@@ -88,8 +88,8 @@ No token holds token management, billing, members or Email Routing destination a
 **What Cloud offers tenants as a result.** `nameservers` is not offered (`422 transport_unavailable`,
 `zone_creation_not_allowed`); `delegated_subdomain` is off (`PM_CF_SUBDOMAIN_SETUP=off`); `cloudflare_zone`
 works only on names a platform key lists in a tenant's `domains.cloudflare_zones`, which on Cloud means only
-the exact names `=notify.pylota.io` and `=reminders.pylota.io` for Pylota's own two tenants, never the
-`pylota.io` zone itself. Customers bring their own domains with `dns_records`,
+the exact names `=notify.pylota.io`, `=reminders.pylota.io` and `=account.pylota.io` for Pylota's own three
+tenants, never the `pylota.io` zone itself. Customers bring their own domains with `dns_records`,
 `send_only` and `smtp_relay` ([Domains on any DNS host](design/domain-connections.md)), each shipping only if
 its spike passed (S8, S11, S12).
 
@@ -225,34 +225,47 @@ pmail --profile cloud-prod partners create --name Pylota --default-billing-mode 
   --max-tenants 200 --ramp-exempt true
 
 # 3. Pylota's partner key, 90 days. The secret goes straight into Pylota's backend secret store.
+#    erasure:manage and tenants:erase let Pylota delete an operator's workspace (and, later, the
+#    partner); suppressions:manage keeps do-not-contact lists; audit:read reads its tenants' audit log.
+#    No policy:write: every key Pylota mints must be a subset of this one, so an agent's tenant key
+#    could otherwise be given policy:write. Pylota sets tenant policy through tenants:manage.
 pmail --profile cloud-prod keys create --level partner --partner <ptn_id> --name pylota-backend \
-  --expires-in 90d --permissions tenants:manage,keys:manage,webhooks:manage,webhooks:read,\
-quarantine:review,usage:read,identities:read,identities:write,domains:read,domains:write,messages:read,\
-messages:send,messages:write,attachments:read,search:read,members:manage,policy:write,accounts:approve
+  --expires-in 90d --permissions tenants:manage,tenants:erase,erasure:manage,keys:manage,webhooks:manage,\
+webhooks:read,quarantine:review,suppressions:manage,audit:read,usage:read,identities:read,identities:write,\
+domains:read,domains:write,messages:read,messages:send,messages:write,attachments:read,search:read,\
+members:manage,accounts:approve
 ```
 
 `max_tenants` 200 bounds Pylota at 200 × 5,000 sends a day in policy terms; the shared Email Sending quota
 is the tighter bound in practice, and its 80% alert fires first. Raising it later is a platform-key
 `PATCH /v1/partners/{partner_id}`.
 
-**Pylota's own two tenants**, created with Pylota's partner key (a profile `pylota-partner` that holds it),
-so they are Pylota's, billed `exempt` and outside the ramp:
+**Pylota's own three tenants**, created with Pylota's partner key (a profile `pylota-partner` that holds it),
+so they are Pylota's, billed `exempt` and outside the ramp. The auth tenant keeps Pylota's sign-in,
+invitation and waitlist mail apart, with a short retention, so codes and links are not kept for the life of
+the platform tenant's mail:
 
 ```bash
-# 4. Pylota's platform tenant (transactional mail from notify.pylota.io) and marketing tenant
-#    (reminders, win-back and expired quotes from reminders.pylota.io, with consent).
+# 4. Pylota's platform tenant (transactional mail from notify.pylota.io), marketing tenant
+#    (reminders, win-back and expired quotes from reminders.pylota.io, with consent) and auth tenant
+#    (sign-in, invitation and waitlist mail from account.pylota.io; raw MIME 1 day, messages 2 days).
+#    The suffix is .pylota-platform, not .pylota: `pylota` is a reserved suffix.
 pmail --profile pylota-partner tenants create --slug pylota-platform --name "Pylota platform"
 pmail --profile pylota-partner tenants create --slug pylota-marketing --name "Pylota marketing"
+pmail --profile pylota-partner tenants create --slug pylota-auth --name "Pylota sign-in" \
+  --policy-file pylota-auth-policy.json   # {"retention":{"raw_days":1,"message_days":2}}
 
-# 5. Only a platform key grants the two names, each by exact name (domains.cloudflare_zones is
+# 5. Only a platform key grants the three names, each by exact name (domains.cloudflare_zones is
 #    platform-only; a whole-zone entry would hand every pylota.io name to a stolen key, H18).
 pmail --profile cloud-prod tenants update pylota-platform  --policy '{"domains":{"cloudflare_zones":["=notify.pylota.io"]}}'
 pmail --profile cloud-prod tenants update pylota-marketing --policy '{"domains":{"cloudflare_zones":["=reminders.pylota.io"]}}'
+pmail --profile cloud-prod tenants update pylota-auth      --policy '{"domains":{"cloudflare_zones":["=account.pylota.io"]}}'
 
-# 6. Pylota adds the two subdomains with its partner key (cloudflare_zone, exactly the granted name;
+# 6. Pylota adds the three subdomains with its partner key (cloudflare_zone, exactly the granted name;
 #    nothing else in pylota.io is reachable).
 pmail --profile pylota-partner domains add notify.pylota.io --tenant pylota-platform --method cloudflare_zone
 pmail --profile pylota-partner domains add reminders.pylota.io --tenant pylota-marketing --method cloudflare_zone
+pmail --profile pylota-partner domains add account.pylota.io --tenant pylota-auth --method cloudflare_zone
 
 # 7. Marketing mail needs SES: Cloudflare Email Service is for transactional mail only. The transport
 #    change is platform-only. With SES configured, onboarding already created the SES identity and its
