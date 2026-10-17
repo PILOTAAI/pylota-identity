@@ -486,6 +486,11 @@ CREATE TABLE exports (
   created_at    INTEGER NOT NULL
 );
 
+CREATE TABLE link_uses (                                   -- export links work once (Privacy § 9.4)
+  nonce       TEXT PRIMARY KEY,                            -- the link payload's nonce
+  expires_at  INTEGER NOT NULL                             -- the link's expiry; the global retention job
+);                                                         -- deletes rows past it
+
 -- Durable Object calls that must follow a D1 change (Design conventions § 9): written in the same D1 batch as
 -- the change, deleted once the call succeeds; the every-minute cron re-sends the rest.
 CREATE TABLE rpc_intents (
@@ -895,6 +900,10 @@ CREATE TABLE billing_accounts (
                                                            -- and no sends until the dispute closes (Billing ›
                                                            -- Disputes and refunds); read by outbound step 18
   cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+  scheduled_plan_id    TEXT,                               -- a downgrade waiting for the period end and when it
+  scheduled_plan_at    INTEGER,                            -- starts; written by Applying state from the plan
+                                                           -- subscription's schedule, read by the console's
+                                                           -- plan page (Billing › Plan changes)
   updated_at           INTEGER NOT NULL
 );
 
@@ -1648,9 +1657,9 @@ CREATE TABLE IF NOT EXISTS sent (                          -- per-day counters f
 
 | Key | Content | Custom metadata | Deleted by |
 |---|---|---|---|
-| `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` | Raw message before routing resolves | `envelope_to_hash` | The inbound consumer after the move, or the lifecycle rule (15 days, longer than the 14-day dead-letter retention, [J7](../edge-cases.md)) |
+| `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` | Raw message before routing resolves | `envelope_to_hash`, `envelope_from`, `envelope_to`, `received_at` | The inbound consumer after the move, or the lifecycle rule (15 days, longer than the 14-day dead-letter retention, [J7](../edge-cases.md)) |
 | `inbound-staging/ses/{key}` | Raw message received through SES, copied from S3 (`in/{key}`) before its recipients are resolved | – | The lifecycle rule (15 days); a held message whose copy is gone is fetched from S3 again |
-| `inbound-staging/role/{yyyy}/{mm}/{dd}/{ulid}.eml` | Role mail (`postmaster@`, `abuse@`, …) waiting to be relayed through the system identity ([Inbound › Role mail relay](inbound.md#role-mail-relay)) | – | The inbound consumer after the relay, or the lifecycle rule (1 day) |
+| `inbound-staging/role/{yyyy}/{mm}/{dd}/{ulid}.eml` | Role mail (`postmaster@`, `abuse@`, …) waiting to be relayed through the system identity ([Inbound › Role mail relay](inbound.md#role-mail-relay)) | – | The inbound consumer after the relay, or the lifecycle rule (15 days on `inbound-staging/`) |
 | `t/{ten}/i/{idn}/m/{msg}/raw.eml` | Raw inbound MIME | `tenant`, `identity`, `message` | Retention (`raw_days`), erasure |
 | `t/{ten}/i/{idn}/m/{msg}/a/{att}` | Attachment bytes | same, plus `sha256` | Erasure, message retention |
 | `t/{ten}/i/{idn}/m/{msg}/a/{att}.md` | Extracted text (Markdown, with page markers) | same | as above |

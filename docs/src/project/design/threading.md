@@ -99,6 +99,8 @@ pub enum TokenCheck {
     Absent,                                  // no detail part, or detail does not look like a token
     Valid { seq: u64, kid: u8, current: bool },
     Invalid,                                 // looks like a token; unknown kid or MAC does not verify
+    Unchecked,                               // looks like a token, not verified because a § 2.5 budget
+                                             // is spent; neither joins nor flags (C11)
 }
 
 pub fn verify(ring: &ThreadKeyring, identity_id: &str, detail: &str) -> TokenCheck;
@@ -150,12 +152,22 @@ mailbox's `rate_windows` table with prefixed keys and hourly windows
 
 | Key in `rate_windows.sender` | Limit per hour | When exceeded |
 |---|---|---|
-| `tok:{sender_address}` | 10 failed verifications | Tokens from this sender are not verified for the rest of the window (treated as `Invalid` without computing the MAC) |
-| `tok:*` | 100 failed verifications across all senders | Tokens are not verified for any sender for the rest of the window |
+| `tok:{sender}` | 10 failed verifications | Tokens from this sender are not verified for the rest of the window (`TokenCheck::Unchecked`, no MAC computed) |
+| `tok:*` | 100 failed verifications across all senders | Tokens are not verified for any sender for the rest of the window (`Unchecked`) |
 
 In both cases the message is still accepted and threads by headers. Each failure increments
-`thread_token_invalid_total`. `sender_address` is the normalised `From` address, or the envelope sender
-when `From` is missing. These rows are pruned with the D5 throttle rows (older than 48 hours).
+`thread_token_invalid_total`. `{sender}` is the normalised `From` address when the message authenticates
+its sender (`sender_authenticated`, Inbound's authenticated-sender rule), and `unauth:` followed by
+that address (or by the envelope sender when `From` is missing) otherwise, so a stranger who forges the
+`From` of a correspondent spends only the `unauth:` budget, never the correspondent's own
+([C11](../edge-cases.md)).
+
+A spent budget stops verification, not reply detection. An `Unchecked` token neither joins a thread nor
+sets `join_unverified`: the message threads by `In-Reply-To` and `References` with the usual participant
+rule, so a genuine reply from an authenticated participant, which carries those headers, joins its thread
+unflagged and still satisfies `wait` with `kind=reply` while junk tokens flood the mailbox. Only a reply
+that carries the token and no threading header opens a new thread during such a window; that residue is
+accepted, and `thread_token_unchecked_total` counts it. These rows are pruned with the D5 throttle rows (older than 48 hours).
 
 ## 3. Resolving the thread of an inbound message
 
@@ -204,7 +216,8 @@ pub fn resolve_inbound(inp: &InboundThreadInputs, db: &impl ThreadLookup) -> Thr
 
 `join_unverified` is set when any of these holds:
 
-- `token` is `Invalid` (a token-shaped tag failed, or was not checked because of the rate limit);
+- `token` is `Invalid` (a token-shaped tag failed). A token that was not checked because a budget of
+  §2.5 was spent is `Unchecked` and sets nothing;
 - the decision is `Join { via: Token }`, the sender is not an authenticated participant
   (`!(sender_authenticated && db.is_participant(seq, sender))`), and neither `In-Reply-To` nor any
   `References` entry resolved to the same seq;
@@ -483,6 +496,7 @@ truncated at a character boundary.
 | `core::thread_token::a12_budget` | The longest username plus suffix (40) with a 12-character seq gives a 64-octet local part |
 | `it::send::reply_to_carries_token` | A send from a `subaddress` domain has a `Reply-To` sub-address whose thread token ([§2](#2-thread-token)) verifies for that thread; a send from a domain with `reply_token = 'none'` has no `Reply-To` (FR-OUT-6) |
 | `it::inbound::a2_forged_token_ignored` | A forged token files by headers, flags `thread_join_unverified`, identity unchanged (A2) |
+| `it::inbound::c11_token_flood_keeps_replies` | 100 junk tokens in an hour from ten throwaway senders spend `tok:*`; a reply from an authenticated participant with `In-Reply-To` then joins its thread without `thread_join_unverified` and satisfies `wait(kind=reply)`; ten forged-`From` failures naming a correspondent spend `tok:unauth:{address}`, not `tok:{address}`, so that correspondent's own token is still verified; an `Unchecked` token with no threading header opens a new thread and increments `thread_token_unchecked_total` ([C11](../edge-cases.md)) |
 | `it::inbound::d10_token_bruteforce` | Eleventh failure in an hour from one sender is not verified; the 101st failure across senders suspends verification; mail still accepted (D10) |
 | `core::thread::c1_token_only` / `core::thread::c1_no_headers_new_thread` / `core::thread::c1_subject_never_joins` | C1; the resolution order of FR-THR-1 (token, then headers, then a new thread; the subject never joins) |
 | `it::thread::seq_never_reused` | Erase the newest thread of a mailbox, create a new one: its `seq` is higher than the erased one's, and a reply carrying the erased thread's valid token starts a new thread instead of joining the new one (C1; an integration test because the guarantee is SQLite's `AUTOINCREMENT`) |

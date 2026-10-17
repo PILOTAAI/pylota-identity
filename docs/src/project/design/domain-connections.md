@@ -67,7 +67,8 @@ This table is in the [Custom domains guide](../../guides/custom-domains.md) in t
 the deployment's own Cloudflare account, which also holds other tenants' zones and the zones of the
 deployment's hosts, so a tenant or partner key may use only a zone created for its tenant by `nameservers`
 or `delegated_subdomain` (`zone_claims`) or one listed in its platform-only policy
-`domains.cloudflare_zones`, which allows names strictly under the listed zone, never its apex. A name under the zone of `PM_PLATFORM_DOMAIN`, `PM_API_HOST` or
+`domains.cloudflare_zones`, which allows names strictly under a listed zone, never its apex, or exactly
+one name for an entry written `=name`. A name under the zone of `PM_PLATFORM_DOMAIN`, `PM_API_HOST` or
 `PM_CONSOLE_HOST` is refused, and so is `replace_mx` on any zone the tenant may not use:
 `403 scope_denied`, `details.reason = "zone_not_allowed"`
 ([Zone permission](identity-domains.md#zone-permission), [H8](../edge-cases.md)). Platform keys may use
@@ -467,7 +468,7 @@ pub enum SesCaller { Request, DomainCheck, PlatformCheck, RuleSync, Removal }
   `Busy { retry_after_ms: at − now }` and consumes nothing; otherwise it stores `next_free_ms = at + 1000`
   and returns `Granted { at_ms: at }`. The caller waits until `at` (a timer, no CPU), then calls SES. No
   two callers are ever given the same second.
-- **Deadlines.** Request-path callers (domain create, `PATCH`, the start of removal) wait at most
+- **Deadlines.** Request-path callers (domain create and `PATCH`) wait at most
   5 seconds; `Busy` answers `429 upstream_rate_limited` with `Retry-After` and `details.retry_after`
   (seconds, rounded up). Background callers wait at most 60 seconds; on `Busy` they set their alarm to
   `retry_after_ms` later.

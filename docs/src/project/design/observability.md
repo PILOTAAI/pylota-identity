@@ -178,7 +178,7 @@ GROUP BY domain_id
 | `scanner_error_total`, `auth_dns_cache_miss_total` | counter | – | `pm-inbound` ([Inbound](inbound.md)) |
 | `backscatter_total` | counter | – | `pm-inbound` ([D4](../edge-cases.md)) |
 | `inbound_throttled_total` | counter | cap (`per_sender`, `unauthenticated`, `per_tenant`) | mailbox ([D5](../edge-cases.md), [D13](../edge-cases.md)) |
-| `thread_token_invalid_total`, `thread_token_previous_key_total` | counter | – | mailbox ([Threading](threading.md)) |
+| `thread_token_invalid_total`, `thread_token_previous_key_total`, `thread_token_unchecked_total` | counter | – | mailbox ([Threading](threading.md)) |
 | `quarantine_total` | counter | reason | mailbox |
 | `send_api_requests_total` | counter | operation, result (`accepted`, `deduplicated`, or the error code) | `fetch` |
 | `send_api_ms` | observation | operation | `fetch`, accepted sends only |
@@ -221,7 +221,7 @@ GROUP BY domain_id
 | `stripe_api_errors_total` | counter | call (`customer_create`, `checkout_create`, `checkout_retrieve`, `portal_create`, `subscriptions_list`, `charge_retrieve`, `subscription_cancel`) | worker: a Stripe API call that failed with a network error, a timeout or a non-`2xx` answer ([Billing › Stripe integration](billing.md#stripe-integration)) |
 | `stripe_duplicate_subscriptions_total` | counter | – | `fetch`: the webhook's state application cancelled a duplicate subscription ([Billing › Applying state](billing.md#applying-state), [W39](../edge-cases.md)) |
 | `billing_increase_held_total` | counter | feature (`plan`, or the top-up feature) | `fetch`: the webhook's state application kept an increase back because the subscription's latest invoice is not `paid` ([Billing › Allowances and periods](billing.md#allowances-and-periods), [W37](../edge-cases.md)) |
-| `system_mail_budget_denied_total` | counter | class (`signin`, `invitation`, `notification`, `account`), scope (`recipient`, `network`, `asn`, `tenant`, `class`, `day`) | `TenantQuota` of the default tenant: a system-identity send refused by a budget ([Cloud sign-up › System mail budgets](cloud-signup.md#102-system-mail-budgets), [W44](../edge-cases.md)) |
+| `system_mail_budget_denied_total` | counter | class (`signin`, `invitation`, `notification`, `account`), scope (`recipient`, `network`, `asn`, `tenant`, `class`, `role`, `day`) | `TenantQuota` of the default tenant: a system-identity send refused by a budget ([Cloud sign-up › System mail budgets](cloud-signup.md#102-system-mail-budgets), [W44](../edge-cases.md)) |
 | `ses_control_throttled_total` | counter | – | SES control-plane callers: SES answered `ThrottlingException` or `TooManyRequestsException` although `SesControl` granted the slot ([Domains on any DNS host §4.8](domain-connections.md#48-ses-api-rate-one-request-per-second)) |
 | `search_requests_total` | counter | mode, scope, result (`ok`, `degraded`, `partial`, code) | `fetch` |
 | `search_ms` | observation | mode, scope, fanout (`1`, `2-10`, `11-100`) | `fetch` |
@@ -333,7 +333,7 @@ the window (the Custom Alert "minimum event count").
 | `webhook_failing:{webhook_id}` | B | `consecutive_failures` ≥ 10 on an enabled endpoint | ticket | [Integrator API down](#integrator-api-down) |
 | `webhook_disabled:{webhook_id}` | B + C | Endpoint disabled with `failing` (`webhook.disabled` event) | ticket | [Integrator API down](#integrator-api-down) |
 | `provider_quota` | A | `provider_quota_errors_total` > 0 over 15 minutes: the first quota error ([G3](../edge-cases.md)) | page | [Quota exhausted](#quota-exhausted) |
-| `provider_quota_80` | B | Only when `PM_DAILY_SEND_QUOTA` is set: today's (UTC) `cf_recipients` in `usage_daily` (recipients the Cloudflare transport accepted, [Outbound › Usage counters](outbound.md#tenantquota)), summed over live tenants, reach 80% of it ([G3](../edge-cases.md)) | ticket | [Quota exhausted](#quota-exhausted) |
+| `provider_quota_80` | B | Only when `PM_DAILY_SEND_QUOTA` is set: the default tenant's `deployment_day` (recipients accepted today, UTC, for the Cloudflare transport by every tenant and the system identity, counted inline, [Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker)), reach 80% of it ([G3](../edge-cases.md)) | ticket | [Quota exhausted](#quota-exhausted) |
 | `quota_warning` | C | `quota.warning` at 80% and 100% of a tenant or identity daily send cap | – (tenant-facing) | [Quota exhausted](#quota-exhausted) |
 | `domain_failing:{domain_id}` | B + C | Domain enters `failing` or `suspended` (`domain.failing`, `domain.suspended`) | ticket | [Domain failing](#domain-failing) |
 | `platform_domain_failing` | B | The platform domain enters `failing`, or shows `dns_unresolvable` or `dnssec_bogus`: all system mail and every fallback send depend on it ([H9](../edge-cases.md)) | page | [Domain failing](#domain-failing) (the platform domain is never suspended; `POST /v1/domains/{id}/reprove` re-reads its zone) |
@@ -354,6 +354,7 @@ the window (the Custom Alert "minimum event count").
 | `erasure_failed:{erasure_id}` | B + C | Erasure request `failed` (`erasure.failed`): its step still failed at the end of its retry window, and no request resumes it yet. It resolves once a resumption exists (`resumes_id`), which raises its own alerts if it fails too | page | [Erasure failure](#erasure-failure) |
 | `erasure_overdue:{erasure_id}` | B | Erasure still `queued` or `running` after `deadline_at − 4 h` (20 hours after the first request) | page | [Erasure failure](#erasure-failure) |
 | `job_failed:{kind}` | B | A job of that kind ended `failed` in the last 7 days and no later job of the same kind and tenant has completed. Page for `retention` (personal data kept past its retention), `domain_remove` (provider resources left behind) and `restore_reconcile`; ticket for `backup`, `export`, `reembed`, `reparse` and `reindex`. The detail lists the job IDs, tenants, failed steps and error codes | page / ticket | [Job failed](#job-failed) |
+| `break_glass_key_used` | B | Only when `PM_BREAK_GLASS_KEY_ID` is set: a request authenticated with that key. Fired by the authentication path itself, with the audit row `key.break_glass_used` (route, IP hash), not by the evaluator, so it pages on the first use ([J36](../edge-cases.md)) | page | [Break-glass record](#57-break-glass-record) |
 | `heartbeat_missing` | B | Only when `PM_HEARTBEAT_KEY_ID` is set: that key's `last_used_at` (before its first use, its `created_at`) is more than 1 hour old, so the external heartbeat (section 5.5) has stopped: the workflow was disabled, GitHub Actions is not running, or the key was revoked | page | [Heartbeat](#heartbeat) |
 | `capacity_70:{resource}` | B | `resource` is `d1` (the D1 database's size against 10 GB, read as 10,000,000,000 bytes), `vectors` (the nightly reconciliation's `index_count` against 20,000,000 vectors) or `namespaces` (tenants that are not erased, one Vectorize namespace each, against 50,000) at 70% or more ([Limits](../../reference/limits.md#storage), [J30](../edge-cases.md), [J31](../edge-cases.md)) | ticket | [Capacity](#capacity) |
 | `capacity_80:{resource}` | B | The same at 80% or more | page | [Capacity](#capacity) |
@@ -397,10 +398,10 @@ The `* * * * *` cron runs `ops::alerts::evaluate`:
      `SELECT COUNT(*) FROM tenants WHERE status <> 'erased'`. The three values are kept in the `alert_fired`
      detail and shown by `GET /v1/platform/status`; the automatic rules of section 5.6 that depend on
      them run here too;
-   - when `PM_DAILY_SEND_QUOTA` is set: `SELECT SUM(u.value) FROM usage_daily u JOIN tenants t ON
-     t.id = u.tenant_id WHERE u.day = ?today AND u.metric = 'cf_recipients' AND t.mode = 'live'` against 80%
-     of the quota. The roll-up flushes each workspace at most once an hour, so this alert can lag by up to
-     an hour; SES and SMTP sends are not counted, because they do not use the Cloudflare quota;
+   - when `PM_DAILY_SEND_QUOTA` is set: the default tenant's `deployment_day` (`QuotaRequest::DeploymentStatus`,
+     [Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker)) against 80% of the quota. It is
+     counted inline at accept, system mail included, so the alert has no roll-up lag; SES and SMTP sends are
+     not counted, because they do not use the Cloudflare quota;
    - when SES is configured: `SELECT COUNT(*) FROM domains WHERE ses_region IS NOT NULL AND state <>
      'removed'`, plus the `domain_onboarding` rows whose journal holds an SES identity, plus one for the
      platform identity, or the last daily `ListEmailIdentities` total when larger, against 9,000
@@ -442,8 +443,9 @@ The `* * * * *` cron runs `ops::alerts::evaluate`:
    `erasure_stalled` and `billing_cancel_failed`, which the erasure job resolves itself (it writes
    `alert.resolved`) when the step next succeeds or the job ends; and `containment:{rule}`, which the
    evaluator re-reads as a level on every run: true while a switch is away from its default (`read_only`
-   on, `free_sending` off, `emergency_prune` on), or while a partner or tenant that the rule suspended is
-   still `suspended`.
+   on, `free_sending` off, `emergency_prune` on); for `partner_suspended`, while the partner is `suspended`
+   and its latest status audit row is `partner.auto_suspend`; for `tenant_paused`, while the tenant's
+   `sending_paused_at` is set with `sending_pause_reason = 'abuse_burst'`.
 4. Alert rows use `tenant_id` of the affected tenant, or NULL for deployment-level alerts. They contain
    IDs and numbers only.
 
@@ -458,7 +460,10 @@ re-notification, `-{n}`). The subject is `[pylota-mail {env}] {severity}: {alert
 alert key, severity, values, the time it fired, the runbook's URL in the published docs and the
 `pmail` command that shows more. Like every alert row it holds IDs and numbers only, never content or
 addresses. At most 20 alert emails are sent per hour; above that one email says how many more are
-firing. They count against the system identity's daily cap like any of its sends; when a send is
+firing. They count against the system identity's daily cap like any of its sends, and as class `account`
+of the system-mail budgets (`QuotaRequest::SystemMail { class: Account }`,
+[Cloud sign-up § 10.2](cloud-signup.md#102-system-mail-budgets)), which only the day limits, so
+notifications and role relays can never crowd them out; when a send is
 refused, `alert_emails_total{result=refused}` counts it, `system_mail_blocked` fires, and the heartbeat
 still reports the page alert.
 
@@ -488,8 +493,10 @@ infrastructure, outside the Cloudflare account it watches:
   settings.
 - The two keys are created on the production deployment and stored by the owner:
   `HEARTBEAT_KEY` is a platform key holding only `audit:read` (it reads `GET /v1/platform/status`); its ID
-  is set as `PM_HEARTBEAT_KEY_ID`. `HEARTBEAT_MAIL_TEST_KEY` is a tenant key of the default tenant with
-  exactly the permissions `--mail-test` needs ([CLI and setup §10](cli.md#10-doctor)). Both expire after
+  is set as `PM_HEARTBEAT_KEY_ID`. `HEARTBEAT_MAIL_TEST_KEY` is an **identity key of `pmail-doctor`** with
+  exactly the permissions `--mail-test` needs (`messages:send`, `messages:read`, `search:read`,
+  `erasure:manage`; [CLI and setup §10](cli.md#10-doctor)), never a tenant key of the default tenant, which
+  could create bare platform addresses ([A18](../edge-cases.md)). Both expire after
   90 days. A rotation keeps a key's `expires_at` ([Security § 4.5](security.md#45-rotation)), so every
   quarter (the break-glass review, section 5.7) the owner **replaces** them: creates a new platform key
   (`pmail keys create --level platform --permissions audit:read --expires-in 90d`), sets
@@ -541,7 +548,8 @@ record lists, for each item, where it is and how to use it:
 | Item | Where it is kept |
 |---|---|
 | Cloudflare account login, its two-factor device and recovery codes | Password manager; recovery codes also on the printed copy |
-| The production bootstrap platform key and the `pmail` profile | Password manager (`key_command` reads it, [CLI › Configuration](cli.md#2-configuration-and-credentials)) |
+| The break-glass platform key (`break-glass`: the session permissions, 400 days; its ID is `PM_BREAK_GLASS_KEY_ID`) | The `pylota-mail-break-glass` vault and the printed copy only, never a `pmail` profile; any use pages ([J36](../edge-cases.md)) |
+| The `pmail` profile and the current day's session platform key | Password manager (`key_command` reads it, [CLI › Configuration](cli.md#2-configuration-and-credentials)); each day's key is minted with the previous one, or with the break-glass key after a lapse |
 | The minisign release key and its password (section 11 of [Security](security.md#11-supply-chain)) | The encrypted removable drive, and a second drive in the sealed copy's location; password in the password manager |
 | GitHub account (owner of `PILOTAAI`), two-factor device and recovery codes | Password manager and printed copy |
 | AWS root login and the SES IAM user | Password manager |
@@ -550,7 +558,13 @@ record lists, for each item, where it is and how to use it:
 | `PM_HASH_KEY`, `PM_KEY_PEPPER` and the master-key slots | Never written down: they live only as Worker secrets and cannot be read back ([Security §6.1](security.md#61-inventory)). The record says so, and that losing the Worker means rotating them |
 
 `pmail doctor` cannot check this record. The owner reviews it every quarter, when the heartbeat keys are
-rotated, and writes the date in the incident log.
+rotated, and writes the date in the incident log. The review rehearses the break-glass path: it mints a
+1-day session key with the break-glass key (the expected `break_glass_key_used` page confirms the alert
+works) and revokes it, and it replaces the break-glass key when fewer than 120 days remain (a new key,
+the record and `PM_BREAK_GLASS_KEY_ID` updated, the old key revoked). Session keys live one day, so
+without this key a gap of more than a day would leave no key that can mint another, and the only way back
+would be `pmail setup --rotate-pepper`, which invalidates every key of every tenant
+([Security §6.2](security.md#62-rotation-procedures), [J36](../edge-cases.md)).
 
 ### 5.8 When a store is full
 
@@ -1144,6 +1158,7 @@ drill.
 | `it::ops::j30_d1_capacity` | With the D1 size faked through `meta.size_after`: `capacity_70:d1` (ticket) at 70%, `capacity_80:d1` (page, emailed) at 80%, the `emergency_prune` switch and `containment:emergency_prune` at 90%, after which retention prunes `event_index` and `webhook_deliveries` at 7 days; a write failing with "Exceeded maximum DB size" answers `503 unavailable` (`storage_full`) while an inbound message is still accepted and its outbox event waits | [J30](../edge-cases.md) |
 | `it::ops::j31_vector_capacity` | `capacity_70:vectors`, `capacity_80:vectors` and `capacity_70:namespaces` fire from the reconciliation's `index_count` and the tenant count; while `capacity_80:vectors` fires, a failing upsert leaves chunks `pending`, acks the index job without a retry and puts nothing in the dead-letter queue, and hybrid search reports `degraded` | [J31](../edge-cases.md) |
 | `it::ops::j32_alert_channels` | A page alert sends one alert email through the system identity to `PM_ALERT_EMAIL` and another after 6 hours; ticket alerts arrive in one summary at 08:00 UTC; more than 20 emails in an hour collapse into one; `GET /v1/platform/status` reports `alert_email: missing` when no address is configured; `pmail doctor --check alerts` fails on a firing page alert and on `missing`; with the `read_only` switch on, an alert email from the system identity still leaves while a tenant's queued send is re-enqueued | [J32](../edge-cases.md), section 5.5 |
+| `it::ops::j36_break_glass_key` | With `PM_BREAK_GLASS_KEY_ID` set and every session platform key expired, the break-glass key mints a new 1-day platform key; the request writes `key.break_glass_used` and fires `break_glass_key_used` (a page and an alert email) at once; any other key's use fires nothing; a revoked break-glass key gets `401`; with the variable unset nothing fires ([J36](../edge-cases.md)) | [J36](../edge-cases.md), section 5.7 |
 | `it::ops::heartbeat_missing` | With `PM_HEARTBEAT_KEY_ID` set, `heartbeat_missing` fires when that key's `last_used_at` (or, never used, its `created_at`) is more than an hour old, or the key is revoked, and resolves after the key is used again; a replacement key the heartbeat has not used yet does not fire in its first hour | [J32](../edge-cases.md) |
 | `it::ops::j33_auto_containment` | An `rpc_owner_mismatch` turns `read_only` on (non-platform writes `503 read_only`, queued sends re-enqueued and not canceled, inbound still stored); five auto-paused identities across three of one partner's tenants within an hour suspend the partner, and five in one tenant do not; a tenant above 10% bounces with ≥ 200 outcomes on one domain gets `sending_paused_at` with `sending_pause_reason = 'abuse_burst'` (sends `409 sending_paused`, queued sends held, inbound still stored), and its system identity's bounces count towards nothing; five auto-paused Free workspaces within an hour turn `free_sending` off (`403 policy_denied`, `free_sending_off`); each writes its audit row and pages `containment:{rule}`, which stays firing while the switch is set or the target is suspended and resolves two runs after a platform key undoes it; only a platform key undoes each | [J33](../edge-cases.md), section 5.6 |
 | `it::ops::job_failed_alerts` | A retention job failing its tenth attempt fires `job_failed:retention` (page); a failed backup fires `job_failed:backup` (ticket); each resolves once a later job of the same kind and tenant completes | section 5.3 |

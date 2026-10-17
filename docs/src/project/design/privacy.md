@@ -27,7 +27,7 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 
 | Store | Personal data | Purpose | Retention | Deletion mechanism |
 |---|---|---|---|---|
-| R2 `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml`, and `inbound-staging/ses/{key}` for the SES source | Whole raw message, envelope | Accept mail when the directory lookup fails transiently ([J7](../edge-cases.md)); hand SES mail to the normal pipeline | Until routed; at most 15 days | Inbound consumer deletes after the move; R2 lifecycle rule (15 days: longer than the 14 days a dead-letter item is kept, so a pointer redriven from the dead-letter queue still finds its object, [J7](../edge-cases.md)). Not keyed by tenant: erasure cannot find these objects, and section 11 lists them |
+| R2 `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` (with the envelope in its metadata), `inbound-staging/ses/{key}` for the SES source, and `inbound-staging/role/…` for role mail waiting to be relayed | Whole raw message, envelope | Accept mail when the directory lookup fails transiently ([J7](../edge-cases.md)); hand SES mail to the normal pipeline | Until routed; at most 15 days | The inbound consumer deletes an outage copy after the move and a role copy after the relay; SES copies stay for re-drives; the R2 lifecycle rule removes every copy (15 days: longer than the 14 days a dead-letter item is kept, so a pointer redriven from the dead-letter queue still finds its object, [J7](../edge-cases.md)). Not keyed by tenant: erasure cannot find these objects, and section 11 lists them |
 | Amazon S3 `{prefix}-inbound`, keys `in/{messageId}` (only with `inbound = ses`) | Whole raw inbound message, as SES received it | Hand-over from SES receiving to the Worker | Until every recipient is ingested, normally seconds; never longer than 14 days | The inbound consumer calls `DeleteObject` once every `ses_ingest` row of the object is `done`; the bucket's lifecycle rule deletes `in/` after 14 days. The bucket uses SSE-S3 and blocks all public access ([Domains on any DNS host §11](domain-connections.md#11-privacy-and-jurisdiction)) |
 | Amazon SQS `pylota-mail-inbound` (only with `inbound = ses`) | Copies of SES receipt notifications: envelope sender and recipients, the message headers up to 10 KB (including From, To and Subject), verdicts ([notification contents](https://docs.aws.amazon.com/ses/latest/dg/receiving-email-notifications-contents.html), read 2026-10-09) | Backstop for a missed SNS push | Until the every-minute backstop cron handles it; queue retention 14 days | The cron deletes each message after handling it; SQS retention |
 | Amazon SES receipt rules `pm-retired-{n}` (SES domains) | Retired agent addresses, in clear, as rule recipients | Bounce mail to retired addresses with `5.1.6` ([N7](../edge-cases.md)) | While the address is retired; beyond 150 rules the oldest addresses are removed | Removed from the rules by domain removal, identity erasure and tenant erasure (sections 6.5, 6.6) |
@@ -316,12 +316,12 @@ delivery log longer but never extends replay past 30 days ([Webhooks › Replay]
 | `ses_ingest` | `ses_ingest` rows whose `done_at` (set with `done`, `dropped` or `lost`) is more than 30 days ago. `queued` and `held` rows are never pruned: the backstop cron owns them | `it::retention::global_ses_ingest` |
 | `console` | `login_tokens` rows 24 hours past `expires_at`; `sessions` 30 days after expiry or revocation; `invitations` with status `expired` or `revoked` 30 days after `expires_at` | `it::retention::global_console_rows` |
 | `signup` | `oauth_states` and `pending_auth` rows 24 hours past `expires_at`; `users.totp_pending_sealed` and `totp_pending_expires_at` cleared 24 hours past `totp_pending_expires_at`; `waitlist` rows 30 days after their invitation (there are no unconfirmed rows: an unused confirmation link simply expires after 10 minutes) | `it::retention::global_signup_rows` |
-| `staging` | Reconciliation of `inbound-staging/` older than 1 hour against mailbox records: an unrouted object is re-queued once a day while it exists (a pointer may sit in a dead-letter queue for up to 14 days, [J7](../edge-cases.md)); objects are never deleted here (the 15-day lifecycle rule does that). An object still unrouted 14 days after it was written counts in `inbound_lost_total` | `it::retention::global_job_steps` |
+| `staging` | Only the outage copies `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` ([J7](../edge-cases.md)); never `inbound-staging/ses/` or `inbound-staging/role/`, which their own consumers and the lifecycle rule handle. The inbound consumer deletes an outage copy once its message is committed, so an object older than 1 hour that still exists is **unrouted**: it is re-queued once a day as `InboundJob::Staged`, built from the object's custom metadata (`envelope_from`, `envelope_to`, `received_at`) and its size (a pointer may sit in a dead-letter queue for up to 14 days). Objects are never deleted here (the 15-day lifecycle rule does that). An object still unrouted 14 days after it was written counts in `inbound_lost_total` | `it::retention::global_job_steps` |
 | `held_erasures` | For each `erasing` tenant whose latest tenant-scope erasure request is `completed_with_holds`: `ActiveHolds` on the mailbox of every identity still `deleting`; when every answer is 0, create a tenant-scope erasure request with reason `hold_released:{era_id}` and `resumes_id` = that request, audit-logged (`erasure.create`), which finishes the erasure (section 6.6, "Holds in a tenant being erased") | `it::erasure::i2_hold_tenant_scope` |
 | `audit` | One `audit_log` row per step with counts (`tenant_id = NULL`) | `it::retention::global_job_steps` |
 
 Each step is added to `jobs/retention.rs`, with its test, by the milestone that builds the feature
-writing its table's rows ([Build plan › M14](../build-plan.md#m14--privacy-after-m9-m10) names them); the job
+writing its table's rows ([Build plan › M14](../build-plan.md#m14--privacy-after-m9-m10-m11-m12-and-m13) names them); the job
 runs the steps in the order above.
 
 ### 5.4 Optional R2 backup copy
@@ -496,7 +496,7 @@ Order: stop routing, then billing (money stops before anything else is removed),
 | # | Step | Does |
 |---|---|---|
 | 1 | `stop_routing` | `tenants.status = 'erasing'`, which only this job changes afterwards (a `PATCH` with `status` gets `409 tenant_erased`, and non-platform keys can no longer write to the tenant) (inbound for every tenant address now gets `550 5.1.1`; outbound consumers drop messages for the tenant); revoke every tenant and identity key; disable the tenant's webhook endpoints (`enabled = 0`, `disabled_reason = 'manual'`); cancel the tenant's other running jobs |
-| 2 | `cancel_billing` | Skipped when `PM_BILLING=off`, or when the tenant has no `billing_accounts.stripe_customer_id`. Otherwise read the customer's subscriptions (`GET /v1/subscriptions?customer=…`, every status except canceled) and cancel each one, the plan subscription and every top-up subscription, at once: immediate cancellation with `invoice_now=true` and `prorate=false`, so anything not yet invoiced is billed on a final invoice, with no proration credit and no refund ([Billing › Stripe integration](billing.md#stripe-integration) records why). The step is done when the read returns none, so a re-run after a partial failure cancels only what is left; a customer Stripe no longer knows counts as done. Failures retry under the job's backoff (section 4). The third failed attempt fires `billing_cancel_failed:{tenant_id}` (page; [Observability › Alert list](observability.md#53-alert-list)), so the operator cancels in the Stripe Dashboard at once, while the step keeps retrying until `deadline_at − 4 h` like any erasure step (section 4). Webhooks for this tenant afterwards are answered `200` and recorded `ignored_erased`, except that a live subscription created after the deletion is cancelled (`cancelled_after_erasure`; [Billing › Webhook endpoint](billing.md#webhook-endpoint)) |
+| 2 | `cancel_billing` | Skipped when `PM_BILLING=off`, or when the tenant has no `billing_accounts.stripe_customer_id`. Otherwise read the customer's subscriptions (`GET /v1/subscriptions?customer=…&expand[]=data.schedule`, every status except canceled) and cancel each one, the plan subscription and every top-up subscription, at once (a subscription that carries a schedule, such as a downgrade waiting for the period end, has the schedule released first with `POST /v1/subscription_schedules/{id}/release`): immediate cancellation with `invoice_now=true` and `prorate=false`, so anything not yet invoiced is billed on a final invoice, with no proration credit and no refund ([Billing › Stripe integration](billing.md#stripe-integration) records why). The step is done when the read returns none, so a re-run after a partial failure cancels only what is left; a customer Stripe no longer knows counts as done. Failures retry under the job's backoff (section 4). The third failed attempt fires `billing_cancel_failed:{tenant_id}` (page; [Observability › Alert list](observability.md#53-alert-list)), so the operator cancels in the Stripe Dashboard at once, while the step keeps retrying until `deadline_at − 4 h` like any erasure step (section 4). Webhooks for this tenant afterwards are answered `200` and recorded `ignored_erased`, except that a live subscription created after the deletion is cancelled (`cancelled_after_erasure`; [Billing › Webhook endpoint](billing.md#webhook-endpoint)) |
 | 3 | `remove_domains` | For each tenant domain, run the `domain_remove` steps of [Identities and domains › Domain removal](identity-domains.md#domain-removal) inline (literal rules, catch-all, routing, sending onboarding, event subscription, the SES identity with `DeleteEmailIdentity` and its DKIM CNAMEs, including a failover identity, the domain's addresses in `pm-retired-{n}` receipt rules, ownership record, zone); then `DomainMonitor` `delete_all` |
 | 4 | `erase_identities` | For each identity: identity steps 2 and 3 (tombstone every address, including retired ones; erase the mailbox). An identity with held threads keeps them, with their R2 objects and vectors, and stays `deleting` (below) |
 | 5 | `delete_d1_rows` | In this order, all `WHERE tenant_id = ?1`, each table in batches of at most 1,000 rows (section 6.12): `webhook_deliveries`, `webhook_endpoints`, `event_index`, `suppressions`, `sender_lists`, `idempotency_records` (`scope = ?1 OR tenant_id = ?1`: the tenant's own records, and the records of platform and partner keys whose stored response belongs to the tenant, such as the `POST /v1/tenants` that created it), `rpc_intents`, `usage_daily`, `identity_keys` (after `INSERT OR IGNORE INTO key_tombstones` of every row's `id`, as in identity scope), `service_accounts`, `notification_prefs`, `api_keys`, `identities` (except rows still `deleting` with holds, which are scrubbed as in identity step 4 and kept), `domains`, `exports`, non-erasure `jobs`, `invitations`, `sessions` (active workspace = this tenant), `members`, `billing_events`, `billing_accounts`, `dlq_items`, `audit_log` rows whose `action` does not start with `erasure.` (or `hold.`, while holds remain); then `tenants` set `status = 'erased'`, `name = ''`, `policy_json = '{}'` (the row, slug and suffix stay, so neither is reused; with holds, `status` stays `erasing`); `TenantQuota` `delete_all` and `Notifier` `delete_all`, so no pending notification survives. Every person the `members` delete left with no workspace is then deleted as in section 6.9, which also removes their `oauth_identities`, `login_tokens` and `waitlist` row |
@@ -748,8 +748,13 @@ tenant's policy says (section 5.2). Deleting the person erases it at once (secti
 
 ## 9. Subject-access export
 
-`POST /v1/exports` (`erasure:manage`) with `scope: "counterparty"` and `counterparty_address`, or
-`scope: "identity"` and `identity_id` (FR-PRV-5, [I3](../edge-cases.md)).
+`POST /v1/exports` with `scope: "counterparty"` and `counterparty_address`, or `scope: "identity"` and
+`identity_id` (FR-PRV-5, [I3](../edge-cases.md)). An export is a read of mail, so it needs
+`erasure:manage` **and** `messages:read` and `attachments:read`, and it is refused to identity keys
+(`403 permission_denied`): a key minted only for deletions cannot read the workspace through it, and an
+agent asked by a message to "send us an export" holds an identity key ([I14](../edge-cases.md)). Whether
+the requesting key also holds `quarantine:review` is recorded in the job's `meta.include_held` when the
+export is created.
 
 ### 9.1 Job steps
 
@@ -767,8 +772,11 @@ read 2026-10-10). `pmail setup` adds a lifecycle rule to `BLOBS` that aborts inc
 after 1 day (`wrangler r2 bucket lifecycle add … --abort-multipart-days 1`), a backstop for an abort that
 never ran ([I13](../edge-cases.md)).
 
-Held, quarantined, hidden and throttled messages are included: an export is a read of everything the
-deployment holds about the subject in the workspace's mailboxes. The system identity's mailbox is never
+Held, quarantined, hidden and throttled messages are included as `.eml` only when `meta.include_held` is
+set, because reading them through the API needs `quarantine:review` too; otherwise each appears in
+`messages.json` with its `id`, `identity_id`, `status` and dates and `content_withheld:
+"quarantine_review_required"`, and no `.eml` ([I14](../edge-cases.md)). With it, an export is a read of
+everything the deployment holds about the subject in the workspace's mailboxes. The system identity's mailbox is never
 read by an export, whichever tenant it is on ([A15](../edge-cases.md)); a person's system mail is covered
 by person deletion ([§6.9](#69-people-console-accounts)). The ZIP is written with a pure-Rust ZIP writer (for example the
 `zip` crate with only a pure-Rust deflate backend), pinned at build time.
@@ -832,12 +840,19 @@ the signed link format of [Security › Signed links](security.md#73-signed-link
 
 ```text
 https://mail.example.com/v1/links/{token}
-payload = "l1:{kid}:export:{tenant_id}:{export_id}:{expires_unix_s}"
+payload = "l1:{kid}:export:{tenant_id}:{export_id}:{nonce}:{expires_unix_s}"
 expires = min(now + 1 hour, the export's expires_at)
+nonce   = 16 random bytes, Crockford base32
 ```
 
 - The download needs no API key; the MAC authenticates it. A bad MAC, an expired link or an expired
   export returns `404 export_not_found`.
+- **A link works once** ([I14](../edge-cases.md)). After the MAC, expiry and target checks pass, the
+  handler runs `INSERT INTO link_uses (nonce, expires_at) VALUES (?1, ?2) ON CONFLICT DO NOTHING`; when
+  it changes no row the link was already used, and the answer is `404 export_not_found` like any refused
+  link. So a link that leaks after the download, or that an agent was talked into sending on, gives
+  nothing. A broken download needs a new link (`GET /v1/exports/{export_id}` mints one); range requests
+  are not served. The global retention job deletes `link_uses` rows past `expires_at`.
 - A link is a bearer URL, so it lives one hour, and a new one is minted on every `GET`; the export
   itself stays downloadable until `expires_at` (7 days). `DELETE /v1/exports/{export_id}`
   (`erasure:manage`, audit `export.delete`) revokes every link at once: it deletes the ZIP of a
@@ -981,6 +996,7 @@ canaries.
 | `it::erasure::resume_failed_any_scope` | For message, thread, counterparty and identity scope, a request made to fail at the end of its retry window is resumed by a new request with the same scope and target: `202`, `resumes_id` = the failed request, `deadline_at` copied; the message resumption is accepted although the message rows are already gone; the identity resumption after `WipeAll` probes the vector IDs the failed job deleted (copied by `Snapshot`) and finds none; the resumed job keeps retrying for 4 hours although `deadline_at − 4 h` has passed; two concurrent resumptions create one request (the second gets `200` with it); `erasure_failed` resolves once the resumption exists; `erasure_stalled` stays firing between the step's hourly attempts and resolves when the step succeeds | sections 4, 6.1 |
 | `it::erasure::step_retry_and_fail` | Injected R2 and Vectorize faults retry with backoff and resume from the cursor without double counting; the third consecutive failure fires `erasure_stalled`; the job keeps retrying hourly past 10 attempts and becomes `failed`, with a partial receipt and `erasure.failed`, only on the first failed attempt after `deadline_at − 4 h`; a non-erasure job fails after 10 attempts and fires `job_failed:{kind}` | NFR-PRV-1 |
 | `it::identities::a5_tombstone_blocks_reuse` | A deleted address cannot be assigned to any identity in any tenant | [A5](../edge-cases.md) |
+| `it::export::i14_export_permissions` | A tenant key with only `erasure:manage` gets `403 permission_denied` (`details.required` names `messages:read` and `attachments:read`); an identity key holding all three gets `403 permission_denied`; a tenant key with the three exports a counterparty whose quarantined message appears in `messages.json` with `content_withheld: "quarantine_review_required"` and no `.eml`, and with `quarantine:review` too the `.eml` is included; the first download through a link succeeds and a second request with the same link gets `404 export_not_found`; a new `GET` mints a link that works; `link_uses` rows past `expires_at` are deleted by the retention job ([I14](../edge-cases.md)) | FR-PRV-5 |
 | `it::export::i3_counterparty` | ZIP layout, one `.eml` per message, `messages.json` schema, reconstructed messages after `raw_days`, Bcc redaction; a signed link that fails when tampered, after its hour, or after the export's 7 days; each `GET` mints a new link; `DELETE /v1/exports/{export_id}` makes every earlier link answer `404 export_not_found` at once | [I3](../edge-cases.md), FR-PRV-5 |
 | `it::retention::i4_raw` | Raw MIME older than `raw_days` deleted, `410 raw_expired` afterwards, audit row written | [I4](../edge-cases.md), FR-PRV-2 |
 | `it::retention::i4_messages` | With `message_days` set, messages, attachments, index rows and vectors are purged, except held threads | [I4](../edge-cases.md) |

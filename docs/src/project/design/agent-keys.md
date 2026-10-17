@@ -137,11 +137,21 @@ Header `{"alg":"EdDSA","typ":"agent-assertion+jwt","kid":"<thumbprint>"}`. Claim
 | `iat`, `nbf` | Now |
 | `exp` | Now + `expires_in` |
 | `jti` | A new ULID |
-| `email` | The identity's primary address |
+| `email` | The identity's **vouched address**, defined below |
 | `email_verified` | `true`: mail to that address reaches this identity |
 | `unverified` | An object of statements the workspace made and the deployment did not check: `name` (the identity's display name), `org` (the workspace name) and `accountable_human` (`true` when the identity has owner fields set, FR-IDN-2; the owner's name and address are never included). A verifier must not grant access on them: anyone can create a workspace with any name ([O27](../edge-cases.md) covers the verifier side) |
 | `ai_agent` | `true` |
 | `nonce`, `ext` | When given |
+
+**The vouched address** ([O29](../edge-cases.md)) is the identity's primary address when that address
+is on the platform domain, or on a tenant domain whose `state` is `healthy` or `degraded` and whose
+`inbound` is `routing` or `ses`, or `forward` with the address's `forwarding = 'ok'`. Otherwise it is the
+identity's platform address, which every identity has. So a domain that changed hands (`suspended`, [H4](../edge-cases.md)),
+a `failing` domain, a `send_only` domain whose mail never reaches the deployment, and an address whose
+forwarding check failed are never vouched for; the address returns to the claim when the domain is healthy
+again. It is read at signing time from the identity's cached domain state, the same state the send path
+uses. The window between a change of hands and its detection by the weekly ownership check
+([Identity and domains](identity-domains.md)) is not closed by this rule.
 
 Only `iss`, `sub`, `email` and `email_verified` are facts this deployment vouches for: the issuer, the
 identity, and that mail to the address reaches it. The display name, the workspace name and the owner
@@ -218,8 +228,8 @@ Response `200` (nothing is created or stored):
 
 - `Signature-Agent` is a structured-field string, in double quotes, naming the deployment's origin. Its
   directory is at that origin's well-known path ([§3.2](#32-web-bot-auth-key-directory)).
-- `From` carries the identity's primary address (RFC 9110 `From`: the address of whoever is responsible
-  for the request). It is signed, so the site knows which agent made the request and how to reach its
+- `From` carries the identity's vouched address ([§4.2](#42-token); RFC 9110 `From`: the address
+  of whoever is responsible for the request). It is signed, so the site knows which agent made the request and how to reach its
   operator.
 - The signature base is built by `core::httpsig::signature_base` exactly as RFC 9421 §2.5, and signed with
   the deployment's active key. `nonce` is 64 random bytes, base64.
@@ -348,6 +358,7 @@ published again.
 | `it::identity_keys::lazy_create_and_rotate` | First sign creates a key; rotation keeps the old key in the JWKS until `verify_until` ([O2](../edge-cases.md)) |
 | `it::identity_keys::revoke_removes_from_jwks` | Revoked key disappears from the JWKS at once ([O3](../edge-cases.md)) |
 | `it::identity_keys::paused_withdraws_jwks` | Paused identity: `409` on sign, `404` on JWKS ([O1](../edge-cases.md)) |
+| `it::assertions::o29_vouched_address` | An identity whose primary address is on a tenant domain gets that address in `email` and in Web Bot Auth's `From` while the domain is `healthy`; after the domain moves to `suspended` or `failing`, when the domain is `send_only` (`inbound = 'forward'`) with `forwarding = 'failed'` or `'unverified'`, and when `inbound = 'none'`, both carry the platform address instead; `email_verified` is `true` in every case; a healthy domain restores the primary address ([O29](../edge-cases.md)) |
 | `it::assertions::claims_and_limits` | Audience, expiry and `ext` rules ([O4](../edge-cases.md), [O5](../edge-cases.md), [O6](../edge-cases.md)) |
 | `it::assertions::sdk_verifies` | The SDK verifier accepts a fresh token and rejects a wrong audience, an expired token, an unknown kid and `alg: none`; it rejects a `sub` that is not an identity ID (`../../v1/links/{token}?` included) without making a request, and a JWKS answer that is a redirect or not `application/jwk-set+json` ([O27](../edge-cases.md)) |
 | `it::identity_keys::o28_concurrent_first_sign_and_revoke_active` | Ten concurrent first signing requests and a `POST …/keys` leave one `active` key and one `identity.key_created` event, and every assertion verifies with it; after the active key is revoked, the next signing request creates a new key (a new kid, `identity.key_created`) and `POST …/keys/rotate` with no active key answers with `previous_kid: null`; a `retiring` key past `verify_until` is absent from the JWKS before the retention job runs ([O28](../edge-cases.md)) |

@@ -691,7 +691,9 @@ WHERE seq = ?1
   release that produced it, never a count; how many times triage ran for the message is `run`
   ([§2](#2-data-structures)).
 - A version bump does not re-triage stored messages automatically (cost). New messages, releases and
-  re-runs use the current version. A `reparse` job ([J3]) re-triages what it re-ingests.
+  re-runs use the current version, so a record's `version` is that of its latest run: a re-run on the
+  same release keeps it, and a re-run after a bump records the new one. A `reparse` job ([J3])
+  re-triages what it re-ingests.
 - A change of `PM_TRIAGE_MODEL` takes effect for the next job; no migration is needed.
 
 ## 12. Cost controls
@@ -753,7 +755,7 @@ validation and failure handling without network access.
 | `it::billing::w7_inbound_never_refused` | With the triage allowance spent, mail is stored and triage ends `skipped` with reason `allowance`, rule risk flags kept, no model call and no event | FR-BILL-7, FR-BILL-8, [W7] |
 | `it::triage::events` | `message.triaged` is emitted for `done` and `failed`, not for `skipped` | FR-TRI-1, FR-WH-4 |
 | `it::triage::thread_rollup` | The roll-up follows the latest triaged inbound message; a later outbound keeps `needs_reply = 0` | FR-TRI-1 |
-| `it::triage::rerun` | `POST …/triage` returns `202` with no body, debounces, refuses outbound with `400`; a `quarantined`, `hidden`, `throttled`, DSN or system-mailbox message gets `409 triage_not_eligible` (and `404` without `quarantine:review`) and keeps its `triage_status`; after the job the record has the same `version` and `run` one higher | FR-TRI-5, FR-TRI-1 |
+| `it::triage::rerun` | `POST …/triage` returns `202` with no body, debounces, refuses outbound with `400`; a `quarantined`, `hidden`, `throttled`, DSN or system-mailbox message gets `409 triage_not_eligible` (and `404` without `quarantine:review`) and keeps its `triage_status`; after the job the record has `run` one higher and the current `TRIAGE_VERSION` (unchanged on the same release; a record written before a test-only bump of the constant gets the new value) | FR-TRI-5, FR-TRI-1 |
 | `it::triage::skipped_record_at_ingest` | A message stored with triage disabled, or `hidden`, `throttled` or a DSN, has `triage_json` with `status: skipped`, its reason, `version` and `run: 0` in the same transaction, and no job | FR-TRI-1 |
 | `it::triage::f16_rl_ai_deferral` | With `RL_AI` at 60 per minute, 500 triage jobs of one tenant are deferred (the hold released, `deferrals` incremented, `attempt` unchanged) while another tenant's triage runs at once; a job past 120 deferrals ends `skipped` with reason `ai_unavailable` and its rule flags | [F16](../edge-cases.md) |
 | `it::triage::daily_model_cap` | With `daily_model_cap: 3` on an `exempt` tenant, the fourth message is triaged rules-only (`model: "rules"`), the cap resets at the tenant's local midnight, and a redelivered job is counted once | FR-IN-12, [D13](../edge-cases.md) |

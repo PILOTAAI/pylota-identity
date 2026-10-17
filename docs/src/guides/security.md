@@ -301,7 +301,8 @@ the key holds `quarantine:review`. Mail stored `hidden` or `throttled` follows t
 - Release is a human action. It needs `quarantine:review`, takes a reason, and is audit-logged. Where
   `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud), only a person in the console can release,
   unless the workspace's policy has `quarantine.key_release: true`, which only the operator or the
-  workspace's partner can set, so that a partner's own review screen can release through its key.
+  workspace's partner can set, so that a partner's own review screen can release through its partner key.
+  The workspace's own tenant and identity keys, which agents hold, still cannot release there.
 - Receive-allow lists skip spam quarantine but **never** authentication quarantine.
 - No agent should hold `quarantine:review`.
 

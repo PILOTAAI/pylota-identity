@@ -499,7 +499,9 @@ for this workspace, revoke every session of that user whose active workspace is 
 key of the workspace whose `created_by_user_id` is that user (a `key.revoke` audit row each,
 `details.reason = "creator_removed"`, [W36](../edge-cases.md)), disable every enabled webhook endpoint of
 the workspace whose `created_by_user_id` is that user (`disabled_reason = 'creator_removed'`, a
-`webhook.disable` audit row each, [W47](../edge-cases.md)), write the audit row and the
+`webhook.disable` audit row each, [W47](../edge-cases.md)), revoke every pending invitation of the
+workspace whose `invited_by` is that user (a `member.invite_revoke` audit row each, `details.reason =
+"inviter_removed"`), so an address the person invited cannot bring them back, write the audit row and the
 `member.removed` event. Then the seat is released with `Adjust −1`; if that call is
 lost, the hourly reconciliation corrects the count. After the batch the handler calls
 `NotifierRequest::MemberRemoved { user_id }` on the workspace's Notifier, which drops the person's
@@ -655,7 +657,7 @@ while a person's other preferences are paused.
 | `/console/domains`, `/console/domains/{dom}` | Domains, health and issues, DNS records read from the provider API; add, verify, remove | View: all roles. Change: owner, admin |
 | `/console/webhooks` | Endpoints, recent deliveries, rotate secret, replay | Owner, admin |
 | `/console/members` | Members, pending invitations, seats used; invite, resend, revoke, change role, remove, transfer ownership, leave | View: all roles. Change: owner, admin. Transfer: owner |
-| `/console/plan` | Plan, a meter per allowance, upgrade, top-ups, manage billing ([Billing](billing.md#checkout)) | View: all roles. Buy: owner |
+| `/console/plan` | Plan, a meter per allowance, upgrade, a downgrade scheduled for the period end, top-ups, manage billing ([Billing](billing.md#checkout), [Plan changes](billing.md#plan-changes)) | View: all roles. Buy or change: owner |
 | `/console/plan/return` | Return from Stripe Checkout: confirms the plan once the webhook has applied it ([Cloud sign-up §9](cloud-signup.md#9-coming-back-from-checkout)) | Owner |
 | `/console/audit` | Audit log with filters | Owner, admin |
 | `/console/accounts` | Service sign-up requests: pending first, with inbox, service, sender domains, account identifier, purpose (escaped) and status; approve (re-authentication), reject, close, delete; a link to quarantined `account_unapproved` mail ([Service sign-up ledger §8](service-accounts.md#8-console)) | View: owner, admin, member. Change: owner, admin |
@@ -730,7 +732,8 @@ the workspace's `tenant_id` and delivered like `webhook.disabled`
 4. **Key-based quarantine release** (FR-CON-6). Closed: `PM_QUARANTINE_KEY_RELEASE`
    ([Configuration](../../reference/configuration.md#variables)) is `on` by default for self-hosting, and
    Pylota Mail Cloud sets it to `off`, so only a signed-in person can release there, except in a workspace
-   whose policy has `quarantine.key_release: true` (decided 2026-10-10). Only a platform key, or the
+   whose policy has `quarantine.key_release: true` (decided 2026-10-10), and there only for a platform key
+   or the workspace's partner key, never the workspace's own keys. Only a platform key, or the
    partner key of the workspace's partner, can set that field; Pylota sets it on its operators'
    workspaces ([Configuration › Tenant policy](../../reference/configuration.md#tenant-policy)).
 5. **Erasure of console data.** Closed: tenant erasure deletes the workspace's `members`, `invitations`

@@ -38,7 +38,8 @@ crates/cli/src/
   aws/
     mod.rs             credentials (§2.6), SigV4 signing with sha2 and hmac, error decoding, retries
     ses.rs s3.rs sns.rs sqs.rs iam.rs   the calls `setup ses` and the doctor's `ses` check make
-  wrangler.rs          Node.js check, `npx --yes wrangler@4.139.0 …`, stdin piping, output capture
+  wrangler.rs          Node.js check, Wrangler installed from the bundle's lockfile (§5.1), stdin piping,
+                       output capture
   bundle/
     release.rs         GitHub release lookup and streaming download
     verify.rs          minisign signature, SHA256SUMS parsing, SHA-256 checks
@@ -354,6 +355,37 @@ Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI
 - Request and response bodies are never logged. `--verbose` logs method, path (with the account and
   zone IDs), status and duration to stderr.
 
+### 5.1 Wrangler
+
+Some steps need Cloudflare's `wrangler` CLI (Worker uploads, secrets, queue subscriptions, rollback and
+delete). `pmail` never fetches it by name (`npx`, `npm exec` or `npm install wrangler`): that would
+resolve Wrangler's dependency tree from the npm registry at run time and run its install scripts while
+the process holds a Cloudflare token ([J34](../edge-cases.md)). Instead:
+
+1. The repository keeps `deploy/wrangler/package.json` and `deploy/wrangler/package-lock.json`: `wrangler`
+   at exactly `4.139.0`, and every package it pulls in with its `resolved` URL and `integrity` hash.
+   `cargo xtask release` copies both into the Worker bundle as `wrangler/package.json` and
+   `wrangler/package-lock.json`, so `SHA256SUMS` and the owner's signature cover them
+   ([Rust workspace §9](rust-workspace.md#9-xtask)).
+2. Before the first Wrangler call of a command, `pmail` downloads and verifies the bundle of its own
+   version (§8.1 to §8.3; `setup` and `destroy` do this too), then installs Wrangler from the bundle's
+   lockfile into `<dir>/.wrangler/{version}/` with `npm ci --ignore-scripts --no-audit --no-fund`.
+   `npm ci` refuses a lockfile that does not match `package.json` and checks every package against its
+   `integrity` hash; `--ignore-scripts` runs no install script. An existing install is reused only when
+   its `.lock-sha256` file equals the SHA-256 of the bundle's lockfile; otherwise the directory is
+   removed and installed again.
+3. Every Wrangler call runs `<dir>/.wrangler/{version}/node_modules/.bin/wrangler` (`wrangler.cmd` on
+   Windows) by its absolute path, never through `PATH`, after checking once that `wrangler --version`
+   prints `4.139.0`. A failed install or a different version is exit 10.
+4. `--from-source` uses the checkout's `deploy/wrangler/` lockfile in the same way; it is the operator's
+   own source, so no signature applies (§8.8).
+
+The workflows that run `pmail` with a token (`cloud-deploy.yml`, and `release-publish.yml`'s `staging`
+job) therefore install nothing from npm by name either. Node.js 22 or later and its `npm` are the only
+Node.js requirements. An operator who needs Wrangler by hand (a secret the CLI does not wrap, a rollback)
+runs `pmail wrangler <args…>`, which installs it the same way and passes the arguments through, with
+stdin, stdout and the exit code unchanged. Test: `cli::wrangler::installs_from_signed_lockfile`.
+
 ## 6. `setup`
 
 `pmail setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example --jurisdiction eu`
@@ -400,8 +432,9 @@ All checks run before anything is created; each failure is exit 2, 3 or 10 with 
    `--mail-domain`; so is `--console-host` when given. `--mail-domain` is a valid domain.
    `--jurisdiction` is `eu` or `default`. `--daily-send-quota` is a positive integer. `--backup-bucket`
    is a valid R2 bucket name other than `pylota-mail-blobs`.
-3. `node --version` reports 22 or later; then `npx --yes wrangler@4.139.0 --version` prints `4.139.0`
-   (this also fills the npx cache, so later steps do not download).
+3. `node --version` reports 22 or later and `npm --version` answers; then the release bundle is
+   downloaded and verified and Wrangler is installed from its lockfile, and `wrangler --version` prints
+   `4.139.0` ([§5.1](#51-wrangler)).
 4. The mail domain is a zone apex: `GET /zones?name={mail_domain}&account.id={account_id}` returns a
    zone whose `name` equals the mail domain. If it does not, the CLI repeats the call for each parent
    label to name the zone the domain belongs to, and fails with "agents.example is not a zone apex in
@@ -438,10 +471,10 @@ Each step prints `created`, `exists`, `updated` or `skipped` with the resource a
 | 10 | Rate-limit namespace IDs | No call when `deploy/wrangler.toml` already holds an ID for each of the seven bindings (`RL_API`, `RL_SEARCH`, `RL_AGENTIC`, `RL_SEND`, `RL_SIGNIN`, `RL_SIGN`, `RL_PARTNER`). Otherwise list the account's scripts (`GET /accounts/{a}/workers/scripts`) and read each script's bindings (`GET /accounts/{a}/workers/scripts/{name}/settings`; verify at build time), collect every `ratelimit` binding's `namespace_id`, and pick the smallest unused integers from 1001 for the bindings that have none | Kept across re-runs through the rendered file ([Rust workspace §8](rust-workspace.md#8-generated-wranglertoml)); a file from an older release that lacks `RL_SIGNIN`, `RL_SIGN` or `RL_PARTNER` gets one new ID for each missing binding |
 | 11 | Render `deploy/wrangler.toml` | none ([§7](#7-rendering-wranglertoml)) | Deterministic; a re-run with the same inputs writes the same bytes |
 | 12 | D1 migrations | `POST /accounts/{a}/d1/database/{id}/query` per migration ([§8.5](#85-d1-migrations)) | `schema_migrations` records each applied version |
-| 13 | First deploy | `npx --yes wrangler@4.139.0 deploy --config <dir>/wrangler.toml` from the bundle directory. Creates the Worker `pylota-mail`, its Durable Object classes, queue consumers, cron triggers and the Custom Domain (two when the console host differs) | Skipped when `/health` already reports this version and the rendered file is unchanged since the last deploy ([§8.9](#89-no-op-redeploys)) |
-| 14 | Secrets | `GET /accounts/{a}/workers/scripts/pylota-mail/secrets` (names only); for each missing required secret, generate 32 bytes from the OS CSPRNG, base64, and pipe it to `npx --yes wrangler@4.139.0 secret put {NAME} --name pylota-mail` on stdin. `PM_KEY_PEPPER` follows [§6.5](#65-the-bootstrap-key), which decides here whether a new pepper is uploaded | Existing secrets are never overwritten or read (Worker secrets are write-only), except a pepper replaced by §6.5 |
+| 13 | First deploy | `wrangler deploy --config <dir>/wrangler.toml` ([§5.1](#51-wrangler)) from the bundle directory. Creates the Worker `pylota-mail`, its Durable Object classes, queue consumers, cron triggers and the Custom Domain (two when the console host differs) | Skipped when `/health` already reports this version and the rendered file is unchanged since the last deploy ([§8.9](#89-no-op-redeploys)) |
+| 14 | Secrets | `GET /accounts/{a}/workers/scripts/pylota-mail/secrets` (names only); for each missing required secret, generate 32 bytes from the OS CSPRNG, base64, and pipe it to `wrangler secret put {NAME} --name pylota-mail` on stdin. `PM_KEY_PEPPER` follows [§6.5](#65-the-bootstrap-key), which decides here whether a new pepper is uploaded | Existing secrets are never overwritten or read (Worker secrets are write-only), except a pepper replaced by §6.5 |
 | 15 | Health | `GET https://{api_host}/health` every 5 s until `200` with `version` equal to the bundle's `VERSION`, at most 5 minutes (the Custom Domain's certificate can take minutes) | Pure read. A timeout is exit 13; a re-run continues here |
-| 16 | Event subscription | `GET /accounts/{a}/event_subscriptions/subscriptions` and look for `name = "pylota-mail {mail_domain}"`; if absent, `npx --yes wrangler@4.139.0 queues subscription create pm-delivery-events --source email.sending --events message.delivered,message.deferred,message.bounced,message.failed,message.rejected,message.complained --zone-id {z} --domain {mail_domain} --name "pylota-mail {mail_domain}"`, then list again to read its ID | Found by name. Wrangler's flags for the `email.sending` source are documented; the REST body for that source is not, so the CLI uses Wrangler here |
+| 16 | Event subscription | `GET /accounts/{a}/event_subscriptions/subscriptions` and look for `name = "pylota-mail {mail_domain}"`; if absent, `wrangler queues subscription create pm-delivery-events --source email.sending --events message.delivered,message.deferred,message.bounced,message.failed,message.rejected,message.complained --zone-id {z} --domain {mail_domain} --name "pylota-mail {mail_domain}"`, then list again to read its ID | Found by name. Wrangler's flags for the `email.sending` source are documented; the REST body for that source is not, so the CLI uses Wrangler here |
 | 17 | Catch-all to the Worker | `GET /zones/{z}/email/routing/rules/catch_all`; unless it is enabled with exactly one `worker` action whose value is `["pylota-mail"]`, `PUT /zones/{z}/email/routing/rules/catch_all` `{"actions":[{"type":"worker","value":["pylota-mail"]}],"matchers":[{"type":"all"}],"enabled":true,"name":"pylota-mail"}` | Read first; `PUT` only on a difference |
 | 18 | Read the records back | `GET /zones/{z}/email/routing/dns` and `GET /zones/{z}/email/sending/subdomains/{tag}/dns`; normalise to `{ type, name, value, priority, purpose, required }` and add the ownership TXT (FR-DOM-3) | Pure read |
 | 19 | Bootstrap key | D1 query API ([§6.5](#65-the-bootstrap-key)) | Skipped when the profile already holds a working platform key |
@@ -804,7 +837,8 @@ when complete. Rules:
 - Every path is relative, has no `..` component, no leading `/`, no drive prefix, and stays inside the
   target after normalisation. At most 1,000 entries and 128 MiB unpacked.
 - Expected contents: `build/index.js`, `build/index_bg.wasm`, `build/worker/shim.mjs`,
-  `migrations/d1/*.sql`, `deploy/wrangler.toml.tmpl`, `VERSION`. `VERSION` must equal the requested
+  `migrations/d1/*.sql`, `deploy/wrangler.toml.tmpl`, `wrangler/package.json`,
+  `wrangler/package-lock.json`, `VERSION`. `VERSION` must equal the requested
   version. Any missing file is exit 11.
 
 ### 8.4 Order of a deploy
@@ -851,8 +885,8 @@ in the throwaway local database and never meets a deployed one.
 
 ### 8.6 Code deploy and the gradual flag
 
-**Default (`--gradual` off).** `npx --yes wrangler@4.139.0 deploy --config <dir>/wrangler.toml
---message "pmail deploy v{version}"`, run with the bundle directory as working directory, so `main =
+**Default (`--gradual` off).** `wrangler deploy --config <dir>/wrangler.toml
+--message "pmail deploy v{version}"` ([§5.1](#51-wrangler)), run with the bundle directory as working directory, so `main =
 "build/index.js"` resolves. Wrangler's output is captured; on failure its last 40 lines are printed and
 the exit code is 10.
 
@@ -921,8 +955,8 @@ the current directory; a directory without `crates/worker` is exit 2):
 
 `--from-source` avoids the GitHub Releases download, not the network: Cargo still needs crates.io for
 `worker-build` and the workspace's dependencies, unless the crates are vendored (`cargo vendor`) and
-`worker-build` 0.8.7 is already installed, and `npx` still fetches Wrangler from the npm registry unless
-it is in the npx cache. What else `worker-build` downloads while it builds: verify at build time.
+`worker-build` 0.8.7 is already installed, and `npm ci` still downloads Wrangler's packages from the npm
+registry (checked against the lockfile's hashes) unless they are in the npm cache. What else `worker-build` downloads while it builds: verify at build time.
 
 ### 8.9 No-op redeploys
 
@@ -1006,13 +1040,17 @@ Data sources:
 | `web_bot_auth` | Only when `PM_WEB_BOT_AUTH = "on"` in the rendered file (otherwise `skip`). `GET https://{api_host}/.well-known/http-message-signatures-directory`, no key. `fail` unless it answers `200` with `Content-Type: application/http-message-signatures-directory+json`, lists one to three keys, and carries one `Signature-Input` and `Signature` member per listed key, with tag `http-message-signatures-directory`, that verifies with that key (`core::httpsig`; [Agent signing keys §3.2](agent-keys.md#32-web-bot-auth-key-directory)). The fix names the deploy step or the key rotation |
 | `mail_test` | Below |
 
-**`--mail-test`.** Needs a key that holds, in the default tenant, `identities:read` and
-`identities:write` (step 1), `messages:send` (step 2), `search:read` (`wait`, step 3), `messages:read`
-(the raw message, step 4) and `erasure:manage` (step 5). The platform key that setup creates holds them;
-without one of them the check is `fail` with the missing permission in `detail`.
+**`--mail-test`.** Runs with either a platform key (setup's bootstrap key, which also creates the identity)
+or an **identity key of `pmail-doctor`** holding `messages:send` (step 2), `search:read` (`wait`, step 3),
+`messages:read` (the raw message, step 4) and `erasure:manage` (step 5). The heartbeat uses the identity
+key, so a stolen CI secret can send only as `pmail-doctor` and can never create another bare platform
+address ([A18](../edge-cases.md)). Without a needed permission the check is `fail` with the missing
+permission in `detail`.
 
-1. Create or reuse the identity `pmail-doctor` in the default tenant (`client_id: "pmail:doctor"`,
-   owner = the setup owner or `postmaster@{mail_domain}` as a placeholder the operator sees).
+1. With a platform key, create or reuse the identity `pmail-doctor` in the default tenant
+   (`client_id: "pmail:doctor"`, owner = the setup owner or `postmaster@{mail_domain}` as a placeholder
+   the operator sees, `send_policy.require_known_recipient: true`); setup does this at its step 23. With
+   an identity key, use the key's own identity, and `fail` unless it is `pmail-doctor`.
 2. Send from it to its own platform address `pmail-doctor@{mail_domain}`, subject
    `pmail doctor {ulid}`, `Idempotency-Key: pmail-doctor-{ulid}`.
 3. `GET /v1/identities/{id}/wait?subject_contains=pmail%20doctor%20{ulid}&timeout=60`, twice at most.
@@ -1080,7 +1118,7 @@ database or bucket.
    one, is never deleted: it is listed and skipped. Operation names beyond those cited in
    [Domains on any DNS host §4.2](domain-connections.md#42-deployment-set-up-for-ses): verify at build
    time.
-5. **Delete the Worker:** `npx --yes wrangler@4.139.0 delete --name pylota-mail`. Wrangler describes
+5. **Delete the Worker:** `wrangler delete --name pylota-mail` ([§5.1](#51-wrangler)). Wrangler describes
    this as deleting the Worker and its associated resources; whether the Durable Object namespaces'
    storage is removed with it is verified at build time. After step 2 no mail content remains in them.
 6. **Delete storage:** every Vectorize index named `pm-mail-chunks*`
@@ -1105,7 +1143,8 @@ Each step is idempotent; a `404` carrying Cloudflare's own "not found" code coun
 `pmail secrets rotate-master [--resume] [--discard-previous] [--yes]`
 
 The procedure, with its two key slots, is [Security §6.2](security.md#62-rotation-procedures). The
-CLI's part needs the Cloudflare token (Workers Scripts · Edit, to write secrets) and a platform key with
+CLI's part needs the Cloudflare token (the per-Worker Editor role on `pylota-mail`, which writes its
+secrets; never account-wide Workers Scripts · Edit, [ADR 0010](../adr/0010-cloud-in-the-existing-cloudflare-account.md)) and a platform key with
 `audit:read` (to read `GET /v1/platform/status`); it makes no D1 query.
 
 1. Read `master_key` from `GET /v1/platform/status`: `active_slot`, the two slots with `present` and
@@ -1176,7 +1215,7 @@ read back: the API returns key IDs, never key material.
 ### 12.3 Other secrets
 
 `PM_CF_API_TOKEN` and the SES keys (`PM_SES_ACCESS_KEY_ID`, `PM_SES_SECRET_ACCESS_KEY`) rotate with
-`wrangler secret put` as listed in Security §6.2; the CLI does not wrap them, and a re-run of
+`pmail wrangler secret put` ([§5.1](#51-wrangler)) as listed in Security §6.2; the CLI does not wrap them, and a re-run of
 `setup ses` never replaces an existing SES key ([§6.9](#69-setup-ses)). `PM_KEY_PEPPER` rotates only
 through `pmail setup --rotate-pepper` ([§6.5](#65-the-bootstrap-key)). `PM_HASH_KEY` is not rotatable in
 v1.0.
@@ -1390,7 +1429,7 @@ is not set up for the method" to exit 3 (`config`) instead of the API's exit 7:
   raise the SES limit; `method_not_supported`: another method). `marketing_needs_ses` is never returned
   by a domain create (it is a send refusal), so `domains add` does not map it.
 - `422 cf_token_required`: the deployment has no `PM_CF_API_TOKEN`. The fix is "set `PM_CF_API_TOKEN` on
-  the deployment (`wrangler secret put PM_CF_API_TOKEN`), or, for a zone apex, run again with
+  the deployment (`pmail wrangler secret put PM_CF_API_TOKEN`), or, for a zone apex, run again with
   `--local-token`".
 
 The CLI never falls back to the local token on its own.
@@ -1740,6 +1779,7 @@ reached, and every step can be re-run.
 | `cli::setup::ses_region_check` | A region that cannot receive is exit 2; a region outside the EU and the UK under `PM_JURISDICTION = "eu"` is exit 2 without `--allow-non-eu` and accepted with it, and `eu-west-2` (London) is accepted without it; no production access is exit 14 with the console steps and nothing created; Essentials prints a warning | FR-DOM-8, [N30] |
 | `cli::setup::ses_policy_and_key` | The IAM policy JSON is printed before it is applied and needs a confirmation or `--yes`; the access key reaches Wrangler only on stdin, appears in no file, argument, output or log, and is not created again when `PM_SES_ACCESS_KEY_ID` exists | FR-DOM-8, [I5] |
 | `cli::render::preserves_vars` | Operator edits under `[vars]` and in `[observability.traces]` survive a re-render; owned sections (including `[observability]` and `[observability.logs]`) are restored with a diff | FR-OPS-2 |
+| `cli::wrangler::installs_from_signed_lockfile` | Against a recorded npm registry: `pmail` installs Wrangler only with `npm ci --ignore-scripts` from the verified bundle's `wrangler/package-lock.json` into `<dir>/.wrangler/{version}/`, reuses it only while `.lock-sha256` matches, runs it by absolute path after a `--version` check, and never runs `npm exec`, `npm install` by name or the npm package runner; a tampered lockfile is exit 11 before any install; a package whose bytes differ from its `integrity` hash stops the install (exit 10) before any Wrangler call; `pmail wrangler` passes arguments, stdin and the exit code through ([J34](../edge-cases.md)) | FR-OPS-2 |
 | `cli::deploy::tampered_bundle_refused` | A modified tarball, `SHA256SUMS`, signature, wrong key ID or replayed trusted comment is exit 11 and nothing is deployed | FR-OPS-2 (M16) |
 | `cli::deploy::safe_extraction` | Symlinks, `..`, absolute paths and oversized archives are refused | FR-OPS-2 |
 | `cli::deploy::migrations_before_code` | Migrations run before Wrangler; a failing migration stops the deploy; `schema_migrations` is updated | FR-OPS-2, [J9] |

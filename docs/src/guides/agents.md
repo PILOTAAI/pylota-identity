@@ -236,7 +236,8 @@ and the token is never stored or logged.
 
 **What the audience learns.** The token's claims are `iss` (your deployment's API origin, for example
 `https://mail.example.com`), `sub` (the identity ID), `aud`, `iat`, `nbf`, `exp`, `jti` (a unique ID),
-`email` (the identity's primary address) with `email_verified: true`, `unverified` (the display name as
+`email` (the identity's primary address, or its platform address while its domain is unhealthy or
+receives no mail at the deployment) with `email_verified: true`, `unverified` (the display name as
 `name`, the workspace name as `org`, and `accountable_human`, `true` when the identity has owner fields
 set: statements your workspace made, which the deployment does not check), `ai_agent: true`, and your
 `nonce` and `ext`. The owner's name and address are never included. Services should rely only on `iss`,

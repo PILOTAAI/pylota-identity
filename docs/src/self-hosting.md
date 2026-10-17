@@ -28,7 +28,7 @@ and deploying the docs site.
 | A Cloudflare account on the **Workers Paid** plan | Email Sending to arbitrary recipients needs Workers Paid. Email Sending is in public beta |
 | A **platform mail domain**: a zone apex on Cloudflare DNS in that account, that does not receive mail anywhere else. Examples use `agents.example` | Every identity gets an address on it, such as `bookings.acme@agents.example`. Only this domain must be on Cloudflare: tenants' own domains can be on any DNS host ([Custom domains](guides/custom-domains.md)) |
 | An **API host**: any hostname on a zone in the account, with no existing CNAME record. Examples use `mail.example.com` | The Worker serves there, as a Worker Custom Domain: the REST API (`/v1/*`, including signed links `/v1/links/*`), the MCP server (`/mcp`), `/openapi.json`, `/health`, `/.well-known/*`, the provider hooks (`/hooks/*`) and `/billing/stripe/webhook`; and the console, unless you give it its own host with `--console-host` |
-| Node.js 22 or later | `pmail setup` and `pmail deploy` run Cloudflare's `wrangler` CLI (version `4.139.0`, through `npx --yes wrangler@4.139.0`) |
+| Node.js 22 or later, with `npm` | `pmail setup` and `pmail deploy` run Cloudflare's `wrangler` CLI (version `4.139.0`), which `pmail` installs with `npm ci --ignore-scripts` from the lockfile inside the signed release, never by name |
 | The `pmail` binary | It runs setup, deploy, the doctor and every admin and mail command |
 
 ### Why the mail domain must be a dedicated zone apex
@@ -191,7 +191,7 @@ Every flag is in the [CLI reference](reference/cli.md#setup).
 Setup also deploys the Worker. It downloads the release for the CLI's version
 (`pylota-mail-worker-<version>.tar.gz`) and the release's signed `SHA256SUMS` from GitHub Releases,
 refuses to continue if the checksum does not match, renders `deploy/wrangler.toml`, applies the D1
-migrations and runs `npx --yes wrangler@4.139.0 deploy`. `--version <v>` picks another release, and
+migrations and runs `wrangler deploy`. `--version <v>` picks another release, and
 `--from-source` builds the Worker locally from a checkout of the repository (`--source-dir <path>`,
 default the current directory) instead; it needs the Rust toolchain, the `wasm32-unknown-unknown` target
 and `worker-build` 0.8.7, and it still downloads crates from crates.io (unless you vendor them) and
@@ -325,7 +325,7 @@ mail domain's zone and every zone you will list in a tenant's `domains.cloudflar
 a Worker secret:
 
 ```bash
-npx --yes wrangler@4.139.0 secret put PM_CF_API_TOKEN --name pylota-mail
+pmail wrangler secret put PM_CF_API_TOKEN --name pylota-mail
 ```
 
 What the Worker does with it is in

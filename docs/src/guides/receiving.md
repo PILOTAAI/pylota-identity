@@ -183,7 +183,8 @@ entry. The CLI commands are `pmail quarantine list` and `pmail quarantine releas
 Release is a human decision. Give `quarantine:review` to the people who review mail, not to agents
 ([Security](security.md#quarantine)). Where `PM_QUARANTINE_KEY_RELEASE` is `off`, as on Pylota Mail Cloud,
 every key gets `403 permission_denied` and a person releases in the console, unless the workspace's
-policy has `quarantine.key_release: true` ([Configuration › Tenant policy](../reference/configuration.md#tenant-policy)).
+policy has `quarantine.key_release: true`, which lets the partner's key (never the workspace's own keys)
+release ([Configuration › Tenant policy](../reference/configuration.md#tenant-policy)).
 
 ## Blocked senders and throttling
 

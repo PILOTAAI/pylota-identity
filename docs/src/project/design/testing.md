@@ -169,14 +169,15 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    `PM_ITEST_TOKEN`, queue consumers with `max_batch_timeout = 1`, and no `AI` or `VECTORS` binding (both
    are served by fakes). Tests inject provider events through the production `Q_DELIVERY` producer
    binding, which exists for dead-letter redrive.
-3. Apply D1 migrations: `npx --yes wrangler@4.139.0 d1 migrations apply pylota-mail --local
+3. Apply D1 migrations with the Wrangler that `cargo xtask itest` installs from `deploy/wrangler/package-lock.json`
+   (`npm ci --ignore-scripts`, run by path; [CLI §5.1](cli.md#51-wrangler)): `wrangler d1 migrations apply pylota-mail --local
    --persist-to target/itest/state --config deploy/wrangler.itest.toml` (a fresh directory per run). The
    rendered file sets `migrations_dir = "../migrations/d1"`, because Wrangler resolves it against the
    file's own directory, `deploy/`. Until v1.0 there is one file, `0001_init.sql`.
 4. Write a throwaway TLS certificate for the run: `openssl req -x509 -newkey ec -pkeyopt
    ec_paramgen_curve:P-256 -nodes -days 2 -subj /CN=localhost -addext
    "subjectAltName=DNS:localhost,DNS:console.localhost,IP:127.0.0.1"` into `target/itest/tls/`. Then start
-   `npx --yes wrangler@4.139.0 dev --local --port 8799 --local-protocol https --https-key-path
+   `wrangler dev --local --port 8799 --local-protocol https --https-key-path
    target/itest/tls/key.pem --https-cert-path target/itest/tls/cert.pem --persist-to target/itest/state
    --test-scheduled --config deploy/wrangler.itest.toml` (Wrangler's `dev` options `--local-protocol`,
    `--https-key-path` and `--https-cert-path`, Cloudflare "Wrangler commands", read 2026-10-10), write its
@@ -594,7 +595,8 @@ Checkout page, Gmail's unsubscribe button). They are `#[ignore]`d in the nightly
 person runs `cargo xtask live --manual` against the release candidate on staging: the harness runs the
 scripted parts, prints each browser step and waits for the person to confirm it, then checks the outcome
 through the API exactly as an automated test would, and records the result per test in
-`target/live/manual.json`. The release job needs a passing manual run on the release commit (section 12).
+`target/live/manual.json`. A final release needs a passing manual run of the candidate it reproduces,
+recorded in its gate file (section 12; [Security § 16](security.md#16-pre-release-checklist)).
 
 **Staging configuration.** Staging runs with `PM_BILLING=stripe`, Stripe test-mode keys and its own
 `PM_PLAN_CATALOG` (`deploy/staging/plan-catalog.json`): the production plan names with Stripe test-mode

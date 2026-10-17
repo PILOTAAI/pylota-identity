@@ -584,7 +584,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   webhooks, members, plan and usage, and settings. On Cloud, releasing quarantine **must** be possible
   only for a signed-in person (`PM_QUARANTINE_KEY_RELEASE=off`), except in a workspace whose policy has
   `quarantine.key_release: true`, which only a platform key or the workspace's partner key can set; there,
-  API keys with `quarantine:review` can release too. Self-hosters can allow release by API keys with
+  those two keys can release too, never the workspace's own tenant or identity keys. Self-hosters can allow release by API keys with
   `quarantine:review` everywhere (`on`, the default for self-hosting).
 - **FR-CON-7** A self-hosted deployment **must** create its first owner during `pmail setup`
   (`--owner-email`). The console **must** be optional (`PM_CONSOLE=off` removes its routes).

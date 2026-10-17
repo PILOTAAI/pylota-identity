@@ -2,7 +2,7 @@
 
 Binding design for plans, allowances, metering and payment. It implements FR-BILL-1 to FR-BILL-12,
 FR-BILL-14, NFR-BILL-1 and NFR-BILL-2, build plan milestone M22, and the edge-case rows W1–W8, W11–W14,
-W19 and W37–W39 in the [edge-case register](../edge-cases.md). Usage alerts by email (FR-BILL-13, rows
+W19, W37–W39 and W49 in the [edge-case register](../edge-cases.md). Usage alerts by email (FR-BILL-13, rows
 O20, O21 and O23) are
 designed in [Notifications and usage alerts](notifications.md#4-usage-alerts); this page owns the
 `TenantQuota` side of them ([Usage thresholds](#usage-thresholds)). The user-facing description is
@@ -235,8 +235,14 @@ UPDATE allowances SET held = held + ?2 WHERE feature = ?1;
 - `remaining` is `max(0, granted − used − held)`. It is what `GET /v1/usage` reports, so an agent sees what
   it can actually use while other requests are in flight.
 - A denial writes nothing in the object except, the first time in a period, the storage key
-  `limit_reached:{feature}:{period_start}`; it then returns `first_in_period: true` and the caller emits
-  `billing.limit_reached` ([Events](#events-and-errors)).
+  `limit_reached:{feature}:{period_start}`; it then returns `first_in_period: true`. The event
+  `billing.limit_reached` ([Events](#events-and-errors)) is written by whoever turns the denial into a
+  `402`, the Worker handler (for a send, the handler that receives the mailbox's answer) or the triage
+  consumer, on **every** denial and before answering: one
+  `INSERT OR IGNORE INTO event_index` whose event ID is
+  `HMAC-SHA256(PM_HASH_KEY, "limit_reached:" + tenant_id + ":" + feature + ":" + period_start)`. The event
+  ID makes it once per feature and period; trying on every denial means a lost insert is made by the next
+  one. A failed insert never changes the `402`. `first_in_period` is informational.
 - Requests to one Durable Object are processed one at a time, and the transaction contains no `.await`.
   When two sends race for the last unit, exactly one hold succeeds and the other is denied ([W1]).
 
@@ -246,7 +252,8 @@ When consumed units first take `used` to or past 80% or 100% of `granted` (top-u
 a `Settle` that consumes units, the settle of a count feature's hold when its create commits, or
 `SetMeasured` for storage, `TenantQuota` sends
 `NotifierRequest::UsageThreshold { feature, threshold, used, granted, period }` to the tenant's
-`Notifier` (`tenants.notify_do_id`) after its transaction commits, and records the meta key
+`Notifier` after its transaction commits (the object reads `tenants.notify_do_id` from D1 then; while it is
+`NULL`, before the every-minute cron has minted the Notifier, nothing is sent), and records the meta key
 `alerted:{feature}:{threshold}:{period}` in the same transaction that decides it:
 
 - `sends` and `triage` (they reset): `{period}` is the period's `period_start` and the value `1`; a
@@ -405,9 +412,11 @@ Stripe is called for these things only ([Architecture › Console and billing](.
 | Create a Checkout Session | [Checkout](#checkout) |
 | Retrieve a Checkout Session (`GET /v1/checkout/sessions/{id}`) | The return page ([Cloud sign-up › Coming back from Checkout](cloud-signup.md#9-coming-back-from-checkout)) |
 | Create a Customer Portal session | [Customer Portal](#customer-portal) |
-| Read subscriptions (`GET /v1/subscriptions?customer=…&expand[]=data.latest_invoice`) | When a webhook arrives ([Applying state](#applying-state)), and before cancelling |
+| Read subscriptions (`GET /v1/subscriptions?customer=…&expand[]=data.latest_invoice&expand[]=data.schedule`) | When a webhook arrives ([Applying state](#applying-state)), and before cancelling |
+| Retrieve a subscription (`GET /v1/subscriptions/{id}?expand[]=schedule`) | Before an upgrade, a downgrade or keeping the plan ([Plan changes](#plan-changes)) |
+| Create, update and release a subscription schedule (`POST /v1/subscription_schedules`, `POST /v1/subscription_schedules/{id}`, `POST /v1/subscription_schedules/{id}/release`) | A downgrade at the period end and keeping the current plan ([Plan changes](#plan-changes)); releasing a schedule whose change has happened ([Applying state](#applying-state)), and before cancelling |
 | Retrieve a charge (`GET /v1/charges/{id}`) | A dispute event, to find the charge's customer ([Disputes and refunds](#disputes-and-refunds)) |
-| Cancel subscriptions (`DELETE /v1/subscriptions/{id}`) | Workspace deletion, with `invoice_now=true` and `prorate=false` ([Privacy › Tenant scope](privacy.md#66-tenant-scope), step `cancel_billing`); a duplicate subscription, with `prorate=true` and `invoice_now=true` ([Applying state](#applying-state)); a live subscription for an erasing or erased workspace (`cancelled_after_erasure`, [Webhook endpoint](#webhook-endpoint)) and a lost dispute, with neither |
+| Cancel subscriptions (`DELETE /v1/subscriptions/{id}`) | Workspace deletion, with `invoice_now=true` and `prorate=false`, after releasing a downgrade schedule the plan subscription carries ([Privacy › Tenant scope](privacy.md#66-tenant-scope), step `cancel_billing`); a duplicate subscription, with `prorate=true` and `invoice_now=true` ([Applying state](#applying-state)); a live subscription for an erasing or erased workspace (`cancelled_after_erasure`, [Webhook endpoint](#webhook-endpoint)) and a lost dispute, with neither |
 
 **Why these cancel parameters.** Stripe's cancel call defaults to `invoice_now=false` and
 `prorate=false`, and with both false it removes pending prorations ("Cancel a subscription", read
@@ -423,7 +432,8 @@ customer's balance at once.
 Its signed webhooks are the only writer of subscription state in D1 (FR-BILL-10). `PM_STRIPE_SECRET_KEY` is a
 restricted key with exactly these permissions, set per resource in the Stripe Dashboard (restricted keys
 are created there only, with Read, Write or None per resource; "Restricted API keys", read 2026-10-10):
-Checkout Sessions Write, Customer portal Write, Customers Write, Subscriptions Write, Invoices Read and
+Checkout Sessions Write, Customer portal Write, Customers Write, Subscriptions Write (with Subscription
+schedules Write, where the Dashboard lists schedules as a resource of their own), Invoices Read and
 Charges Read; every other resource None. Every request pins the API version in
 `Stripe-Version: 2025-03-31.basil`, because periods are read from subscription items and invoices carry
 their subscription in `parent.subscription_details`, and the webhook endpoint is created with
@@ -442,9 +452,10 @@ pin is a change of its own, made after reading the changelog between the two ver
 Plan and top-ups live in separate subscriptions on purpose. The Customer Portal can cancel a subscription
 with several products but cannot update one, and a Checkout Session in `subscription` mode creates a new
 subscription rather than changing an existing one. With one
-product per subscription, the Portal can switch the plan subscription between plan prices and change a
-top-up subscription's quantity, and the Worker's only write to a subscription is cancelling it (the
-cases in the table above). Every
+product per subscription, the Portal can move the plan subscription to a dearer plan price and change a
+top-up subscription's quantity. The Worker's writes to a subscription are cancelling it (the cases in
+the table above) and attaching or releasing the schedule of a downgrade ([Plan changes](#plan-changes)).
+Every
 subscription carries `metadata.tenant_id` and `metadata.kind` (`plan` or `topup:{feature}`), set through
 `subscription_data.metadata` at Checkout.
 
@@ -493,8 +504,11 @@ URL. Each button names its configuration and, for one task, deep-links with `flo
 | Manage billing (invoices, tax IDs, address) | `account` | none |
 | Update payment method | `account` | `type=payment_method_update` |
 | Cancel plan | `account` | `type=subscription_cancel`, the plan subscription (`stripe_subscription_id`) |
-| Change plan | `plan` | `type=subscription_update`, the plan subscription |
+| Upgrade to {plan} ([Plan changes](#plan-changes)) | `plan` | `type=subscription_update_confirm` with the plan subscription, its one item's `id`, the dearer plan's `stripe_price_id` and quantity 1; `after_completion[type]=redirect` to `https://{PM_CONSOLE_HOST}/console/plan` |
 | Change {feature} top-ups | `topup` | `type=subscription_update`, that feature's subscription from `topup_subscriptions_json` |
+
+A downgrade between paid plans is not a Portal button: the console schedules it itself
+([Plan changes](#plan-changes)).
 
 The three configurations are created by `cargo xtask stripe-setup` ([Stripe account setup](#stripe-account-setup))
 with exactly these settings (Stripe "Create a portal configuration", read 2026-10-10):
@@ -502,7 +516,7 @@ with exactly these settings (Stripe "Create a portal configuration", read 2026-1
 | Configuration | Settings |
 |---|---|
 | `account` | `features.subscription_update.enabled = false`; `features.subscription_cancel` enabled with `mode = at_period_end` and `proration_behavior = none`; `features.payment_method_update`, `features.invoice_history` enabled; `features.customer_update` enabled with `allowed_updates = [address, name, tax_id]` (the email stays the owner's sign-in address); `business_profile.privacy_policy_url` and `terms_of_service_url` from `PM_PRIVACY_URL` and `PM_TERMS_URL`; `login_page.enabled = true`, so a customer who has lost console access can still reach invoices and cancellation through Stripe's own email sign-in |
-| `plan` | As `account`, plus `features.subscription_update` enabled with `default_allowed_updates = [price]`, `products` = each paid plan's product with its one price, `proration_behavior = always_invoice` and `billing_cycle_anchor = unchanged` |
+| `plan` | As `account`, except `login_page.enabled = false`, plus `features.subscription_update` enabled with `default_allowed_updates = [price]`, `products` = each paid plan's product with its one price, `proration_behavior = always_invoice` and `billing_cycle_anchor = unchanged`. It is only ever opened by the `subscription_update_confirm` deep link above, whose page hides the navigation to the rest of the Portal (Stripe "Deep links in the customer portal", read 2026-10-17), and it has no sign-in page of its own, so a customer can never reach a page of it where a cheaper plan could be chosen |
 | `topup` | As `account`, plus `features.subscription_update` enabled with `default_allowed_updates = [quantity]`, `products` = each top-up product with its one price and `adjustable_quantity = { enabled: true, minimum: 1, maximum: topup.max_quantity }`, `proration_behavior = always_invoice`, and `schedule_at_period_end.conditions = [{ type: decreasing_item_amount }]` |
 
 What follows from them:
@@ -514,14 +528,73 @@ What follows from them:
   Portal schedules it (through a subscription schedule) instead of crediting units that may already have
   been used. While it is scheduled, the Portal cannot change or cancel that subscription (Stripe "Customer
   portal › Limitations", read 2026-10-10); the console says so.
-- **Plan downgrades apply at once.** The Portal schedules a downgrade at the period end only between
-  prices of one product ("Configure the customer portal", read 2026-10-10), and each plan has its own
-  product, so a downgrade applies when it is made, with a credit for the unused part of the dearer plan
-  on the customer's balance. `used` is kept, so the credit is at most one period's price difference for
-  units already consumed. This is accepted; the allowances fall at once.
+- **Plan downgrades wait for the period end, and are not the Portal's.** The Portal schedules a change at
+  the period end only between prices of one product (Stripe "Configure the customer portal", read
+  2026-10-17), and each plan must be its own product, because two monthly prices of one product are not
+  allowed (Stripe "Customer portal › Limitations", read 2026-10-17). In the Portal a downgrade would
+  therefore apply at once with a credit for the unused part of the dearer plan: a workspace could
+  upgrade, use the dearer allowances, downgrade the next day and keep almost the whole difference as a
+  credit. So the Portal is only ever given an upgrade to confirm, and the console schedules downgrades
+  through a subscription schedule ([Plan changes](#plan-changes)).
 - The `plan` configuration offers only plan products and the `topup` configuration only top-up
   products, so a plan subscription can never be turned into a top-up or the reverse. The Worker treats a
   plan subscription's quantity as 1 whatever it finds.
+
+### Plan changes
+
+On a workspace with a plan subscription, the plan page offers the owner one button for each other paid
+plan in the catalog: **Upgrade** when its `price` is higher, **Downgrade** when it is lower (plans of
+equal price are not offered), and **Cancel plan** for the default plan. Every button is owner only and
+re-authenticated ([Console › Roles](console.md#roles)). Each action first retrieves the plan subscription
+(`GET /v1/subscriptions/{stripe_subscription_id}?expand[]=schedule`) and stops, with a message on the
+plan page and no Stripe write, when the subscription is not `active`, has `cancel_at_period_end` set
+("renew the plan first", in Manage billing), or has a `pending_update`.
+
+1. **Upgrade** (`POST /console/plan/portal` with the button and the target `plan_id`, audit
+   `billing.portal_opened`). The Worker opens the `plan` configuration with the
+   `subscription_update_confirm` deep link ([Customer Portal](#customer-portal)), naming the dearer
+   plan's price. Stripe shows the prorated amount, takes the payment (3-D Secure included) and invoices
+   it at once; the allowances rise when that invoice is paid ([W37]). The Worker never names a cheaper
+   price in this link.
+2. **Downgrade** (`POST /console/plan/downgrade` with the target `plan_id`, audit
+   `billing.downgrade_scheduled` with both plans and the date). The Worker:
+   1. stops when the subscription carries a schedule that is not its own (`metadata.pm_kind` is not
+      `plan_downgrade`): such a schedule was made in the Stripe Dashboard, and the operator resolves it;
+   2. when the subscription has no schedule, creates one: `POST /v1/subscription_schedules` with
+      `from_subscription` and `Idempotency-Key: downgrade:{subscription_id}:{period_end}`. Stripe gives it
+      one phase matching the current period and creates no proration (Stripe "Subscription schedules",
+      read 2026-10-17);
+   3. updates it (`POST /v1/subscription_schedules/{id}`, `Idempotency-Key: downgrade:{schedule_id}:{plan_id}`)
+      with `end_behavior=release`, `metadata[pm_kind]=plan_downgrade`, `metadata[tenant_id]`,
+      `phases[0]` = the current phase exactly as Stripe returned it (its items, `start_date`, `end_date`
+      and every other setting it carries, because a setting left out of an update is unset), and
+      `phases[1]` with `items[0][price]` = the cheaper plan's `stripe_price_id`, `items[0][quantity]=1`,
+      `proration_behavior=none` and `iterations=1`. `iterations` belongs to the pinned
+      `2025-03-31.basil`: `duration` replaces it from `2025-07-30.basil`, and `2025-09-30.clover` refuses
+      `iterations` (Stripe changelog, read 2026-10-17), so moving the version pin changes this call. A
+      second downgrade while one is scheduled updates the same schedule's `phases[1]`;
+   4. answers `303` to `/console/plan`. A failed Stripe call shows "Try again"; a repeated click repeats
+      both calls under the same keys, and a schedule left with its single phase changes nothing.
+
+   Nothing is written to D1 here. The `subscription_schedule.updated` event re-reads the subscription and
+   [Applying state](#applying-state) stores the scheduled change, so the page can show it a few seconds
+   late.
+3. **While a downgrade is scheduled**, the plan page shows "Changes to {plan} on {date}" and a **Keep
+   {current plan}** button in place of Upgrade and Cancel plan, with the reason: the Portal can neither
+   update nor cancel a subscription that has a scheduled update (Stripe "Customer portal › Limitations",
+   read 2026-10-17). Keep (`POST /console/plan/keep`, audit `billing.downgrade_cancelled`) releases the
+   schedule (`POST /v1/subscription_schedules/{id}/release`), which keeps the subscription on its current
+   price and drops the next phase; the `subscription_schedule.released` event clears the scheduled change.
+4. **At the period end** Stripe starts `phases[1]`. The renewal invoice is for the cheaper plan, with no
+   proration and no credit, and `customer.subscription.updated` applies the cheaper plan for the new
+   period (`billing.plan_changed`, reason `scheduled_downgrade`). The same re-read releases the schedule,
+   so the Portal can update or cancel the subscription again; `end_behavior=release` would release it
+   one period later if that release kept failing.
+
+Until the period end the workspace keeps the dearer plan it paid for. Counts above the cheaper plan's
+allowances are handled as after any downgrade ([W11]), and the console lists them when the owner
+schedules one. A move to the default plan is **Cancel plan**: it takes effect at the period end with no
+credit (the `account` configuration). Downgrades are tested by [W49].
 
 ### Webhook endpoint
 
@@ -543,9 +616,9 @@ signature, not by an API key, and lives in its own route table outside the API k
    attempt that failed half-way and is processed again, which is safe because processing re-reads state.
 4. **Resolve the workspace.** `checkout.session.completed` and the two `async_payment` events:
    `client_reference_id`. Other events: look up `billing_accounts.stripe_customer_id` with the event's
-   customer: the subscription's or invoice's `customer`, a refunded charge's `customer`, or, for a dispute,
+   customer: the subscription's, schedule's or invoice's `customer`, a refunded charge's `customer`, or, for a dispute,
    the `customer` of the charge it names (`GET /v1/charges/{id}`). If the customer is not known (events
-   arrive in any order), use the subscription's `metadata.tenant_id`, or an invoice's
+   arrive in any order), use the subscription's or schedule's `metadata.tenant_id`, or an invoice's
    `parent.subscription_details.metadata.tenant_id`. An event that resolves to no workspace (a customer and
    metadata this deployment does not know, for example another product's customers in the same Stripe
    account) is answered `200` and recorded with outcome `ignored_unresolved`; nothing is applied and no
@@ -582,6 +655,8 @@ recorded with outcome `error:unhandled_type`, so a misconfigured endpoint shows 
 | `customer.subscription.created` | A subscription exists (may arrive before the Checkout event) | Re-read |
 | `customer.subscription.updated` | Plan switch, quantity change, renewal (new period), `cancel_at_period_end`, status change | Re-read |
 | `customer.subscription.deleted` | A subscription ended | Re-read |
+| `subscription_schedule.updated` | The console scheduled a downgrade, or changed which plan it goes to ([Plan changes](#plan-changes)) | Re-read |
+| `subscription_schedule.released` | The owner kept the current plan, or the Worker released a schedule whose change has happened | Re-read |
 | `invoice.paid` | A payment succeeded: a `past_due` subscription can become `active` again, and a Portal increase waiting on its invoice is granted | Re-read |
 | `invoice.payment_failed` | A payment failed; the subscription becomes `past_due` (or stays `incomplete` on a first invoice) | Re-read |
 | `charge.dispute.created` | A customer or their bank disputed a charge | Open the dispute, then re-read ([Disputes and refunds](#disputes-and-refunds)) |
@@ -614,6 +689,14 @@ three `charge.*` events are the risk events Stripe asks a subscription integrati
    - **period**: the plan subscription item's `current_period_start` and `current_period_end`; calendar
      months without a subscription ([Allowances and periods](#allowances-and-periods));
    - **`cancel_at_period_end`**: copied;
+   - **scheduled change**: when the plan subscription's expanded `schedule` is `active` and has a phase
+     whose `start_date` is after `read_started_at`, `scheduled_plan_id` is the plan whose
+     `stripe_price_id` that phase's item carries and `scheduled_plan_at` is that `start_date`; otherwise
+     both are `NULL`. When the schedule is the console's (`metadata.pm_kind = plan_downgrade`) and no
+     phase starts after `read_started_at`, its change has happened: after the batch commits, the handler
+     releases it (`POST /v1/subscription_schedules/{id}/release`) so that the Portal can update or cancel
+     the subscription again, and a failed release answers `500` so that Stripe retries the event
+     ([Plan changes](#plan-changes)). A schedule made in the Stripe Dashboard is shown but never released;
    - **top-ups**: for each feature, the quantity on its top-up subscription when that subscription is
      `active` or `trialing`, or `past_due`/`unpaid` while the workspace is within its grace period; and
      **`topup_subscriptions_json`**: each live top-up subscription's ID by feature;
@@ -630,14 +713,18 @@ three `charge.*` events are the risk events Stripe asks a subscription integrati
    SET plan_id = ?2, status = ?3, topups_json = ?4, period_start = ?5, period_end = ?6,
        grace_until = ?7, stripe_customer_id = ?8, stripe_subscription_id = ?9,
        cancel_at_period_end = ?10, updated_at = ?11,         -- ?11 = read_started_at
-       topup_subscriptions_json = ?12
+       topup_subscriptions_json = ?12, scheduled_plan_id = ?13, scheduled_plan_at = ?14
    WHERE tenant_id = ?1 AND updated_at < ?11;
    ```
 
    plus the `event_index` rows for any `billing.*` events and an `audit_log` row. When the new `plan_id`
    is a paid plan (any plan other than `default_plan`), which the payment gate allows only once that
    plan's invoice is `paid`, the batch also runs
-   `UPDATE tenants SET ramp_lifted_at = ?now WHERE id = ?1 AND ramp_lifted_at IS NULL`, which ends the
+   `UPDATE tenants SET ramp_lifted_at = ?now WHERE id = ?1 AND ramp_lifted_at IS NULL`. Every statement
+   after the `UPDATE` carries the same guard, so a stale read writes nothing at all: the inserts are
+   `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM billing_accounts WHERE tenant_id = ?1 AND updated_at = ?11)`
+   and the tenant update adds `AND EXISTS (…)` with the same condition, as the policy write does
+   ([Workspace policy](workspace-policy.md)). The ramp update ends the
    new-workspace send ramp and keeps it ended after a later downgrade
    ([Cloud sign-up › Abuse and safety](cloud-signup.md#10-abuse-and-safety-on-cloud), [W30](../edge-cases.md)).
    A dispute clears `ramp_lifted_at` again ([Disputes and refunds](#disputes-and-refunds)).
@@ -659,7 +746,8 @@ Events emitted by this step (as platform events, [Events](#events-and-errors)):
 | `plan_id` changed after `checkout.session.completed` | `billing.plan_changed`, reason `checkout` |
 | `plan_id` changed because a subscription ended | `billing.plan_changed`, reason `canceled` |
 | `plan_id` restored by a late payment after the grace period ended | `billing.plan_changed`, reason `payment_recovered` |
-| `plan_id` changed for any other Stripe reason (a plan switch in the Portal) | `billing.plan_changed`, reason `portal` |
+| `plan_id` changed to the stored `scheduled_plan_id` once `scheduled_plan_at` has passed | `billing.plan_changed`, reason `scheduled_downgrade` |
+| `plan_id` changed for any other Stripe reason (an upgrade confirmed in the Portal) | `billing.plan_changed`, reason `portal` |
 | `plan_id` changed because a dispute opened | `billing.plan_changed`, reason `dispute` |
 | Status became `past_due` | `billing.payment_failed` with `grace_until` |
 
@@ -744,7 +832,8 @@ mailbox the action needs anyway.
   `remaining: null`, `unlimited: true` and the real `used`.
 - No usage alerts are sent ([Usage thresholds](#usage-thresholds), [O23](../edge-cases.md)).
 - `GET /v1/plans` returns `{ "billing_enabled": false, "data": [] }`.
-- `/billing/stripe/webhook`, `/console/plan/checkout` and `/console/plan/portal` are not registered
+- `/billing/stripe/webhook`, `/console/plan/checkout`, `/console/plan/portal`, `/console/plan/downgrade` and
+  `/console/plan/keep` are not registered
   (`404`). The console's plan page shows usage only.
 - No Stripe account or Stripe secret is needed; `pmail setup` does not ask for one.
 
@@ -777,7 +866,7 @@ missing; a found object whose settings differ is reported, not changed.
 | 2. Tax | `stripe-setup`: `POST /v1/tax/settings` with `defaults[tax_behavior]=exclusive`, `defaults[tax_code]=txcd_10103001` (software as a service, business use) and `head_office[address]`; `POST /v1/tax/registrations` with `country=GB`, `country_options[gb][type]=standard` and `active_from` = the UK VAT registration date given with `--vat-from` | Prices exclude VAT, as `plans[].price` says. Stripe Tax collects only where an active registration exists, so without the UK registration no VAT is charged; the run stops with a message when `--vat-from` is missing in live mode |
 | 3. Products and prices | `stripe-setup`, from the catalog given with `--catalog` (default: the built-in one) | One Product per paid plan and per top-up feature (`metadata[pm_plan_id]` or `metadata[pm_topup]`), each with exactly one Price: `currency=gbp`, `recurring[interval]=month`, `unit_amount` = the catalog price in pence, `tax_behavior=exclusive`, `lookup_key` = `pm_plan_{plan_id}` or `pm_topup_{feature}` |
 | 4. Portal | `stripe-setup`: `POST /v1/billing_portal/configurations`, three times | `account`, `plan` and `topup`, exactly as in [Customer Portal](#customer-portal) |
-| 5. Webhook endpoint | `stripe-setup`: `POST /v1/webhook_endpoints` with `url=https://{PM_API_HOST}/billing/stripe/webhook`, `api_version=2025-03-31.basil` and `enabled_events[]` = exactly the 11 events of [Events handled](#events-handled) | The Dashboard creates endpoints only at the newest API version, so the API is used ("Upgrade your integration", read 2026-10-10). The endpoint's `secret` (`whsec_…`) is printed once, for `wrangler secret put PM_STRIPE_WEBHOOK_SECRET` |
+| 5. Webhook endpoint | `stripe-setup`: `POST /v1/webhook_endpoints` with `url=https://{PM_API_HOST}/billing/stripe/webhook`, `api_version=2025-03-31.basil` and `enabled_events[]` = exactly the 13 events of [Events handled](#events-handled) | The Dashboard creates endpoints only at the newest API version, so the API is used ("Upgrade your integration", read 2026-10-10). The endpoint's `secret` (`whsec_…`) is printed once, for `wrangler secret put PM_STRIPE_WEBHOOK_SECRET` |
 | 6. Failed payments | A person, in the Dashboard (subscription settings, "Manage failed payments") | Any retry schedule; when all retries fail, **cancel the subscription**; subscription status follows the most recent invoice. [Grace](#grace) assumes `past_due` and then `canceled` |
 | 7. Payment methods | A person, in the Dashboard | Cards only (with the card wallets), so the Portal's payment-method update offers no delayed method; Checkout sends `payment_method_types[0]=card` anyway |
 | 8. Keys | A person, in the Dashboard (restricted keys are created there only) | The Worker key with the permissions in [Stripe integration](#stripe-integration), stored with `wrangler secret put PM_STRIPE_SECRET_KEY`; the setup key `STRIPE_SETUP_KEY` with Write on Products, Prices, Customer portal, Webhook Endpoints and Tax settings and registrations, and None elsewhere |
@@ -798,7 +887,7 @@ stop it before any call.
 
 | Event | When | `data` |
 |---|---|---|
-| `billing.plan_changed` | `plan_id` changed | `from_plan`, `to_plan`, `reason` (`checkout`, `portal`, `payment_failed_grace_ended`, `payment_recovered`, `canceled`, `operator`, `dispute`) |
+| `billing.plan_changed` | `plan_id` changed | `from_plan`, `to_plan`, `reason` (`checkout`, `portal`, `scheduled_downgrade`, `payment_failed_grace_ended`, `payment_recovered`, `canceled`, `operator`, `dispute`) |
 | `billing.payment_failed` | Status became `past_due` | `grace_until` |
 | `billing.limit_reached` | The first `402` for a feature in a period | `feature`, `granted`, `resets_at` |
 
@@ -809,8 +898,8 @@ stop it before any call.
 | `409 plan_managed_by_stripe` | `PATCH /v1/tenants/{id}/billing` with `plan_id` on a workspace with a Stripe plan subscription: the handler reads `billing_accounts.stripe_subscription_id` and refuses when it is not `NULL` |
 | `503 unavailable` | `TenantQuota` did not answer in time |
 
-Audit actions: `billing.checkout_started`, `billing.portal_opened`, `billing.mode_change`,
-`billing.plan_set` (operator), and, written by the webhook with the Stripe event ID in `details_json`,
+Audit actions: `billing.checkout_started`, `billing.portal_opened`, `billing.downgrade_scheduled`,
+`billing.downgrade_cancelled`, `billing.mode_change`, `billing.plan_set` (operator), and, written by the webhook with the Stripe event ID in `details_json`,
 `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`,
 `billing.dispute_closed` and `billing.refund_recorded`.
 
@@ -861,8 +950,9 @@ Metrics: `quota_hold_denied_total{feature}`, `quota_hold_expired_total{feature}`
 | `it::billing::stripe_fixtures` | `stripe trigger` fixtures recorded as JSON: checkout completed, subscription updated, payment failed, canceled | M22 |
 | `it::billing::plan_managed_by_stripe` | `PATCH …/billing` with `plan_id` on a Stripe-paid workspace gets `409`; on others it sets a complimentary plan and emits reason `operator` | FR-BILL-1 |
 | `it::billing::usage_matches_quota` (property) | `GET /v1/usage` equals the catalog plus `TenantQuota` state for random sequences of holds, settles and plan changes | FR-BILL-11, M22 |
-| `it::billing::w37_grant_after_payment` | A Portal upgrade and a top-up increase whose `latest_invoice` is `open` keep the stored plan and quantities (`billing_increase_held_total`), and `invoice.paid` grants them; a downgrade applies at once; a subscription `active` with an unpaid first invoice grants nothing and does not lift the ramp; during grace the kept plan is the one last paid for, not a failed upgrade; the Checkout session sends `payment_method_types[0]=card`, `customer`, `customer_update[address]=auto` and `customer_update[name]=auto` | [W37], FR-BILL-14 |
+| `it::billing::w37_grant_after_payment` | A Portal upgrade and a top-up increase whose `latest_invoice` is `open` keep the stored plan and quantities (`billing_increase_held_total`), and `invoice.paid` grants them; a decrease (a top-up decrease, or a scheduled downgrade once its phase starts) applies without waiting for an invoice; a subscription `active` with an unpaid first invoice grants nothing and does not lift the ramp; during grace the kept plan is the one last paid for, not a failed upgrade; the Checkout session sends `payment_method_types[0]=card`, `customer`, `customer_update[address]=auto` and `customer_update[name]=auto` | [W37], FR-BILL-14 |
 | `it::billing::w38_dispute_and_refund` | `charge.dispute.created` sets `dispute_open_at`, applies the default plan (reason `dispute`), clears `ramp_lifted_at`, fires `billing_dispute`, and every send gets `429 daily_cap_reached` with `details.cap: "billing_dispute"` while inbound is stored; `charge.dispute.closed` `won` restores the plan and sending; `lost` cancels every live subscription and leaves the workspace ramped on the default plan; `charge.refunded` writes `billing.refund_recorded` and changes no plan | [W38], FR-BILL-14 |
+| `it::billing::w49_downgrade_at_period_end` | Against the recorded Stripe fake: Downgrade creates a schedule `from_subscription` and updates it with `phases[0]` as returned and `phases[1]` = the cheaper price, quantity 1, `proration_behavior=none`, `iterations=1`, `end_behavior=release` and `metadata[pm_kind]=plan_downgrade`; no invoice, proration or credit is created and the dearer plan's allowances stay until `scheduled_plan_at`; `subscription_schedule.updated` stores `scheduled_plan_id` and `scheduled_plan_at`; a repeated click reuses both idempotency keys; while scheduled, Upgrade and Cancel plan are refused and Keep releases the schedule and clears both columns; at the period end `customer.subscription.updated` applies the cheaper plan with reason `scheduled_downgrade` and releases the schedule, and a failed release answers `500`; a Dashboard-made schedule is shown and never released; an Upgrade opens a `subscription_update_confirm` flow naming only a dearer price, and the `plan` configuration has `login_page.enabled = false`; `cancel_billing` releases a schedule before cancelling | [W49], FR-BILL-14 |
 | `it::billing::w39_duplicate_subscription` | Two plan Checkouts paid before the first webhook: the later subscription is cancelled once with `prorate=true` and `invoice_now=true`, the older one applies, and the same holds for two top-up subscriptions of one feature; a Customer is created once for two concurrent Checkout clicks | [W39] |
 | `it::billing::unresolved_event_ignored` | An event whose customer and metadata name no workspace is answered `200`, recorded `ignored_unresolved`, and fires no alert; an invoice event before the customer is linked resolves through `parent.subscription_details.metadata.tenant_id` | [Webhook endpoint](#webhook-endpoint) |
 | `xtask::stripe_setup_idempotent` | [Stripe account setup](#stripe-account-setup): a second run creates nothing; a live key without `--live`, or no `--vat-from` in live mode, stops before any call; the written catalog validates | M22 |
@@ -884,6 +974,7 @@ Metrics: `quota_hold_denied_total{feature}`, `quota_hold_expired_total{feature}`
 [W37]: ../edge-cases.md
 [W38]: ../edge-cases.md
 [W39]: ../edge-cases.md
+[W49]: ../edge-cases.md
 
 Verified (2026-10-09): Stripe documentation at docs.stripe.com, read through WebFetch on this date.
 `/api/checkout/sessions/create` (modes `payment`, `setup` and `subscription`; `client_reference_id` up to
@@ -928,4 +1019,20 @@ existing customer); `/api/tax/settings/update` and `/api/tax/registrations/creat
 (the newest version is `2026-09-30.endive`; a webhook endpoint at an older version is created through the
 API with `api_version`); `/keys/restricted-api-keys` (created in the Dashboard only, Read, Write or None per
 resource). Not verified: the Customer Portal's own use of pending updates when an `always_invoice` payment
-fails, which is why the payment gate above does not depend on it.
+fails, which is why the payment gate above does not depend on it. Read on 2026-10-17 for
+[Plan changes](#plan-changes): `/customer-management` (the same two limits, unchanged);
+`/customer-management/configure-portal` (downgrades at the period end only between prices of one product);
+`/customer-management/portal-deep-links` (`subscription_update_confirm` takes the subscription, one item's
+`id` with a new `price` or `quantity`, and handles prorations, payment failures and 3-D Secure; a flow hides
+the navigation to the rest of the Portal; `after_completion[type]=redirect`);
+`/billing/subscriptions/subscription-schedules` (`from_subscription` makes one phase matching the current
+period with no proration; an update must pass every current and future phase and every setting to keep;
+`end_behavior` `release` keeps the subscription; `release` works on a `not_started` or `active` schedule
+and drops the remaining phases); `/api/subscription_schedules/update` (`phases[].proration_behavior`
+applies on entering that phase; `duration` and `end_date` exclude each other);
+`/changelog/basil/2025-07-30/add-schedule-phase-duration` and `/changelog/clover/2025-09-30/remove-iterations`
+(`duration` from `2025-07-30.basil`, `iterations` refused from `2025-09-30.clover`); `/api/events/types`
+(`subscription_schedule.updated` and `.released`, with a `subscription_schedule` object);
+`/billing/subscriptions/pending-updates` (a schedule's phase change voids a pending update's invoice).
+Not checked: whether `DELETE /v1/subscriptions/{id}` succeeds while a schedule is attached, which is why
+`cancel_billing` releases the schedule first.

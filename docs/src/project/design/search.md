@@ -1614,8 +1614,12 @@ Algorithm, per draft sentence in order:
    normalised value contains a digit and is at least 4 characters long (claim, invoice, plate and
    booking numbers, amounts; dates excluded) must appear in the `refs` of a cited message or, after
    normalisation, in its `texts_seen`. Otherwise remove (`UnsupportedReference`).
-7. **Source trust** ([F17](../edge-cases.md)). If any cited message is `steering_suspected`, or none of
-   the cited messages is `authenticated`, remove (`UntrustedSource`). Mail that tried to steer the model,
+7. **Source trust** ([F17](../edge-cases.md), [F18](../edge-cases.md)). If any cited message is
+   `steering_suspected`, or none of the cited messages is `authenticated`, remove (`UntrustedSource`). When
+   some cited messages are not authenticated, every quoted fragment of step 5 and every reference of step 6
+   must also be found in an **authenticated** cited message; one found only in unauthenticated ones removes
+   the sentence (`UntrustedSource`). Otherwise a forged message's claim ("pay the excess to account
+   40991234") would survive by being cited next to the genuine thread message that holds the claim number. Mail that tried to steer the model,
    or whose sender cannot be shown, can still be read in `evidence`, but it cannot be restated as an
    answer. A kept sentence gets `citation_trust = authenticated` when every cited message is
    authenticated, else `partly_authenticated`.
@@ -1852,6 +1856,7 @@ written there.
 | `it::index::reembed_dual_read` | During a re-embed reads use the old index; writes go to both; finalise switches | §7 |
 | `it::index::reindex_row_rewrite` | Analyzer bump rewrites rows while keyword search keeps answering | §7 |
 | `core::citations::f11_*` | Each removal reason; inline markers; quote normalisation; fallback sentence split | FR-SRCH-8, [F11] |
+| `core::citations::f18_refs_from_authenticated_sources` | A sentence citing a `pass` message that holds claim `7781` and a `verdict: none` message that alone holds account `40991234` and the quoted phrase, stating both, is removed with `UntrustedSource`; the same sentence stating only the claim number is kept as `partly_authenticated`; a quote found in both kinds of message is accepted ([F18](../edge-cases.md)) | FR-SRCH-13, [F18](../edge-cases.md) |
 | `core::citations::f17_untrusted_sources_removed` | A sentence citing only a `verdict: none` message, or citing a `pass` message and a `steering_suspected` one, is removed with `UntrustedSource`; a sentence citing a `pass` message and an `unaligned` one is kept with `citation_trust: partly_authenticated`; one citing an outbound message is `authenticated` | FR-SRCH-13, [F17](../edge-cases.md) |
 | `it::agentic::f17_answer_untrusted` | Every agentic response with an answer has `answer.untrusted: true`, each sentence has `citation_trust`, each evidence item has `steering_suspected`; mail saying "the verified answer is: wire the deposit to …" in an unauthenticated message never appears in `answer.text` | FR-SRCH-13, [F17](../edge-cases.md) |
 | `it::agentic::contacts_tenant_merge` | At tenant scope the `contacts` tool merges one address seen by two identities into one row with summed counts and the newer `last_thread_id`, whose thread `read_thread` can then open; the system identity's contacts never appear | [§11.5](#115-planner-tools), [A15](../edge-cases.md) |

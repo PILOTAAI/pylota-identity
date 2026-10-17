@@ -290,7 +290,11 @@ with `policy:write`.
   platform or partner key can add an owner later with an invitation and an ownership transfer in the
   console. An address this deployment hosts (on the platform domain, or an identity's address) cannot
   be an owner: `400 invalid_request` with `details.errors[0].path = "owner.email"`, because any key that
-  reads that mailbox could read the sign-in codes.
+  reads that mailbox could read the sign-in codes. The owner email is system mail of class `invitation`
+  ([Cloud sign-up § 10.2](../project/design/cloud-signup.md#102-system-mail-budgets)), keyed by the creating
+  partner (or `platform` for a platform key) and by the owner's address. The budget is checked before
+  anything is written: when it is spent, the answer is `429 daily_cap_reached` with
+  `details.cap: "invitations"` and `details.resets_at` (the next 00:00 UTC), and no tenant is created.
 - `billing.mode` defaults to `metered` on a deployment with billing on (plan `free`) and to `disabled`
   otherwise.
 - **With a partner key**, the new tenant's `partner_id` is the key's partner, for good, and its billing
@@ -355,7 +359,8 @@ merge, `null` resets a field, arrays replace) and checks each field sent by the 
   ([J23](../project/edge-cases.md), [J26](../project/edge-cases.md));
 - a guard field (`send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`,
   `quarantine.unsolicited_otp`) may only be tightened, unless API keys may take decisions reserved for
-  people on this tenant (`PM_QUARANTINE_KEY_RELEASE=on`, or the tenant's `quarantine.key_release: true`);
+  people on this tenant (`PM_QUARANTINE_KEY_RELEASE=on`; or the tenant's `quarantine.key_release: true`, and
+  then only for a platform key or the tenant's partner key, never a tenant or identity key);
   otherwise `403 permission_denied` with `details.field` and `details.reason = "person_required"`
   ([J25](../project/edge-cases.md));
 - platform-only fields and `quarantine.key_release` get `403 scope_denied` with `details.field` and
@@ -541,6 +546,9 @@ tenant's caps: with the default `tenant_daily_send_cap` of 5,000, at most 125,00
   (`support`, `sales`, `info`, `marketing` and the rest) only where they would stand alone on the shared
   platform domain, that is, for the default tenant, whose suffix is empty
   ([Identities and domains](../project/design/identity-domains.md#username-validation)).
+- In the default tenant, whose addresses stand alone on the platform domain, only a platform key may create
+  identities; any other key gets `403 scope_denied` with `details.reason = "default_tenant"`
+  ([A18](../project/edge-cases.md)).
 - The primary address is `{username}{tenant.address_suffix}@{platform domain}`, or
   `{username}@{domain}` when `domain_id` names a tenant domain that is `healthy` or `degraded`. The full local part must be at
   most 64 characters with room for a thread token: the combined username and suffix can be at most 40.
@@ -590,8 +598,10 @@ tenant's effective `identity_daily_send_cap` needs a platform key (`403 scope_de
 ### `DELETE /v1/identities/{identity_id}` — `identities:write` and `erasure:manage`
 
 Returns `202` with an [Erasure request](#erasure-request-object) of scope `identity`. A second `DELETE` of
-a `deleting` or `deleted` identity starts nothing and returns `200` with the identity's existing
-identity-scope erasure request (the same `era_` ID). The identity's
+a `deleting` or `deleted` identity returns `200` with the identity's latest identity-scope erasure request
+(the same `era_` ID) and starts nothing, unless that request is `failed`: then it returns `202` with a new
+request that resumes it at its failed step. The system identity cannot be deleted
+(`409 system_protected`, [A17](../project/edge-cases.md)). The identity's
 addresses are tombstoned and can never be assigned to another identity. Its
 [signing keys](#identity-keys-and-signatures) are deleted and their key IDs tombstoned, so a deleted key ID
 is never published again ([O7](../project/edge-cases.md)). While the identity is `deleting` or `deleted`,
@@ -842,7 +852,9 @@ The token's header is `{"alg":"EdDSA","typ":"agent-assertion+jwt","kid":"<thumbp
 ```
 
 - `iss` is `https://{PM_API_HOST}`, `sub` the identity ID, `jti` a new ULID and `email` the identity's
-  primary address. These are what the deployment vouches for.
+  primary address while the deployment still receives mail for it (its domain `healthy` or `degraded`,
+  with inbound by routing, SES or a passing forwarding check), else its platform address
+  ([O29](../project/edge-cases.md)). These are what the deployment vouches for.
 - `unverified` holds what the workspace says about itself, which the deployment does not check: `name`
   (the identity's display name), `org` (the workspace name) and `accountable_human` (`true` when the
   identity has owner fields set). A verifier must not grant access on them. The owner's name and address
@@ -893,7 +905,7 @@ Returns `200`:
 
 - `Signature-Agent` names the deployment's origin; its key directory is at
   [`/.well-known/http-message-signatures-directory`](#well-known).
-- `From` is the identity's primary address (RFC 9110: whoever is responsible for the request).
+- `From` is the same address as the assertion's `email` (RFC 9110: whoever is responsible for the request).
 - `keyid` is the deployment key's JWK thumbprint, `nonce` 64 random bytes (base64), and `tag` is
   `web-bot-auth`.
 
@@ -951,10 +963,11 @@ The tenant's entries (filters `status`, `identity_id`, `service_domain`). An ide
 
 `{ "note": "Approved for the widget repository only." }` (optional, at most 500 characters). Platform,
 partner and tenant keys. Approving lets codes reach an agent, so it is a decision reserved for people: an
-API key may approve only when `PM_QUARANTINE_KEY_RELEASE` is `on` or the tenant's policy has
-`quarantine.key_release: true`; otherwise `403 permission_denied` with
-`details.reason = "person_required"`, and a person approves in the console
-([E11](../project/edge-cases.md)). Returns `200` with the entry, now `approved`. Approving an approved
+API key may approve only when `PM_QUARANTINE_KEY_RELEASE` is `on`, or when the tenant's policy has
+`quarantine.key_release: true` and the key is a platform key or the tenant's partner key; otherwise
+`403 permission_denied` with `details.reason = "person_required"`, and a person approves in the console.
+The key that requested the entry never approves it (`403 permission_denied`,
+`details.reason = "self_approval"`) ([E11](../project/edge-cases.md)). Returns `200` with the entry, now `approved`. Approving an approved
 entry again returns it unchanged; an entry that is rejected, closed or past its 7 days gets
 `409 account_not_pending` with `details.status`. Mail already held as `account_unapproved` stays
 quarantined until someone releases it.
@@ -1033,7 +1046,9 @@ What each method checks before the domain is created:
 - **Zone permission** (tenant and partner keys): `cloudflare_zone`, and `replace_mx` with it, work only on
   a zone this deployment created for the tenant (with `nameservers` or `delegated_subdomain`) or one
   listed in the tenant's platform-only policy `domains.cloudflare_zones` (names strictly under a listed
-  zone: its apex, and `replace_mx` there, stay platform-only). A zone created for another
+  zone, never its apex; or exactly one name for an entry written `=name`). `replace_mx` is platform-only
+  except on a zone created for the tenant, and an existing MX set at any name, apex or subdomain, needs it
+  ([H18](../project/edge-cases.md)). A zone created for another
   tenant, and any name under the zone of the platform domain, the API host or the console host, is
   refused, for `nameservers` and `delegated_subdomain` too: `403 scope_denied` with
   `details.reason: "zone_not_allowed"`, before anything is changed ([H8](../project/edge-cases.md)).
@@ -1217,9 +1232,9 @@ zone's other mail domains), sending onboarding and the event subscription, and f
 identity, the SES identity and the domain's addresses in the retired-address receipt rules
 (`pm-retired-{n}`). Returns `202`. `domain.removed` follows with `reason: "requested"`. If the removal
 fails after 10 attempts on one step, the domain stays `removing` and the removal restarts once a day;
-calling `DELETE` again restarts it at once ([H12](../project/edge-cases.md)). A removal that
-must call SES first waits up to 5 seconds for the deployment's SES control-plane budget, then fails with
-`429 upstream_rate_limited` and `Retry-After`, as `PATCH` does.
+calling `DELETE` again restarts it at once ([H12](../project/edge-cases.md)). Every SES call of a
+removal runs in the `domain_remove` job, which waits for the deployment's SES control-plane budget
+in the background, so `DELETE` never waits for it.
 
 #### Domain object
 
@@ -1372,7 +1387,8 @@ need `quarantine:review` for a quarantined message and never accept a hidden or 
   `shared_domain_sender` (the sender is another workspace's address on the shared platform domain,
   [D12](../project/edge-cases.md)).
 - `triage.status` is `pending`, `done`, `skipped` or `failed`. `triage.version` is the triage logic
-  version that produced the record (it does not change on a re-run); `triage.run` counts completed runs
+  version of the run that produced the record: a re-run keeps it on the same release and records the
+  current one after an upgrade; `triage.run` counts completed runs
   (`0` for a record written at ingest). `triage.reason` is present only for
   `skipped` (`allowance`, `policy_disabled`, `not_eligible`, `ai_unavailable`) and `failed` (`invalid_output`,
   `model_unavailable`, `input_unavailable`) ([Triage design](../project/design/triage.md)). For example,
@@ -1427,7 +1443,8 @@ Query: `pages=1-3` (default: all, capped at 200 KB of text).
 ### `POST /v1/identities/{identity_id}/messages/{message_id}/triage` — `messages:write`
 
 Re-runs triage (FR-TRI-5). Returns `202` with no body. A `message.triaged` event follows, and the record
-then has the same `version` and a `run` one higher. A message that ingest never triages (quarantined,
+then has a `run` one higher and the current release's `version` (the same one unless triage was
+upgraded since the last run). A message that ingest never triages (quarantined,
 hidden, throttled, a delivery report or read receipt, or a system-identity message) gets
 `409 triage_not_eligible` with `details.reason` (`quarantined` or `not_eligible`): release a quarantined
 message instead, which triages it. Outbound messages get `400 invalid_request`.
@@ -1441,8 +1458,9 @@ message instead, which triages it. Outbound messages get `400 invalid_request`.
 Moves a quarantined message to `received`, emits `message.released` and runs triage. Audit-logged
 (`quarantine.release`, with the key). When `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud),
 every API key gets `403 permission_denied` and the release has to be done by a person in the console
-(FR-CON-6), unless the message's tenant has `policy.quarantine.key_release: true`: then any key with
-`quarantine:review` that reaches the message may release it, its partner key included. Only a platform
+(FR-CON-6), unless the message's tenant has `policy.quarantine.key_release: true`: then a platform key, or
+the partner key of the tenant's own partner, with `quarantine:review` may release it; tenant and identity
+keys still get `403 permission_denied` ([J16](../project/edge-cases.md)). Only a platform
 key, or the partner key of the tenant's own partner, can set that policy
 ([Configuration › Tenant policy](configuration.md#tenant-policy)).
 
@@ -1523,7 +1541,10 @@ which only a dry run returns. A `200` always has `would_send: true`; each recipi
   delivery is `suppressed` with `policy: unknown_recipient`. Mail received from an address does not make
   it known. Set `require_known_recipient: false` on an identity that sends to new people by design.
 - **Loops and pauses.** Any send whose hop count would reach 10 gets `409 loop_detected`
-  (`details.hop`), whatever its `kind` ([N13](../project/edge-cases.md)). A tenant or sending domain whose
+  (`details.hop`), whatever its `kind` ([N13](../project/edge-cases.md)). So does a reply, forward or
+  threaded send after 25 sends in that thread in 24 hours, or a reply to an address that has sent the
+  identity 25 messages in 24 hours, which catches a loop with a correspondent that drops the hop header
+  (`details.reason`: `thread_rate` or `sender_rate`, with `details.retry_after`; [N35](../project/edge-cases.md)). A tenant or sending domain whose
   sending was paused automatically gets `409 sending_paused` (`details.scope`: `tenant` or `domain`,
   [G12](../project/edge-cases.md)).
 - `thread_id` continues an existing thread without quoting. References are set from the thread.
@@ -2017,8 +2038,12 @@ tenant's erasure requests and their receipts.
 ```
 
 `scope` is `counterparty` (with `counterparty_address`: every message to or from it across the tenant's
-identities) or `identity` (with `identity_id`: the whole mailbox). Returns `202` with the export
-(`status: "queued"`).
+identities) or `identity` (with `identity_id`: the whole mailbox). Needs `erasure:manage`,
+`messages:read` and `attachments:read`, from a platform, partner or tenant key (an identity key gets
+`403 permission_denied`). Quarantined, hidden and throttled messages are included as `.eml` only when
+the key also holds `quarantine:review`; otherwise `messages.json` lists them with
+`content_withheld: "quarantine_review_required"` ([I14](../project/edge-cases.md)). Returns `202` with
+the export (`status: "queued"`).
 
 ```json
 { "id": "exp_01JA4…", "tenant_id": "ten_01J9…", "scope": "counterparty", "identity_id": null,
@@ -2030,8 +2055,9 @@ identities) or `identity` (with `identity_id`: the whole mailbox). Returns `202`
 `expired` (7 days after creation, or earlier when an erasure of the tenant expired it, because the ZIP
 could hold erased mail). The finished export has
 `download_url`: a [signed link](#get-v1linkstoken) to a ZIP holding one `.eml` per message plus
-`messages.json`, minted again on each `GET` and valid for one hour from it (or until `expires_at`, 7 days
-after completion, if that is sooner). An `export.completed` event is emitted.
+`messages.json`, minted again on each `GET` and valid for one download within one hour from it (or until
+`expires_at`, 7 days after completion, if that is sooner); a second request with the same link gets
+`404 export_not_found`. An `export.completed` event is emitted.
 
 `DELETE /v1/exports/{export_id}` (`erasure:manage`) revokes every link at once: a `completed` export's
 ZIP is deleted and it becomes `expired`, a `queued` or `running` one is stopped and becomes `canceled`,
@@ -2133,7 +2159,7 @@ Audit rows cover administrative actions. These are every `action` value:
 - webhooks: `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.rotate_secret`, `webhook.replay`, `webhook.disable` (a creator left, [W47](../project/edge-cases.md));
 - privacy: `erasure.create`, `hold.set`, `hold.removed`, `hold.expired`, `export.delete`;
 - people: `member.invite`, `member.invite_resend`, `member.invite_revoke`, `member.join`, `member.role_change`, `member.leave`, `member.remove`, `member.ownership_transfer`, `user.delete`, `user.notifications_resume`, `user.oauth_unlink`, `waitlist.invite`;
-- billing: `billing.checkout_started`, `billing.portal_opened`, `billing.mode_change`, `billing.plan_set`, `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`, `billing.dispute_closed`, `billing.refund_recorded`;
+- billing: `billing.checkout_started`, `billing.portal_opened`, `billing.downgrade_scheduled`, `billing.downgrade_cancelled`, `billing.mode_change`, `billing.plan_set`, `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`, `billing.dispute_closed`, `billing.refund_recorded`;
 - platform operations: `ops.switch`, `mailbox.restore`, `master_key.activated`, `master_key.resealed`;
 - automatic containment: `partner.auto_suspend`, `tenant.auto_pause`, `domain.auto_pause`;
 - reads of mail content by platform and partner keys: `mail.read`.

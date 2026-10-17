@@ -105,9 +105,15 @@ that nobody reviewed reach agents, so they follow the same rule, implemented onc
 
 An API key may take these decisions only when `PM_QUARANTINE_KEY_RELEASE` is `on`, or `PM_CONSOLE` is `off`
 (no person could take them), or the tenant's policy has `quarantine.key_release: true` (a platform key or the
-tenant's partner key opted the tenant in, as Pylota does for its operators' review screen). Otherwise the
-key gets `403 permission_denied` with `details.reason = "person_required"`, and a signed-in person decides
-in the console. A console session is a person, so `key_may_decide` is never asked for it.
+tenant's partner key opted the tenant in, as Pylota does for its operators' review screen). Under
+`quarantine.key_release` alone, only a **platform key or the partner key of the tenant's own partner** may
+decide: tenant and identity keys, the keys agents hold, still need a person, so an agent steered by the
+mail it reads cannot release that mail, loosen its own guard fields or approve its own sign-up
+([J16](../edge-cases.md)). Otherwise the key gets `403 permission_denied` with
+`details.reason = "person_required"`, and a signed-in person decides in the console. In every case an
+approval is never made by the key that requested the entry (`403 permission_denied`,
+`details.reason = "self_approval"`, [E11](../edge-cases.md)). A console session is a person, so
+`key_may_decide` is never asked for it.
 
 **Guard fields.** A write by a tenant key **tightens** a guard field when the new value is at least as
 strict as the tenant's current effective value: `true` for `send_allowlist_only`,
@@ -241,7 +247,8 @@ becomes that tenant's partner ceiling, so:
 - a tenant key that Pylota minted with `policy:write`, or a person Pylota invited as owner or admin, may
   lower that field again or change free fields, never raise it above Pylota's value;
 - guard fields follow [§3](#3-decisions-reserved-for-people): because Pylota's tenants have
-  `quarantine.key_release: true`, Pylota's own tenant keys may loosen them; a person may too;
+  `quarantine.key_release: true`, Pylota's partner key may loosen them; a person may too; the tenant and
+  identity keys Pylota's agents hold may not;
 - `quarantine.key_release` and the platform-only fields stay out of reach of the tenant;
 - Pylota receives `tenant.policy_updated` on its partner endpoints whenever a policy changes.
 

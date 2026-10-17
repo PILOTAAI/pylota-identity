@@ -295,8 +295,8 @@ Guide: [Sending › Safe retries](guides/sending.md#safe-retries).
 scored above the spam threshold, carries a risky attachment, or is an unsolicited one-time code.
 Quarantined mail is stored but hidden from every key without `quarantine:review`. A person with that
 permission releases it in the console; a key with it can release it too where the deployment allows
-(`PM_QUARANTINE_KEY_RELEASE=on`, the self-hosting default) or the tenant's policy does
-(`quarantine.key_release`). Lists and search leave quarantined, `hidden` and `throttled` mail out
+(`PM_QUARANTINE_KEY_RELEASE=on`, the self-hosting default) or the tenant's policy does for its partner's
+key (`quarantine.key_release`). Lists and search leave quarantined, `hidden` and `throttled` mail out
 by default; it appears only when a request asks for it explicitly and the key holds
 `quarantine:review`. Released mail is then triaged like any other.
 

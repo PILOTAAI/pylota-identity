@@ -11,7 +11,8 @@ The behaviour behind each command is specified in the [CLI and setup design](../
 
 Download a prebuilt binary from the project's
 [GitHub Releases](https://github.com/PILOTAAI/pylota-mail/releases) (macOS arm64 and x64, Linux x64 and
-arm64, Windows x64), or build it with Cargo:
+arm64, Windows x64), or build it with Cargo (the crate is published by the maintainer from the same signed
+tag, never from CI):
 
 ```bash
 cargo install pylota-mail-cli --locked
@@ -318,7 +319,8 @@ pmail setup ses --region eu-west-2
 
 Downloads the Worker release for the CLI's version from GitHub Releases, verifies its signature and
 checksum, renders `deploy/wrangler.toml`, applies D1 migrations, and deploys with
-`npx --yes wrangler@4.139.0`. Needs Node.js 22 or later.
+Wrangler 4.139.0, installed with `npm ci --ignore-scripts` from the lockfile inside the signed release
+(never fetched by name). Needs Node.js 22 or later with `npm`.
 
 ```text
 pmail deploy [--version <v>] [--from-source [--source-dir <path>]] [--gradual] [--stages <list>]
@@ -471,8 +473,22 @@ needs. Needs your Cloudflare token and a platform key with `audit:read`. Identit
 Web Bot Auth key are re-sealed with everything else; their public keys do not change. The thread, link,
 cursor and Web Bot Auth signing keys are rotated with
 [`keys rotate thread|link|cursor|web_bot_auth`](#keys-rotate-threadlinkcursorweb_bot_auth). `PM_CF_API_TOKEN` and the SES keys are
-rotated with `wrangler secret put`, as described in
+rotated with `pmail wrangler secret put`, as described in
 [Security](../project/design/security.md#62-rotation-procedures).
+
+### `wrangler`
+
+Runs Cloudflare's `wrangler` CLI, version 4.139.0, installed from the lockfile inside the signed release of
+the CLI's version (checked like `deploy` checks it) with `npm ci --ignore-scripts`. Use it instead of a
+Wrangler you install yourself whenever a Cloudflare token is in your shell: nothing is fetched from npm by
+name and no install script runs.
+
+```text
+pmail wrangler [--dir <path>] <wrangler arguments…>
+```
+
+The arguments, stdin, stdout and the exit code pass through unchanged, for example
+`pmail wrangler secret put PM_CF_API_TOKEN --name pylota-mail` or `pmail wrangler rollback`.
 
 ## Platform operations
 
@@ -1557,8 +1573,8 @@ pmail quarantine list --identity bookings@acme.example.com
 ### `quarantine release`
 
 Moves a quarantined message into the mailbox and triages it. Needs `quarantine:review`; audit-logged.
-Where `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud), it works only on a tenant whose policy has
-`quarantine.key_release: true`; elsewhere the API answers `403 permission_denied` (exit 4) and a person
+Where `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud), it works only with a platform or partner
+key on a tenant whose policy has `quarantine.key_release: true`; elsewhere the API answers `403 permission_denied` (exit 4) and a person
 releases in the console.
 
 ```text
@@ -1781,8 +1797,9 @@ pmail accounts delete <account_id> --identity <identity> [--yes]
 ```
 
 `approve` with an API key works only where keys may take decisions reserved for people
-(`PM_QUARANTINE_KEY_RELEASE = "on"`, or the tenant's `quarantine.key_release: true`); otherwise the API
-answers `403 permission_denied` (`person_required`, exit 4) and a person approves in the console.
+(`PM_QUARANTINE_KEY_RELEASE = "on"`, or the tenant's `quarantine.key_release: true` with a platform or
+partner key); otherwise the API answers `403 permission_denied` (`person_required`, exit 4) and a person
+approves in the console. A key never approves an entry it requested (`self_approval`).
 `approve` or `reject` on an entry that is no longer pending exits 6 (`409 account_not_pending`); a
 request beyond the limits exits 7 (`422 account_limit_reached`).
 

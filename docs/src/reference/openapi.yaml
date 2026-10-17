@@ -422,7 +422,18 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
-        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '429':
+          description: >-
+            A rate limit was hit (`rate_limited`), or the `owner` email's system-mail budget of class
+            `invitation` is spent for the creating partner or the platform (`daily_cap_reached`,
+            `details.cap: "invitations"`, `details.resets_at` the next 00:00 UTC); no tenant was created.
+          x-error-codes: [rate_limited, daily_cap_reached]
+          headers:
+            Request-Id: {$ref: '#/components/headers/Request-Id'}
+            Retry-After: {$ref: '#/components/headers/Retry-After'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
     get:
@@ -556,8 +567,9 @@ paths:
           description: >-
             A platform key changed the `status` of a tenant that is `erasing` or `erased` (`tenant_erased`),
             or dropped a zone from `policy.domains.cloudflare_zones` while the tenant still has domains in it
-            (`domain_in_use`, `details.reason = "zone_has_domains"`, `details.domain_ids`; [H13]).
-          x-error-codes: [tenant_erased, domain_in_use]
+            (`domain_in_use`, `details.reason = "zone_has_domains"`, `details.domain_ids`; [H13]), or tried to
+            suspend the default tenant, which holds the system identity (`system_protected`, [A17]).
+          x-error-codes: [tenant_erased, domain_in_use, system_protected]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
           content:
@@ -1192,8 +1204,9 @@ paths:
         be assigned to another identity; later mail to them gets `550 5.1.1`. Its signing keys are deleted
         and their key IDs tombstoned, so they are never published again ([O7]). While the identity is
         `deleting` or `deleted`, signing and its JWK Set return `404 identity_not_found`. A second `DELETE`
-        of a `deleting` or `deleted` identity starts nothing and returns `200` with its existing
-        identity-scope erasure request.
+        of a `deleting` or `deleted` identity returns `200` with its latest identity-scope erasure request
+        and starts nothing, unless that request is `failed`: then `202` with a new request that resumes it
+        at its failed step. The system identity cannot be deleted (`409 system_protected`, [A17]).
       x-required-permission: ['identities:write', 'erasure:manage']
       x-key-levels: [platform, partner, tenant, identity]
       x-rate-limit-buckets: [api]
@@ -1208,7 +1221,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErasureRequest'}
         '200':
-          description: The identity was already `deleting` or `deleted`; its existing identity-scope erasure request, unchanged.
+          description: The identity was already `deleting` or `deleted` and its latest identity-scope erasure request is not `failed`; that request, unchanged.
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
             RateLimit-Limit: {$ref: '#/components/headers/RateLimit-Limit'}
@@ -1218,6 +1231,14 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: The identity is the deployment's system identity, which no key can delete ([A17]).
+          x-error-codes: [system_protected]
+          headers:
+            Request-Id: {$ref: '#/components/headers/Request-Id'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
         '500': {$ref: '#/components/responses/InternalError'}
         '503': {$ref: '#/components/responses/ServiceUnavailable'}
@@ -1819,7 +1840,8 @@ paths:
         - **Header**: `{"alg":"EdDSA","typ":"agent-assertion+jwt","kid":"<thumbprint>"}`.
         - **Claims**: `iss` (`https://{PM_API_HOST}`), `sub` (the identity ID), `aud` (the requested
           audience), `iat` and `nbf` (now), `exp` (now + `expires_in`), `jti` (a new ULID), `email` (the
-          identity's primary address), `email_verified` (`true`), `unverified` (an object of statements the
+          identity's primary address while the deployment still receives mail for it, else its platform
+          address), `email_verified` (`true`), `unverified` (an object of statements the
           workspace made and the deployment does not check: `name`, the display name; `org`, the workspace
           name; `accountable_human`, `true` when the identity has owner fields set; a verifier must not grant
           access on them, and the owner's name and address are never included), `ai_agent` (`true`), and
@@ -1922,12 +1944,14 @@ paths:
       summary: Sign an HTTP request (Web Bot Auth)
       description: |
         Returns the headers that turn an HTTP request into a Web Bot Auth signed request (RFC 9421), signed
-        with the deployment's active `web_bot_auth` key, with the identity's primary address in a signed
+        with the deployment's active `web_bot_auth` key, with the identity's vouched address in a signed
         `From` header. The Worker never makes the request itself, and nothing is created or stored.
 
         - **`Signature-Agent`** is a structured-field string, in double quotes, naming the deployment's
           origin; its key directory is at `/.well-known/http-message-signatures-directory` there.
-        - **`From`** carries the identity's primary address (RFC 9110: whoever is responsible for the request).
+        - **`From`** carries the identity's primary address while the deployment still receives mail for it
+          (domain `healthy` or `degraded`, inbound by routing, SES or a passing forwarding check), else its
+          platform address (RFC 9110: whoever is responsible for the request).
         - **`Signature-Input`** and **`Signature`**: the signature base is built as in RFC 9421 section 2.5,
           with `alg="ed25519"`, `keyid` (the deployment key's JWK thumbprint), a `nonce` of 64 random bytes
           (base64), `tag="web-bot-auth"`, `created` and `expires`.
@@ -2268,7 +2292,8 @@ paths:
         Approves a `pending_approval` entry, so verification mail from its sender domains to its address can
         reach the agent. A decision reserved for people: an API key may approve only when
         `PM_QUARANTINE_KEY_RELEASE` is `on`, `PM_CONSOLE` is `off`, or the tenant's policy has
-        `quarantine.key_release: true` ([E11]). Approving an approved entry returns it unchanged. Mail already
+        `quarantine.key_release: true` and the key is a platform key or the tenant's partner key; the key
+        that requested the entry never approves it (`self_approval`) ([E11]). Approving an approved entry returns it unchanged. Mail already
         quarantined as `account_unapproved` is not released. Emits `account.approved`; audit `account.approve`.
       x-required-permission: ['accounts:approve']
       x-key-levels: [platform, partner, tenant]
@@ -2855,10 +2880,8 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '429':
-          description: >-
-            A rate limit was hit (`rate_limited`), or the deployment's SES control-plane budget of one call per
-            second had no slot within 5 seconds (`upstream_rate_limited`; `Retry-After` is the wait).
-          x-error-codes: [rate_limited, upstream_rate_limited]
+          description: A rate limit was hit (`rate_limited`).
+          x-error-codes: [rate_limited]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
             Retry-After: {$ref: '#/components/headers/Retry-After'}
@@ -3825,7 +3848,8 @@ paths:
       summary: Re-run triage on a message
       description: >-
         Queues triage again (FR-TRI-5). A `message.triaged` event follows when it finishes (or fails); the
-        record then has the same `version` and a `run` one higher. A message that ingest never triages gets
+        record then has a `run` one higher and the current release's `version` (the same one unless triage was
+        upgraded since the last run). A message that ingest never triages gets
         `409 triage_not_eligible`: release a quarantined message instead, which triages it.
       x-required-permission: ['messages:write']
       x-key-levels: [platform, partner, tenant, identity]
@@ -3872,13 +3896,15 @@ paths:
         Moves a quarantined message to `received`, emits `message.released` and runs triage. Audit-logged
         (`quarantine.release`, with the key). When `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud),
         every API key gets `403 permission_denied` and the release has to be done by a person in the console
-        (FR-CON-6), unless the message's tenant has `policy.quarantine.key_release: true`. Then any key with
-        `quarantine:review` that reaches the message may release it, the tenant's partner key included.
+        (FR-CON-6), unless the message's tenant has `policy.quarantine.key_release: true`. Then a platform key,
+        or the partner key of the tenant's own partner, with `quarantine:review` may release it; tenant and
+        identity keys still need a person ([J16]).
       x-required-permission: ['quarantine:review']
       x-key-levels: [platform, partner, tenant, identity]
       x-permission-notes: >-
-        Allowed for API keys when `PM_QUARANTINE_KEY_RELEASE` is `on` (or `PM_CONSOLE=off`), or when the
-        tenant's `policy.quarantine.key_release` is `true`; otherwise `403 permission_denied`. Only a platform
+        Allowed for API keys when `PM_QUARANTINE_KEY_RELEASE` is `on` (or `PM_CONSOLE=off`), or for a
+        platform key or the tenant's partner key when the tenant's `policy.quarantine.key_release` is `true`;
+        otherwise `403 permission_denied`. Only a platform
         key, or the partner key of the tenant's own partner, can set `quarantine.key_release`.
       x-rate-limit-buckets: [api]
       x-idempotency: optional
@@ -3906,8 +3932,9 @@ paths:
         '403':
           description: >-
             The key lacks `quarantine:review`; or release by API keys is off for this tenant
-            (`PM_QUARANTINE_KEY_RELEASE=off` and `policy.quarantine.key_release` is `false`), so only a person
-            can release, in the console (`permission_denied`); or the partner is suspended.
+            (`PM_QUARANTINE_KEY_RELEASE=off`, and `policy.quarantine.key_release` is `false` or the key is a
+            tenant or identity key), so only a person can release, in the console (`permission_denied`); or the
+            partner is suspended.
           x-error-codes: [permission_denied, scope_denied, tenant_suspended, partner_suspended]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
@@ -5818,9 +5845,10 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409':
           description: >-
-            The tenant is already `erased` (`tenant_erased`, for a `tenant` request), or the idempotency key
-            is in use.
-          x-error-codes: [tenant_erased, idempotency_conflict, request_in_progress]
+            The tenant is already `erased` (`tenant_erased`, for a `tenant` request), the request names the
+            system identity (scope `identity`) or the default tenant (scope `tenant`), which no key can erase
+            (`system_protected`, [A17]), or the idempotency key is in use.
+          x-error-codes: [tenant_erased, system_protected, idempotency_conflict, request_in_progress]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
           content:
@@ -5929,12 +5957,14 @@ paths:
         Builds a ZIP holding one `.eml` per message plus `messages.json`. `scope` is `counterparty` (with
         `counterparty_address`: every message to or from it across the tenant's identities, FR-PRV-5) or
         `identity` (with `identity_id`: the whole mailbox). Returns `202` with the export
-        (`status: "queued"`). When finished, the export has a `download_url` (a signed link valid for one
-        hour, minted again on each `getExport`) until `expires_at`, 7 days later, and an `export.completed`
-        event is emitted.
-      x-required-permission: ['erasure:manage']
-      x-key-levels: [platform, partner, tenant, identity]
-      x-permission-notes: '`counterparty` scope needs a tenant, partner or platform key. An identity key can export only its own identity.'
+        (`status: "queued"`). When finished, the export has a `download_url` (a signed link for one
+        download within one hour, minted again on each `getExport`) until `expires_at`, 7 days later, and an
+        `export.completed` event is emitted. Quarantined, hidden and throttled messages are included as
+        `.eml` only when the key also holds `quarantine:review`; otherwise `messages.json` lists them with
+        `content_withheld: "quarantine_review_required"` ([I14]).
+      x-required-permission: ['erasure:manage', 'messages:read', 'attachments:read']
+      x-key-levels: [platform, partner, tenant]
+      x-permission-notes: 'An export is a read of mail, so it needs the read permissions too; identity keys cannot create exports.'
       x-rate-limit-buckets: [api]
       x-idempotency: optional
       parameters:
@@ -5978,7 +6008,7 @@ paths:
       description: >-
         `status` is `queued`, `running`, `completed`, `failed`, `canceled` or `expired`. A `completed`
         export has `download_url`, a signed link (`getSignedLink`) minted on each `GET` and valid for one
-        hour from it, or until `expires_at` if that is sooner. An earlier link stops working when its hour
+        download within one hour from it, or until `expires_at` if that is sooner. An earlier link stops working when its hour
         ends, or at once when the export is deleted (`deleteExport`).
       x-required-permission: ['erasure:manage']
       x-key-levels: [platform, partner, tenant, identity]
@@ -6316,7 +6346,7 @@ paths:
         `export.delete`; people: `member.invite`, `member.invite_resend`, `member.invite_revoke`, `member.join`,
         `member.role_change`, `member.leave`, `member.remove`, `member.ownership_transfer`, `user.delete`,
         `user.notifications_resume`, `user.oauth_unlink`, `waitlist.invite`; billing:
-        `billing.checkout_started`, `billing.portal_opened`, `billing.mode_change`, `billing.plan_set`,
+        `billing.checkout_started`, `billing.portal_opened`, `billing.downgrade_scheduled`, `billing.downgrade_cancelled`, `billing.mode_change`, `billing.plan_set`,
         `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`,
         `billing.dispute_closed`, `billing.refund_recorded`; platform operations: `ops.switch`,
         `mailbox.restore`, `master_key.activated`, `master_key.resealed`; automatic containment:
@@ -9116,7 +9146,7 @@ components:
     SendForbidden:
       description: >-
         As `Forbidden`, plus `test_mode_recipient` when a test tenant sends to an address that is neither
-        `*@simulator.invalid` nor an identity of its own tenant or of a tenant with the same partner ([L1], [L3]), and `policy_denied` with `details.reason = "free_sending_off"` when the
+        `*@simulator.invalid` nor an identity of its own tenant or of another test tenant with the same partner ([L1], [L3]), and `policy_denied` with `details.reason = "free_sending_off"` when the
         operator's `free_sending` switch is off and the workspace is on the Free plan or still in its send
         ramp.
       x-error-codes: [permission_denied, scope_denied, tenant_suspended, partner_suspended, test_mode_recipient, policy_denied]
@@ -9159,7 +9189,7 @@ components:
         The send conflicts with the idempotency record or with the identity, thread or domain state.
         `idempotency_conflict` carries `details.original_message_id` when known; `identity_paused` carries
         `details.reason`; `thread_busy` carries `details.retry_after`; `loop_detected` carries `details.hop`
-        ([N13]); `sending_paused` carries `details.scope` (`tenant` or `domain`), `details.reason` and, for a
+        ([N13]), or `details.reason` (`thread_rate` or `sender_rate`) and `details.retry_after` ([N35]); `sending_paused` carries `details.scope` (`tenant` or `domain`), `details.reason` and, for a
         domain, `details.domain_id` ([G12]). A recipient refused by `send_policy.require_known_recipient` is
         not an error: its delivery is `suppressed` with `policy: unknown_recipient` ([E2]).
       x-error-codes: [idempotency_conflict, request_in_progress, identity_paused, identity_owner_required, thread_busy, domain_not_ready, auto_reply_not_allowed, loop_detected, sending_paused]
@@ -9773,6 +9803,7 @@ components:
         - zone_hold
         - owner_required
         - partner_has_tenants
+        - system_protected
         - tenant_erased
         - plan_managed_by_stripe
         - address_taken
@@ -10472,11 +10503,14 @@ components:
               default: []
               items:
                 type: string
-                pattern: '^[a-z0-9.-]{1,253}$'
+                pattern: '^=?[a-z0-9.-]{1,253}$'
               description: >-
                 Zones of the deployment's Cloudflare account, by A-label name, that the tenant's own keys and
-                its partner key may use with `cloudflare_zone` and `replace_mx`, besides the zones this
-                deployment created for the tenant (`nameservers`, `delegated_subdomain`). A zone created for
+                its partner key may use with `cloudflare_zone` (names strictly under a listed zone, never its
+                apex), and exact host names written `=name` (for example `=notify.pylota.io`), which grant that
+                one name only; list a zone you also use yourself only by exact names. These are besides the
+                zones this deployment created for the tenant (`nameservers`, `delegated_subdomain`), and
+                `replace_mx` is platform-only except on those. A zone created for
                 another tenant, or under the zones of the deployment's platform domain, API host or console
                 host, is refused even when listed (`403 scope_denied`, `details.reason = "zone_not_allowed"`).
                 Platform keys may use any zone. The zone must also be among the zones of the Worker's
@@ -12322,7 +12356,8 @@ components:
           minimum: 1
           description: >-
             The triage logic version (`TRIAGE_VERSION`) that produced the record: the prompt, schema, built-in
-            rules and merge logic of the release. It does not change when triage is re-run.
+            rules and merge logic of the release that ran it. A re-run on the same release keeps it; a re-run after
+            an upgrade records the current one.
         run:
           type: integer
           minimum: 0
@@ -14680,7 +14715,7 @@ components:
               description: The deployment's origin as a structured-field string, in double quotes.
               examples: ['"https://mail.example.com"']
             From:
-              description: The identity's primary address.
+              description: The identity's vouched address, as for the assertion's `email` claim.
               $ref: '#/components/schemas/EmailAddress'
             Signature-Input:
               type: string
@@ -16144,8 +16179,8 @@ components:
           examples: [developer]
         reason:
           type: string
-          description: '`payment_recovered`: the plan was restored after a late payment, or when a dispute was closed in the workspace''s favour. `dispute`: a payment was disputed, so the default plan applies until the dispute closes.'
-          enum: [checkout, portal, payment_failed_grace_ended, payment_recovered, canceled, operator, dispute]
+          description: '`portal`: an upgrade confirmed in the Stripe Customer Portal. `scheduled_downgrade`: a downgrade the owner scheduled took effect at the period end. `payment_recovered`: the plan was restored after a late payment, or when a dispute was closed in the workspace''s favour. `dispute`: a payment was disputed, so the default plan applies until the dispute closes.'
+          enum: [checkout, portal, scheduled_downgrade, payment_failed_grace_ended, payment_recovered, canceled, operator, dispute]
     BillingPaymentFailedData:
       type: object
       required: [grace_until]

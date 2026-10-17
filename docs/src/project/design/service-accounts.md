@@ -74,8 +74,13 @@ sign-ups; a `service_domain` or sender domain that is a public suffix, an IP lit
 `400 invalid_request` (`details.errors[]`); one whose organisational domain is that of
 `PM_PLATFORM_DOMAIN`, `PM_API_HOST` or `PM_CONSOLE_HOST` gets `400 invalid_request` with
 `details.reason = "own_deployment"`, so agents cannot open workspaces on the deployment they run on
-([E14](../edge-cases.md)); an `address` that is not an `active` or `retiring` address of the identity gets
-`400 invalid_request` with `details.errors[0].path = "address"`.
+([E14](../edge-cases.md)); an extra sender domain (any but `service_domain`) that is a shared mailbox
+provider, from the built-in list that ships with each release (`gmail.com`, `googlemail.com`,
+`outlook.com`, `hotmail.com`, `live.com`, `yahoo.com`, `icloud.com`, `proton.me`, `aol.com`, `gmx.com`
+and the rest) plus `PM_MAILBOX_PROVIDER_DOMAINS`, gets `400 invalid_request` with
+`details.reason = "mailbox_provider"`, because any stranger can send DMARC-passing mail from such a domain
+and it would then match the entry ([E15](../edge-cases.md)); an `address` that is not an `active` or
+`retiring` address of the identity gets `400 invalid_request` with `details.errors[0].path = "address"`.
 
 **Closing** (`POST …/accounts/{account_id}/close`, `accounts:request`): the agent no longer uses the
 account, or an operator withdraws it. `pending_approval` or `approved` → `closed`, with the audit row
@@ -109,8 +114,10 @@ key; never an identity key, so an agent cannot approve its own request), with an
    an agent, so it is one of the decisions reserved for people
    ([Workspace policy §3](workspace-policy.md#3-decisions-reserved-for-people)): an API key may approve only
    when `PM_QUARANTINE_KEY_RELEASE` is `on`, `PM_CONSOLE` is `off`, or the tenant's policy has
-   `quarantine.key_release: true`; otherwise `403 permission_denied` with
-   `details.reason = "person_required"` ([E11](../edge-cases.md)). On Pylota Mail Cloud a self-serve
+   `quarantine.key_release: true` and the key is a platform key or the tenant's partner key; otherwise
+   `403 permission_denied` with `details.reason = "person_required"`. A key never approves an entry it
+   requested (`requested_by_key_id` equals the key's ID): `403 permission_denied`,
+   `details.reason = "self_approval"` ([E11](../edge-cases.md)). On Pylota Mail Cloud a self-serve
    workspace therefore approves in the console, and Pylota, whose operators' tenants have
    `quarantine.key_release: true`, approves from its own review screen with its partner key.
 2. **State.** One D1 batch: `UPDATE service_accounts SET status = …, decided_* = …, note = ?,
@@ -240,7 +247,8 @@ holds no counterparty data and no mail content. The audit rows keep IDs and `ser
 `/console/accounts` ([Console › Screens](console.md#screens)), for the active workspace:
 
 - **View** (owner, admin, member): every entry, pending first, then by `created_at`, with the inbox
-  address, `service_domain`, `sender_domains`, `account_identifier`, `purpose` (escaped text), status,
+  address, `service_domain`, `sender_domains` (the extra domains, beyond `service_domain`, shown apart and
+  highlighted as a decision of their own: approving lets their mail through too, [E15](../edge-cases.md)), `account_identifier`, `purpose` (escaped text), status,
   requester key name and times; filters by status and inbox; a link to the quarantine list for the
   `account_unapproved` reason.
 - **Approve** (owner, admin): a `POST` form with an optional note; a sensitive action, so it needs a sign-in
@@ -271,9 +279,10 @@ not to agents ([MCP › Tools](mcp.md#4-tools)).
 | `core::accounts::e10_match_rules` | The match rule: org-domain match from a subdomain; no match for a look-alike, a domain that only ends with the service's, a verdict other than `pass`, another recipient address, a `pending_approval`, `rejected` or `closed` entry, or another identity's entry; the oldest of two matching entries is chosen; the receive-allow exemption | [E10](../edge-cases.md) |
 | `it::accounts::e9_unapproved_code_held` | With `accounts.require_approval: true`, a verification mail from a service with no approved entry is stored `quarantined` with `account_unapproved` (also when a `wait` for its domain was active, and also with `quarantine.unsolicited_otp: false`), evented as `message.quarantined` without `extracted_text`, and invisible to keys without `quarantine:review`; `wait(kind=verification)` for that domain gets `403 policy_denied` with `reason = "account_not_approved"` and registers nothing; a sender on the receive-allow list is not held by rule 4a; with `require_approval: false` the ledger changes nothing | [E9](../edge-cases.md), [E5](../edge-cases.md) |
 | `it::accounts::e10_matched_code_released` | After approval, the service's code mail to the entry's address, with `verdict: pass`, is `received` while a `wait` is active, its `verifications.account_id` is the entry, `verification.received` carries `account_id`, and `wait` releases the code; the same mail to another address of the identity is held | [E10](../edge-cases.md) |
-| `it::accounts::e11_key_approval_rule` | With `PM_QUARANTINE_KEY_RELEASE=off` and no `quarantine.key_release`, a tenant key with `accounts:approve` gets `403 permission_denied` (`person_required`) on approve and can reject; with `quarantine.key_release: true`, the tenant's partner key and a tenant key approve; with `PM_QUARANTINE_KEY_RELEASE=on` any key with `accounts:approve` approves; an identity key cannot hold `accounts:approve` (`400 invalid_request`); a console owner approves after re-authentication | [E11](../edge-cases.md) |
+| `it::accounts::e11_key_approval_rule` | With `PM_QUARANTINE_KEY_RELEASE=off` and no `quarantine.key_release`, a tenant key with `accounts:approve` gets `403 permission_denied` (`person_required`) on approve and can reject; with `quarantine.key_release: true`, the tenant's partner key approves and a tenant key still gets `person_required`; the key that requested an entry gets `403 permission_denied` (`self_approval`) under every setting; with `PM_QUARANTINE_KEY_RELEASE=on` any key with `accounts:approve` approves; an identity key cannot hold `accounts:approve` (`400 invalid_request`); a console owner approves after re-authentication | [E11](../edge-cases.md) |
 | `it::accounts::e12_limits_and_expiry` | The 11th pending request of an identity, and the 201st entry, get `422 account_limit_reached`, also when two requests race for the last place; a second live entry with the same service and identifier gets `409 account_exists` with `details.account_id`; a pending entry 7 days old is set `rejected` (`expired`) by the global retention job with `account.rejected`, and an approval after that time gets `409 account_not_pending` | [E12](../edge-cases.md) |
 | `it::accounts::e13_closed_entry_holds_codes` | After close, the service's next code is held as `account_unapproved`; a code that arrived before the close is not released by `wait` after it; closing twice answers `200` with no second event | [E13](../edge-cases.md) |
+| `it::accounts::e15_mailbox_provider_refused` | A request with `sender_domains: ["gmail.com"]`, `["outlook.com"]` or a domain in `PM_MAILBOX_PROVIDER_DOMAINS` beside a real `service_domain` gets `400 invalid_request` (`mailbox_provider`) and creates nothing; the same domain as `service_domain` itself is accepted (a service that is the provider); the console's approve page lists extra sender domains apart from `service_domain` ([E15](../edge-cases.md)) | [E15](../edge-cases.md) |
 | `it::accounts::e14_own_deployment_refused` | A request naming the platform domain, the API host's or the console host's organisational domain, as `service_domain` or in `sender_domains`, gets `400 invalid_request` with `reason = "own_deployment"`; nothing is stored | [E14](../edge-cases.md) |
 | `it::accounts::lifecycle_events_and_audit` | Request, approve, reject, close and delete each write their audit row (`account.request`, `.approve`, `.reject`, `.close`, `.delete`, with IDs and `service_domain`, never `account_identifier` or `purpose`) and event in the same batch; repeating the same decision answers `200` and writes nothing; the other decision gets `409 account_not_pending`; a suspended tenant gets `403 tenant_suspended` and a paused identity `409 identity_paused` on request; deleting a live entry emits `account.closed` | §2, §4, §6 |
 | `it::accounts::scope_matrix` | An identity key reaches only its own identity's entries (another identity's ID or entry is `404`); `GET /v1/tenants/{tenant_id}/accounts` with an identity key is `403 scope_denied`; a key of another tenant, or another partner's key, gets `404 account_not_found` exactly as for a missing ID; the routes join `it::security::cross_tenant_matrix` | NFR-SEC-1 |

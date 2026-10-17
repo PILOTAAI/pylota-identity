@@ -72,17 +72,24 @@ The account also runs Pylota's own Workers, so no credential that Cloud uses may
 |---|---|---|---|---|---|
 | Setup token (`CLOUDFLARE_API_TOKEN`) | The owner's shell, for `pmail setup`, `setup ses`, `deploy`, `upgrade`, `doctor` and `secrets rotate-master` | `Editor` on `pylota-mail` only | `pylotamail.com`: Zone Read, DNS Edit, Zone Settings Edit, Email Routing Rules Edit | D1 Edit, Workers R2 Storage Edit, Queues Edit, Vectorize Edit, Workers AI Read and Edit, Email Sending Edit, Account Settings Read, Account Analytics Read | Created for one working session with an expiry 24 hours ahead, deleted at the end of it |
 | Worker token (`PM_CF_API_TOKEN`, a Worker secret) | The Worker | None | `pylotamail.com` and `pylota.io` only: Zone Read, DNS Edit, Zone Settings Edit, Email Routing Rules Edit. No Zone Edit: `domains.allow_create_zone` is off on Cloud, so the Worker never creates a zone | Email Sending Edit, Queues Edit | Standing; rotated every 90 days and after any suspected leak |
-| Site token | The owner's shell, for `pylota-mail-site` deploys | `Editor` on `pylota-mail-site` only | none | none | As the setup token |
+| Site token (`CLOUDFLARE_API_TOKEN` of the GitHub environment `production`) | `site.yml`, which deploys `pylota-mail-site` on every push to `main` that changes the site | `Editor` on `pylota-mail-site` only | `pylotamail.com`: Workers Routes Edit | none | Standing, because `site.yml` runs unattended; rotated every 90 days and after any suspected leak. It reaches no other Worker and no DNS |
+| Production deploy token (`PROD_CLOUDFLARE_API_TOKEN` of the GitHub environment `production`) | `cloud-deploy.yml`, which only the owner starts, for `pmail deploy --gradual` | `Editor` on `pylota-mail` only | none: a deploy changes no DNS and adds no Custom Domain | D1 Edit (migrations) and Queues Edit (Wrangler attaches the queue consumers on deploy); nothing else | Created for one rollout with an expiry 24 hours ahead and set as the environment secret just before the owner starts the workflow; an expired secret makes the next rollout fail before it changes anything. The D1 and Queues permissions are account-wide, which is why it is never standing |
 
-The setup token's D1, R2, Queues and Vectorize permissions are account-wide for those products, because
-those products have no per-resource roles for this use; that is why the token lives for one session only.
+The setup token's D1, R2, Queues and Vectorize permissions, and the production deploy token's D1 and
+Queues permissions, are account-wide for those products, because those products have no per-resource
+roles for this use; that is why both tokens live for one session or one rollout only. Whether a deploy
+needs Queues Edit, or only D1 Edit, is checked on staging at M20 with a token that lacks it; the
+permission is dropped if the deploy succeeds without it. Staging lives in a separate account, so
+`STAGING_CLOUDFLARE_API_TOKEN` (for `release-publish.yml`'s `staging` job) is standing and holds the
+setup token's permissions on that account only.
 No token holds token management, billing, members or Email Routing destination addresses
 ([Deploy › step 2](../self-hosting.md#2-create-a-cloudflare-api-token) lists what each permission is for).
 
 **What Cloud offers tenants as a result.** `nameservers` is not offered (`422 transport_unavailable`,
 `zone_creation_not_allowed`); `delegated_subdomain` is off (`PM_CF_SUBDOMAIN_SETUP=off`); `cloudflare_zone`
-works only on zones a platform key lists in a tenant's `domains.cloudflare_zones`, which on Cloud means only
-`pylota.io` for Pylota's own two tenants. Customers bring their own domains with `dns_records`,
+works only on names a platform key lists in a tenant's `domains.cloudflare_zones`, which on Cloud means only
+the exact names `=notify.pylota.io` and `=reminders.pylota.io` for Pylota's own two tenants, never the
+`pylota.io` zone itself. Customers bring their own domains with `dns_records`,
 `send_only` and `smtp_relay` ([Domains on any DNS host](design/domain-connections.md)), each shipping only if
 its spike passed (S8, S11, S12).
 
@@ -181,7 +188,7 @@ In the Stripe Dashboard, live mode, for TREFT LTD:
 2. **Stripe Tax** on, with TREFT LTD's registrations; the Customer Portal configured as
    [Billing › Customer Portal](design/billing.md#customer-portal) describes.
 3. **Webhook endpoint** `https://api.pylotamail.com/billing/stripe/webhook`, API version
-   `2025-03-31.basil`, with exactly the six events of [Billing › Events handled](design/billing.md#events-handled);
+   `2025-03-31.basil`, with exactly the events of [Billing › Events handled](design/billing.md#events-handled);
    its signing secret becomes `PM_STRIPE_WEBHOOK_SECRET`.
 4. **Restricted key** with exactly the permissions of [Billing › Stripe integration](design/billing.md#stripe-integration);
    it becomes `PM_STRIPE_SECRET_KEY`.
@@ -195,12 +202,21 @@ In the Stripe Dashboard, live mode, for TREFT LTD:
 The owner runs these commands from their own machine. Platform keys are short-lived: setup's bootstrap key
 expires after 24 hours, and every later session uses a new platform key with `--expires-in 1d`, read by the
 CLI through `key_command` from the owner's password manager, never stored in a file
-([Configuration › CLI configuration](../reference/configuration.md#cli-configuration)). No platform key is
+([Configuration › CLI configuration](../reference/configuration.md#cli-configuration)). One long-lived
+break-glass key, kept only in the break-glass record and paging on any use, recovers a gap of more than a
+day without rotating the pepper ([J36](edge-cases.md)). No platform key is
 ever given to Pylota's servers.
 
 ```bash
 # 1. A platform key for this session (the profile reads it with key_command).
 pmail --profile cloud-prod keys create --level platform --name ops-2026-10-12 --expires-in 1d \
+  --permissions tenants:manage,partners:manage,platform:ops,keys:manage,domains:read,domains:write,\
+identities:read,policy:write,audit:read,usage:read
+
+# 1a. The break-glass platform key: the same permissions, 400 days. Its secret goes only into the
+#     pylota-mail-break-glass vault and the sealed printed copy (Observability 5.7), never into a profile.
+#     Then set PM_BREAK_GLASS_KEY_ID to its key_ ID and redeploy, so any use of it pages.
+pmail --profile cloud-prod keys create --level platform --name break-glass --expires-in 400d \
   --permissions tenants:manage,partners:manage,platform:ops,keys:manage,domains:read,domains:write,\
 identities:read,policy:write,audit:read,usage:read
 
@@ -228,12 +244,13 @@ so they are Pylota's, billed `exempt` and outside the ramp:
 pmail --profile pylota-partner tenants create --slug pylota-platform --name "Pylota platform"
 pmail --profile pylota-partner tenants create --slug pylota-marketing --name "Pylota marketing"
 
-# 5. Only a platform key lists pylota.io for them (domains.cloudflare_zones is platform-only).
-pmail --profile cloud-prod tenants update pylota-platform  --policy '{"domains":{"cloudflare_zones":["pylota.io"]}}'
-pmail --profile cloud-prod tenants update pylota-marketing --policy '{"domains":{"cloudflare_zones":["pylota.io"]}}'
+# 5. Only a platform key grants the two names, each by exact name (domains.cloudflare_zones is
+#    platform-only; a whole-zone entry would hand every pylota.io name to a stolen key, H18).
+pmail --profile cloud-prod tenants update pylota-platform  --policy '{"domains":{"cloudflare_zones":["=notify.pylota.io"]}}'
+pmail --profile cloud-prod tenants update pylota-marketing --policy '{"domains":{"cloudflare_zones":["=reminders.pylota.io"]}}'
 
-# 6. Pylota adds the two subdomains with its partner key (cloudflare_zone, names strictly under the
-#    listed zone; the pylota.io apex stays out of reach).
+# 6. Pylota adds the two subdomains with its partner key (cloudflare_zone, exactly the granted name;
+#    nothing else in pylota.io is reachable).
 pmail --profile pylota-partner domains add notify.pylota.io --tenant pylota-platform --method cloudflare_zone
 pmail --profile pylota-partner domains add reminders.pylota.io --tenant pylota-marketing --method cloudflare_zone
 

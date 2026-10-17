@@ -447,6 +447,7 @@ Test tenants send to a simulator instead of the internet. Mail to `*@simulator.i
 scripted outcome by local part: `delivered@`, `bounce@`, `softbounce@`, `complaint@`, `deferred@`,
 `reject@` and `timeout@`. `timeout@` produces an `uncertain` send, which is the best way to test your
 handling of [uncertain sends](#uncertain-sends) ([L2](../project/edge-cases.md)). Mail to identities of the
-same tenant, or of a tenant with the same partner, is delivered internally; every other recipient,
-other workspaces on the same deployment included, is refused with `403 test_mode_recipient`. See
+same tenant, or of another test tenant with the same partner, is delivered internally; every other
+recipient, live workspaces of the same partner and other workspaces on the same deployment included, is
+refused with `403 test_mode_recipient`. See
 [Quickstart › Try it without sending real mail](../quickstart.md#try-it-without-sending-real-mail).

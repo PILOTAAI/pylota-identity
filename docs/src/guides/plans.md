@@ -188,11 +188,13 @@ they last signed in more than 10 minutes ago.
   starts.
 - **Add top-ups.** On Developer or Team, choose how many units of inboxes, sends or triage analyses to add.
   The first purchase of each kind goes through Checkout.
-- **Change plan, change top-ups, update the card, see invoices, cancel.** The buttons on **Plan and usage**
+- **Upgrade, change top-ups, update the card, see invoices, cancel.** The buttons on **Plan and usage**
   open the Stripe Customer Portal. A move to a dearer plan, or more top-up units, is charged at once for
-  the rest of the period, and the new allowances apply when that payment succeeds, not before. A move to
-  a cheaper plan applies at once, and the unused part of the dearer plan becomes a credit on your next
-  invoices. Fewer top-up units take effect at the end of the period you paid for.
+  the rest of the period, and the new allowances apply when that payment succeeds, not before. Fewer
+  top-up units take effect at the end of the period you paid for.
+- **Downgrade.** A move to a cheaper paid plan is scheduled for the end of the period you paid for: you
+  keep the dearer plan until then, the next invoice is for the cheaper plan, and no credit is given.
+  While it is scheduled, **Keep** cancels the change; to upgrade or cancel the plan instead, keep it first.
 - **Cancel.** The plan stays until the end of the period you paid for, then the workspace moves to Free.
 - **Delete the workspace.** Deleting a workspace (owner only, at **Settings**) stops its mail, then cancels
   its plan and every top-up at once, with no proration credit and no refund (anything not yet invoiced is

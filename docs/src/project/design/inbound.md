@@ -170,7 +170,7 @@ setup registers no Email Routing destination address
       windows kept in the monitor's storage for 48 hours. `Limited` → `Err(TempFail::RoleRate)`, so a real
       sender retries later; an unreachable monitor → `Err(TempFail::Check)`.
    4. **Accept.** Write the raw message to `inbound-staging/role/{yyyy}/{mm}/{dd}/{ulid}.eml` (step 6's
-      retries; the 1-day lifecycle rule on `inbound-staging/` is the backstop), queue
+      retries; the 15-day lifecycle rule on `inbound-staging/` is the backstop), queue
       `InboundJob::RoleMail` with the destination, the domain and `base_local`, and return `Ok`. A failed
       write or enqueue is `Err(TempFail::Storage)` or `Err(TempFail::Queue)` as in steps 6 and 7.
    5. **Relay** (in the `pm-inbound` consumer). Authenticate the message with steps 1–7 of
@@ -179,12 +179,22 @@ setup registers no Email Routing destination address
       path (`MailboxRequest::Submit` on its mailbox, `kind: transactional`), a new message to the
       destination: subject `"[{domain}] {base_local} mail: " + original subject` (control characters
       removed, cut to 998 characters) and a short text body naming the original sender, date and verdict.
+      Before submitting, it asks the default tenant's `TenantQuota` for the system-mail budget
+      (`QuotaRequest::SystemMail { class: Notification, keys: [destination hash, "role:" + domain], day }`,
+      [Cloud sign-up § 10.2](cloud-signup.md#102-system-mail-budgets)): role relays share the
+      `notification` part of the system identity's day and may use at most 5% of that day on their own,
+      so a flood of mail to `postmaster@` across many domains can never spend the share kept for sign-in
+      mail. On `Spent` the pointer is retried with a 1-hour delay; one still refused 24 hours after it was
+      received is dropped and counted in `role_mail_failed_total{reason="budget"}`.
       Its internal submit input carries `role_relay: true`, which makes the service add
       `X-Pylota-Mail-Role-Hop: 1` and `Auto-Submitted: auto-generated` ([Outbound › Headers](outbound.md#headers));
-      like `list_unsubscribe`, the field exists only on the internal input. The original is
-      attached as `message/rfc822` (at most 4 MiB) only when its verdict is `pass`, none of its
-      attachments has a `risk` and none is `infected`; otherwise only its header block is attached as
-      `text/rfc822-headers` (at most 64 KiB), with no attachment of it. The submit's `Idempotency-Key` is
+      like `list_unsubscribe`, the field exists only on the internal input. The original is attached as
+      `message/rfc822` (at most 4 MiB) only when the destination is the deployment's
+      `PM_SECURITY_CONTACT` (`destination_kind = "security_contact"`), its verdict is `pass`, none of its
+      attachments has a `risk` and none is `infected`. A workspace owner (`tenant_owner`) gets only the
+      header block as `text/rfc822-headers` (at most 64 KiB) and the first 2,000 characters of its text with
+      every URL defanged (`hxxps://…`), so mail from `no-reply@` of the platform domain never carries a
+      stranger's message or clickable links to a workspace owner. The submit's `Idempotency-Key` is
       `role:{raw_sha256}:{hex HMAC-SHA256(PM_HASH_KEY, destination)[..16]}`, so a redelivered copy relays
       once. The system identity's policy applies as to any send: suppressions, its daily cap, delivery
       events and its sent copy. A submit error (for example a suppressed destination or a spent cap) is
@@ -260,7 +270,9 @@ dictionary attack during an outage is not answered with a `250` for every guess 
 The dictionary guard of step 4 applies here too.
 
 1. Key `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` (UTC date, a bare ULID), custom metadata
-   `envelope_to_hash` = hex `HMAC-SHA256(PM_HASH_KEY, base)`.
+   `envelope_to_hash` = hex `HMAC-SHA256(PM_HASH_KEY, base)`, and `envelope_from`, `envelope_to` and
+   `received_at`, from which the global `staging` step rebuilds the pointer if it was lost
+   ([Privacy § 5.3](privacy.md#53-global-retention-job)). They live as long as the object, at most 15 days.
 2. Write it as in step 6 (same retries; failure → `Err(TempFail::Storage)`).
 3. Queue `InboundJob::Staged`; failure → delete the object, `Err(TempFail::Queue)`.
 4. Return `Ok(())`. The R2 lifecycle rule deletes `inbound-staging/` objects after 15 days as a backstop:
@@ -1562,11 +1574,12 @@ gets `message.received` or `message.quarantined` again with `data.reprocessed = 
 For a test tenant, the outbound loopback transport delivers mail to identities on the same deployment
 by writing the composed MIME to the recipient's raw key and queuing an `InboundPointer` with `loopback`
 set ([Outbound › Transports](outbound.md#transports), FR-OUT-12, [L3](../edge-cases.md)). Only the
-outbound consumer sets this field, and only for a recipient identity in the **same tenant**, or in a
-tenant with the same non-null `partner_id`: loopback skips authentication and spam scoring, so it must
-never reach another workspace's mailbox ([L3](../edge-cases.md), [G11](../edge-cases.md)). The consumer
-checks it again: a pointer whose `loopback.tenant_id` is neither the recipient's tenant nor a tenant of
-the same partner (re-read from D1 in step 1) is processed as ordinary mail, with full authentication and
+outbound consumer sets this field, and only for a recipient identity in the **same tenant**, or in
+another test tenant (`mode = 'test'`) with the same non-null `partner_id`: loopback skips authentication
+and spam scoring, so it must never reach a live workspace's mailbox ([L3](../edge-cases.md),
+[G11](../edge-cases.md)). The consumer checks it again: a pointer whose `loopback.tenant_id` is neither
+the recipient's tenant nor a test tenant of the same partner as a test recipient tenant (both re-read from
+D1 in step 1) is processed as ordinary mail, with full authentication and
 scoring, and `loopback_refused_total` is incremented. For an accepted loopback pointer the consumer:
 
 - skips the DNS prefetch and authentication; `verdict = 'pass'`, `auth_json = { "source": "loopback", … }`;
@@ -1778,5 +1791,5 @@ The `message.released` event reaches the Notifier through the webhook fan-out
 | `it::ses::verdict_mapping`, `it::ses::large_message_40mb` | SPF from SES, DKIM and DMARC recomputed, virus `FAIL` quarantined, spam `FAIL` scores 0.9; a 39 MB message is ingested ([N5](../edge-cases.md), [N27](../edge-cases.md)) |
 | `it::inbound::probe_and_forwarding_check` | `pm-probe+{token}` and a forwarding-check token are recorded on the domain's monitor and never stored as messages; an unknown forwarding token is ordinary mail; mail sent straight to the platform address with the external address in `To` leaves `forwarding` unchanged ([N12](../edge-cases.md), [N18](../edge-cases.md)) |
 | `it::smtp::dsn_to_bounce` | An RFC 3464 DSN for a relay send → `bounced` (hard), a suppression, the DSN stored `hidden` ([N19](../edge-cases.md)) |
-| `it::testmode::l3_loopback` | Test-tenant mail to an identity of the same tenant, or of a tenant of the same partner, arrives with `verdict: pass` and flag `loopback`; a send to an identity of any other tenant gets `403 test_mode_recipient`; a forged loopback pointer for another tenant is processed with full authentication ([L3](../edge-cases.md)) |
+| `it::testmode::l3_loopback` | Test-tenant mail to an identity of the same tenant, or of another test tenant of the same partner, arrives with `verdict: pass` and flag `loopback`; a send to an identity of a live tenant of the same partner, or of any other tenant, gets `403 test_mode_recipient`; a forged loopback pointer for another tenant is processed with full authentication ([L3](../edge-cases.md)) |
 | `it::logs::i5_no_content_in_logs` | No body text, subject or clear address in captured logs ([I5](../edge-cases.md), FR-PRV-6) |

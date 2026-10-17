@@ -476,9 +476,9 @@ therefore counted, before it is submitted, against exact budgets kept by the def
 | Class | What | Budgets per UTC day |
 |---|---|---|
 | `signin` | Sign-in, re-authentication, sign-up, waitlist confirmation and OAuth link codes | 10 per recipient (with `invitation`); 20 per client network (IPv4 address or IPv6 /64) and 200 per ASN (`request.cf.asn`) |
-| `invitation` | Invitations and their re-sends, waitlist invites, and the owner email of `POST /v1/tenants` | 10 per recipient (with `signin`); 50 per inviting tenant; at most 20% of the system identity's day |
-| `notification` | Every Notifier email except `account` | The Notifier's own caps ([Notifications § 3](notifications.md#caps-and-the-daily-digest)); at most 50% of the system identity's day |
-| `account` | `account` emails | none besides the day |
+| `invitation` | Invitations and their re-sends, waitlist invites, and the owner email of `POST /v1/tenants` | 10 per recipient (with `signin`); 50 per inviting tenant (for `POST /v1/tenants`, per creating partner, or one bucket for platform keys; a spent budget refuses the request before the tenant is created); at most 20% of the system identity's day |
+| `notification` | Every Notifier email except `account`, and every role-address relay ([Inbound › Role mail relay](inbound.md#role-mail-relay)) | The Notifier's own caps ([Notifications § 3](notifications.md#caps-and-the-daily-digest)) and the relay's own limits (30 an hour per domain, 5 an hour per envelope sender); role relays at most 5% of the system identity's day (the `sysmail:role` counter); at most 50% of the system identity's day together |
+| `account` | `account` emails, and operator alert email to `PM_ALERT_EMAIL` ([Observability § 5.5](observability.md#55-alert-email-and-the-external-heartbeat)) | none besides the day |
 
 - **The system identity's day** is its `send_policy.daily_cap` (50,000), lowered to 20% of
   `PM_DAILY_SEND_QUOTA` when that variable is set. Because `invitation` and `notification` together can
@@ -496,21 +496,38 @@ therefore counted, before it is submitted, against exact budgets kept by the def
 
 ### 10.3 Shared-domain breaker
 
-The ramp contains one new workspace; the breaker contains all of them at once. The `*/15` cron
-(`crons/send_breaker.rs`) reads today's (UTC) `cf_recipients` in `usage_daily` (the recipients the
-Cloudflare transport accepted, the quota's unit) summed over live tenants, which lag by up to the hourly
-roll-up, and compares them with `PM_DAILY_SEND_QUOTA` (no variable, no breaker)
-([W46](../edge-cases.md)):
+The ramp contains one new workspace; the breaker contains all of them at once ([W46](../edge-cases.md)).
+It is counted and enforced inline, so a burst cannot outrun it. Without `PM_DAILY_SEND_QUOTA` there is no
+breaker.
+
+- **The counter.** The default tenant's `TenantQuota`, the deployment's own object, which already holds
+  the system identity's day and the system-mail budgets of [§10.2](#102-system-mail-budgets), keeps
+  `deployment_day`: the recipients of every message accepted today (UTC) for the Cloudflare transport, any
+  tenant's and the system identity's, the hidden journal copy of Message-ID strategy B included. Policy
+  step 18 of a tenant send whose transport is Cloudflare calls it with `QuotaRequest::DeploymentReserve`
+  once the tenant's own `Reserve` succeeded; a refusal releases that `Reserve` and the `sends` hold. A
+  system email counts in its `SystemMail` call. The count is taken at accept and never given back, so a
+  send refused or cancelled later still counts: the breaker can over-count, never under-count. If the
+  object does not answer in time, the send gets `503 unavailable`, as for the tenant's own object.
+- **What the quota means.** `PM_DAILY_SEND_QUOTA` is the account's Email Sending quota **minus Pylota's own
+  daily volume**: the account is shared with Pylota, whose sends count against the same quota and are
+  invisible to this deployment ([ADR 0010](../adr/0010-cloud-in-the-existing-cloudflare-account.md)). The
+  owner sets it from the Cloudflare dashboard and Pylota's own send figures, and updates it when either
+  changes.
+- **The stages**, against `PM_DAILY_SEND_QUOTA`:
 
 | Share of the daily quota | Stage | Effect until 00:00 UTC |
 |---|---|---|
 | ≥ 60% | 1 | Sends from every ramped workspace ([§10.1](#101-new-workspace-send-ramp)) and every workspace on the catalog's default plan are refused |
 | ≥ 90% | 2 | Every tenant's sends are refused; the system identity still sends, so sign-in mail has the last 10% |
 
-- The cron writes the stage and its end to D1 `platform_state` (`key = 'send_breaker'`), with the audit
-  row `platform.send_breaker` and the state alert `shared_domain_breaker` (page at stage 2, ticket at
-  stage 1). The send handler reads the row with the tenant row (cached for 60 seconds per isolate) and
-  passes it to outbound policy step 18, which refuses with `429 daily_cap_reached`,
+- `DeploymentReserve` refuses at once when the new total would cross a stage the send is subject to. The
+  `*/15` cron (`crons/send_breaker.rs`) reads the counter (`QuotaRequest::DeploymentStatus`) and writes
+  the stage and its end to D1 `platform_state` (`key = 'send_breaker'`), with the audit row
+  `platform.send_breaker` and the state alert `shared_domain_breaker` (page at stage 2, ticket at
+  stage 1); it reports, it does not decide. The send handler also reads that row with the tenant row
+  (cached for 60 seconds per isolate) and passes it to outbound policy step 18 as a stop, so a known stage
+  refuses before any counter moves. Either way the send gets `429 daily_cap_reached`,
   `details.cap: "shared_domain"` and `details.resets_at` at the next 00:00 UTC
   ([Outbound › Policy pipeline](outbound.md#policy-pipeline)). Retrying with the same key the next day
   is safe. The breaker never stops inbound mail.
@@ -660,8 +677,8 @@ adds no migration ([Data model](data-model.md#1-d1-control-plane)).
 | `it::checkout::return_before_webhook` | Waits, then "within a minute"; the plan is applied by the webhook only ([W25](../edge-cases.md), FR-CON-13) |
 | `it::onboarding::derived_steps` | Each checklist step turns done from real data alone; each Overview banner condition shows its banner and hides it once resolved (FR-CON-12) |
 | `it::abuse::free_ramp` | 51st send on day 1 of a Free workspace → `429 daily_cap_reached` (effective cap min(policy, 50)); lifted once the upgrade's invoice is paid (not while it is open), and not ramped again after a downgrade ([W30](../edge-cases.md)) |
-| `it::abuse::w44_system_mail_budgets` | The 11th system email of a day to one address (sign-in and invitations together), the 21st sign-in email from one IPv4 address or IPv6 /64 (also when the address part rotates), and the 201st from one ASN send nothing while the page stays identical; a tenant's 51st invitation of the day → `429 daily_cap_reached` with `details.cap: "invitations"`; `invitation` and `notification` mail stop at 20% and 50% of the system identity's day while sign-in mail still goes out; a sign-up `POST` without a valid ticket, with one issued under 2 seconds before, or from another network sends nothing ([W44](../edge-cases.md), FR-CON-18) |
-| `it::abuse::w46_shared_domain_breaker` | With `PM_DAILY_SEND_QUOTA` set and today's `usage_daily` `cf_recipients` at 60%, the cron writes stage 1: a Free or ramped workspace's send → `429 daily_cap_reached` with `details.cap: "shared_domain"` and `resets_at` at 00:00 UTC, a paid workspace still sends; at 90% every tenant is refused and sign-in mail still goes out; at 00:00 UTC the row is deleted; without the variable nothing happens; a second self-serve Free workspace for `jo+2@example.org` while `jo@example.org` owns one returns `workspace_limit` ([W46](../edge-cases.md), FR-CON-18) |
+| `it::abuse::w44_system_mail_budgets` | The 11th system email of a day to one address (sign-in and invitations together), the 21st sign-in email from one IPv4 address or IPv6 /64 (also when the address part rotates), and the 201st from one ASN send nothing while the page stays identical; a tenant's 51st invitation of the day → `429 daily_cap_reached` with `details.cap: "invitations"`, and a partner's 51st `POST /v1/tenants` with `owner` the same, with no tenant created; role relays stop at 5% of the system identity's day and are retried an hour later, while an alert email of class `account` still goes out; `invitation` and `notification` mail stop at 20% and 50% of the system identity's day while sign-in mail still goes out; a sign-up `POST` without a valid ticket, with one issued under 2 seconds before, or from another network sends nothing ([W44](../edge-cases.md), FR-CON-18) |
+| `it::abuse::w46_shared_domain_breaker` | With `PM_DAILY_SEND_QUOTA` set and the default tenant's `deployment_day` at 60%, the next Free send is refused inline before any cron run or roll-up (a burst within one minute cannot pass 60% for Free or 90% for paid tenants by more than one message's recipients), and system mail adds to the counter; the cron then writes stage 1: a Free or ramped workspace's send → `429 daily_cap_reached` with `details.cap: "shared_domain"` and `resets_at` at 00:00 UTC, a paid workspace still sends; at 90% every tenant is refused and sign-in mail still goes out; at 00:00 UTC the row is deleted; without the variable nothing happens; a second self-serve Free workspace for `jo+2@example.org` while `jo@example.org` owns one returns `workspace_limit` ([W46](../edge-cases.md), FR-CON-18) |
 | `it::console::w45_hosted_address_refused` | Sign-up (email, Google), the waitlist, an invitation (`400 invalid_request`, path `email`) and `POST /v1/tenants` with `owner` (path `owner.email`) refuse an address on the platform domain and an identity's `active` address; creating an identity address equal to a console user's sign-in address → `409 address_taken` ([W45](../edge-cases.md), FR-CON-17) |
 | `it::abuse::ramp_evaluator` | On day 7 the daily evaluation lifts the ramp when the rates are under the thresholds; outcomes of an identity deleted before the evaluation still count (the tenant's per-day counters, not the identity's `outcomes` rows); with a complaint rate above them the ramp stays and is evaluated again daily, and the third failure fires `signup_ramp_review` without suspending the tenant ([W30](../edge-cases.md)) |
 | `it::abuse::partner_ramp` | A tenant created by a partner key is ramped (51st send of the day → `429 daily_cap_reached`) with billing mode `exempt` and with billing `disabled` on the deployment, and the daily evaluation lifts it on day 7 as for a Free workspace; with the partner's `ramp_exempt` set by a platform key its tenants are not ramped, including ones already ramped; a tenant without a partner in billing mode `exempt` is still never ramped ([W30](../edge-cases.md), §10.1) |
