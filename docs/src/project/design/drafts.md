@@ -1529,8 +1529,8 @@ kind and three permissions:
 | Pylota agent or path | Key | Draft permissions | Why |
 |---|---|---|---|
 | The public-webchat coordinator, and any path whose input is untrusted (a renter's chat turn, mail-steered specialists on first contact) | **K8**, a new identity key per operator identity that needs it, minted by K1 | `drafts:write` only; no `messages:send`, no `messages:read` | It can write mail and can never send it, so every message it writes waits for an operator (pattern 2). Without `messages:read` it cannot create reply drafts to mail it cannot read (`404 message_not_found`) or read the mailbox |
-| Specialists that send for an operator (K3) | K3 | none added | Under the operator tenant's `drafts.require_approval: "new_recipients"`, a direct send to a new address is refused with `403 approval_required`; the capability route then turns it into a draft (pattern 1) |
-| Pylota's server, for operator decisions | K1 (partner key) | add `drafts:read`, `drafts:approve` (it already holds `messages:send`) | Reads drafts to show them in Pylota's app and approves or rejects for the operator |
+| Specialists that send for an operator (K3) | K3 | add `drafts:write` (which includes the `drafts:read` a draft send needs) | Under the operator tenant's `drafts.require_approval: "new_recipients"`, a direct send to a new address is refused with `403 approval_required`; the capability route then creates the same message as a draft and sends it with K3, which leaves it `pending_approval` (pattern 1, [§3.5](#35-the-two-approval-patterns)) |
+| Pylota's server, for operator decisions | K1 (partner key) | add `drafts:write` and `drafts:approve` (it already holds `messages:send`) | Reads drafts to show them in Pylota's app and approves or rejects for the operator. It needs `drafts:write` as well because a key it mints may hold only permissions it holds itself, and it mints K3 and K8 |
 
 **Policy Pylota sets** on each operator tenant at creation (spec §4.3), with K1: `drafts.key_approval: true`
 (which only a platform key or the tenant's own partner key can set) and `drafts.require_approval:
@@ -1577,8 +1577,9 @@ remains the source of the booking's time. Pylota's own pg-boss schedules stay fo
 
 **What Pylota's integration spec must add** (for the spec's owner):
 
-1. §6: key K8 (identity, `drafts:write`), minted by K1 for the identities whose untrusted paths draft; K1
-   gains `drafts:read` and `drafts:approve`; the mint and rotation rules of K3 apply to K8.
+1. §6: key K8 (identity, `drafts:write`), minted by K1 for the identities whose untrusted paths draft; K3
+   gains `drafts:write`; K1 gains `drafts:write` and `drafts:approve`; the mint and rotation rules of K3 apply
+   to K8.
 2. §4.3: tenant creation sets `drafts.key_approval: true` and `drafts.require_approval: "new_recipients"`
    on operator tenants, `never` on Pylota-owned tenants.
 3. §7: the router contract learns `403 approval_required` (convert to a draft, never retry with a new

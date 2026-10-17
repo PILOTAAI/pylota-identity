@@ -1283,9 +1283,11 @@ specialists only ever see clear or released mail. Pylota's mailbox read tools us
 `screening_unavailable` creates the `mail_held_messages` row as for any reason. The mobile "Held" list shows:
 "This email looks like it tries to give instructions to Pylota's assistant" and "Pylota could not check this email
 in time, so it is waiting for you", with the signals in plain words. The operator (owner or manager, step-up)
-releases in Pylota's app; Pylota's API calls `POST …/release` with the tenant key K2 (`quarantine:review`; K5 or K6
-for the platform and marketing tenants), which works on Cloud because Pylota sets `quarantine.key_release: true`
-on each of its tenants. The release then emits `message.released` and `message.received` (`released: true`).
+releases in Pylota's app; Pylota's API calls `POST …/release` with its partner key K1 (`quarantine:review`), for
+every one of its tenants, which works on Cloud because Pylota sets `quarantine.key_release: true` on each of them. A
+tenant key such as K2, K5 or K6 cannot release there: under `quarantine.key_release` only a platform key or the
+tenant's own partner key may ([T20](#edge-cases)). The release then emits `message.released` and
+`message.received` (`released: true`).
 
 **Feedback from Pylota.** The release dialog asks "Was this email trying to instruct the assistant?" and Pylota
 posts `correct` (yes) or `false_positive` / `legitimate_instruction` (no) with K2; Dismiss on a
