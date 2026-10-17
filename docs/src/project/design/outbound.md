@@ -220,6 +220,13 @@ recipient of `send` and `forward` must be known by rules 1 or 2. Integrators tha
 design (booking confirmations, a backend rather than a steered agent) set
 `send_policy.require_known_recipient: false` on that identity, or add send-allow entries.
 
+**First replies ([G13](../edge-cases.md)).** A delivery to the reply target of rule 3 whose `contacts` row
+had `outbound_count = 0` when the send was accepted is a first reply to someone who wrote in, whatever
+`require_known_recipient` says. Its `deliveries.first_reply` is `1`, and its bounce or complaint does not
+count towards any pause (below): a stranger who writes in and then makes the reply bounce, or marks it as
+spam, chose that outcome, so it says nothing about the identity's own sending. After that first reply the
+recipient is a contact like any other.
+
 If every recipient is filtered, the send is still accepted (`202`), stored with status `suppressed`, and
 `message.suppressed` is emitted with the recipients; nothing reaches a transport
 ([Errors](../../reference/errors.md#policy-and-limits)).
@@ -823,7 +830,8 @@ For each event (from `pm-delivery-events`, or a `TransportEvent` on `pm-outbound
    ([Inbound › DSN routing](inbound.md#dsn-routing-and-backscatter)) is written by the inbound
    post-commit step instead, with a 30-day expiry.
 6. **Abuse windows** for `outcome` ([Abuse auto-pause](#abuse-auto-pause-fr-dlv-3)):
-   `RecordOutcome { identity_id, domain_id, outcome, at, event_id }`, idempotent by `event_id`. An event
+   `RecordOutcome { identity_id, domain_id, outcome, at, event_id, counted }`, idempotent by `event_id`;
+   `counted` is `false` when the delivery's `first_reply` is `1` ([G13](../edge-cases.md)). An event
    with `source = Dsn` carries no outcome ([D11](../edge-cases.md)).
 7. Ack.
 
@@ -924,11 +932,15 @@ and sent to `pm-outbound` as `TransportEvent`, then handled by the same consumer
 ## Abuse auto-pause (FR-DLV-3)
 
 `TenantQuota.outcomes` keeps the last 1,000 outcomes per identity. For each `outcome`, the consumer calls
-`QuotaRequest::RecordOutcome { identity_id, domain_id, outcome, at, event_id }`, which in one transaction
-first inserts `event_id` into `outcome_events` and, when it is already there (a retried event), does
-nothing and returns the current decision; otherwise it inserts the outcome with the next `seq`, deletes
-rows beyond 1,000 for that identity, increments the tenant's per-day counters and the sending domain's
-hourly counters (below), and evaluates:
+`QuotaRequest::RecordOutcome { identity_id, domain_id, outcome, at, event_id, counted }`, which in one
+transaction first inserts `event_id` into `outcome_events` and, when it is already there (a retried event),
+does nothing and returns the current decision. `counted` is `false` for a first reply
+(`deliveries.first_reply = 1`, [First replies](#recipient-filters)): the object then records nothing else and
+answers an `OutcomeDecision` with every field false or `None`, so outcomes a stranger arranged by writing
+in never pause an identity, a tenant or a domain, and never feed the containment rules built on those
+pauses ([G13](../edge-cases.md)). Otherwise it inserts the outcome with the next `seq`, deletes rows beyond
+1,000 for that identity, increments the tenant's per-day counters and the sending domain's hourly counters
+(below), and evaluates:
 
 ```text
 complaints = complained outcomes among the identity's last 1,000 rows
@@ -1296,7 +1308,10 @@ pub enum QuotaRequest {
                                                      // tenant_counted is false exactly when that Reserve had
                                                      // tenant_cap None
     RecordOutcome { identity_id: String, domain_id: Option<String>, outcome: Outcome, at: i64,
-                    event_id: String },              // idempotent by event_id (outcome_events): the identity's
+                    event_id: String, counted: bool },
+                                                     // idempotent by event_id (outcome_events); counted
+                                                     // false (a first reply, G13) records nothing else and
+                                                     // answers all false. Otherwise: the identity's
                                                      // abuse windows (outcomes rows), the tenant's per-day
                                                      // and the sending domain's hourly counters, the tenant
                                                      // and domain pauses (G12) and the domain alerts
@@ -1353,7 +1368,8 @@ pub struct AllowanceRow { pub feature: Feature, pub granted: Option<u32>, pub us
                           pub remaining: Option<u32>, pub resets_at: Option<i64> }
 
 // Answers. Each request has one answer type; the caller names it in ObjectClient::call::<QuotaRequest, A>.
-// Init, Release, RecordOutcome, ForgetIdentity, Settle, Extend, Adjust, SetPlan, SetMeasured, Reconcile → ()
+// Init, Release, ForgetIdentity, Settle, Extend, Adjust, SetPlan, SetMeasured, Reconcile → ()
+// RecordOutcome → OutcomeDecision (the M5 stub answers it with every field false or None)
 pub enum ReserveAnswer {
     Ok { day, identity_used: u32, tenant_used: u32, warnings: Vec<QuotaWarning>, held: Option<Held> },
     Denied(Denied),
@@ -1503,6 +1519,7 @@ Agent        API handler      IdentityMailbox     pm-outbound consumer   Cloudfl
 | `it::delivery::uncertain_reconciled` | A later event reconciles an uncertain send and emits `message.reconciled` (FR-DLV-4) |
 | `it::delivery::abuse_auto_pause` | Four complaints in a 1,000 window or eleven bounces in a 200 window pause the identity once; the same event delivered twice (same `event_id`) is recorded once, so ten bounces redelivered do not pause (FR-DLV-3) |
 | `it::delivery::g12_tenant_domain_pause` | 600 outcomes spread over 30 identities of one tenant, with 1 complaint per 600 (0.17%), pause no identity but set `tenants.sending_paused_at`: the next send gets `409 sending_paused` (`scope: tenant`), a queued message is held, the system identity still sends; the same rates on one tenant domain pause that domain only (`scope: domain`), and it does not fall back to the platform domain; outcomes on the platform domain never pause it; a tenant key's `PATCH … sending_paused: false` gets `403 scope_denied`, a platform key's resumes; one audit row and one `abuse_pause` alert per pause ([G12](../edge-cases.md), FR-DLV-6) |
+| `it::delivery::g13_first_reply_outcomes_not_counted` | Eleven strangers at one domain (DMARC `pass`) write to an identity, which replies to each; the domain then answers `550 5.1.1`: the eleven deliveries have `first_reply = 1`, their bounces reach the message as usual and create suppressions, but `RecordOutcome` with `counted: false` changes no window or counter, the identity is not paused and no `identity.auto_pause` row is written; a second message to one of them, now a contact, counts normally ([G13](../edge-cases.md)) |
 | `it::send::j28_transport_breaker` | Three Cloudflare `E_INTERNAL_SERVER_ERROR` results in a row (three `uncertain` messages) open the breaker and fire `transport_breaker_open`; the next 20 queued messages are neither claimed nor made `uncertain`, and stay `queued` with the `Paused` back-off; after `open_until` exactly one probe is claimed; a probe accepted closes the breaker and the held messages send; a probe that fails again doubles the period; a definitive `Rejected` resets the count ([J28](../edge-cases.md)) |
 | `it::send::g4_suppressed_after_submit` | A recipient suppressed (a hard bounce from another send) between submit and transport becomes a `suppressed` delivery at `BeginTransport` and is never handed to the transport; with no recipient left the message ends `suppressed` and the `sends` hold settles with nothing consumed; a provider suppression scoped to the shared platform domain makes the delivery `suppressed` without writing a `suppressions` row or emitting `suppression.created` ([G4](../edge-cases.md)) |
 | `it::send::stale_claim_outcome` | A claim older than 5 minutes is resolved to `uncertain` with the deliveries' `updated_at` = `claimed_at`; a late `RecordTransportOutcome` with that stale token and `Accepted` sets the provider ID, makes the deliveries `submitted`, adds `reconciled` and emits `message.reconciled`; a late `Unknown` with the stale token changes nothing and increments `stale_claim_outcome_total` ([G2](../edge-cases.md)) |

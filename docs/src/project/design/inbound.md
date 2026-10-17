@@ -878,9 +878,15 @@ source; only the SPF input differs (step 5).
 
 Computed partly in the consumer and finished inside `ingest`, which can see the mailbox's contacts.
 
+**Authenticated sender ([C10](../edge-cases.md)).** The sender is authenticated when the verdict is
+`pass`, or when `auth_json.dmarc.aligned_by` is `dkim` or `spf`: an aligned DKIM signature or an aligned
+SPF pass proves the `From` domain even when it publishes no DMARC record or `p=none`. Every rule below that
+trusts an address the identity knows (a contact, a participant, a known correspondent) applies only to an
+authenticated sender, because a `From` header alone can name anyone.
+
 | Signal | Rule |
 |---|---|
-| `known_sender` (FR-IN-4) | True when the sender address is in `contacts` with `outbound_count > 0` (we have written to them), or matches a receive-allow entry, or its domain is one of the tenant's **own** domains (`kind <> 'platform'`) and the verdict is `pass`. The shared platform domain never gives domain-level trust: every tenant's agents send from it with a passing DMARC verdict, so a platform-domain sender is known only through `contacts` or an address-level receive-allow entry ([D12](../edge-cases.md)) |
+| `known_sender` (FR-IN-4) | True when the sender is authenticated (below) and its address is in `contacts` with `outbound_count > 0` (we have written to them), or matches a receive-allow entry, or its domain is one of the tenant's **own** domains (`kind <> 'platform'`) and the verdict is `pass`. The shared platform domain never gives domain-level trust: every tenant's agents send from it with a passing DMARC verdict, so a platform-domain sender is known only through `contacts` or an address-level receive-allow entry ([D12](../edge-cases.md)) |
 | `shared_domain_sender` ([D12](../edge-cases.md)) | The `From` domain is `PM_PLATFORM_DOMAIN` and the sender is not an address of this identity's own tenant: the mail comes from another workspace on the shared domain, whose name the receiving agent should not take at face value |
 | `display_name_spoof` ([D2](../edge-cases.md)) | The display name contains an address-like token different from the `From` address; or its confusable fold equals the fold of the name of a contact with `outbound_count > 0` whose address differs; or it equals the identity's display name or the tenant name while the sender is not this identity |
 | `lookalike_domain` ([D2](../edge-cases.md)) | The fold of the sender's registrable domain equals the fold of a tenant domain or of a contact domain with `outbound_count > 0`, while the domains differ. For a sender on the platform domain, the fold of its local part's tenant suffix (the part after the last `.`) is also compared with the folds of the receiving tenant's own suffix and domain labels. The fold is the UTS #39 skeleton plus the ASCII rules of [Identities › Confusables](identity-domains.md#confusable-detection) |
@@ -948,12 +954,13 @@ keyed by what can be trusted (FR-IN-4, FR-IN-12, [D5](../edge-cases.md), [D13](.
 
 | Cap | Key | Default (policy) | Exceeded |
 |---|---|---|---|
-| Per sender, per identity | The `From` address when the verdict is `pass`; otherwise `unauth:` + the `From` address (or `env:` + envelope sender when `From` is missing) | 60 an hour (`inbound.per_sender_per_hour`) | `throttled` |
-| Unauthenticated, per identity | One bucket for all mail whose verdict is not `pass`, from senders that are not known correspondents | 120 an hour (`inbound.unauthenticated_per_hour`) | `throttled` |
+| Per sender, per identity | The `From` address when the sender is authenticated; otherwise `unauth:` + the `From` address (or `env:` + envelope sender when `From` is missing) | 60 an hour (`inbound.per_sender_per_hour`) | `throttled` |
+| Unauthenticated, per identity | One bucket for all mail whose sender is not authenticated (none of them is a known correspondent) | 120 an hour (`inbound.unauthenticated_per_hour`) | `throttled` |
 | Per tenant | One bucket per tenant in `TenantQuota` (`AdmitInbound`), across its identities, for senders that are not known correspondents | 2,000 an hour (`inbound.per_tenant_per_hour`) | `throttled` |
 
-A **known correspondent** is a sender in the identity's `contacts` with `outbound_count > 0`; it and a
-receive-allowed sender are never throttled by the unauthenticated and tenant caps, so a flood from forged
+A **known correspondent** is an authenticated sender in the identity's `contacts` with `outbound_count > 0`
+([C10](../edge-cases.md)); it and a receive-allowed sender are never throttled by the unauthenticated and
+tenant caps, so a flood from forged
 senders cannot crowd out the people an agent already writes to. The per-identity caps use the mailbox's
 `rate_windows` inside the transaction:
 

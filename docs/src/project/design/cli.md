@@ -521,8 +521,8 @@ Setup is the only time the CLI knows the pepper, because it generated it. The bo
 
 ```sql
 INSERT INTO api_keys (id, lookup, hash, name, level, tenant_id, identity_id, mode,
-                      permissions_json, created_by_key_id, expires_at, created_at)
-VALUES (?1, ?2, ?3, 'setup-bootstrap', 'platform', NULL, NULL, 'live', ?4, NULL, ?5, ?6);
+                      permissions_json, created_by_key_id, created_by_level, expires_at, created_at)
+VALUES (?1, ?2, ?3, 'setup-bootstrap', 'platform', NULL, NULL, 'live', ?4, NULL, 'setup', ?5, ?6);
 
 INSERT INTO audit_log (id, tenant_id, actor_key_id, action, target_type, target_id,
                        details_json, request_id, created_at)

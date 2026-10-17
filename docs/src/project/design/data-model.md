@@ -295,6 +295,10 @@ CREATE TABLE api_keys (
                                                            -- copied from the parent key); NULL otherwise
   created_by_role   TEXT CHECK (created_by_role IN ('owner','admin')),  -- that person's role when it was set;
                                                            -- 'owner' lets a tenant key hold tenants:erase
+  created_by_level  TEXT NOT NULL CHECK (created_by_level IN ('platform','partner','tenant','identity',
+                                                             'console','setup')),  -- who minted it: the
+                                                           -- caller's level, a console session, or pmail setup;
+                                                           -- platform/partner = provider-managed (W48)
   expires_at        INTEGER,
   revoked_at        INTEGER,
   last_used_at      INTEGER,                               -- updated at most once per minute
@@ -318,8 +322,13 @@ CREATE TABLE webhook_endpoints (
   identity_ids_json      TEXT,                             -- optional filter
   enabled                INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
   disabled_reason        TEXT                              -- manual | failing (a 410 is 'failing'; the event says gone)
-                         CHECK (disabled_reason IN ('manual','failing','url_changed')),  -- | url_changed: a PATCH
-                                                           -- changed the URL; a passing test re-enables (J29)
+                         CHECK (disabled_reason IN ('manual','failing','url_changed','creator_removed')),
+                                                           -- | url_changed: a PATCH changed the URL; a passing test
+                                                           -- re-enables (J29) | creator_removed: the person behind
+                                                           -- it left or lost webhooks:manage (W47)
+  created_by_key_id      TEXT,                             -- the key that created it, or last re-enabled it
+  created_by_user_id     TEXT REFERENCES users(id),        -- usr_: the person behind that key or console session
+                                                           -- (api_keys.created_by_user_id); NULL otherwise
   secret_enc             TEXT NOT NULL,                    -- AES-256-GCM(PM_MASTER_KEY), base64
   prev_secret_enc        TEXT,
   prev_secret_expires_at INTEGER,
@@ -606,7 +615,7 @@ CREATE TABLE usage_daily (
   day       TEXT NOT NULL,                                 -- YYYY-MM-DD in UTC
   metric    TEXT NOT NULL
             CHECK (metric IN ('inbound','outbound','sends','triage','search','agentic','ai_neurons',
-                              'storage_bytes','assertions','http_signatures')),
+                              'storage_bytes','assertions','http_signatures','cf_recipients')),
   value     INTEGER NOT NULL,
   PRIMARY KEY (tenant_id, day, metric)
 );
@@ -1260,6 +1269,9 @@ CREATE TABLE IF NOT EXISTS deliveries (                    -- per-recipient outb
   smtp_response   TEXT,                                    -- trimmed to 512 chars
   bounce_type     TEXT CHECK (bounce_type IN ('hard','soft')),
   provider_event_ids_json TEXT NOT NULL DEFAULT '[]',      -- dedupe of provider events
+  first_reply     INTEGER NOT NULL DEFAULT 0 CHECK (first_reply IN (0,1)),  -- 1: a reply to someone who
+                                                           -- wrote in and was never written to; its outcome
+                                                           -- counts towards no pause (Outbound › First replies)
   updated_at      INTEGER NOT NULL,
   PRIMARY KEY (message_rowid, address)
 );
@@ -1339,7 +1351,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
   expires_at    INTEGER NOT NULL                           -- created_at + 30 days
 );
 
-CREATE TABLE erased_ids (                                  -- message IDs an erasure deleted (I10): writers that
+CREATE TABLE IF NOT EXISTS erased_ids (                    -- message IDs an erasure deleted (I10): writers that
   message_id TEXT PRIMARY KEY,                             -- finish after the erasure see them and delete what they
   erased_at  INTEGER NOT NULL                              -- wrote; ingest refuses them. Rows older than 7 days are
 );                                                         -- deleted by the daily maintenance
@@ -1480,9 +1492,9 @@ CREATE TABLE IF NOT EXISTS steps (
   last_error  TEXT,
   updated_at  INTEGER NOT NULL
 );
-CREATE TABLE held (thread_id TEXT PRIMARY KEY, identity_id TEXT NOT NULL, reason TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS held (thread_id TEXT PRIMARY KEY, identity_id TEXT NOT NULL, reason TEXT NOT NULL);
                                                            -- erasure: held threads, for receipt.held
-CREATE TABLE deleted_vectors (id TEXT PRIMARY KEY);        -- erasure: every vector ID sent to deleteByIds, for
+CREATE TABLE IF NOT EXISTS deleted_vectors (id TEXT PRIMARY KEY); -- erasure: every vector ID sent to deleteByIds, for
                                                            -- the semantic probe and a resumption (Privacy § 6.7)
 CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, type TEXT NOT NULL,
                      payload_json TEXT NOT NULL, occurred_at INTEGER NOT NULL, dispatched_at INTEGER);
@@ -1537,7 +1549,7 @@ CREATE TABLE IF NOT EXISTS counters (
   value  INTEGER NOT NULL,
   PRIMARY KEY (metric, window)
 );
-CREATE TABLE outcome_events (                              -- RecordOutcome is idempotent by event ID: a retried
+CREATE TABLE IF NOT EXISTS outcome_events (                -- RecordOutcome is idempotent by event ID: a retried
   event_id TEXT PRIMARY KEY,                               -- delivery event is counted once (Outbound › Abuse
   at       INTEGER NOT NULL                                -- auto-pause); rows older than 7 days are deleted by
 );                                                         -- the daily alarm

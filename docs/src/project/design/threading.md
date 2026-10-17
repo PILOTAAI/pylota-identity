@@ -168,6 +168,8 @@ pub struct InboundThreadInputs<'a> {
     pub in_reply_to: Option<&'a str>,         // normalised msg-id, see 3.2
     pub references: &'a [String],             // normalised msg-ids, header order
     pub sender: &'a str,                      // normalised From address
+    pub sender_authenticated: bool,           // Inbound › Authenticated sender: verdict pass, or an aligned
+                                              // DKIM or SPF pass (auth_json.dmarc.aligned_by is not null)
 }
 
 pub trait ThreadLookup {                      // implemented over the mailbox SQLite connection
@@ -203,12 +205,14 @@ pub fn resolve_inbound(inp: &InboundThreadInputs, db: &impl ThreadLookup) -> Thr
 `join_unverified` is set when any of these holds:
 
 - `token` is `Invalid` (a token-shaped tag failed, or was not checked because of the rate limit);
-- the decision is `Join { via: Token }`, the sender is not already a participant
-  (`!db.is_participant(seq, sender)`), and neither `In-Reply-To` nor any `References` entry resolved
-  to the same seq;
-- the decision is `Join { via: InReplyTo }` or `Join { via: References }` and the sender is not already a
-  participant of that thread. A `Message-ID` is in every copy of a message, so anyone who saw one (a
-  recipient, a forwardee, a list) can write a header join into the thread ([C9](../edge-cases.md)).
+- the decision is `Join { via: Token }`, the sender is not an authenticated participant
+  (`!(sender_authenticated && db.is_participant(seq, sender))`), and neither `In-Reply-To` nor any
+  `References` entry resolved to the same seq;
+- the decision is `Join { via: InReplyTo }` or `Join { via: References }` and the sender is not an
+  authenticated participant of that thread. A `Message-ID` is in every copy of a message, so anyone who saw
+  one (a recipient, a forwardee, a list) can write a header join into the thread ([C9](../edge-cases.md));
+  and a `From` header can name a participant whose domain publishes no enforcing DMARC policy, so a
+  participant counts only when the message authenticates its sender ([C10](../edge-cases.md)).
 
 The flag is stored in `messages.flags_json` and exposed in `trust.flags`. It is advisory for the message
 itself: integrators show it to the agent and to humans, and the message still joins the thread. One
@@ -483,6 +487,7 @@ truncated at a character boundary.
 | `core::thread::c1_token_only` / `core::thread::c1_no_headers_new_thread` / `core::thread::c1_subject_never_joins` | C1; the resolution order of FR-THR-1 (token, then headers, then a new thread; the subject never joins) |
 | `it::thread::seq_never_reused` | Erase the newest thread of a mailbox, create a new one: its `seq` is higher than the erased one's, and a reply carrying the erased thread's valid token starts a new thread instead of joining the new one (C1; an integration test because the guarantee is SQLite's `AUTOINCREMENT`) |
 | `core::thread::c9_header_join_non_participant` / `it::inbound::c9_header_join_flagged` | `resolve_inbound` sets `join_unverified` for an `In-Reply-To` or `References` join by a sender who is not a participant, and not for a participant; through `email()`, such a message joins the thread with `thread_join_unverified` in `trust.flags` and does not end a `wait` with `kind=reply` (C9) |
+| `core::thread::c10_forged_participant` / `it::inbound::c10_forged_participant_unverified` | A message whose `From` is a participant of the thread, joining by `In-Reply-To`, with no DMARC record and no aligned DKIM or SPF pass (an attacker's own envelope domain passing SPF): `join_unverified` is set, it does not satisfy `wait(kind=reply)`, `known_sender` is false and it counts in the unauthenticated and tenant inbound caps; the same message with an aligned DKIM signature is a normal join ([C10](../edge-cases.md)) |
 | `it::messages::thread_counts_visible_only` | A quarantined first message leaves the thread unlisted with `message_count = 0`; a throttled reply changes neither `last_at` nor `participants`; after release the counts, subject and participants include the released message; after a counterparty erasure the counterparty leaves `participants` |
 | `core::thread::c2_trim_references` | 150 references → first + 19 most recent, order kept, duplicates removed (C2) |
 | `core::thread::c2_rfc5322_parent_rules` | Parent without References uses its In-Reply-To |

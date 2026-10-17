@@ -5694,7 +5694,10 @@ paths:
         `404 key_not_found`, like a missing one. **Not wider:** the target's level must be at most the
         caller's and each of its permissions one the caller holds (or, for a platform or partner caller,
         `identities:sign`); otherwise `403 key_scope_exceeded` and nothing is changed or returned. A key
-        always passes for itself.
+        always passes for itself. **Provider-managed:** a key a platform or partner key minted can be
+        rotated only by a platform key or a partner key that reaches it (`403 key_scope_exceeded`,
+        `details.reason = "provider_managed"`, [W48]). On success the key's `created_by_user_id` and
+        `created_by_role` become the caller's, so the new secret is traced to whoever received it.
       x-required-permission: ['keys:manage']
       x-key-levels: [platform, partner, tenant, identity]
       x-rate-limit-buckets: [api]
@@ -6307,14 +6310,16 @@ paths:
         `identity.delete`, `identity.auto_pause`; domains: `domain.create` (with any MX records `replace_mx`
         deleted), `domain.transport`, `domain.evict`; service accounts: `account.request`, `account.approve`,
         `account.reject`, `account.close`, `account.delete`; mail: `quarantine.release`, `message.cancel`,
-        `message.resolve`, `suppression.remove` (only for a `complaint` suppression); privacy: `erasure.create`,
-        `hold.set`, `hold.removed`, `hold.expired`, `export.delete`; people: `member.invite`,
-        `member.invite_resend`, `member.invite_revoke`, `member.join`, `member.role_change`, `member.leave`,
-        `member.remove`, `member.ownership_transfer`, `user.delete`, `user.notifications_resume`,
-        `user.oauth_unlink`, `waitlist.invite`; billing: `billing.checkout_started`, `billing.portal_opened`,
-        `billing.mode_change`, `billing.plan_set`, `billing.plan_changed`, `billing.duplicate_cancelled`,
-        `billing.dispute_opened`, `billing.dispute_closed`, `billing.refund_recorded`; platform operations:
-        `ops.switch`, `mailbox.restore`, `master_key.activated`, `master_key.resealed`; automatic containment:
+        `message.resolve`, `suppression.remove` (only for a `complaint` suppression); webhooks:
+        `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.rotate_secret`, `webhook.replay`,
+        `webhook.disable`; privacy: `erasure.create`, `hold.set`, `hold.removed`, `hold.expired`,
+        `export.delete`; people: `member.invite`, `member.invite_resend`, `member.invite_revoke`, `member.join`,
+        `member.role_change`, `member.leave`, `member.remove`, `member.ownership_transfer`, `user.delete`,
+        `user.notifications_resume`, `user.oauth_unlink`, `waitlist.invite`; billing:
+        `billing.checkout_started`, `billing.portal_opened`, `billing.mode_change`, `billing.plan_set`,
+        `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`,
+        `billing.dispute_closed`, `billing.refund_recorded`; platform operations: `ops.switch`,
+        `mailbox.restore`, `master_key.activated`, `master_key.resealed`; automatic containment:
         `partner.auto_suspend`, `tenant.auto_pause`, `domain.auto_pause`; and `mail.read`, one row per request
         by a platform or partner key to a route that returns mail content, written before the response. **Sends
         are not audit rows**: each send is recorded by its message, its events (`message.sent` and the delivery
@@ -13190,9 +13195,10 @@ components:
         disabled_reason:
           type: [string, 'null']
           description: >-
-            `manual`, `failing` (a `410` or 100 failures over 24 hours), or `url_changed` (a `PATCH` changed the
-            URL; a passing test delivery re-enables it, [J29]).
-          enum: [manual, failing, url_changed, null]
+            `manual`, `failing` (a `410` or 100 failures over 24 hours), `url_changed` (a `PATCH` changed the
+            URL; a passing test delivery re-enables it, [J29]), or `creator_removed` (the person who created it
+            left the workspace or lost `webhooks:manage`; an owner or admin re-enables it, [W47]).
+          enum: [manual, failing, url_changed, creator_removed, null]
         created_at:
           type: string
           format: date-time

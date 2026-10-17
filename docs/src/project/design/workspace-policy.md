@@ -54,7 +54,7 @@ has no entry.
 |---|---|---|
 | Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones` | `403 scope_denied`, `details.reason = "not_writable"` |
 | Platform or own partner | `quarantine.key_release` | `403 scope_denied`, `details.reason = "not_writable"` ([J14](../edge-cases.md)) |
-| Lower-only | The 16 fields of the configuration table, and `accounts.require_approval` | At most its **workspace ceiling**; above it `403 scope_denied`, `details.reason = "above_ceiling"`, `details.ceiling`, `details.ceiling_source` ([J23](../edge-cases.md)) |
+| Lower-only | The fields the configuration table lists as lower-only, `accounts.require_approval` among them | At most its **workspace ceiling**; above it `403 scope_denied`, `details.reason = "above_ceiling"`, `details.ceiling`, `details.ceiling_source` ([J23](../edge-cases.md)) |
 | Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp` | Any value as a person; a key may only tighten, unless keys may take decisions reserved for people ([§3](#3-decisions-reserved-for-people), [J25](../edge-cases.md)) |
 | Free | Every other field | Any valid value |
 

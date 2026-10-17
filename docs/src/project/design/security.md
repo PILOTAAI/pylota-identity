@@ -297,7 +297,11 @@ warn before expiry. Expired keys are kept for audit and can be deleted (revoked)
 1. Generate a new 32-byte secret; keep `id`, `lookup`, `level`, scope and permissions.
 2. In one D1 statement: `prev_hash = hash`, `prev_expires_at = now + overlap_hours`,
    `hash = HMAC(new token)`. With `overlap_hours = 0`, `prev_hash` and `prev_expires_at` are set to NULL.
-3. Return the new token once; audit `key.rotate`.
+3. In the same statement, `created_by_user_id` and `created_by_role` become the rotating principal's: the
+   calling key's own values, the console person and role, or `NULL` for a platform or partner caller. The
+   new secret is then traced to whoever received it, so removing that person revokes it
+   ([W48](../edge-cases.md)).
+4. Return the new token once; audit `key.rotate`.
 
 A second rotation during an overlap replaces `prev_hash` with the current hash, so at most two secrets
 are ever valid. Revocation (`DELETE /v1/keys/{key_id}`) sets `revoked_at` and clears `prev_hash`.
@@ -368,7 +372,10 @@ partner's keys, [Partner keys](#partner-keys)), `tenant` (one tenant) and `ident
   list it (step 2), and platform and partner keys hold it only when listed.
 - The caller needs `keys:manage`. The new key's `mode` is its tenant's mode; platform and partner keys
   are `live`.
-- `created_by_key_id` records the lineage. Revoking a key does not revoke its children; the
+- `created_by_key_id` records the lineage, and `created_by_level` who minted it: the calling key's level
+  (`platform`, `partner`, `tenant` or `identity`), `console` for a console session, or `setup` for the
+  bootstrap key. Rotating and revoking a provider-minted key is reserved to the provider
+  ([Managing existing keys](#managing-existing-keys), check 3). Revoking a key does not revoke its children; the
   compromised-key runbook ([Observability](observability.md#compromised-key)) revokes descendants
   explicitly.
 - Minting and revoking a key write `key.create` and `key.revoke` audit rows; for a partner key
@@ -391,7 +398,9 @@ batch as the change, each with a `key.revoke` audit row whose `details.reason` n
 
 - **Removal or leaving.** When a person is removed from a workspace, leaves it, or deletes their account
   (which leaves every workspace first), every key of that workspace that is neither revoked nor expired
-  and has their `created_by_user_id` is revoked (`creator_removed`).
+  and has their `created_by_user_id` is revoked (`creator_removed`), and every enabled webhook endpoint of
+  the workspace with their `created_by_user_id` is disabled (`disabled_reason = 'creator_removed'`,
+  [W47](../edge-cases.md)).
 - **Role change.** When a person's role is lowered (an admin made a member or viewer, or the owner made an
   admin by an ownership transfer), every such key that holds a permission the new role's session
   principal lacks is revoked (`creator_role_changed`); the others stay and get the new
@@ -410,7 +419,8 @@ v1.1.
 #### Managing existing keys
 
 FR-KEY-1, [J20](../edge-cases.md). `GET /v1/keys/{key_id}`, `DELETE /v1/keys/{key_id}` (revoke) and
-`POST /v1/keys/{key_id}/rotate` need `keys:manage` and two checks on the target key, in this order:
+`POST /v1/keys/{key_id}/rotate` need `keys:manage` and these checks on the target key, in this order (the
+third only for rotate and revoke):
 
 1. **Reach** (section 5.2, step 4). A platform key reaches every key. A partner key reaches the tenant and
    identity keys of its own tenants. A tenant key reaches the tenant and identity keys of its own tenant.
@@ -420,8 +430,14 @@ FR-KEY-1, [J20](../edge-cases.md). `GET /v1/keys/{key_id}`, `DELETE /v1/keys/{ke
    and every permission of the target is one the caller can grant (step 3 above: its own resolved
    permissions, plus `identities:sign` for a platform or partner key). Otherwise
    `403 key_scope_exceeded`: nothing changes and nothing about the key is returned.
+3. **Provider-managed** (rotate and revoke only). A key whose `created_by_level` is `platform` or `partner`
+   belongs to the provider that minted it: only a platform key, or a partner key that reaches it, may
+   rotate or revoke it. A tenant or identity key, or a console session, gets `403 key_scope_exceeded` with
+   `details.reason = "provider_managed"` and can still read it. So a workspace admin can neither take the
+   secret of the key Pylota's partner key minted for the workspace nor break that integration
+   ([W48](../edge-cases.md)).
 
-A key always passes both checks for itself, so it can rotate or revoke itself. `GET /v1/keys` lists only
+A key always passes these checks for itself, so it can rotate or revoke itself. `GET /v1/keys` lists only
 the keys that pass both. Only a platform key reaches a partner key, as above.
 
 #### Partner keys
@@ -1328,6 +1344,8 @@ address used by the integration suite, captures all Worker output, and fails if 
 | `it::auth::missing_permission` | A key lacking a route's permission gets `403 permission_denied` with `details.required` naming it, on a real and on a missing target alike | section 5.2 |
 | `it::keys::w35_tenant_erase_owner_only` | A tenant-scope erasure request with `erasure:manage` but without `tenants:erase` gets `403 permission_denied` (`details.required = ["tenants:erase"]`) and starts nothing, from an admin's console key and from keys it minted; the owner's console session mints a tenant key with `tenants:erase`, which erases the tenant and mints a child that may hold it too; an admin's session cannot list it; a partner key with both permissions erases its own tenant | section 4.6, [W35](../edge-cases.md) |
 | `it::members::w36_removed_member_keys_revoked` | Keys an admin minted in the console, and a key one of them minted, record the admin's `created_by_user_id`; removing the admin, or the admin leaving, revokes all of them in the removal batch (`401 key_revoked` next, `key.revoke` rows with `creator_removed`) and no other key; making an admin a member revokes their keys holding a permission a member lacks and keeps the others; an ownership transfer revokes the former owner's keys holding `tenants:erase` | section 4.6, [W36](../edge-cases.md) |
+| `it::members::w47_removed_member_endpoints_disabled` | An admin creates a webhook endpoint in the console and another with a key the admin minted; removing the admin, the admin leaving, and demoting the admin to member each disable both (`disabled_reason = 'creator_removed'`, a `webhook.disable` audit row each) in the same batch, and no event reaches them afterwards; endpoints other people created keep receiving; an owner's `PATCH … enabled: true` re-enables one and records the owner as its creator ([W47](../edge-cases.md)) |
+| `it::keys::w48_rotation_provenance` | A tenant key minted by a partner key: an admin's tenant key with `keys:manage` and a console session each get `403 key_scope_exceeded` (`details.reason = "provider_managed"`) on rotate and revoke, can still read it, and the partner key rotates it; an admin's key rotating the owner's narrower key receives the secret and the key's `created_by_user_id` and `created_by_role` become the admin's, so removing the admin revokes it; a key rotating itself keeps its lineage ([W48](../edge-cases.md)) |
 | `it::auth::j22_tenant_aggregate_limits` | Four tenant keys of one tenant together get `429 rate_limited` (`details.bucket = "tenant"`) on the 1,801st request in a minute although each is under 600; three partner keys of one partner the same with `details.bucket = "partner"`; the 101st active key of a tenant and the 11th partner key of a partner get `422 key_limit_reached`, also when two mints race for the last place (exactly one succeeds); a revoked or expired key frees its place | section 10, [J22](../edge-cases.md) |
 | `it::tenants::create_idempotent_replay` | A `POST /v1/tenants` replayed with the same `Idempotency-Key` and body returns the stored `201` body with `Idempotent-Replayed: true` and creates one tenant and one `TenantQuota`; a changed body gets `409 idempotency_conflict`; `owner` and `billing` are stored but send no mail and change no limit | section 4.6, M5 |
 | `worker::quota::stub_answers_every_variant` | The M5 `TenantQuota` stub answers every `QuotaRequest` variant with the answer type of [Outbound › TenantQuota](outbound.md#tenantquota) as the build plan's stub table says, and refuses each one before `Init` and for a mismatched owner | section 5.2, M5 |

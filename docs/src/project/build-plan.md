@@ -427,10 +427,11 @@ well-formed answer. Later milestones replace behaviour, never a signature:
 |---|---|---|
 | `Init` | Stores the owner in `meta`; every other request checks it | final |
 | `Reserve`, `Release` | `Reserve` takes its `sends` hold as `Hold` does and counts the day's `sends:{identity_id}` counter, and the tenant `sends` counter unless `tenant_cap` is `None` (the system identity), without enforcing a cap; `Release` decrements the same counters (`sends` only when `tenant_counted`) | M9: daily caps (`CapReached`) and `quota.warning` thresholds |
-| `RecordOutcome` | Records the outcome in `outcomes` and the tenant's per-day outcome counters (once per `event_id`); never pauses an identity, a tenant or a domain | M9: abuse auto-pause (FR-DLV-3) and the tenant and domain pause (FR-DLV-6, G12) |
+| `RecordOutcome` | Records the outcome in `outcomes` and the tenant's per-day outcome counters (once per `event_id`); answers `OutcomeDecision` with every field false or `None`, so it never pauses an identity, a tenant or a domain | M9: abuse auto-pause (FR-DLV-3) and the tenant and domain pause (FR-DLV-6, G12) |
 | `AdmitInbound` | Counts `inbound_hour`; always `Admit` | M7: the per-tenant inbound cap (`Throttle`, D13) |
 | `CountTriageModel` | Counts `triage_model` once per `ref`; always `Ok` | M12: the daily model cap (`CapReached`) |
 | `OutcomeRates` | Zero counts (`{ outcomes: 0, bounced: 0, complained: 0 }`) | M24: sums the tenant's outcome counters for the send ramp |
+| `SystemMail` | Always `SystemMailAnswer::Ok`; counts nothing | M24: the system-mail budgets (`sysmail:{class}:{key}` counters, `Spent { scope }`) |
 | `CountAgentic` | Counts `agentic` for the day and `usage:agentic`; always `Ok { used }` | M11: the tenant daily cap (`CapReached`) |
 | `RecordUsage` | Adds to `usage:{metric}` for the current UTC day | final |
 | `ForgetIdentity` | Deletes the identity's `outcomes` rows and `sends:{identity_id}` counters | final |
@@ -578,7 +579,7 @@ No deployment runs these stubs in production; the first staging deploy is M20.
 ([Inbound › The `wait` handler](design/inbound.md#the-wait-handler-e4)), which is P0 because quarantine
 rule 5 (E5) depends on its registrations.
 
-**Acceptance:** A2, A6 (`it::inbound::a6_reject_codes`; its SES part in M23), A9, A10 (inbound part), A13, A16, B1 (documented), B2 (with `it::inbound::panic_to_degraded`), B3, B12 (`it::index::b12_extraction_failure`; the search part in M10), B14, C1 (with `it::thread::seq_never_reused`), C9, D4, D5, D9, D10,
+**Acceptance:** A2, A6 (`it::inbound::a6_reject_codes`; its SES part in M23), A9, A10 (inbound part), A13, A16, B1 (documented), B2 (with `it::inbound::panic_to_degraded`), B3, B12 (`it::index::b12_extraction_failure`; the search part in M10), B14, C1 (with `it::thread::seq_never_reused`), C9, C10 (`it::inbound::c10_forged_participant_unverified`), D4, D5, D9, D10,
 D12, D13 (`it::inbound::d13_unsolicited_flood_caps`; the triage cap in M12),
 E4 (`it::wait::e4_*`), E5, J1, J2, J7, J14 (`it::quarantine::j14_key_release_policy`), J16
 (`it::quarantine::j16_key_release_override`), the message, thread and quarantine routes added to J10's
@@ -664,7 +665,8 @@ lazily and reconciliation is event-driven, so neither has an alarm; no cron is i
 `it::send::g2_delivery_failed_recipients`; G4 with `it::send::g4_suppressed_after_submit`), G8–G11 (G5 with
 signed links; G9's re-check of the marketing transport at `BeginTransport`, which needs an `ses` domain, is
 accepted in M13), G12 (`it::delivery::g12_tenant_domain_pause` and `it::send::sending_paused_refuses`; the
-domain part seeds a tenant domain row through the itest hooks), I9 (`it::erasure::orphan_objects_swept`,
+domain part seeds a tenant domain row through the itest hooks), G13
+(`it::delivery::g13_first_reply_outcomes_not_counted`), I9 (`it::erasure::orphan_objects_swept`,
 with the mailbox's daily sweep in `mailbox/alarms.rs`), J28 (`it::send::j28_transport_breaker`), the loop
 guard of N13 (`it::send::n13_loop_guard`; the forwarding part in M23), K3, L1–L4. J13
 (`it::partners::j13_suspended_partner`, whose authentication part runs from M5): no send is accepted for
@@ -1103,7 +1105,8 @@ including identity-key management on the identity page ([Agent signing keys §6]
 - Edge rows W9, W10, W15–W18, W35 (`it::keys::w35_tenant_erase_owner_only`, and the tenant-erasure row
   of `it::console::w18_role_and_scope`: the owner's session principal holds `tenants:erase`, an admin's
   never) and W36 (`it::members::w36_removed_member_keys_revoked`: the console's key form records the
-  person and role, and removal, leaving and role changes revoke their keys).
+  person and role, and removal, leaving and role changes revoke their keys), W47
+  (`it::members::w47_removed_member_endpoints_disabled`) and W48 (`it::keys::w48_rotation_provenance`).
 - J18 (`it::partners::j18_partner_limits`), accepted here with its invitation case, which counts in
   `RL_PARTNER` with tenant creations; its `max_tenants` part runs from M5 and its erased-tenant case from
   M14.

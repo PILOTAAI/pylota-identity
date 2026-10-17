@@ -1935,6 +1935,10 @@ Reading, revoking and rotating a key follow two rules ([J20](../project/edge-cas
 - **Not wider.** The target's level must be at most the caller's, and each of its permissions one the
   caller holds (or, for a platform or partner caller, `identities:sign`). Otherwise
   `403 key_scope_exceeded`, and nothing is changed or returned. A key always passes for itself.
+- **Provider-managed** (rotate and revoke). A key a platform or partner key minted (`created_by_level`
+  `platform` or `partner`) can be rotated or revoked only by a platform key or a partner key that reaches
+  it; other callers get `403 key_scope_exceeded` with `details.reason = "provider_managed"`
+  ([W48](../project/edge-cases.md)). A key always passes for itself.
 
 `GET /v1/keys` lists only the keys that pass both rules.
 
@@ -1942,7 +1946,9 @@ Reading, revoking and rotating a key follow two rules ([J20](../project/edge-cas
 
 `{ "overlap_hours": 24 }` (0–168). Returns a new secret. The old one keeps working until the overlap ends.
 The caller must reach the key and not be narrower than it, as above, so no key can obtain a wider key's
-secret.
+secret. The key's `created_by_user_id` and `created_by_role` become the caller's (its own values, or the
+console person; `null` for a platform or partner caller), so the new secret is traced to whoever received
+it ([W48](../project/edge-cases.md)).
 
 ---
 
@@ -2124,6 +2130,7 @@ Audit rows cover administrative actions. These are every `action` value:
 - domains: `domain.create` (with any MX records `replace_mx` deleted), `domain.transport`, `domain.evict`;
 - service accounts: `account.request`, `account.approve`, `account.reject`, `account.close`, `account.delete`;
 - mail: `quarantine.release`, `message.cancel`, `message.resolve`, `suppression.remove` (only for a `complaint` suppression);
+- webhooks: `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.rotate_secret`, `webhook.replay`, `webhook.disable` (a creator left, [W47](../project/edge-cases.md));
 - privacy: `erasure.create`, `hold.set`, `hold.removed`, `hold.expired`, `export.delete`;
 - people: `member.invite`, `member.invite_resend`, `member.invite_revoke`, `member.join`, `member.role_change`, `member.leave`, `member.remove`, `member.ownership_transfer`, `user.delete`, `user.notifications_resume`, `user.oauth_unlink`, `waitlist.invite`;
 - billing: `billing.checkout_started`, `billing.portal_opened`, `billing.mode_change`, `billing.plan_set`, `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`, `billing.dispute_closed`, `billing.refund_recorded`;

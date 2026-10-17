@@ -228,11 +228,27 @@ the tenants they cover, so the identity filter needs no further check. A replay 
 when the endpoint's types need a permission the replaying key does not hold.
 
 **URL changes.** A `PATCH` that changes `url` sets `enabled = 0` and `disabled_reason = 'url_changed'` in
-the same update, audit-logged with the old and new host names. Nothing is delivered to the new URL until
+the same update, audit-logged (`webhook.update`) with the old and new host names. Nothing is delivered to the new URL until
 `POST /v1/webhooks/{id}/test` to it succeeds (a `2xx`), which sets `enabled = 1` and clears the reason.
 `PATCH … enabled: true` on a `url_changed` endpoint gets `400 invalid_request` (message "Send a test
 delivery to confirm the new URL"). Events that occur meanwhile are not queued for it (the fan-out reads
 enabled endpoints only); they can be replayed after the test.
+
+**Endpoints of a person who leaves ([W47](../edge-cases.md)).** An endpoint records who created it:
+`created_by_key_id`, and `created_by_user_id` copied from that key's `created_by_user_id` (or the console
+person). When that person is removed from the workspace, leaves it, deletes their account, or gets a role
+whose session principal lacks `webhooks:manage`, the same D1 batch that revokes their keys sets
+`enabled = 0` and `disabled_reason = 'creator_removed'` on every enabled endpoint of the workspace with
+their `created_by_user_id`, with a `webhook.disable` audit row each (`details.reason`). An endpoint is a way
+to read mail, so it must not outlive the access of the person who pointed it somewhere. An owner or admin
+re-enables it with `PATCH … enabled: true` after checking where it points; the caller becomes its
+`created_by_key_id` and `created_by_user_id`.
+
+**Audit.** Creating, changing, re-enabling and deleting an endpoint, rotating its secret and replaying to
+it write `webhook.create`, `webhook.update` (`details.from_host` and `details.to_host` when the URL
+changed), `webhook.delete`, `webhook.rotate_secret` and `webhook.replay` rows; the automatic disabling above
+writes `webhook.disable`. A disable for `failing` is a platform event (`webhook.disabled`), not an audit
+row.
 
 ## Handing new mail to the Notifier
 
@@ -319,7 +335,8 @@ pub fn signature_header(current: &[u8], previous: Option<&[u8]>, content: &[u8])
 - **Rotation.** `POST /v1/webhooks/{id}/rotate-secret` with `overlap_hours` (0–168): the current secret
   is unsealed and re-sealed with the associated data of `prev_secret_enc` (the column is part of the
   associated data, so the ciphertext cannot simply be copied), `prev_secret_expires_at = now + overlap`
-  (both `NULL` when the overlap is 0), and `secret_enc` = a newly generated secret. Audit-logged.
+  (both `NULL` when the overlap is 0), and `secret_enc` = a newly generated secret. Audit-logged
+  (`webhook.rotate_secret`).
 
 ## HTTP client and SSRF rules
 
@@ -479,7 +496,7 @@ events (FR-WH-3):
    then queue `Deliver { attempt: first_attempt, first_attempt, replay: true }`. The full retry schedule
    restarts for the replay. The payload is read from the owner as for a normal delivery, so an event whose
    message was erased can no longer be replayed (`event_unavailable`).
-4. Respond `202 { "queued": n }`. Audit-logged.
+4. Respond `202 { "queued": n }`. Audit-logged (`webhook.replay`).
 
 ## Test deliveries
 
