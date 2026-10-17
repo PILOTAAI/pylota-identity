@@ -31,8 +31,8 @@ gate and its webhook reconciliation would have nothing to stand on.
    | Drafts, approval before send, scheduled send | [Drafts](../design/drafts.md) | FR-DRF | Q | M29 |
    | Event feed, durable consumers, live stream | [Event feed](../design/event-feed.md) | FR-EVT | R | M30 |
    | Screening hold for mail that steers agents | [Screening](../design/screening.md) | FR-SCR | T | M31 |
-   | Calendar invitations (iMIP in and out, no calendar store) | [Calendar invitations](../design/calendar-invitations.md) | FR-CAL | U | M32 |
-   | Uploads for attachments | [Uploads](../design/uploads.md) | FR-UPL | V | M33 |
+   | Calendar invitations (iMIP in and out, no calendar store) | [Calendar invitations](../design/calendar-invitations.md) | FR-CAL | V | M32 |
+   | Uploads for attachments | [Uploads](../design/uploads.md) | FR-UPL | Q (Q65–Q108) | M33 |
    | Agent self-sign-up, behind `PM_AGENT_SIGNUP` (off by default) | [Agent self-sign-up](../design/agent-signup.md) | FR-ASU | X | M34 |
    | Deliverability metrics | [Metrics](../design/metrics.md) | FR-MET | Y | M35 |
    | TypeScript SDK, skills, MCP and CLI tooling for agents | [SDKs and skills](../design/sdk-and-skills.md) | FR-SDK-2 onward | Y | M36 |
@@ -85,37 +85,31 @@ gate and its webhook reconciliation would have nothing to stand on.
 
 ## Integration
 
-This record was written while PR #5 (the review fixes on `agent/docs-validation-oct10`) was still open and
-editing the shared pages. So the new pages were written as new files, each with an **Integration
-checklist**. After PR #5 merges, merge `main` into `agent/agentmail-parity` and apply the edits in this
-order:
+The nine pages were written as new files while PR #5 was still editing the shared pages, then folded into
+those pages on 2026-10-18, on top of PR #5's final head (`97ba036`):
 
-1. `SUMMARY.md`: the nine design pages under Design, the gap register under Project, ADR 0017 under
-   Decision records (already on this branch).
+1. `SUMMARY.md` lists the nine design pages, the gap register and this record.
 2. `prd.md`:
-   - In § 4: remove the two superseded non-goals, add the refusals as non-goals with one-line reasons,
-     and replace the competitive rows from Decision 6.
-   - In § 5: update the scope table (Outbound gains drafts and scheduled send; Integrations gains the
-     feed, the stream, the TypeScript SDK and skills; Inbound gains screening and calendar).
-   - In § 6: add the FR rows from each page.
-3. Each page's checklist, in milestone order (M29 → M37). Each checklist covers `reference/api.md`,
-   `reference/openapi.yaml`, `reference/errors.md`, `reference/events.md`, `reference/limits.md`,
-   `reference/configuration.md`, `design/data-model.md`, `design/security.md`, `design/mcp.md` with
-   `reference/mcp.md`, `reference/cli.md`, `design/console.md` and `design/observability.md`.
-4. `architecture.md`: the new Durable Object class from the event-feed page (the class count, the
-   storage table, § 4.4) and the entry points that change.
-5. `edge-cases.md`: sections Q, R, T, U, V, X, Y and Z, and the header counts.
-6. `build-plan.md`: M29–M37, the timeline and the dependency graph.
-7. `design/testing.md`: the new test modules.
-8. Reply extraction: an Arabic attribution sample in `crates/conformance` and its pattern in
-   `inbound.md` (GAP-21).
-9. Run the gate:
-   - `mdbook build` with 0 warnings;
-   - `check_built.py`;
-   - `check_openapi.py` (the errors page, the `ErrorCode` enum and every route's `x-error-codes` agree,
-     and every example validates);
-   - `register.py` (rows, tests, milestones, duplicates);
-   - the duplicate-key scan.
+   - § 4 drops the two superseded non-goals, adds the refusals as non-goals with their reasons, and
+     carries the competitive rows of Decision 6.
+   - § 5's scope table gains the new features.
+   - § 6 gains § 6.16–§ 6.22 (FR-DRF, FR-EVT, FR-SCR, FR-CAL, FR-UPL, FR-MET, FR-ASU). FR-SDK-2 onward
+     join § 6.11, and the parity additions' requirements join their existing sections.
+3. The reference pages carry the routes, schemas, errors, events, limits, policy fields, MCP tools and CLI
+   commands: `api.md`, `openapi.yaml`, `errors.md`, `events.md`, `limits.md`, `configuration.md`,
+   `mcp.md` and `cli.md`. `errors.md`, the `ErrorCode` enum and the routes' `x-error-codes` list the same
+   161 codes.
+4. The design pages each feature extends carry its storage, rules and operations.
+5. `architecture.md` has the seventh Durable Object class (`TenantEvents`) and the `pm-screen` queue.
+6. `edge-cases.md` has sections Q (drafts and uploads), R, T, V (calendar), X, Y and Z.
+   - Calendar rows use V and uploads rows join Q as Q65–Q108. U would collide with the PRD's selling
+     points U1–U10, and every other free letter already names something: M milestones, P priorities and
+     S spikes.
+7. `build-plan.md` has M29–M37 in its dependency graph, before M20.
+8. `design/testing.md` has the new test modules and prefixes.
+
+Still open: the Arabic attribution pattern for reply extraction waits for a conformance sample (GAP-21).
+The phase timeline in the build plan has not been re-estimated for the nine milestones.
 
 ## Consequences
 

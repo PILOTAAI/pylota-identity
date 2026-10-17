@@ -317,6 +317,7 @@ After any successful sign-in (and two-step verification), the first matching row
 |---|---|
 | A valid `next` was carried through sign-in: a relative path starting with `/console/`, with no `//`, no backslash and no scheme ([W31](../edge-cases.md)) | That page |
 | The sign-in accepted an invitation (its accept page, or **Accept with Google** or **GitHub**) | That workspace's Overview |
+| The sign-in confirmed or claimed an agent sign-up ([Agent self-sign-up § 19](agent-signup.md#19-console)) | That workspace's Overview |
 | No workspace, and a pending invitation exists for this address | The pending invitations, `/console/invitations`, each with its own **Accept** button. Nothing is accepted without that click ([W40](../edge-cases.md)) |
 | No workspace, and sign-up is open or the address has a valid waitlist invite ([§6.1](#61-before-launch-the-waitlist)) | Create your workspace ([§6.2](#62-after-launch-open-sign-up)), with the plan from the sign-up token or OAuth flow |
 | No workspace, sign-up is closed or waitlist, and no valid waitlist invite | "No workspace yet", explaining how to be invited |
@@ -330,8 +331,8 @@ After any successful sign-in (and two-step verification), the first matching row
 
 **Frame.** A header with the workspace switcher, a "Test" badge for test tenants, the plan name and the
 user menu (settings, security, sign out). A left navigation, in this order: Overview, Inboxes, Search,
-Quarantine, Service accounts, Domains, Webhooks, API keys, Connect, Members, Plan and usage, Audit log,
-Settings (with the workspace policy).
+Quarantine, Drafts, Screening, Service accounts, Domains, Deliverability, Webhooks, API keys, Connect, Members,
+Plan and usage, Audit log, Settings (with the workspace policy).
 
 **Body, top to bottom:**
 
@@ -346,7 +347,11 @@ Settings (with the workspace policy).
    - an identity paused for bounces or complaints;
    - two-step verification required but missing;
    - your notification emails paused after a bounce or complaint, with "Confirm your address"
-     ([Notifications § 5](notifications.md#5-the-emails)).
+     ([Notifications § 5](notifications.md#5-the-emails));
+   - in a workspace created by agent self-sign-up, until dismissed with the checklist: "An AI agent created
+     this workspace on 17 October 2026 and holds the key 'agent sign-up'. Review its access on the keys
+     page." ([Agent self-sign-up § 19](agent-signup.md#19-console)). Its first-run steps "Create your first
+     inbox" and "Create an API key" are already done, from real data.
 2. **First-run checklist**, until its required steps are done ([below](#first-run-checklist)).
 3. **Needs a person.** The actions that only a person should take, each linking to the screen that
    resolves it:
@@ -356,7 +361,10 @@ Settings (with the workspace policy).
    - webhook endpoints that are failing or disabled;
    - invitations about to expire;
    - service sign-ups waiting for approval (count, plus the five oldest with inbox and service;
-     [Service sign-up ledger §8](service-accounts.md#8-console)).
+     [Service sign-up ledger §8](service-accounts.md#8-console));
+   - drafts awaiting approval (the count and the five oldest, with inbox, kind and recipient count;
+     [Drafts § 16](drafts.md#16-console));
+   - scheduled sends that failed (the count, with the most common `failure.reason`).
 
    The daily "needs a person" email reads the same counts ([Notifications](notifications.md#3-how-notifications-are-produced)).
 4. **Usage.** A meter per allowance (inboxes, sends, triage analyses, custom domains, storage, seats) from
@@ -452,7 +460,8 @@ sending history ([W30](../edge-cases.md)).
   `complained / outcomes` nor `bounced / outcomes` is above the tenant's `policy.abuse` thresholds (both
   are 0 with no outcomes), it sets `ramp_lifted_at = now` and writes the audit row `tenant.ramp_lifted`.
   Otherwise the ramp stays, the audit row `tenant.ramp_held` records the rates, and the workspace is
-  evaluated again the next day.
+  evaluated again the next day. For a tenant created by agent self-sign-up, the 7 days and
+  `OutcomeRates { since }` count from `agent_signups.verified_at`.
 - **Operator review.** The third `tenant.ramp_held` row of a workspace raises the state alert
   `signup_ramp_review:{tenant_id}` (ticket; [Observability › Alert list](observability.md#53-alert-list)).
   Nothing is suspended automatically. The ramp stays and is still evaluated daily; the operator may
@@ -478,11 +487,13 @@ therefore counted, before it is submitted, against exact budgets kept by the def
 | `signin` | Sign-in, re-authentication, sign-up, waitlist confirmation and OAuth link codes | 10 per recipient (with `invitation`); 20 per client network (IPv4 address or IPv6 /64) and 200 per ASN (`request.cf.asn`) |
 | `invitation` | Invitations and their re-sends, waitlist invites, and the owner email of `POST /v1/tenants` | 10 per recipient (with `signin`); 50 per inviting tenant (for `POST /v1/tenants`, per creating partner, or one bucket for platform keys; a spent budget refuses the request before the tenant is created); at most 20% of the system identity's day |
 | `notification` | Every Notifier email except `account`, and every role-address relay ([Inbound › Role mail relay](inbound.md#role-mail-relay)) | The Notifier's own caps ([Notifications § 3](notifications.md#caps-and-the-daily-digest)) and the relay's own limits (30 an hour per domain, 5 an hour per envelope sender); role relays at most 5% of the system identity's day (the `sysmail:role` counter); at most 50% of the system identity's day together |
+| `signup` | Agent sign-up code emails | 5 per recipient (base address), counted apart from `signin`; 3 sign-ups per person, 5 per client network, 100 per ASN, `PM_AGENT_SIGNUP_DAILY_CAP` per deployment; at most 5% of the system identity's day |
 | `account` | `account` emails, and operator alert email to `PM_ALERT_EMAIL` ([Observability § 5.5](observability.md#55-alert-email-and-the-external-heartbeat)) | none besides the day |
 
 - **The system identity's day** is its `send_policy.daily_cap` (50,000), lowered to 20% of
-  `PM_DAILY_SEND_QUOTA` when that variable is set. Because `invitation` and `notification` together can
-  use at most 70% of it, at least 30% of every day stays for `signin` and `account` mail.
+  `PM_DAILY_SEND_QUOTA` when that variable is set. `invitation`, `notification` and `signup` together can
+  use at most 75% of it, so at least 25% of every day stays for `signin` and `account` mail
+  ([Agent self-sign-up](agent-signup.md)).
 - **Keys.** The recipient is a keyed hash (`HMAC(PM_HASH_KEY, address)`), the network and the ASN are
   hashed the same way, and the tenant is its ID; no clear address or IP is stored. The counters are
   deleted with the day by the object's daily cleanup, like the other daily counters.
@@ -649,6 +660,8 @@ adds no migration ([Data model](data-model.md#1-d1-control-plane)).
 | `PM_OAUTH_GOOGLE_CLIENT_ID` / secret `PM_OAUTH_GOOGLE_CLIENT_SECRET` | unset | Enables Google |
 | `PM_OAUTH_GITHUB_CLIENT_ID` / secret `PM_OAUTH_GITHUB_CLIENT_SECRET` | unset | Enables GitHub |
 | Binding `RL_SIGNIN` | 10 per 60 s | Keyed by client network (`CF-Connecting-IP`; an IPv6 address by its /64 prefix), on `POST /console/sign-in`, `/console/sign-in/link`, `/console/sign-in/code`, `/console/sign-in/verify`, `/console/sign-up` and `/console/waitlist`, and `GET /console/oauth/{provider}/start` |
+| `PM_AGENT_SIGNUP` | `off` | `on` or `off`: agent self-sign-up ([Agent self-sign-up](agent-signup.md)); active only while `PM_SIGNUP = "open"`, billing and the console are on and the `agent_signup` switch is `on` |
+| `PM_AGENT_SIGNUP_DAILY_CAP` | `200` | Agent sign-ups per UTC day for the deployment, 1–10,000 (the `signup` budget's deployment key, [§10.2](#102-system-mail-budgets)) |
 | `PM_DAILY_SEND_QUOTA` | unset | Also sizes the system identity's day ([§10.2](#102-system-mail-budgets)) and turns on the shared-domain breaker ([§10.3](#103-shared-domain-breaker)); Pylota Mail Cloud must set it, because its account's quota is shared with Pylota |
 
 ## 13. Tests

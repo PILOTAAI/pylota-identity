@@ -394,7 +394,9 @@ pmail keys create --level identity --identity bookings@acme.example.com --name b
 ```
 
 Add the server to your MCP client's configuration. `pmail mcp config` prints this for the current
-profile:
+profile (`--client claude-code`, `cursor`, `codex`, `claude-desktop` or `agent-sdk` print each client's own
+form; a client that runs only local servers can use `pmail mcp stdio`, which reads the key from your
+profile):
 
 ```json
 {
@@ -466,10 +468,11 @@ The `timeout@` address is the best way to practise handling an uncertain send. S
 | `400 idempotency_key_required` | A send without `Idempotency-Key` | Add the header (or `--idempotency-key`) |
 | `409 identity_owner_required` | The identity has no accountable human | Set `--owner-name` and `--owner-email` |
 | `409 idempotency_conflict` | The key was used for a different message | Use a new key for a new message |
+| `403 approval_required` | The workspace's policy needs a person to approve this send | Create a draft and send it, so it waits for approval ([Sending › Drafts, approval and scheduled send](guides/sending.md#drafts-approval-and-scheduled-send)) |
 | `403 test_mode_recipient` | A test tenant tried to send to a real address | Send to `*@simulator.invalid` or to an identity on this deployment |
 | `ref:` finds nothing | The reference pack for that kind is off, or the reference is in an attachment whose text is not extracted yet | Enable `uk_vehicle` for plates and PCNs. Check the attachment's `text_status` |
 | `ask` returns `insufficient_evidence` | The mailbox does not hold an answer | Check the `trace` to see what was searched |
 | No webhook arrives | The endpoint failed or is not HTTPS | `pmail webhooks deliveries whk_…` shows each attempt and its error |
 
-Every error has a `fix` field with one sentence on what to do, and a `request_id` to quote in bug
-reports. The full list is in [Errors](reference/errors.md).
+Every error has a `fix` field with one sentence on what to do, a `docs` link to that error's entry in the
+documentation, and a `request_id` to quote in bug reports. The full list is in [Errors](reference/errors.md).

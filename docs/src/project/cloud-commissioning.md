@@ -38,19 +38,23 @@ Cloudflare's daily Email Sending quota is per account, so Cloud shares it with P
 
 ## 2. Release order
 
-Pylota's integration needs Cloud before the public does, so Cloud opens in three phases. Each phase is
-entered only through its gate ([§10](#10-go-live-gates)); going back is always one variable away.
+Pylota's integration needs Cloud before the public does, so Cloud opens in three phases, and agent
+self-sign-up comes after them as a fourth step. Each phase is entered only through its gate
+([§10](#10-go-live-gates)); going back is always one variable away.
 
 | Phase | Who can get in | `PM_SIGNUP` | What changes from the previous phase |
 |---|---|---|---|
 | **A. Partner-only** | Pylota's partner key and the workspaces it creates; the owner's default tenant | `waitlist` (the landing page collects the waitlist; nobody is invited) | Everything in [§4](#4-production-configuration) and [§7](#7-bootstrap-the-partner-and-pylotas-tenants) |
 | **B. Waitlist** | Plus people the owner invites in batches with `pmail waitlist invite` | `waitlist` | Invitations start; paid plans can be bought |
 | **C. Open (public v1.0 on Cloud)** | Anyone | `open` | `PM_SIGNUP=open` |
+| **D. Agent self-sign-up** | Plus AI agents that sign themselves up and name the person accountable for them ([Agent self-sign-up](design/agent-signup.md)) | `open` | `PM_AGENT_SIGNUP=on`, behind gate D |
 
 **Rolling back a phase.** `PM_SIGNUP=closed` stops all sign-ups and waitlist confirmations at the next
 deploy and leaves every account working; `PATCH /v1/partners/{partner_id}` with `status: suspended` contains
 Pylota at once ([J13](edge-cases.md)); `npx --yes wrangler@4.139.0 rollback` returns the Worker to the
-previous version ([Security §10](design/security.md#10-rate-limiting-and-abuse)).
+previous version ([Security §10](design/security.md#10-rate-limiting-and-abuse)). `PM_AGENT_SIGNUP=off`, or
+`pmail ops switch agent_signup off` without a deploy, stops new agent sign-ups and their mail while every
+provisional workspace keeps its lifecycle.
 
 ## 3. The Cloudflare account: shared, tightened
 
@@ -128,13 +132,16 @@ owner's private operations repository, never in `PILOTAAI/pylota-mail`.
 | `PM_SES_SNS_TOPIC_ARN`, `PM_SES_INBOUND_BUCKET`, `PM_SES_INBOUND_TOPIC_ARN`, `PM_SES_INBOUND_QUEUE_URL`, `PM_SES_RULE_SET` | As `pmail setup ses` writes them | – |
 | `PM_CF_SUBDOMAIN_SETUP` | `off` | No Enterprise child zones on Cloud |
 | `PM_WEB_BOT_AUTH` | `off` | Turned on only after spike S13 passed and the owner decides, by a later change to this page |
+| `PM_AGENT_SIGNUP` | `off` | Until gate D ([§10](#10-go-live-gates)) |
+| `PM_AGENT_SIGNUP_DAILY_CAP` | `200` | Agent sign-ups per UTC day for the deployment ([Cloud sign-up § 10.2](design/cloud-signup.md#102-system-mail-budgets)) |
 | `PM_DAILY_SEND_QUOTA` | The account's Email Sending daily quota from the dashboard (shared with Pylota) | Alert at 80% |
 | `PM_BACKUP_BUCKET` | `pylota-mail-backup` | Paying customers' mail gets the nightly copy (NFR-OPS-2) |
 | `PM_SECURITY_CONTACT` | A mailbox outside `pylotamail.com` that the owner reads, for example `security@pylota.io` | Mail to role names on the platform domain routes to it, so it must not be on that domain |
 | `PM_TRUSTED_AUTHSERV_ID` | Written by setup's mail test | – |
 | `PM_LOG_LEVEL` | `info` | – |
 | `PM_AI_GATEWAY`, `PM_SCANNER_URL` | unset | – |
-| `PM_EMBED_MODEL`, `PM_RERANK_MODEL`, `PM_AGENT_MODEL`, `PM_TRIAGE_MODEL`, `PM_DOH_RESOLVERS`, `PM_IDENTITY_KEY_OVERLAP_DAYS` | Defaults | – |
+| `PM_DOCS_URL` | unset | The default, `https://pylotamail.com/docs`, is where Cloud's docs are published |
+| `PM_EMBED_MODEL`, `PM_RERANK_MODEL`, `PM_AGENT_MODEL`, `PM_TRIAGE_MODEL`, `PM_SCREEN_MODEL`, `PM_DOH_RESOLVERS`, `PM_IDENTITY_KEY_OVERLAP_DAYS` | Defaults | – |
 
 **Secrets:**
 
@@ -176,8 +183,10 @@ console account; it is never a customer workspace.
   for every Cloud tenant. It is lower-only with `false` as the looser value, so neither a workspace nor a
   partner can turn it off; only a platform key can, tenant by tenant
   ([Workspace policy §2](design/workspace-policy.md#2-classes-and-ceilings)).
-- Every other field keeps its built-in default. `quarantine.key_release` stays `false` and
-  `web_bot_auth.allowed` stays `false`.
+- Every other field keeps its built-in default. `quarantine.key_release` stays `false`,
+  `drafts.key_approval` stays `false` and `web_bot_auth.allowed` stays `false`. Pylota's partner key sets
+  `drafts.key_approval` on its own operators' workspaces when it creates them
+  ([Drafts § 19](design/drafts.md#19-pylota-agentic-os)); no other workspace's keys approve drafts.
 
 ## 6. Stripe live mode
 
@@ -326,6 +335,7 @@ the phase; nothing is fixed by hand in the dashboard without the change being wr
 | **A** | Phase A, partner-only | M20 accepted on staging and the release tagged; CC1–CC14, CC18 and CC19 pass; the terms, privacy and DPA pages are live; a fresh agent that never saw this deployment rebuilds [§4](#4-production-configuration) and [§5](#5-the-cloud-default-policy) from the docs alone and finds no difference from the deployed configuration; an independent adversarial agent review of the deployed configuration, the token scopes and [§7](#7-bootstrap-the-partner-and-pylotas-tenants) finds nothing rated high; `PM_SIGNUP=waitlist` with no invitation sent |
 | **B** | Phase B, waitlist invitations | Gate A; Pylota's integration has run on Cloud for 14 days with no service-owned edge row failing in production and no state alert left open; CC15, CC16 and CC17 pass; the OAuth documentation re-read is recorded; the DMARC record is at `p=quarantine` |
 | **C** | Phase C, open sign-up | Gate B; the [pre-release checklist](design/security.md#16-pre-release-checklist) is complete, the external penetration test included; 30 days of phase B with every Free workspace's complaint and bounce rates under the auto-pause thresholds and no `signup_ramp_review` alert unanswered; the DMARC record is at `p=reject`; a second fresh-agent dry run and adversarial review pass on the phase-C configuration (`PM_SIGNUP=open`) |
+| **D** | Agent self-sign-up (`PM_AGENT_SIGNUP=on`) | Gate C; phase C has run for at least 30 days with no `containment:*` page, no `shared_domain_breaker` at stage 2 and no unresolved `signup_ramp_review`; DMARC on the platform domain is at `p=reject`; the two `live::signup` tests (`live::signup::x40_refuse_one_click_headers` and `live::signup::end_to_end`) pass on production with the variable on for one hour, then it is turned off again until the owner decides ([Agent self-sign-up › Milestone](design/agent-signup.md#26-milestone)) |
 
 The owner records each gate in a dated note in the private operations repository: the release tag, the
 check results, and the dry-run and review reports.

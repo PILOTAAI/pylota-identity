@@ -5,7 +5,14 @@ and sessions behind it. It implements FR-CON-1 to FR-CON-7, FR-CON-16, NFR-CON-1
 M21, and the edge-case rows W9–W10, W15–W18, W40 and W43 in the [edge-case register](../edge-cases.md); and the console parts
 of agent signing keys (FR-IDN-6, M25), of notifications (FR-CON-14, FR-CON-15, M26; rows O17–O19), of the
 workspace policy page (FR-TEN-4, [Workspace policy](workspace-policy.md)) and of the service sign-up ledger
-(FR-IDN-10, M27, [Service sign-up ledger](service-accounts.md)). The plan and usage
+(FR-IDN-10, M27, [Service sign-up ledger](service-accounts.md)); and the console parts of the parity features of
+[ADR 0017](../adr/0017-agentmail-parity.md): [Drafts § 16](drafts.md#16-console),
+[Event feed § 14](event-feed.md#14-console), [Screening hold § 21](screening.md#21-console-mcp-and-cli),
+[Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli),
+[Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli),
+[Agent self-sign-up § 19](agent-signup.md#19-console),
+[SDKs, skills and agent tooling § 15](sdk-and-skills.md#15-console) and
+[Parity additions](parity-additions.md) (webhook headers and identity-scope lists). The plan and usage
 page and everything about money is in [Plans, metering and billing](billing.md). Self-serve sign-up,
 Google and GitHub sign-in, two-step verification, the landing rules and the Overview (FR-CON-8 to
 FR-CON-13) are in [Cloud sign-up, sign-in and first run](cloud-signup.md), which extends this design.
@@ -23,7 +30,7 @@ FR-CON-13) are in [Cloud sign-up, sign-in and first run](cloud-signup.md), which
 
 The console is for the people who run the agents. Agents keep using the REST API and MCP. The console
 holds the views a person needs to check on them, and the actions that should need a person: keys,
-domains, members, quarantine release and billing ([PRD §4](../prd.md#4-goals-and-non-goals)). It is not a
+domains, members, quarantine release, draft approval and billing ([PRD §4](../prd.md#4-goals-and-non-goals)). It is not a
 webmail client: it has no compose or reply form.
 
 - **Same Worker.** `fetch` routes `/console` and `/console/*` to `console::router`. With `PM_CONSOLE=off`
@@ -57,7 +64,7 @@ webmail client: it has no compose or reply form.
   what a tenant key holding the same permissions may do (tenant search, `resume` of an abuse pause,
   tenant-scope erasure, `nameservers` when policy allows it), and never what needs a platform key. Unlike a
   key it is a person, so it may take the decisions reserved for people (release, loosening a guard field,
-  approving a service sign-up) whatever `PM_QUARANTINE_KEY_RELEASE` says
+  approving a service sign-up, approving a draft) whatever `PM_QUARANTINE_KEY_RELEASE` says
   ([Workspace policy §3](workspace-policy.md#3-decisions-reserved-for-people)).
   Validation, error codes, idempotency, metering and audit are therefore identical to the API's.
 - **Budget.** Server render time p95 ≤ 300 ms (NFR-CON-1). A page makes at most one D1 query for the
@@ -92,14 +99,19 @@ role's session principal holds, so the same checks run as for an API key.
 |---|---|---|---|---|
 | Read inboxes, threads, messages and attachments; keyword, semantic and hybrid search | Yes | Yes | Yes | Yes |
 | Agentic search | Yes | Yes | Yes | No |
-| Labels, read state, re-run triage | Yes | Yes | Yes | No |
+| Labels, read state, re-run triage; report on a screening verdict | Yes | Yes | Yes | No |
 | See quarantined mail and release it (sensitive) | Yes | Yes | Yes | No |
+| See the screening summary and the mail being screened | Yes | Yes | Yes | No |
+| See drafts, their approvals and schedules | Yes | Yes | Yes | No |
+| Approve a draft (sensitive); reject or cancel one | Yes | Yes | No | No |
 | Create, pause and resume identities | Yes | Yes | No | No |
 | See an identity's signing keys and its JWKS link | Yes | Yes | Yes | Yes |
 | Create, rotate and revoke an identity's signing keys (sensitive) | Yes | Yes | No | No |
 | See domains, their health and DNS records | Yes | Yes | Yes | Yes |
 | Add, verify and remove domains (add and remove are sensitive) | Yes | Yes | No | No |
-| Webhook endpoints: create, edit, rotate the secret, replay | Yes | Yes | No | No |
+| Webhook endpoints: create, edit, rotate the secret, replay; their custom delivery headers | Yes | Yes | No | No |
+| See event consumers and streams; delete a consumer | Yes | Yes | No | No |
+| See deliverability: pause windows, headroom and event counts | Yes | Yes | Yes | Yes |
 | API keys: list, create (sensitive), revoke | Yes | Yes | No | No |
 | Erasure and legal holds (sensitive): message, thread, counterparty and identity scope | Yes | Yes | No | No |
 | Delete the workspace (tenant-scope erasure, sensitive) | Yes | No | No | No |
@@ -118,10 +130,10 @@ role's session principal holds, so the same checks run as for an API key.
 
 | Role | Permission set of the session principal |
 |---|---|
-| `owner` | Every tenant-level permission: `identities:read`, `identities:write`, `identities:sign`, `domains:read`, `domains:write`, `messages:read`, `messages:send`, `messages:write`, `attachments:read`, `search:read`, `search:agentic`, `quarantine:review`, `webhooks:read`, `webhooks:manage`, `keys:manage`, `erasure:manage`, `tenants:erase`, `suppressions:manage`, `usage:read`, `audit:read`, `members:read`, `members:manage`, `policy:write`, `accounts:request`, `accounts:approve`; plus the console-only owner rights: billing, ownership transfer, deleting the workspace, and the workspace settings below |
+| `owner` | Every tenant-level permission: `identities:read`, `identities:write`, `identities:sign`, `domains:read`, `domains:write`, `messages:read`, `messages:send`, `messages:write`, `attachments:read`, `search:read`, `search:agentic`, `quarantine:review`, `webhooks:read`, `webhooks:manage`, `keys:manage`, `erasure:manage`, `tenants:erase`, `suppressions:manage`, `usage:read`, `audit:read`, `members:read`, `members:manage`, `policy:write`, `accounts:request`, `accounts:approve`, `drafts:read`, `drafts:write`, `drafts:approve`, `events:read`, `metrics:read`; plus the console-only owner rights: billing, ownership transfer, deleting the workspace, and the workspace settings below |
 | `admin` | The owner's tenant-level permissions (`identities:sign` included) except `tenants:erase`, without the console-only owner rights. Its `erasure:manage` covers every scope except `tenant`, which needs `tenants:erase` in the console's tenant-erasure route as in the API, so neither an admin nor a key an admin mints can delete the workspace ([W35](../edge-cases.md)) |
-| `member` | `identities:read`, `domains:read`, `messages:read`, `messages:write`, `attachments:read`, `search:read`, `search:agentic`, `quarantine:review`, `usage:read`, `members:read`, `accounts:request` (the console offers it only the accounts list) |
-| `viewer` | `identities:read`, `domains:read`, `messages:read`, `attachments:read`, `search:read`, `usage:read`, `members:read` |
+| `member` | `identities:read`, `domains:read`, `messages:read`, `messages:write`, `attachments:read`, `search:read`, `search:agentic`, `quarantine:review`, `usage:read`, `members:read`, `accounts:request` (the console offers it only the accounts list), `drafts:read`, `metrics:read` |
+| `viewer` | `identities:read`, `domains:read`, `messages:read`, `attachments:read`, `search:read`, `usage:read`, `members:read`, `metrics:read` |
 
 Rules:
 
@@ -143,7 +155,7 @@ Rules:
   `policy::write` service as `PATCH /v1/tenants/{tenant_id}/policy` with the session as a person
   ([Workspace policy §6](workspace-policy.md#6-the-console-page)): free fields, lower-only fields up to their
   ceilings (the deployment's, the platform operator's and, for a partner's workspace, the partner's), and the
-  guard fields. Platform-only fields and `quarantine.key_release` are shown read-only to every role; members
+  guard fields. Platform-only fields, `quarantine.key_release` and `drafts.key_approval` are shown read-only to every role; members
   and viewers see the whole policy read-only. Each save is a sensitive action, and a change that deletes mail
   (shorter retention) asks for a second, confirmed `POST`.
 - **Workspace settings** (name, time zone, `require_two_factor`) are console-only owner rights, like
@@ -158,6 +170,11 @@ Rules:
   `quarantine.key_release: true`, which only a platform key or the workspace's partner key can set (so a
   partner such as Pylota can release from its own review screen); a self-hosted deployment can also allow
   keys with `quarantine:review` everywhere (`on`, its default) (FR-CON-6).
+- **Draft approval** follows the same rule with its own field: a signed-in owner or admin approves a draft
+  (re-authentication, [Drafts § 16](drafts.md#16-console)). Where people decide, no API key approves, except
+  in a workspace whose policy has `drafts.key_approval: true`, and there only a platform key or the partner
+  key of the workspace's own partner, never a tenant key ([Drafts § 4.6](drafts.md#46-approve)).
+  `quarantine.key_release` does not open draft approval, and `drafts.key_approval` does not open release.
 - **Every handler checks the role**, through the console's route table, which registers each route with its
   required permission exactly like the API's deny-by-default table
   ([Security](security.md#51-deny-by-default-router-table)). A viewer's `POST` to a write route gets `403`,
@@ -340,8 +357,9 @@ session of the user. Revoked and expired rows are deleted 30 days later.
 
 Sensitive actions require a sign-in within the last 10 minutes and write an audit row (FR-CON-5):
 creating keys, creating, rotating or revoking an identity's signing keys, inviting or removing members,
-changing roles, transferring ownership, adding or removing domains, releasing quarantine, erasure and
-legal holds, saving the workspace policy, approving a service sign-up, and billing (Checkout and the
+changing roles, transferring ownership, adding or removing domains, releasing quarantine, approving a draft,
+erasure and legal holds, saving the workspace policy, approving a service sign-up, claiming an agent's inbox
+([Agent self-sign-up § 8](agent-signup.md#8-claiming-in-the-console)), and billing (Checkout and the
 Customer Portal). Confirming your address after a notification
 bounce is audited but needs no recent sign-in, because the re-authentication code would go to the
 suppressed address ([Notification settings](#notification-settings)).
@@ -369,7 +387,8 @@ Three layers, all required ([W16]):
 3. **Cookie.** `SameSite=Lax`, so cross-site `POST`s carry no session at all.
 
 The forms used before a session exists (sign-in, code, link, the pending step at
-`/console/sign-in/verify`, invitation acceptance, sign-up, waitlist) are checked by `Origin` alone; they
+`/console/sign-in/verify`, invitation acceptance, sign-up, waitlist, and the agent sign-up confirmation at
+`/console/agent-signup/verify`) are checked by `Origin` alone; they
 cannot act as a signed-in person. The OAuth callback is a `GET` from
 the provider and is bound to the browser by its `state` and `__Host-pm_oauth` cookie instead
 ([Cloud sign-up §4](cloud-signup.md#4-google-and-github)).
@@ -378,7 +397,9 @@ The unsubscribe pair (`GET` and `POST /console/notifications/unsubscribe`) is ex
 layers: it needs no session, and its `POST` is checked by neither the CSRF token nor `Origin`, because a
 mail provider sends the RFC 8058 one-click `POST` with neither ([W16](../edge-cases.md)). The token in
 the URL is its only authority, and it can only turn one notification kind off for one person in one
-workspace ([Unsubscribe links](#unsubscribe-links)).
+workspace ([Unsubscribe links](#unsubscribe-links)). The agent sign-up refuse pair (`GET` and
+`POST /console/agent-signup/refuse`) is exempt in the same way and for the same reason: its token is its only
+authority, and it can only put one address on the refusal list ([Agent self-sign-up § 9](agent-signup.md#9-not-me-complaints-and-refusals)).
 
 Console pages are served with `Referrer-Policy: same-origin`, not the API's `no-referrer`. The Fetch
 Standard sets the `Origin` header of a non-CORS `POST` to `null` when the page's referrer policy is
@@ -416,8 +437,12 @@ cannot act ([W17]):
   answers with the serving headers of [Security § 8.5](security.md#85-serving-attachments-and-raw-mime)
   (`Content-Disposition: attachment`, `Content-Security-Policy: sandbox`, `X-Content-Type-Options: nosniff`,
   `Cache-Control: private, no-store`). A message in quarantine serves none of its attachments.
-- Quarantined messages show the text view and the quarantine reason only. Risky attachments are never
-  offered for preview.
+- Quarantined and screening messages show the text view and the quarantine reason only
+  ([Screening hold § 21](screening.md#21-console-mcp-and-cli)). Risky attachments are never offered for
+  preview.
+- A message with a calendar object shows a read-only **Calendar** panel
+  ([Calendar invitations §13](calendar-invitations.md#13-console-mcp-and-cli)); it offers no answer buttons.
+  A quarantined message's panel shows only the method and the verified badge.
 - Display names, subjects and filenames are always escaped; links in text view are not made clickable.
 
 ## Invitations
@@ -626,6 +651,7 @@ where the event happened; for an event in no workspace, the default tenant.
 | `ownership_transferred` | The ownership transfer in `members/mod.rs` ([Members](#members)) | The previous owner and the new owner |
 | `payment_failed` | The billing webhook, in `billing/webhook.rs`, when the status becomes `past_due` ([Billing › Applying state](billing.md#applying-state)) | The owner |
 | `sign_in_codes_locked` | The code route, in `console/signin.rs`, when an address reaches 30 failed codes in a UTC day ([Using the code](#using-the-code)) | The person, once per lock |
+| `agent_signup_verified` | `signup/verify.rs`, when an agent sign-up is verified by code, link or claim ([Agent self-sign-up](agent-signup.md)) | The new owner |
 
 `account` emails are sent with `PM_NOTIFICATIONS=off`, to a suspended workspace, past the daily caps and
 while a person's other preferences are paused.
@@ -647,22 +673,30 @@ while a person's other preferences are paused.
 | `/console/workspaces` | Workspace picker and switcher | Signed in |
 | `/console/workspaces/new` | Create your workspace: name, address suffix, time zone ([Cloud sign-up §6.2](cloud-signup.md#62-after-launch-open-sign-up)) | Signed in, with no workspace or pending invitation, when sign-up is open or the person has a valid waitlist invite |
 | `/console` | Overview, the workspace home: banners, the first-run checklist, "Needs a person", usage meters, inboxes and recent activity ([Cloud sign-up §8](cloud-signup.md#8-the-overview-the-screen-people-land-on)). M21 builds a plain home first (the workspace name, the frame and its navigation, and a link to each screen), which M24 replaces with the Overview | All roles (viewers without action buttons) |
-| `/console/connect` | Connect your agent: the `claude mcp add` line, `.mcp.json`, a `curl` request and `pmail login`, with a key ID filled in, never a secret | Owner, admin |
-| `/console/inboxes`, `/console/inboxes/{idn}` | Identities with their addresses and status; one identity's threads with triage, and its signing keys with the JWKS link ([Identity signing keys](#identity-signing-keys)) | All roles. Create, rotate and revoke signing keys: owner, admin |
-| `/console/inboxes/{idn}/threads/{thr}` | A thread; each message in text view, HTML on request ([Showing untrusted mail](#showing-untrusted-mail)) | All roles |
+| `/console/connect` | Connect your agent: the `claude mcp add` line, `.mcp.json`, a `curl` request and `pmail login`, with a key ID filled in, never a secret; the Codex, Cursor and Claude Desktop bridge blocks, the Agent SDK snippet and `pmail skills generate` ([SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup)) | Owner, admin |
+| `/console/inboxes`, `/console/inboxes/{idn}` | Identities with their addresses and status; one identity's threads with triage, and its signing keys with the JWKS link ([Identity signing keys](#identity-signing-keys)); their pause windows ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)); the identity's message retention (owners and admins change it; shortening needs the confirmation step of the policy page) and its own allow and block list entries, read-only ([Parity additions § 7](parity-additions.md#7-per-identity-message-retention-fr-prv-7), [§ 3.8](parity-additions.md#38-privacy-events-and-interfaces)) | All roles. Create, rotate and revoke signing keys: owner, admin |
+| `/console/inboxes/{idn}/threads/{thr}` | A thread; each message in text view, HTML on request ([Showing untrusted mail](#showing-untrusted-mail)), with the Calendar panel when it has one, and the screening line and feedback form (owner, admin, member); `arc_rescued` messages say "Authenticated by the forwarder {sealer} (ARC)" | All roles |
+| `/console/drafts` | The workspace's drafts that need attention: **Awaiting approval**, **Scheduled** and **Failed** ([Drafts § 16](drafts.md#16-console)) | View: owner, admin, member |
+| `/console/inboxes/{idn}/drafts` | One inbox's drafts in every status | View: owner, admin, member |
+| `/console/inboxes/{idn}/drafts/{drf}` | One draft: recipients, subject, text view, HTML on request, attachments, approval, send, rejection and failure details; **Approve** (re-authentication; hidden `revision` and `digest`), **Reject** with a reason, **Cancel** | View: owner, admin, member. Approve, reject, cancel: owner, admin |
 | `/console/inboxes/{idn}/messages/{msg}/attachments/{att}` | Download one attachment, with the API's serving headers ([Showing untrusted mail](#showing-untrusted-mail)) | All roles |
 | `/console/search` | Search one identity or the whole workspace, with facets; agentic answers with citations | All roles (agentic: not viewers) |
-| `/console/quarantine` | Quarantined mail with reasons; release | Owner, admin, member |
-| `/console/keys` | Keys with scope and last use; create (the secret is shown once); revoke | Owner, admin |
-| `/console/domains`, `/console/domains/{dom}` | Domains, health and issues, DNS records read from the provider API; add, verify, remove | View: all roles. Change: owner, admin |
-| `/console/webhooks` | Endpoints, recent deliveries, rotate secret, replay | Owner, admin |
+| `/console/quarantine` | Quarantined mail with reasons and screening signals; mail being screened; release; for `auth_failed` mail with an ARC chain, why it was not rescued | Owner, admin, member |
+| `/console/screening` | Screening summary: verdicts, reasons, feedback, precision and recall, per inbox ([Screening hold §21](screening.md#21-console-mcp-and-cli)) | Owner, admin, member |
+| `/console/deliverability` | Pauses in effect, the tenant's, each domain's and each identity's pause windows with headroom, and daily event counts ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)) | All roles |
+| `/console/keys` | Keys with scope and last use; create (the secret is shown once), with an optional MCP tools fieldset ([SDKs, skills and agent tooling § 5.3](sdk-and-skills.md#53-per-key-tool-allow-list)); revoke | Owner, admin |
+| `/console/domains`, `/console/domains/{dom}` | Domains, health and issues, DNS records read from the provider API; add, verify, remove; their pause windows; Download zone file (`/console/domains/{dom}/records.zone`) | View: all roles. Change: owner, admin |
+| `/console/webhooks` | Endpoints, recent deliveries, rotate secret, replay; event consumers and streams ([Event feed § 14](event-feed.md#14-console)); custom delivery header names, add (write-only value) or remove | Owner, admin |
 | `/console/members` | Members, pending invitations, seats used; invite, resend, revoke, change role, remove, transfer ownership, leave | View: all roles. Change: owner, admin. Transfer: owner |
 | `/console/plan` | Plan, a meter per allowance, upgrade, a downgrade scheduled for the period end, top-ups, manage billing ([Billing](billing.md#checkout), [Plan changes](billing.md#plan-changes)) | View: all roles. Buy or change: owner |
 | `/console/plan/return` | Return from Stripe Checkout: confirms the plan once the webhook has applied it ([Cloud sign-up §9](cloud-signup.md#9-coming-back-from-checkout)) | Owner |
 | `/console/audit` | Audit log with filters | Owner, admin |
 | `/console/accounts` | Service sign-up requests: pending first, with inbox, service, sender domains, account identifier, purpose (escaped) and status; approve (re-authentication), reject, close, delete; a link to quarantined `account_unapproved` mail ([Service sign-up ledger §8](service-accounts.md#8-console)) | View: owner, admin, member. Change: owner, admin |
 | `/console/settings/policy` | The workspace policy, grouped by area, each field with its limit or the reason it is read-only; the form for owners and admins, and the confirmation step for changes that delete mail ([Workspace policy §6](workspace-policy.md#6-the-console-page)) | View: all roles. Change: owner, admin |
-| `/console/settings` | Your name and sessions; the terms version you accepted and when (`users.terms_version`, `terms_accepted_at`; "not recorded" for people who joined by invitation before sign-up opened); delete your account; workspace name, time zone and `require_two_factor` (owner only, through the console-only owner handler; never the platform-only tenant fields), and a link to the policy page | All roles |
+| `/console/agent-signup/verify` | Confirm being an agent's accountable human: the agent's address, what it means, the terms checkbox, **Confirm** ([Agent self-sign-up § 19](agent-signup.md#19-console)) | Anyone with a link; no session needed |
+| `/console/agent-signup/claim` | Claim an agent's inbox with its key (re-authentication) | Signed in |
+| `/console/agent-signup/refuse` | Stop agents naming this address | Anyone with a link; no session, no CSRF token, no `Origin` check |
+| `/console/settings` | Your name and sessions; the refusal notice and **Allow again** for a person on the agent sign-up refusal list; the terms version you accepted and when (`users.terms_version`, `terms_accepted_at`; "not recorded" for people who joined by invitation before sign-up opened); delete your account; workspace name, time zone and `require_two_factor` (owner only, through the console-only owner handler; never the platform-only tenant fields), and a link to the policy page | All roles |
 | `/console/settings/security` | Two-step verification: enrol with a QR code, recovery codes, turn off (re-authentication needed); linked Google and GitHub identities with **Unlink** ([Cloud sign-up §4](cloud-signup.md#4-google-and-github), [§5](cloud-signup.md#5-two-step-verification)) | Signed in |
 | `/console/settings/notifications` | Your notification preferences for the active workspace: kinds, modes, followed inboxes and the `needs_reply` filter; the bounce banner and **Confirm my address**; the daily-cap notice ([Notification settings](#notification-settings)) | All roles, each for themselves |
 
@@ -710,6 +744,10 @@ Every sensitive action writes an `audit_log` row in the same D1 batch as the cha
 | `tenant.policy_update` | The policy page saved (the API writes the same action) | `tenant.policy_updated` |
 | `account.approve`, `account.reject`, `account.close`, `account.delete` | A service sign-up decided, closed or deleted on the accounts page (the API writes the same actions) | `account.approved`, `account.rejected`, `account.closed` (delete of a live entry) |
 | `waitlist.invite` | The operator invited a batch from the waitlist ([Cloud sign-up §6.1](cloud-signup.md#61-before-launch-the-waitlist)) | – |
+| `draft.approve`, `draft.reject` | A draft decided on its page (the API writes the same actions) | `draft.approved`, `draft.rejected` |
+| `event_consumer.delete` | A consumer deleted on the webhooks page (the API writes the same action, and `event_consumer.create` and `event_consumer.reset`) | – |
+| `agent_signup.verify` | An agent sign-up confirmed through the link page; `agent_signup.claim` is recorded as `agent_signup.verify` with `"via": "claim"` when a signed-in person claims the inbox ([Agent self-sign-up](agent-signup.md)) | `signup.verified` |
+| `user.agent_signup_allow` | A person removed their address from the agent sign-up refusal list (**Allow again**) | – |
 
 The other sensitive actions use the same audit actions as the API (for example `key.create`,
 `quarantine.release`), so the log reads the same whichever way the action was taken. Billing actions are
@@ -771,6 +809,12 @@ the workspace's `tenant_id` and delivered like `webhook.disabled`
 | `it::notify::one_click_unsubscribe`, `it::notify::bounce_pauses_prefs`, `it::notify::member_removed_drops_pending` ([Notifications §10](notifications.md#10-tests)) | Unsubscribe without a session; the bounce banner and **Confirm my address**; member removal deletes preferences | [O17](../edge-cases.md)–[O19](../edge-cases.md) |
 | `cli::setup::owner_email` ([CLI and setup](cli.md)) plus `it::console::first_owner_signin` | `pmail setup --owner-email` creates the default tenant's owner, who receives a link and can sign in | FR-CON-7 |
 | `browser::console::no_js`, `browser::console::axe_scan` ([Testing §6.8](testing.md#68-browser-suite-browser)) | Every console route works with `javaScriptEnabled: false`; an axe scan finds no violation of impact `serious` or `critical` | FR-CON-1, M21 |
+| `it::console::drafts_page` ([Drafts § 22](drafts.md#22-tests)) | The three screens for each role; approve needs re-authentication and posts `revision` and `digest`; a stale page is refused and shown again; the Overview items; escaping | [Q54](../edge-cases.md), [Q55](../edge-cases.md) |
+| `it::console::event_consumers_section` ([Event feed § 20](event-feed.md#20-tests)) | Owners and admins see the section and can delete a consumer with the CSRF token; members and viewers get `403`; no payload appears | FR-EVT |
+| `it::console::t49_screening_pages` ([Screening hold › Tests](screening.md#tests)) | The console behaviour of T49; the pages join `browser::console::no_js` and `browser::console::axe_scan` | [T49](../edge-cases.md) |
+| `it::console::calendar_panel` ([Calendar invitations](calendar-invitations.md)) | The panel for each role, escaped text, workspace-time-zone times, the verified badge and reason, the `.ics` link through the console route; a quarantined message shows method and badge only; no answer buttons | FR-CAL |
+| `it::console::deliverability_page` ([Deliverability metrics](metrics.md)) | All roles see the screen; pauses first, tripped rows first, headroom sentences; works with no script; the inbox and domain pages show their windows | FR-MET |
+| `it::console::agent_signup_pages` ([Agent self-sign-up](agent-signup.md)) | The verify, claim and refuse pages and the settings notice render without JavaScript, escape untrusted text and join `browser::console::no_js` and `browser::console::axe_scan` | FR-ASU |
 | `it::console::render_budget` | Server render time p95 ≤ 300 ms on the fixture workspace | NFR-CON-1 |
 
 [W8]: ../edge-cases.md

@@ -88,7 +88,10 @@ normal outbound pipeline.
 - **Fixed retention.** Its mailbox keeps messages 30 days and raw MIME 7 days, whatever the default
   tenant's `retention` policy says: the tenant retention job uses these cutoffs for the identity with
   `is_system = 1` ([Privacy §5.2](privacy.md#52-steps-of-a-tenant-retention-job)). Deleting a person also
-  erases the system mail sent to them ([Privacy §6.9](privacy.md#69-people-console-accounts)).
+  erases the system mail sent to them ([Privacy §6.9](privacy.md#69-people-console-accounts)). The identity
+  field `retention.message_hours` cannot be set on it: the platform key that alone reaches it gets
+  `400 invalid_request` with `details.reason = "system_identity"`
+  ([Parity additions § 7.1](parity-additions.md#71-the-field)).
 - **Changing `PM_SYSTEM_FROM`.** A re-run of setup inserts the new address as an `active` alias on the
   platform domain through its internal path, in one D1 query API batch as at creation (no reserved-name
   or role-name check, so `noreply` is accepted), then promotes it through the API with the bootstrap
@@ -109,7 +112,9 @@ normal outbound pipeline.
 
 1. Validate the body: `username` ([Username validation](#username-validation)), `display_name` (1–78
    characters, Unicode allowed, no CR or LF), `owner.email` (RFC 5321), `signature.html` (sanitised with
-   the inbound policy before storage), `metadata` (≤ 16 keys, ≤ 512 bytes per value). For any key but a
+   the inbound policy before storage), `metadata` (≤ 16 keys, ≤ 512 bytes per value), `retention.message_hours`
+   (`null` or 1–8,760; a number needs `erasure:manage` as well, because it deletes mail sooner,
+   [Parity additions § 7.1](parity-additions.md#71-the-field)). For any key but a
    platform key, `send_policy.daily_cap` may not exceed the tenant's effective
    `identity_daily_send_cap` (`403 scope_denied`, `details.field = "send_policy.daily_cap"`); the same
    check runs on `PATCH /v1/identities/{identity_id}`
@@ -127,7 +132,8 @@ normal outbound pipeline.
    `pending`. Each address is checked against `addresses_address` (`409 address_taken`), against
    `address_tombstones` ([Tombstones](#tombstones-a5)), and against `users.email`: an address that is
    a console user's sign-in address is refused with `409 address_taken` too, because every key that reads
-   the mailbox could then read that person's sign-in codes. The same check runs when `POST …/addresses`
+   the mailbox could then read that person's sign-in codes, and so is an address equal to the human address
+   of a provisional agent sign-up ([Agent self-sign-up §3.3](agent-signup.md#33-the-human-email-rules)). The same check runs when `POST …/addresses`
    adds an address ([Cloud sign-up §10](cloud-signup.md#10-abuse-and-safety-on-cloud),
    [W45](../edge-cases.md)).
 5. `mailbox_do_id = objects.new_object_id(Mailbox)`.
@@ -151,7 +157,9 @@ normal outbound pipeline.
 ### Updates, pause and tenant suspension
 
 `PATCH /v1/identities/{id}` updates D1 and, in the same batch, writes an `rpc_intents` row for the event:
-`identity.updated` (`changed` = field names), `identity.paused` or `identity.resumed`. After the commit it
+`identity.updated` (`changed` = field names), `identity.paused` or `identity.resumed`. A change of
+`retention.message_hours` also writes the audit row `identity.retention_update` and tells the mailbox its new
+expiry (`SetRetention`, [Parity additions § 7.2](parity-additions.md#72-how-the-mailbox-learns-it)). After the commit it
 sends `MailboxRequest::EmitEvent` with the intent's derived `event_id`; a failed call is re-sent by the
 every-minute cron, and the outbox stores the event once ([Design conventions § 9](index.md#9-durable-object-calls-after-a-d1-change),
 [J21](../edge-cases.md)).
@@ -491,7 +499,9 @@ sending DNS endpoints for zones (including `nameservers` and `delegated_subdomai
 `inbound: ses`. The Worker composes only its own values: the ownership TXT, the `pm-bounce` MAIL FROM
 records and the SES endpoint hosts of `ses_region`
 ([§4.1](domain-connections.md#41-what-each-method-asks-the-customer-to-publish)). `GET …/records`
-re-reads them; they are never copied from documentation or templates.
+re-reads them; they are never copied from documentation or templates. With `?format=bind` the same records
+come back as an RFC 1035 zone fragment (`text/plain`), with suggested records, records to remove and registrar
+nameservers as comments ([Parity additions § 9](parity-additions.md#9-zone-file-export-fr-dom-15)).
 
 #### Zone permission
 

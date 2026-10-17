@@ -9,10 +9,13 @@ Deployment (platform) ── platform keys, the platform mail domain, platform w
   └─ Tenant (ten_)           live | test · policy · address suffix · quotas · partner_id (optional)
        ├─ Domain (dom_)      zone | delegated | external · connection method
        ├─ Webhook (whk_)     tenant endpoints
+       ├─ Event log          one per tenant (Durable Object) · event consumers (evc_)
        ├─ API key (key_)     tenant or identity level
        └─ Identity (idn_)    one mailbox (Durable Object)
             ├─ Address (adr_)      primary | alias · pending | active | retiring | retired
             ├─ Signing key (kid)   active | retiring | retired
+            ├─ Draft (drf_)        editing | pending_approval | approved | scheduled | sent | …
+            ├─ Upload (upl_)       a file staged for a send, at most 7 days
             └─ Thread (thr_)
                  └─ Message (msg_) inbound | outbound
                       └─ Attachment (att_)
@@ -65,7 +68,8 @@ contends with another and can be deleted in one step.
 | `owner` | The accountable human (name and email). **Required before the identity can send** (`409 identity_owner_required`) |
 | `purpose`, `metadata`, `signature` | Free tags, your own key-value data, and the signature appended to sends |
 | `client_id` | Your own unique name for the identity, such as `acme:bookings`. A repeated create with the same `client_id` returns the existing identity |
-| `send_policy` | Per-identity daily cap, auto-reply setting and `require_known_recipient` |
+| `send_policy` | Per-identity daily cap, auto-reply setting, `require_known_recipient` and `require_approval` (stricter than the tenant's, never looser) |
+| `retention` | `message_hours`: erase each message that many hours after it is stored, or `null` to follow the tenant's retention only |
 | `status` | `active` or `paused`. A paused identity still receives and stores mail, and refuses every send with `409 identity_paused`. `pause_reason` is `manual`, `abuse_threshold` or `tenant_suspended`; while the tenant is suspended, sends get `403 tenant_suspended` instead |
 
 Deleting an identity runs an identity-scope erasure and **tombstones its addresses permanently**:
@@ -185,7 +189,7 @@ A **message** has a `direction` and a `status`:
 
 | Direction | Statuses |
 |---|---|
-| `inbound` | `received` (visible), `quarantined` (held for review), `throttled` (over the per-sender limit, hidden), `hidden` (from a receive-blocked sender, or a delivery report, kept for audit) |
+| `inbound` | `received` (visible), `screening` (held until a screening verdict, hidden), `quarantined` (held for review), `throttled` (over the per-sender limit, hidden), `hidden` (from a receive-blocked sender, or a delivery report, kept for audit) |
 | `outbound` | `queued`, `submitted`, `delivered`, `deferred`, `bounced`, `complained`, `rejected`, `failed`, `uncertain`, `suppressed`, `canceled`. See [Outbound status](reference/api.md#outbound-status) |
 
 What an inbound message carries:
@@ -194,8 +198,10 @@ What an inbound message carries:
 |---|---|
 | `extracted_text` | The new content, with quoted history and signatures removed. Returned by default, and what an agent should read first |
 | `text`, `html` | The full plain text (derived from HTML when the mail is HTML-only) and sanitised HTML. Returned on request (`include=quoted`, `include=html`). The service never renders HTML |
-| `trust` | The authentication verdict (`pass`, `fail`, `softfail`, `none`, `unaligned` or `unverified`) with SPF, DKIM, DMARC and ARC results, `known_sender`, `spam_score`, `automated`, `quarantined` and flags such as `display_name_spoof`, `lookalike_domain`, `reply_to_mismatch` and `hidden_text` |
+| `trust` | The authentication verdict (`pass`, `arc_rescued`, `fail`, `softfail`, `none`, `unaligned` or `unverified`) with SPF, DKIM, DMARC and ARC results, `known_sender`, `spam_score`, `automated`, `quarantined` and flags such as `display_name_spoof`, `lookalike_domain`, `reply_to_mismatch` and `hidden_text` |
 | `kind` | `normal`, `automated`, `dsn`, `list`, `calendar` or `mdn`. Automated mail is marked so agents never auto-reply to it |
+| `calendar` | For an invitation: the verified, structured calendar object (method, times with their time zone, organizer, attendees). Never accepted automatically |
+| `screening` | The screening record: status, mode, reason and signals |
 | `attachments` | Metadata, `text_status` for extracted text, and `risk` for unsafe files |
 | `refs` | Exact references found in the mail: plates, PCNs, invoice and order numbers, amounts, phone numbers and your own patterns |
 | `triage` | See [Triage](#triage) |
@@ -245,6 +251,12 @@ state change ──▶ outbox (same transaction) ──▶ pm-webhooks queue ─
 Payloads are thin: IDs, a summary, verdicts and a little extracted text. Fetch the rest from the API.
 Mailbox events carry a per-identity `sequence` for ordering.
 
+The same events are also kept in the tenant's **event log**, in append order, for
+`retention.events_days`. Read it with `GET /v1/events` from a cursor, through a named **event consumer**
+that remembers its position, or as a **live stream** over a WebSocket that resumes from a cursor after a
+disconnect. Webhooks, the feed, consumers and the stream share one log and one `evt_` ID per event, so one
+deduplication table covers them all. Design: [Event feed](project/design/event-feed.md).
+
 Reference: [Webhook events](reference/events.md) · Guide:
 [Receiving, webhooks and quarantine](guides/receiving.md).
 
@@ -289,10 +301,22 @@ POST …/messages ──▶ queued ──▶ transport ─┬─ accepted ──
 
 Guide: [Sending › Safe retries](guides/sending.md#safe-retries).
 
+## Drafts and approval
+
+A **draft** is a message stored in the identity's mailbox but not sent. Each save is a new revision. Sending
+a draft goes through the same pipeline as a direct send. When the tenant policy `drafts.require_approval`,
+or the identity's `send_policy.require_approval`, says a send needs a person, the draft waits in
+`pending_approval` until an approver (`drafts:approve`, never an identity key) approves the exact revision
+and digest they read; an edit after approval asks again. A draft can carry `send_at` to be sent later.
+Guide: [Sending › Drafts, approval and scheduled send](guides/sending.md#drafts-approval-and-scheduled-send).
+
 ## Quarantine
 
 **Quarantine** holds inbound mail that should not reach an agent: mail that failed authentication,
-scored above the spam threshold, carries a risky attachment, or is an unsolicited one-time code.
+scored above the spam threshold, carries a risky attachment, is an unsolicited one-time code, or was
+judged by screening to try to steer an agent. In the tenant's `hold` screening mode, mail waits in status
+`screening`, hidden like quarantined mail, until a verdict; `message.received` is emitted once, when a
+message first becomes visible to agents.
 Quarantined mail is stored but hidden from every key without `quarantine:review`. A person with that
 permission releases it in the console; a key with it can release it too where the deployment allows
 (`PM_QUARANTINE_KEY_RELEASE=on`, the self-hosting default) or the tenant's policy does for its partner's

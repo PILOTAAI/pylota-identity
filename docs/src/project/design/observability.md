@@ -83,6 +83,7 @@ template in [Rust workspace](rust-workspace.md#8-generated-wranglertoml).
 | `address_ph` | `ph_` + 16 hex | when an address must be correlated | Pseudonym of the address the event concerns (counterparty or envelope recipient): `HMAC-SHA256(PM_HASH_KEY, address)` truncated |
 | `transport`, `provider_code`, `smtp_code` | short codes | outbound and delivery | `E_RATE_LIMIT_EXCEEDED`, `550`, `5.1.1`; never `smtpResponse` text |
 | `mcp_method`, `tool` | JSON-RPC method, MCP tool name | MCP requests | Never the arguments ([MCP](mcp.md#7-limits-logging-and-safety)) |
+| `client` | `ts_sdk` \| `rust_sdk` \| `cli` \| `mcp_bridge` \| `other` | `fetch` | From the user agent ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)) |
 | `query_hash` | 16 hex | search requests and MCP search tools | `hex(HMAC-SHA256(PM_HASH_KEY, q))[..16]` ([MCP](mcp.md#7-limits-logging-and-safety)) |
 | `count`, `bytes`, `duration_ms` | int | when relevant | |
 | `detail` | `^[a-z0-9_.:-]{1,64}$` | optional | Machine string only |
@@ -119,6 +120,12 @@ template in [Rust workspace](rust-workspace.md#8-generated-wranglertoml).
 | `notifier_handoff_failed` | warn | The `pm-webhooks` consumer could not hand a new-mail event to the tenant's Notifier; the delivery work is unaffected: `tenant_id`, `event_id`, `code` ([Webhooks](webhooks.md#handing-new-mail-to-the-notifier)) |
 | `notification_unsubscribe` | info | `POST /console/notifications/unsubscribe`: `tenant_id` and `user_id` when the token verified, `detail` = the kind, `code` = `expired` or `invalid` otherwise; never the token |
 | `usage_alert` | info | `TenantQuota` asked the Notifier for a usage alert: `tenant_id`, `detail` = `{feature}:{threshold}` |
+| `calendar_parsed` | info | `pm-inbound` step 10a read a calendar object: method, `object_status`, `verified`, reason, part count, `tz_resolution` values, bytes. Never the `UID`, text or addresses ([Calendar invitations § 14](calendar-invitations.md#14-observability)) |
+| `calendar_send_refused` | info | A send, reply or calendar reply with a calendar object was refused: method, error code, `details.reason` |
+| `mcp_tools_corrupt` | warn | A key's stored `mcp_tools` list cannot be parsed: the key sees no MCP tools (fail closed) and REST is unaffected; `key_id` ([SDKs, skills and agent tooling § 10](sdk-and-skills.md#10-failure-handling)) |
+| `docs_url_invalid` | warn | Once per isolate: `PM_DOCS_URL` is malformed, so the default is used for error `docs` links ([Parity additions § 10.1](parity-additions.md#101-the-field)) |
+| `retention_expire_flush` | info | A mailbox with `retention.message_hours` wrote its daily expiry audit row ([Parity additions § 7](parity-additions.md#7-per-identity-message-retention-fr-prv-7)) |
+| `label_event_trimmed` | info | An erasure removed a message from a pending label event ([Parity additions § 4](parity-additions.md#4-label-change-events-fr-wh-6)) |
 | `panic` | error | Panic hook; source location only |
 | `metric` | debug | `PM_ENV = "local"` only: a metrics data point |
 
@@ -166,7 +173,7 @@ GROUP BY domain_id
 | `rate_limited_total` | counter | bucket | `fetch` |
 | `inbound_received_total` | counter | result: `accepted`, `staged`, `rejected_unknown`, `rejected_retired`, `rejected_suspended`, `tempfail_suspended`, `tempfail_storage`, `tempfail_frozen` (a restore freeze; excluded from NFR-REL-2 like suspensions) | `email()` |
 | `inbound_r2_retries_total` | counter | – | `email()` |
-| `inbound_processed_total` | counter | outcome: `stored`, `deduplicated`, `quarantined`, `hidden`, `throttled`, `dsn_applied`, `parse_degraded` | `pm-inbound` |
+| `inbound_processed_total` | counter | outcome: `stored`, `deduplicated`, `quarantined`, `hidden`, `throttled`, `dsn_applied`, `parse_degraded`, `screening` (stored and held for screening, [Screening hold § 22](screening.md#22-observability)) | `pm-inbound` |
 | `inbound_ingest_ms` | observation | – | `pm-inbound`: `received_at` → commit |
 | `inbound_lost_total` | counter | – | Global retention `staging` step: a staging object still unrouted 14 days after it was written, a day before the lifecycle rule deletes it ([J7](../edge-cases.md)) |
 | `inbound_raw_missing_total` | counter | – | `pm-inbound`: a pointer whose raw object is missing and whose message is not in the mailbox ([Inbound](inbound.md)) |
@@ -179,7 +186,7 @@ GROUP BY domain_id
 | `backscatter_total` | counter | – | `pm-inbound` ([D4](../edge-cases.md)) |
 | `inbound_throttled_total` | counter | cap (`per_sender`, `unauthenticated`, `per_tenant`) | mailbox ([D5](../edge-cases.md), [D13](../edge-cases.md)) |
 | `thread_token_invalid_total`, `thread_token_previous_key_total`, `thread_token_unchecked_total` | counter | – | mailbox ([Threading](threading.md)) |
-| `quarantine_total` | counter | reason | mailbox |
+| `quarantine_total` | counter | reason (including `steering_suspected` and `screening_unavailable`) | mailbox |
 | `send_api_requests_total` | counter | operation, result (`accepted`, `deduplicated`, or the error code) | `fetch` |
 | `send_api_ms` | observation | operation | `fetch`, accepted sends only |
 | `outbound_queue_to_transport_ms` | observation | transport | `pm-outbound`, first transport attempt |
@@ -221,7 +228,7 @@ GROUP BY domain_id
 | `stripe_api_errors_total` | counter | call (`customer_create`, `checkout_create`, `checkout_retrieve`, `portal_create`, `subscriptions_list`, `charge_retrieve`, `subscription_cancel`) | worker: a Stripe API call that failed with a network error, a timeout or a non-`2xx` answer ([Billing › Stripe integration](billing.md#stripe-integration)) |
 | `stripe_duplicate_subscriptions_total` | counter | – | `fetch`: the webhook's state application cancelled a duplicate subscription ([Billing › Applying state](billing.md#applying-state), [W39](../edge-cases.md)) |
 | `billing_increase_held_total` | counter | feature (`plan`, or the top-up feature) | `fetch`: the webhook's state application kept an increase back because the subscription's latest invoice is not `paid` ([Billing › Allowances and periods](billing.md#allowances-and-periods), [W37](../edge-cases.md)) |
-| `system_mail_budget_denied_total` | counter | class (`signin`, `invitation`, `notification`, `account`), scope (`recipient`, `network`, `asn`, `tenant`, `class`, `role`, `day`) | `TenantQuota` of the default tenant: a system-identity send refused by a budget ([Cloud sign-up › System mail budgets](cloud-signup.md#102-system-mail-budgets), [W44](../edge-cases.md)) |
+| `system_mail_budget_denied_total` | counter | class (`signin`, `invitation`, `notification`, `signup`, `account`), scope (`recipient`, `network`, `asn`, `tenant`, `class`, `role`, `day`) | `TenantQuota` of the default tenant: a system-identity send refused by a budget ([Cloud sign-up › System mail budgets](cloud-signup.md#102-system-mail-budgets), [W44](../edge-cases.md)) |
 | `ses_control_throttled_total` | counter | – | SES control-plane callers: SES answered `ThrottlingException` or `TooManyRequestsException` although `SesControl` granted the slot ([Domains on any DNS host §4.8](domain-connections.md#48-ses-api-rate-one-request-per-second)) |
 | `search_requests_total` | counter | mode, scope, result (`ok`, `degraded`, `partial`, code) | `fetch` |
 | `search_ms` | observation | mode, scope, fanout (`1`, `2-10`, `11-100`) | `fetch` |
@@ -233,7 +240,7 @@ GROUP BY domain_id
 | `triage_total` | counter | status | `pm-index` |
 | `job_steps_total` | counter | kind, step, result | JobRunner |
 | `erasure_ms` | observation | scope | JobRunner: `created_at` → completion |
-| `retention_purged_total` | counter | store (`raw`, `messages`, `vectors`, `events`) | JobRunner |
+| `retention_purged_total` | counter | store (`raw`, `messages`, `vectors`, `events`) | JobRunner. Per-identity message retention has its own `retention_expired_total` (below) |
 | `domain_checks_total` | counter | resolver, outcome | DomainMonitor |
 | `domain_transitions_total` | counter | from, to | DomainMonitor |
 | `mailbox_size_bytes` | observation | – | mailbox, hourly at most |
@@ -246,6 +253,79 @@ GROUP BY domain_id
 | `r2_orphans_deleted_total` | counter | – | the mailbox's daily orphan sweep ([I9](../edge-cases.md)) |
 | `loopback_refused_total`, `stale_claim_outcome_total` | counter | – | `pm-inbound` (a loopback pointer across tenants), `pm-outbound` (a transport outcome with a stale claim token, [G2](../edge-cases.md)) |
 | `index_job_unimplemented_total`, `ai_deferred_total`, `ai_rate_limited_total`, `triage_model_cap_total` | counter | kind or task | `pm-index`: job kinds before their milestone; jobs deferred by `RL_AI` or `RL_EMBED`; Workers AI rate-limit answers; triage runs made rules-only by the daily model cap ([F16](../edge-cases.md), [D13](../edge-cases.md)) |
+| `drafts_written_total` | counter | op (`create`, `update`, `delete`) | mailbox ([Drafts § 18](drafts.md#18-observability)) |
+| `draft_sends_total` | counter | origin (`api`, `approval`, `console`, `alarm`), outcome (`sent`, `pending_approval`, `scheduled`, `refused`, `failed`, `transient`) | mailbox |
+| `draft_send_failures_total` | counter | reason (the `failure.reason` codes) | mailbox |
+| `draft_decisions_total` | counter | decision (`approve`, `reject`, `expire`), actor (`key`, `person`, `system`), send | mailbox |
+| `draft_approval_rerequested_total` | counter | cause (`edit`, `digest_changed`, `approver_invalid`) | mailbox |
+| `draft_fire_lag_ms` | observation | – | mailbox: the fire's start minus `send_at` |
+| `draft_claims_expired_total` | counter | origin | mailbox |
+| `drafts_alarm_missed_total` | counter | – | `crons/drafts_due.rs` |
+| `draft_index_write_failures_total` | counter | – | mailbox |
+| `send_approval_required_total` | counter | level | `fetch` (step 16a refusals) |
+| `event_log_append_total` | counter | result (`appended`, `duplicate`, `refused_erased`, `skipped_no_tenant`, `skipped_system`, `skipped_unavailable`, `skipped_tenant_erasing`, `skipped_too_old`) | `pm-webhooks` (`Fanout`) and the `TenantEvents` object ([Event feed § 16](event-feed.md#16-observability)) |
+| `event_log_append_failures_total` | counter | reason (`unavailable`, `timeout`, `payload_read`) | `pm-webhooks` |
+| `event_log_lag_ms` | observation | – | `TenantEvents`: `appended_at − occurred_at` for each appended event |
+| `event_log_pruned_total` | counter | reason (`retention`, `size_limit`, `erasure`, `reset`) | `TenantEvents` |
+| `event_log_payload_bytes` | observation | – | `TenantEvents` daily maintenance |
+| `event_feed_reads_total` | counter | surface (`feed`, `consumer`, `mcp`), result (`ok`, `empty`, `long_poll_timeout`, or the error code) | `fetch` |
+| `event_consumer_backlog` | observation | state (`active`, `expired`, `reset_required`) | `TenantEvents` daily maintenance: each consumer's `positions_behind` |
+| `event_stream_connections` | observation | – | `TenantEvents`, at each revalidation alarm |
+| `event_stream_opened_total` | counter | auth (`key`, `token`), result (`ok`, or the refusal's code) | `fetch` and `TenantEvents` |
+| `event_stream_closed_total` | counter | code, by (`server`, `client`) | `TenantEvents` |
+| `event_stream_sent_total` | counter | – | `TenantEvents`: events sent |
+| `event_stream_tokens_total` | counter | result (`minted`, `redeemed`, `expired`, `refused`) | `fetch` and `TenantEvents` |
+| `event_stream_revalidation_failures_total` | counter | – | `TenantEvents`: a revalidation query that failed |
+| `screening_verdict_total` | counter | mode, status, reason | mailbox, at every final verdict ([Screening hold § 22](screening.md#22-observability)) |
+| `screening_latency_ms` | observation | mode | mailbox: `completed_at − started_at` |
+| `screening_deadline_lag_ms` | observation | – | mailbox `screen` alarm: run time − `deadline_at` for each expired row |
+| `screening_model_calls_total` | counter | outcome (`valid`, `invalid`, `error`, `timeout`) | `pm-screen` |
+| `screening_model_ms` | observation | – | `pm-screen` |
+| `screening_deferred_total` | counter | cause (`rl_ai`, `quota`, `rpc`, `attachment_wait`) | `pm-screen` |
+| `screening_queue_wait_ms` | observation | – | `pm-screen`: commit time → first run |
+| `screening_late_signal_total` | counter | outcome (`requarantined`, `flagged`, `ignored_released`) | mailbox |
+| `screening_late_verdict_total` | counter | verdict | `pm-screen` |
+| `screening_deadline_extended_total` | counter | – | mailbox, after a freeze |
+| `screening_feedback_total` | counter | screening_status, verdict | feedback handler |
+| `screening_test_header_ignored_total` | counter | – | `pm-inbound`: a test header on mail that may not use it |
+| `calendar_objects_total` | counter | method, object_status | `pm-inbound`, step 10a ([Calendar invitations § 14](calendar-invitations.md#14-observability)) |
+| `calendar_verification_total` | counter | method, result (`verified` or the reason) | `pm-inbound`, step 10a |
+| `calendar_tz_resolution_total` | counter | resolution (`utc`, `iana`, `windows`, `prefixed`, `vtimezone`, `unknown`, `floating`, `date`) | `pm-inbound`, step 10a |
+| `calendar_events_total` | counter | trigger (`ingest`, `release`, `screening`, `reparse`) | mailbox |
+| `calendar_sends_total` | counter | method, result (`accepted`, or the error code) | `fetch` (send, reply, draft send) |
+| `calendar_replies_total` | counter | partstat, result (`accepted`, or the error code) | `fetch` (calendar reply) |
+| `calendar_vtimezones_added_total` | counter | – | `fetch` |
+| `calendar_properties_removed_total` | counter | – | `fetch` (one per removed extension property) |
+| `uploads_created_total` | counter | – | `handlers/uploads.rs` ([Uploads § 14](uploads.md#14-observability)) |
+| `upload_puts_total` | counter | result (`ready`, `already_ready`, `rejected_risk`, `rejected_infected`, `size_mismatch`, `checksum_mismatch`, `incomplete`, `in_progress`, `expired`, `not_found`, `unavailable`) | `handlers/links.rs` |
+| `upload_bytes` | observation | – | `handlers/links.rs`, per `ready` upload |
+| `upload_put_ms` | observation | – | `handlers/links.rs`: request start → response |
+| `upload_classify_wait_total` | counter | result (`immediate`, `waited`, `timed_out`) | `uploads/classify.rs` |
+| `upload_scanner_error_total` | counter | – | `uploads/classify.rs` |
+| `uploads_expired_total` | counter | reason (`expired`, `too_many_attempts`, `object_missing`) | `mailbox/uploads.rs` |
+| `upload_attachments_total` | counter | mode (`inline`, `link`) | `mailbox/submit.rs` |
+| `upload_copy_ms` | observation | – | `uploads/copy.rs`, per copied upload |
+| `metrics_requests_total` | counter | route (`rates`, `events`), scope (`identity`, `tenant`, `domain`), status_class | `handlers/metrics.rs` ([Deliverability metrics § 10](metrics.md#10-observability)) |
+| `metrics_ms` | observation | route | `handlers/metrics.rs` |
+| `metrics_fanout_partial_total` | counter | – | `metrics/events.rs`, once per partial response |
+| `rates_tripped_reads_total` | counter | action (`pause_identity`, `pause_tenant`, `pause_domain`, `operator_alert`) | `metrics/rates.rs`, per tripped window returned |
+| `agent_signups_total` | counter | result (`created`, `closed`, `rate_limited`, `limit_network`, `limit_asn`, `limit_human`, `limit_deployment`, `username_taken`, `invalid`, `no_mail_domain`, `dns_unavailable`) | `signup/create.rs` and `signup/admit.rs` ([Agent self-sign-up § 21](agent-signup.md#21-observability)); no `source` label |
+| `agent_signup_codes_total` | counter | result (`verified`, `wrong`, `burned`, `locked`, `expired`, `superseded`) | `signup/verify.rs` |
+| `agent_signup_verified_total` | counter | via (`code`, `link`, `claim`) | `signup/verify.rs` |
+| `agent_signup_ended_total` | counter | reason (`expired`, `abandoned`, `refused`) | `signup/end.rs`, `crons/agent_signup.rs` |
+| `agent_signup_mail_total` | counter | result (`queued`, `not_sent`, `delivered`, `bounced`, `complained`) | `signup/mail.rs`, `signup/outcomes.rs` |
+| `agent_signup_refusals_total` | counter | reason (`refused`, `complaint`, `lifted`) | `signup/end.rs`, `signup/outcomes.rs` |
+| `api_client_requests_total` | counter | client (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), client_version (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Mail-Client`; MCP requests are already counted by `mcp_method` ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)) |
+| `messages_batch_total` | counter | op (`get`, `update`), result (`ok` or the error code) | `fetch` ([Parity additions § 11](parity-additions.md#11-observability)) |
+| `messages_batch_ids` | observation | op | `fetch`: IDs per request |
+| `label_events_total` | counter | source (`message`, `thread`, `batch`) | mailbox |
+| `list_decisions_total` | counter | direction, scope (`identity`, `tenant`), kind | `pm-inbound`, `fetch` (send), `pm-outbound` |
+| `arc_rescue_total` | counter | result (`rescued`, `off`, `chain`, `untrusted_sealer`, `from_unsigned`, `no_dmarc_pass`, `stale`, `no_binding`), source (`routing`, `ses`) | `pm-inbound` |
+| `retention_expired_total` | counter | store (`messages`, `attachments`, `r2_objects`, `vectors`, `events`, `drafts`) | mailbox |
+| `retention_expiry_lag_ms` | observation | – | mailbox: due time → commit |
+| `retention_expiry_errors_total` | counter | step (`vectors`, `objects`, `commit`) | mailbox |
+| `webhook_header_updates_total` | counter | result | `fetch` |
+| `zone_exports_total` | counter | method | `fetch` |
 
 ## 4. Service-level objectives
 
@@ -318,7 +398,7 @@ the window (the Custom Alert "minimum event count").
 
 | Alert | Class | Condition | Severity | Runbook |
 |---|---|---|---|---|
-| `dlq:{queue}` | B | The oldest open `dlq_items` row of a queue is older than 15 minutes ([J8](../edge-cases.md)) | page | [DLQ growth](#dlq-growth) |
+| `dlq:{queue}` | B | The oldest open `dlq_items` row of a queue is older than 15 minutes ([J8](../edge-cases.md)); this includes `dlq:pm-screen` for the screening queue's backstop jobs ([Screening hold § 22](screening.md#22-observability)) | page | [DLQ growth](#dlq-growth) |
 | `vector_drift` | B | Tonight's and the previous night's reconciliation both put `drift_pct` more than 1 away from zero ([Search › Nightly reconciliation](search.md#66-nightly-reconciliation)) | ticket | Re-run the reconciliation; if the drift persists, start a `reembed` job for each affected tenant (`POST /v1/platform/jobs` with `{ "kind": "reembed", "tenant_id": … }`, and `identity_ids` to limit it to the identities whose `index_reconcile` rows show the gap; `platform:ops`). A `reindex` job rebuilds only the keyword index and does not touch Vectorize |
 | `bounce_rate:{tenant_id}:{domain_id}` | B | Bounced outcomes / all outcomes > 2% over the last hour, with ≥ 50 outcomes, for one tenant's sends through one domain (the platform domain counts per tenant). Evaluated by `TenantQuota` from its per-domain hourly outcome counters each time `RecordOutcome` runs ([Outbound › Abuse auto-pause](outbound.md#abuse-auto-pause-fr-dlv-3)), so one rule covers every domain without a Custom Alert per domain. Above 10% with ≥ 200 outcomes the tenant's sending is paused automatically (section 5.6) | page | [Bounce spike](#bounce-spike) |
 | `complaint_rate:{tenant_id}:{domain_id}` | B | Complained outcomes / all outcomes > 0.1% over the last 24 hours, with ≥ 200 outcomes, for one tenant and domain, evaluated the same way. Above 0.6% with ≥ 1,000 outcomes the tenant's sending is paused automatically (section 5.6) | page | [Complaint spike](#complaint-spike) |
@@ -358,7 +438,7 @@ the window (the Custom Alert "minimum event count").
 | `heartbeat_missing` | B | Only when `PM_HEARTBEAT_KEY_ID` is set: that key's `last_used_at` (before its first use, its `created_at`) is more than 1 hour old, so the external heartbeat (section 5.5) has stopped: the workflow was disabled, GitHub Actions is not running, or the key was revoked | page | [Heartbeat](#heartbeat) |
 | `capacity_70:{resource}` | B | `resource` is `d1` (the D1 database's size against 10 GB, read as 10,000,000,000 bytes), `vectors` (the nightly reconciliation's `index_count` against 20,000,000 vectors) or `namespaces` (tenants that are not erased, one Vectorize namespace each, against 50,000) at 70% or more ([Limits](../../reference/limits.md#storage), [J30](../edge-cases.md), [J31](../edge-cases.md)) | ticket | [Capacity](#capacity) |
 | `capacity_80:{resource}` | B | The same at 80% or more | page | [Capacity](#capacity) |
-| `containment:{rule}` | B | An automatic containment rule of section 5.6 acted: `read_only`, `partner_suspended`, `tenant_paused`, `free_sending_off` or `emergency_prune`. The detail names the target and the values that triggered it. It stays firing while the rule's effect lasts (section 5.4), so the heartbeat sees it too | page | [Automatic containment](#automatic-containment) |
+| `containment:{rule}` | B | An automatic containment rule of section 5.6 acted: `read_only`, `partner_suspended`, `tenant_paused`, `free_sending_off`, `emergency_prune` or `agent_signup_off`. The detail names the target and the values that triggered it. It stays firing while the rule's effect lasts (section 5.4), so the heartbeat sees it too | page | [Automatic containment](#automatic-containment) |
 | `rpc_owner_mismatch` | B | `rpc_owner_mismatch_total` ≥ 1. The deployment turns read-only at once (section 5.6) | page | [Compromised key](#compromised-key) (treat as a security incident) |
 | `uncertain_spike` | A | `transport_outcomes_total{outcome=uncertain}` > 5 over 15 minutes | page | [Email Sending outage](#email-sending-outage) |
 | `transport_breaker_open:{scope}` | B | A transport's circuit breaker opened after 3 unknown outcomes in a row; queued messages wait unclaimed ([Outbound › Transport circuit breaker](outbound.md#transport-circuit-breaker-j28), [J28](../edge-cases.md)) | page | [Email Sending outage](#email-sending-outage) |
@@ -370,6 +450,25 @@ the window (the Custom Alert "minimum event count").
 | `webhook_secret_unavailable` | A | `webhook_attempts_total{result=secret_unavailable}` > 0 over 15 minutes (a sealed secret no longer opens: wrong or rotated `PM_MASTER_KEY`, [Webhooks](webhooks.md#secrets)) | page | [Security › Rotation procedures](security.md#62-rotation-procedures) (`PM_MASTER_KEY`) |
 | `webhook_ssrf_blocked` | A | `webhook_ssrf_blocked_total` > 20 over 1 h | ticket | [Integrator API down](#integrator-api-down) (an endpoint's DNS now points at a blocked range) |
 | `notification_send_failures` | A | `notifications_failed_total` > 0 in each of 3 consecutive hours, or > 20 in one hour | ticket | [Domain failing](#domain-failing) for the platform domain first (system mail has no fallback, [Notifications §7](notifications.md#7-when-system-mail-cannot-be-sent)), then [Email Sending outage](#email-sending-outage) |
+| `drafts_overdue` | B | The watchdog finds a `scheduled` draft more than 10 minutes past `send_at` in two consecutive minutes ([Drafts § 18](drafts.md#18-observability)) | page | [Drafts overdue](#drafts-overdue) |
+| `draft_index_stuck` | B | A mailbox reports a `draft_sync` row older than 15 minutes (the size check of its next write reports it, as `mailbox_size` is reported) | ticket | Check D1 health and `draft_index_write_failures_total`; the rows retry with back-off |
+| `draft_send_interrupted` | A | `draft_send_failures_total{reason=send_interrupted}` > 0 over 1 hour | ticket | Read the logs of the claims that expired (`draft_claims_expired_total`); a repeating crash in composition is a bug |
+| `event_log_append_failing` | A | `event_log_append_failures_total` > 0 in each of 5 consecutive minutes: a tenant's log refuses appends, and that tenant's webhooks wait with it ([Event feed § 16](event-feed.md#16-observability)). The existing `dlq:pm-webhooks` alert is the backstop for `Fanout` messages whose append retries ran out | page | [Event log](#event-log) |
+| `event_log_lag` | A | The share of `event_log_lag_ms` ≤ 10,000 is below 95% over 1 hour (ticket), or the share ≤ 60,000 is below 90% over 15 minutes (page); at least 100 events in the window | ticket / page | [Event log](#event-log) |
+| `event_log_size:{tenant_id}` | B | Reported by the `TenantEvents` maintenance: `payload_bytes` passed 4,200,000,000 (70% of the budget), or the size budget pruned the log in the last 24 hours | ticket | [Event log](#event-log) |
+| `event_stream_errors` | A | `event_stream_closed_total` with code `1011` or `1013` above 50 in 5 minutes | ticket | [Event log](#event-log) |
+| `screening_unavailable:{tenant_id}` | B | Reported by an identity's mailbox when, in the trailing hour, at least 10 of its hold-mode verdicts are `unavailable` and they are at least 20% of its verdicts (counted in mailbox meta per UTC hour) ([Screening hold § 22](screening.md#22-observability)) | page | [Screening unavailable](#screening-unavailable) |
+| `screening_stuck:{identity_id}` | B | Reported by `ScreenExpire` (the backstop, 30 seconds after the deadline) when it finds the row still `pending`, or by the mailbox's daily maintenance when a `pending` row is more than 60 seconds past its deadline: the alarm did not end the hold | page | [Screening unavailable](#screening-unavailable) |
+| `screening_deadline_lag` | A | p95 of `screening_deadline_lag_ms` above 30 s over 15 minutes, with at least 20 points | ticket | [Screening unavailable](#screening-unavailable) |
+| `screening_queue_wait` | A | p95 of `screening_queue_wait_ms` above 20 s over 15 minutes, with at least 20 points | ticket | [Screening unavailable](#screening-unavailable) |
+| `screening_suspect_spike` | A | Anomaly detection on `screening_verdict_total{status=suspect}` per tenant: spike, 1-hour window, 7-day baseline, at least 20 verdicts | ticket | [Screening unavailable](#screening-unavailable) (a campaign, or a regression that makes false positives) |
+| `calendar_parse_failures` | A | `calendar_objects_total{object_status="invalid"}` is more than 20% of `calendar_objects_total` over 24 hours, with at least 50 objects ([Calendar invitations § 14](calendar-invitations.md#14-observability)) | ticket | [Parser bug](#parser-bug) (a reader regression, or a sender's new format; add the case to the corpus) |
+| `calendar_raw_refused` | A | `calendar_sends_total{result="transport_unavailable"}` > 0 over 1 hour | ticket | Read the S1 result in [Design › Spikes](index.md#spikes); until the raw path works, calendar mail needs an SES or SMTP domain |
+| `upload_object_missing` | B | `uploads_expired_total{reason=object_missing}` > 0 while no restore freeze is in effect: an upload's object disappeared without a restore ([Q100](../edge-cases.md)) | ticket | Compare the mailbox's `uploads` rows with `BLOBS.list` of the identity's `up/` prefix and the orphan sweep's log |
+| `agent_signup_spike` | B | The evaluator counts `agent_signup.create` audit rows: the last hour has at least 20 and at least three times the hourly average of the previous 7 days ([Agent self-sign-up § 21](agent-signup.md#21-observability)) | ticket | [Agent sign-up abuse](#agent-sign-up-abuse) |
+| `agent_signup_cap_80` | B | Today's (UTC) `sysmail:signup:deployment` counter reaches 80% of `PM_AGENT_SIGNUP_DAILY_CAP` | ticket | [Agent sign-up abuse](#agent-sign-up-abuse) (decide whether to raise the variable) |
+| `retention_expiry_overdue:{identity_id}` | B | The oldest due message of a mailbox with `retention.message_hours` is more than 1 hour past due, reported by its expiry run or its daily maintenance ([Parity additions § 11](parity-additions.md#11-observability)) | ticket; page at 24 hours | [Erasure failure](#erasure-failure) (read `retention_expiry_errors_total{step}`; an R2 or Vectorize outage clears itself) |
+| `arc_rescue_refused_spike` | A | `arc_rescue_total{result=no_binding\|stale}` > 50 in 1 hour: someone may be replaying sealed mail | ticket | [Abusive identity](#abusive-identity) |
 | SLO burn rules | A | Section 5.2 | page / ticket | The runbook of the failing path |
 
 ### 5.4 The state alert evaluator
@@ -431,6 +530,11 @@ The `* * * * *` cron runs `ops::alerts::evaluate`:
      | `shared_domain_breaker` | The breaker cron (`crons/send_breaker.rs`), when it writes a stage; resolved when it deletes the row ([Cloud sign-up › Shared-domain breaker](cloud-signup.md#103-shared-domain-breaker)) |
      | `ses_sending_paused`, `ses_rule_missing` | The 15-minute SES platform check, which reads `GetAccount` and the receipt rule set |
      | `ses_rule_sync_failed` | `SesControl`, after the third failed verification of a change set |
+     | `drafts_overdue`, `draft_index_stuck` | The drafts watchdog (`crons/drafts_due.rs`) and the identity's mailbox ([Drafts § 18](drafts.md#18-observability)) |
+     | `event_log_size` | The tenant's `TenantEvents` object, from its daily maintenance ([Event feed § 16](event-feed.md#16-observability)) |
+     | `screening_unavailable`, `screening_stuck` | The identity's mailbox (verdict counts per hour; the daily maintenance and ScreenExpire) |
+     | `upload_object_missing` | The identity's mailbox, when it expires an upload whose object is missing and no restore freeze is in effect ([Uploads § 14](uploads.md#14-observability)) |
+     | `retention_expiry_overdue` | The identity's mailbox, from its expiry run or its daily maintenance ([Parity additions § 11](parity-additions.md#11-observability)) |
 2. Read the current state: for each alert key, the latest `audit_log` row with
    `action IN ('alert.fired', 'alert.resolved') AND target_id = <alert key>`.
 3. Transition, with pure rules in `core::slo`: a true condition on a key that is not firing writes
@@ -443,7 +547,7 @@ The `* * * * *` cron runs `ops::alerts::evaluate`:
    `erasure_stalled` and `billing_cancel_failed`, which the erasure job resolves itself (it writes
    `alert.resolved`) when the step next succeeds or the job ends; and `containment:{rule}`, which the
    evaluator re-reads as a level on every run: true while a switch is away from its default (`read_only`
-   on, `free_sending` off, `emergency_prune` on); for `partner_suspended`, while the partner is `suspended`
+   on, `free_sending` off, `emergency_prune` on, `agent_signup` off); for `partner_suspended`, while the partner is `suspended`
    and its latest status audit row is `partner.auto_suspend`; for `tenant_paused`, while the tenant's
    `sending_paused_at` is set with `sending_pause_reason = 'abuse_burst'`.
 4. Alert rows use `tenant_id` of the affected tenant, or NULL for deployment-level alerts. They contain
@@ -526,12 +630,19 @@ alert evaluator for D1 conditions, the delivery-event consumer for outcome rates
 | `partner_suspended` | For one partner, from `audit_log`: 5 or more `identity.auto_pause` rows in the last hour spread over at least 3 of its tenants (one abusive tenant is contained by its own identity pauses and by `tenant_paused`, not by suspending every tenant of the partner), or 3 or more of its tenants sending-paused automatically (`tenant.auto_pause`, by `tenant_paused` below or by the 7-day rates of [Outbound › Tenant and domain auto-pause](outbound.md#tenant-and-domain-auto-pause-g12)) in the last 24 hours. A stolen partner key used to send abuse shows up this way within the hour; key creation alone is not a trigger, because a partner onboarding many tenants creates many keys legitimately | `partners.status = 'suspended'` (every key of the partner and of its tenants gets `403 partner_suspended`, deliveries to their endpoints are held, inbound is still stored: [J13](../edge-cases.md)). Audit `partner.auto_suspend` with the trigger | `PATCH /v1/partners/{partner_id}` `{"status": "active"}` |
 | `tenant_paused` | For one tenant and domain: bounced > 10% of outcomes over the last hour with ≥ 200 outcomes, or complained > 0.6% over 24 hours with ≥ 1,000 outcomes. That is above both the alert thresholds (2% and 0.1%) and the identity auto-pause thresholds (5% of 200 and 0.3% of 1,000, [Outbound](outbound.md#abuse-auto-pause-fr-dlv-3)), so the identities causing it are normally paused first and this rule catches abuse spread over many identities. Outcomes of the system identity are not counted ([Outbound › Per-domain outcome counters](outbound.md#per-domain-outcome-counters)) | The tenant's sending pause (`tenants.sending_paused_at`, `sending_pause_reason = 'abuse_burst'`): sends get `409 sending_paused` and queued sends are held, never canceled. It is not a suspension: inbound mail is still accepted, keys still work, and the system identity's mail (sign-in, invitation and alert email) still leaves. Audit `tenant.auto_pause` | `PATCH /v1/tenants/{tenant_id}` `{"sending_paused": false}` (platform key) |
 | `free_sending_off` | Only with `PM_BILLING=stripe` or partners with ramped tenants: in the last hour, 5 or more distinct workspaces on the Free plan or still in the new-workspace send ramp had an identity auto-paused for abuse. Pauses come only from counted outcomes, so strangers who write in cannot cause them ([G13](../edge-cases.md)); someone with five Free workspaces of their own can, and that stops Free and ramped sending until the operator lifts it. That is accepted: Free sending is best effort, the page names the five workspaces, and a partner with `ramp_exempt = 1` is never affected | The `ops_switches` row `free_sending` becomes `off`: every send from a workspace on the Free plan or still ramped is refused at submit with `403 policy_denied` (`details.reason = "free_sending_off"`), and queued ones are re-enqueued with the `Paused` back-off. Paid workspaces and partner tenants that are not ramped are unaffected | `PUT /v1/platform/switches` `{"name": "free_sending", "state": "on"}` |
+| `agent_signup_off` | Over the last 24 hours of agent sign-up mail outcomes ([Agent self-sign-up § 13.2](agent-signup.md#132-the-automatic-switch)): bounced > 5% with ≥ 50 outcomes; or complained > 0.5% with ≥ 200 outcomes; or 5 or more complaints, whatever the count. Evaluated in the delivery consumer, where the outcomes are | The `ops_switches` row `agent_signup` becomes `off` (`set_by = 'auto'`): new sign-ups, resends and replacements get `403 signup_closed` (`paused`). Verification by code, link and claim, refusals, abandonment and expiry continue. Audit `ops.switch` | `PUT /v1/platform/switches` `{"name": "agent_signup", "state": "on"}` |
 | `emergency_prune` | `capacity` for `d1` at 90% or more | The `ops_switches` row `emergency_prune` becomes `on`: the next tenant retention runs use a 7-day cutoff for `event_index` and `webhook_deliveries` whatever `retention.events_days` says, so webhook replay reaches back 7 days at most meanwhile ([J30](../edge-cases.md)) | `PUT /v1/platform/switches` `{"name": "emergency_prune", "state": "off"}` |
 
-`ops_switches` ([Data model](data-model.md#1-d1-control-plane)) holds one row per switch. Readers cache a
-row for 60 seconds per isolate, so a switch takes effect within a minute everywhere. `GET /v1/platform/status`
-shows every switch, and the operator can also set one by hand (`pmail ops switch <name> on|off`), for
-example `free_sending off` during a sign-up abuse wave.
+`ops_switches` ([Data model](data-model.md#1-d1-control-plane)) holds one row per switch: `read_only`,
+`free_sending`, `emergency_prune` and `agent_signup`. Readers cache a row for 60 seconds per isolate, so a
+switch takes effect within a minute everywhere. `GET /v1/platform/status` shows every switch, and the
+operator can also set one by hand (`pmail ops switch <name> on|off`), for example `free_sending off` during a
+sign-up abuse wave, or `agent_signup off`, which stops new agent sign-ups and their mail.
+
+`GET /v1/platform/status` also has an `agent_signup` block: `configured`, `active`, the `reason` when inactive
+(`signup_not_open`, `billing_off`, `console_off` or `switch_off`), the switch, today's sign-ups against
+`PM_AGENT_SIGNUP_DAILY_CAP`, and the last 24 hours' outcome rates
+([Agent self-sign-up § 21](agent-signup.md#21-observability)).
 
 The other automatic safe actions already in the design: identity auto-pause on complaint and bounce
 rates ([Outbound](outbound.md#abuse-auto-pause-fr-dlv-3)), erasure retries until 20 hours after the request
@@ -599,10 +710,11 @@ API, so it works from any tool that can call that API.
 | Dashboard | Panels |
 |---|---|
 | Overview | Requests and 5xx rate by route; SLO compliance per objective (section 4) with remaining error budget; firing alerts (from `alert_fired`) |
-| Inbound | Accepted, staged, rejected and temp-failed per hour; quarantine reasons; verdict mix; `inbound_ingest_ms` and `webhook_delivery_latency_ms{event_class=inbound}` p50/p95/p99 by `first_attempt`; backscatter and throttling; drops by reason and source; SES: SNS rejections, auth disagreements, lost objects |
-| Outbound and delivery | Sends by transport and outcome; bounce and complaint rate per domain; uncertain and reconciled; fallback sends per domain; provider quota errors; delivery orphans |
-| Webhooks | Attempts by result and error code; dead deliveries; endpoints over 10 consecutive failures; attempt latency |
-| Identity and notifications | Signing calls by kind and result; identity-key operations; JWKS and directory requests by status class; notifications sent, failed and deferred by kind and reason; unsubscribes by result; usage alerts by feature and threshold |
+| Inbound | Accepted, staged, rejected and temp-failed per hour; quarantine reasons; verdict mix (with `arc_rescued`); screening verdicts, latency and queue wait; calendar objects by status and verification result; `inbound_ingest_ms` and `webhook_delivery_latency_ms{event_class=inbound}` p50/p95/p99 by `first_attempt`; backscatter and throttling; drops by reason and source; SES: SNS rejections, auth disagreements, lost objects |
+| Outbound and delivery | Sends by transport and outcome; bounce and complaint rate per domain; uncertain and reconciled; fallback sends per domain; provider quota errors; delivery orphans; draft sends by origin and outcome and `draft_fire_lag_ms`; uploads by `PUT` result, `upload_put_ms` and `upload_copy_ms` p50/p95/p99, and inline against linked attachments; `metrics_ms` p50/p95/p99 and the partial share of event counts |
+| Webhooks | Attempts by result and error code; dead deliveries; endpoints over 10 consecutive failures; attempt latency; event log appends, lag and size, feed reads by surface, consumer backlog, open streams and close codes |
+| Identity and notifications | Signing calls by kind and result; identity-key operations; JWKS and directory requests by status class; notifications sent, failed and deferred by kind and reason; unsubscribes by result; usage alerts by feature and threshold; agent sign-ups by result, verifications by path, ends by reason and the outcome rates |
+| Client versions | Requests by `client` and `client_version`, and the share of SDK requests whose minor is more than three behind the deployment's ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)); no alert pages on it |
 | Search and AI | Latency per mode and scope; degraded and partial share; agentic status mix; AI call failures by purpose; index job failures |
 | Jobs and privacy | Erasure durations and status; retention purges per store; DLQ open items per queue |
 | Domains | Domains per state and per method; transitions; check outcomes per resolver; SES identities against the 10,000 per Region |
@@ -648,6 +760,7 @@ failure (FR-OPS-3). Output format and exit codes are defined in [CLI and setup](
 | `observability` | `invocation_logs` is not `false`, or traces are enabled with `PM_ENV = production` | The `wrangler.toml` lines |
 | `worker.version` | The deployed version differs from the CLI's | `pmail upgrade` |
 | `health` | `GET /health` is not `200`, or reports `degraded` (a `warn` that names the feature that is off), or `frozen: true` (a `warn`) | Section 7.1; the missing variable or secret; `pmail ops unfreeze` once a restore is done |
+| `agent_signup` (when `PM_AGENT_SIGNUP = "on"`; otherwise `skip`) | Never fails. `warn` when the feature is configured but inactive (`agent_signup.active: false` in `GET /v1/platform/status`; the reason is printed) or when the `agent_signup` switch is `off` ([Agent self-sign-up § 21](agent-signup.md#21-observability)) | The reason's fix; `pmail ops switch agent_signup on` once the cause is fixed |
 | `alerts` | Any page alert is firing, the deployment has been frozen for more than 4 hours, or `alert_email` is `missing` (`GET /v1/platform/status`, which needs a platform key with `audit:read`). A firing ticket alert is a `warn` | The alert's runbook; set `PM_ALERT_EMAIL` |
 | `dlq` | Open `dlq_items` exist | `pmail dlq list` (`GET /v1/platform/dlq`) |
 | `quota` | Provider quota errors in the last 24 hours (Analytics Engine SQL API); `warn` when `PM_DAILY_SEND_QUOTA` is unset, and `warn` (never `fail`) when the operator's token lacks Account Analytics · Read, so the errors cannot be counted | [Quota exhausted](#quota-exhausted); the permission in [Deploy › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token) |
@@ -663,7 +776,8 @@ failure (FR-OPS-3). Output format and exit codes are defined in [CLI and setup](
 
 Every work queue has a dead-letter queue with a consumer (FR-OPS-4,
 [Rust workspace](rust-workspace.md#8-generated-wranglertoml)): `pm-inbound-dlq`, `pm-outbound-dlq`,
-`pm-delivery-events-dlq`, `pm-webhooks-dlq`, `pm-index-dlq`, each with `max_batch_size = 100`.
+`pm-delivery-events-dlq`, `pm-webhooks-dlq`, `pm-index-dlq`, `pm-screen-dlq`
+([Screening hold § 5.1](screening.md#51-queue)), each with `max_batch_size = 100`.
 
 ### 8.1 Consumer
 
@@ -698,7 +812,7 @@ wraps it as `pmail dlq list` and `pmail dlq redrive` ([CLI and setup](cli.md)).
 - `POST /v1/platform/dlq/{dlq_id}/redrive` first checks that SHA-256 of `body_json` still equals
   `body_sha256`. A mismatch (the row was edited or damaged) is refused with `500 internal_error`, logged
   as `dlq_body_mismatch` and nothing is published. Otherwise it publishes the stored body back to its source queue through the
-  Worker's own producer binding (`Q_INBOUND`, `Q_OUTBOUND`, `Q_DELIVERY`, `Q_WEBHOOKS` or `Q_INDEX`), then
+  Worker's own producer binding (`Q_INBOUND`, `Q_OUTBOUND`, `Q_DELIVERY`, `Q_WEBHOOKS`, `Q_INDEX` or `Q_SCREEN`), then
   sets `redriven_at` and increments `redrive_count` in the same request, and writes an `audit_log` row
   (`dlq.redrive`). No Cloudflare API token is involved. Every consumer is idempotent
   ([Design conventions](index.md#7-idempotent-queue-consumers)), so a redrive is safe to repeat.
@@ -715,15 +829,19 @@ wraps it as `pmail dlq list` and `pmail dlq redrive` ([CLI and setup](cli.md)).
 | [SES account and receiving](#ses-account-and-receiving) | `ses_object_lost`, `ses_sending_paused`, `ses_rule_missing`, `ses_identities_90pct` |
 | [DLQ growth](#dlq-growth) | `dlq:{queue}`, `inbound_tempfail` |
 | [Integrator API down](#integrator-api-down) | `webhook_failing`, `webhook_disabled` |
-| [Parser bug](#parser-bug) | `panics`, reports of mis-parsed mail |
+| [Parser bug](#parser-bug) | `panics`, `calendar_parse_failures`, reports of mis-parsed mail |
 | [Compromised key](#compromised-key) | Report, unusual usage, `rpc_owner_mismatch` |
-| [Abusive identity](#abusive-identity) | `abuse_pause`, `sending_pause`, `mailbox_size`, `system_mail_budget` |
-| [Erasure failure](#erasure-failure) | `erasure_stalled`, `erasure_failed`, `erasure_overdue`, `billing_cancel_failed` |
+| [Abusive identity](#abusive-identity) | `abuse_pause`, `sending_pause`, `mailbox_size`, `system_mail_budget`, `arc_rescue_refused_spike` |
+| [Erasure failure](#erasure-failure) | `erasure_stalled`, `erasure_failed`, `erasure_overdue`, `billing_cancel_failed`, `retention_expiry_overdue` |
 | [Billing dispute](#billing-dispute) | `billing_dispute:{tenant_id}` |
 | [Job failed](#job-failed) | `job_failed:{kind}` |
 | [Heartbeat](#heartbeat) | `heartbeat_missing`, a failed heartbeat workflow run |
 | [Capacity](#capacity) | `capacity_70:{resource}`, `capacity_80:{resource}` |
 | [Automatic containment](#automatic-containment) | `containment:{rule}` |
+| [Drafts overdue](#drafts-overdue) | `drafts_overdue` |
+| [Event log](#event-log) | `event_log_append_failing`, `event_log_lag`, `event_log_size`, `event_stream_errors` |
+| [Screening unavailable](#screening-unavailable) | `screening_unavailable`, `screening_stuck`, `screening_deadline_lag`, `screening_queue_wait`, `screening_suspect_spike` |
+| [Agent sign-up abuse](#agent-sign-up-abuse) | `agent_signup_spike`, `agent_signup_cap_80`, `containment:agent_signup_off` |
 | [Restore from PITR](#restore-from-pitr) | Data corruption, a bad migration, `inbound_lost` |
 
 The runbooks are written for one operator working alone: every step is a command or an API call, the
@@ -946,6 +1064,9 @@ incident with the alert key, the times, the commands run and any follow-up.
      cumulative.
    - `erasure_overdue` with no stall: the job is progressing but slowly (a very large tenant). Watch the
      receipt counts grow; there is nothing to restart.
+   - **`retention_expiry_overdue`.** Read `retention_expiry_errors_total{step}` for the identity. `vectors` or
+     `objects` errors clear when Vectorize or R2 recovers; `commit` errors are a bug: capture the logged IDs
+     and open a private issue. Expiry resumes by itself at the next alarm.
 3. **Verify.** The request (or its resumption) is `completed` (or `completed_with_holds`) with zero probe
    hits.
 
@@ -1013,8 +1134,76 @@ incident with the alert key, the times, the commands run and any follow-up.
    - `free_sending_off`: review the paused identities of Free and ramped workspaces; suspend abusive
      workspaces; then `pmail ops switch free_sending on`.
    - `emergency_prune`: follow [Capacity](#capacity); turn it off once D1 is below 80%.
+   - `agent_signup_off`: follow [Agent sign-up abuse](#agent-sign-up-abuse).
 3. **Verify.** The switch or status is back, the alert resolved, and the trigger has not recurred within a
    day.
+
+### Drafts overdue
+
+([Drafts § 18](drafts.md#18-observability))
+
+1. **Diagnose.** Read `drafts_alarm_missed_total` and `draft_fire_lag_ms`: a missed alarm that the watchdog
+   repaired raises only the first.
+2. **Mitigate.** If the watchdog's pokes fail, the mailbox is erroring: read its logs by `identity_id`. A
+   draft past its late limit is already `failed` with `send_window_missed` and in the workspace's "Needs a
+   person"; nothing sends it without an explicit act.
+3. **Verify.** The alert resolved and `draft_fire_lag_ms` is back to seconds.
+
+### Event log
+
+([Event feed § 16](event-feed.md#16-observability))
+
+1. **Diagnose.** Find the tenants: `event_log_append_failures_total` and `event_log_lag_ms` by `index1`;
+   `pmail dlq list --queue pm-webhooks`. Check the object: `pmail events list --tenant <tenant> --limit 1`
+   with a platform key. Repeated `503 unavailable` means the object is failing; an `rpc_owner_mismatch` alert
+   at the same time is a security incident ([Compromised key](#compromised-key)).
+2. **Mitigate.**
+   - Once the object answers, redrive the dead-letter items (`pmail dlq redrive`): each appends once and fans
+     out once.
+   - If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start --kind event_log_rebuild
+     --tenant <tenant>` ([Event feed § 9.3](event-feed.md#93-rebuilding-a-log)), and tell the tenant, or its
+     partner, that cursors and consumers must be reset.
+   - For `event_log_size`: compare the tenant's inbound volume with its `webhook_text_bytes`. Lowering
+     `webhook_text_bytes` shrinks new events; the budget keeps pruning the oldest.
+   - For `event_stream_errors`: `1013` points at D1 (revalidation), `1011` at the object (read its error
+     logs).
+3. **Verify.** Appends succeed, the lag is back under 10 seconds, and the alert resolved.
+
+### Screening unavailable
+
+([Screening hold § 22](screening.md#22-observability))
+
+1. **Diagnose.** Read the reasons in `screening_verdict_total` (model errors, `ai_rate_limited`, `model_cap`,
+   `deadline_exceeded`) and the queue wait (`screening_queue_wait_ms`).
+2. **Mitigate.**
+   - For a Workers AI outage, tell affected tenants (their held mail is safe and releasable) and, where a
+     tenant asks, switch its `screening.on_unavailable` to `deliver` with a platform or partner key until the
+     outage ends, then back.
+   - For `model_cap`, review the tenant's volume and `triage.daily_model_cap`.
+   - For `screening_stuck`, the backstop has already expired the row, so no mail is waiting. A repeated
+     condition for one identity means its mailbox's `screen` alarm purpose keeps failing: read the Worker's
+     error logs for that `identity_id` and fix the handler, while the backstop, the next write to the mailbox
+     and the daily maintenance keep ending holds meanwhile.
+   - If `dlq:pm-screen` fires as well, redrive the dead-lettered backstop jobs
+     ([§8.3](#83-listing-and-redriving)).
+   - For `screening_suspect_spike`: look for one campaign (many senders, one pattern) or a regression that
+     makes false positives (feedback with `false_positive` rising).
+3. **Verify.** The alerts resolved and new verdicts are `clear` or `suspect` within their deadline.
+
+### Agent sign-up abuse
+
+([Agent self-sign-up § 21](agent-signup.md#21-observability))
+
+1. **Diagnose.** List the recent sign-ups with `pmail agent-signups list --since 1h`; look for one network
+   or source. For `containment:agent_signup_off`, read the bounce and complaint counts of sign-up mail and
+   look at the sign-ups of the last day.
+2. **Mitigate.**
+   - `agent_signup_spike`: if it is abuse, `pmail ops switch agent_signup off`.
+   - `agent_signup_cap_80`: decide whether to raise `PM_AGENT_SIGNUP_DAILY_CAP`.
+   - `containment:agent_signup_off`: fix the cause, then switch it back on
+     (`pmail ops switch agent_signup on`).
+3. **Verify.** The alert resolved and the outcome rates in `GET /v1/platform/status` are back under the
+   thresholds of [Agent self-sign-up § 13.2](agent-signup.md#132-the-automatic-switch).
 
 ### Billing dispute
 
@@ -1164,6 +1353,11 @@ drill.
 | `it::ops::job_failed_alerts` | A retention job failing its tenth attempt fires `job_failed:retention` (page); a failed backup fires `job_failed:backup` (ticket); each resolves once a later job of the same kind and tenant completes | section 5.3 |
 | `it::ops::domain_rate_state_alerts` | `RecordOutcome` with `domain_id` keeps hourly per-domain counters; 2 bounces in 51 outcomes within an hour fire `bounce_rate:{tenant_id}:{domain_id}` and 1 complaint in 200 outcomes within 24 hours fires `complaint_rate:{tenant_id}:{domain_id}`, for two domains of one tenant independently, with no Custom Alert; outcomes of the system identity are not counted | section 5.3 |
 | `it::ops::platform_status` | `GET /v1/platform/status` with a platform key holding `audit:read` returns the freeze flag, the switches, `alert_email`, the firing alerts, the master-key slots with `remaining`, `activated_at` and `resealed_at`, and the capacity figures; a partner key gets `403` | section 5.5 |
+| `it::events::append_failure_retries_then_dlq` ([Event feed § 20](event-feed.md#20-tests)) | With the object failing, no `Deliver` is queued for that tenant, another tenant in the batch is delivered, retries follow the age schedule, the messages reach `pm-webhooks-dlq` after 13 deliveries, and a redrive appends once and delivers once; `event_log_append_failing` fires | [R3](../edge-cases.md), section 5.3 |
+| `it::events::size_budget_prune` | Above the budget the oldest events are deleted to 5,000,000,000 bytes (with a small budget in the test build), `floor_reason` is `size_limit`, `event_log_size` is reported, and a cursor behind the floor gets `410` with `size_limit` | [R8](../edge-cases.md), section 5.3 |
+| `it::uploads::q100_restore_object_missing` ([Uploads](uploads.md)) | A `ready` upload with its object removed counts `uploads_expired_total{reason=object_missing}`, and the evaluator fires `upload_object_missing` only when no freeze is set | [Q100](../edge-cases.md), section 5.3 |
+| `it::signup::platform_listing_and_status` ([Agent self-sign-up](agent-signup.md)) | `GET /v1/platform/status` and `pmail doctor` report the agent sign-up state; `agent_signup_spike` fires on a fixture of audit rows | FR-ASU-15, section 5.3 |
+| `it::retention::z56_dependency_failure` ([Parity additions § 15](parity-additions.md#15-tests)) | Back-off, kept rows, `retention_expiry_errors_total` and the `retention_expiry_overdue` alert | [Z56](../edge-cases.md), section 5.3 |
 | `it::logs::i5_no_content_in_logs` | No canary content or address in any captured log line, including `metric` lines | [I5](../edge-cases.md), FR-PRV-6 |
 | `it::ops::metrics_emitted` | Each catalogued metric with its labels appears as `event = "metric"` lines for the flows that emit it; no metric carries a message or identity ID as a label | section 3 |
 | `it::ops::alert_evaluator_transitions` | Fire on a true condition, one audit row, re-notify after 6 h, resolve after two false runs | section 5.4 |

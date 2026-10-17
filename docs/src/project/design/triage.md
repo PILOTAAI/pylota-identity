@@ -42,6 +42,7 @@ Triage runs asynchronously on `pm-index` (FR-TRI-1). Ingest sets `triage_status`
 | Inbound, status `received`, kind not `dsn` or `mdn`, `policy.triage.enabled = true` | `pending` | `Triage { reason: Ingest }` |
 | Inbound, status `received`, triage disabled by policy | `skipped` (reason `policy_disabled`) | none |
 | Inbound, status `quarantined` | `NULL` until released ([Inbound](inbound.md)) | none |
+| Inbound, status `screening` | `NULL` until screened clear ([Screening hold](screening.md)) | none |
 | Inbound, status `hidden` or `throttled`, or kind `dsn` or `mdn` | `skipped` (reason `not_eligible`) | none |
 | Any message of the system identity's mailbox ([Inbound › The system identity's mailbox](inbound.md#the-system-identitys-mailbox)) | `skipped` (reason `not_eligible`) | none |
 | Outbound | `NULL` | none |
@@ -51,6 +52,7 @@ Later triggers:
 | Event | Effect |
 |---|---|
 | A quarantined message is released (`message.released`) | `triage_status = 'pending'`, `Triage { reason: Release }` |
+| A `screening` message is screened clear, or delivered `unavailable` ([Screening hold §7](screening.md#7-committing-a-verdict)) | `triage_status = 'pending'`, `Triage { reason: Ingest }` |
 | `POST …/messages/{id}/triage` on an eligible message (FR-TRI-5) | `triage_status = 'pending'`, `Triage { reason: Rerun }` ([§10](#10-re-run-endpoint)) |
 | A `reparse` job re-ingests a message ([J3]) | `Triage { reason: Reprocess }` |
 
@@ -69,7 +71,7 @@ pub enum TriageReason { #[default] Ingest, Release, Rerun, Reprocess }
 
 1. **Load.** Call the mailbox `triage.load(message_id)`, which checks the tenant ID against its own
    meta ([Architecture §3](../architecture.md#3-tenancy-and-isolation)). The mailbox returns `Skip`
-   when the message no longer exists, is not inbound, is quarantined, hidden or throttled, or already
+   when the message no longer exists, is not inbound, is quarantined, screening, hidden or throttled, or already
    has `triage_status = 'done'` with the current `TRIAGE_VERSION` and the reason is not `Rerun`.
    Otherwise it returns a `TriageInput` ([§2](#2-data-structures)).
 2. **Hold one unit** of the `triage` allowance ([§1.2](#12-metering)). A denied hold ends the job with
@@ -145,7 +147,7 @@ pub struct TriageInput {
     pub to: Vec<Mailbox>, pub cc: Vec<Mailbox>,
     pub subject: Option<String>,
     pub extracted_text: String,                // hidden text already removed (B11)
-    pub verdict: Verdict,                      // pass | fail | softfail | none | unaligned | unverified
+    pub verdict: Verdict,                      // pass | arc_rescued | fail | softfail | none | unaligned | unverified
     pub auth: AuthSummary,                     // spf, dkim, dmarc results
     pub known_sender: bool,
     pub spam_score: f32,
@@ -257,11 +259,11 @@ or by the model.
 | 10 | `bi.urgency_keywords` | – (hint) | Level 3: `\b(final (notice\|demand\|reminder)\|legal action\|court (proceedings\|claim\|summons)\|bailiffs?\|enforcement agents?\|debt collect(ion\|ors?)\|within 24 hours\|today only\|immediately)\b`. Level 2: `\b(urgent(ly)?\|asap\|as soon as possible\|by (today\|tomorrow\|end of (day\|play))\|deadline\|overdue\|time[- ]sensitive\|expir(es\|ing\|y) (today\|tomorrow\|soon))\b`. Adds the hint `urgency_keywords: <matched phrase>` and, only when the model is skipped, `urgency_min` of that level |
 | 11 | `bi.urgent_pressure` | `urgent_pressure` | Rule 10 matched and (`payment_change_request` or `credential_request` or (`unknown_sender` and `verdict ≠ pass`)); or `\b(act now\|do not delay\|failure to (pay\|respond\|comply)\|account will be (suspended\|closed\|terminated))\b` |
 | 12 | `bi.hidden_text` | `hidden_text` | `message_flags` contains `hidden_text` ([B11]) |
-| 13 | `bi.auth_failed` | `auth_failed` | `verdict = fail` or `auth.dmarc = fail` (seen when a failed message was released, or quarantine on auth failure is off by policy) |
+| 13 | `bi.auth_failed` | `auth_failed` | `verdict = fail` or `auth.dmarc = fail`, except when `verdict = arc_rescued` ([Parity additions §6.5](parity-additions.md#65-how-each-rule-treats-arc_rescued)) (seen when a failed message was released, or quarantine on auth failure is off by policy) |
 | 14 | `bi.unknown_sender` | `unknown_sender` | `known_sender = false` |
 | 15 | `bi.attachment_risky` | `attachment_risky` | Any attachment has a non-null `risk` |
 | 16 | `bi.impersonation` | `impersonation_suspected` | `trust_flags` contains `display_name_spoof` or `lookalike_domain` |
-| 17 | `bi.prompt_injection` | `prompt_injection_suspected` | `core::injection::scan` returns `instruction_override`, `role_claim`, `tool_mention`, `fence_spoof` or `exfiltration` on the subject, text, filenames or excerpts ([E1]; signals defined in [Search §11.9](search.md#119-steering-detection)) |
+| 17 | `bi.prompt_injection` | `prompt_injection_suspected` | `core::injection::scan` returns `instruction_override`, `role_marker`, `role_claim`, `tool_mention`, `fence_spoof` or `exfiltration` on the subject, text, filenames or excerpts ([E1]; signals defined in [Search §11.9](search.md#119-steering-detection)) |
 | 18 | `bi.phishing` | `phishing_suspected` | (`credential_request` or `payment_change_request`) and (`verdict ≠ pass` or `unknown_sender` or `impersonation_suspected` or `reply_to_mismatch`); or `lookalike_domain` and the text contains a link |
 
 Rules 8 to 18 run in this order because later rules read flags set by earlier ones.
@@ -666,14 +668,15 @@ WHERE seq = ?1
 `POST /v1/identities/{identity_id}/messages/{message_id}/triage` (`messages:write`), described in the
 [API reference](../../reference/api.md#threads-and-messages).
 
-1. Load the message with the caller's visibility: a `quarantined`, `hidden` or `throttled` message is
+1. Load the message with the caller's visibility: a `quarantined`, `screening`, `hidden` or `throttled` message is
    visible only with `quarantine:review`, else `404 message_not_found`.
 2. Outbound messages return `400 invalid_request` with message "Triage applies to inbound messages only."
 3. **Eligibility** (FR-TRI-5). A message that ingest would not triage cannot be re-run: status
-   `quarantined`, `hidden` or `throttled`, kind `dsn` or `mdn`, or a message of the system identity's
-   mailbox → `409 triage_not_eligible` with `details.reason` (`quarantined`, `not_eligible`), and
+   `quarantined`, `screening`, `hidden` or `throttled`, kind `dsn` or `mdn`, or a message of the system identity's
+   mailbox → `409 triage_not_eligible` with `details.reason` (`quarantined`, `screening`, `not_eligible`), and
    nothing changes. A reviewer who wants a quarantined message triaged releases it, which triages it
-   ([Inbound › Read path and release](inbound.md#read-path-and-release)). The consumer's `Skip` for these
+   ([Inbound › Read path and release](inbound.md#read-path-and-release)); a `screening` message is triaged
+   when it is screened clear. The consumer's `Skip` for these
    statuses ([§1.1](#11-consumer-steps)) therefore never leaves a re-run `pending`.
 4. If `triage_status = 'pending'` and a job was enqueued less than 60 seconds ago, enqueue nothing.
    Otherwise set `triage_status = 'pending'` and enqueue `Triage { reason: Rerun }`.

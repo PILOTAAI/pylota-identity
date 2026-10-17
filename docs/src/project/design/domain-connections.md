@@ -173,6 +173,8 @@ The SES DKIM targets are built from the returned `SigningHostedZone`, never a ha
 `dkim.amazonses.com`, because the zone differs by region
 ([creating identities](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html), read 2026-10-09).
 Each record carries `purpose` (`ownership`, `mx`, `dkim`, `return_path`, `spf`, `dmarc`) and `required`.
+Each method's records can also be downloaded as a zone file
+(`?format=bind`, [Parity additions § 9](parity-additions.md#9-zone-file-export-fr-dom-15)).
 
 ### 4.2 Deployment set-up for SES
 

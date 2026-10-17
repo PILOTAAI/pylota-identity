@@ -16,15 +16,16 @@ garages, insurers and councils. Nothing in it is specific to car rental.
 |---|---|
 | **An identity per agent** | Each agent has a mailbox, a primary address and aliases, a display name, a signature and an accountable human. Move the identity to another domain and its history and threads move with it |
 | **Your own domains, at any DNS host** | Every identity has an address on the deployment's platform domain, which is on Cloudflare. Tenants can add their own domains without moving their DNS: six connection methods cover a domain on Cloudflare, a subdomain at any DNS host, and agents that answer as existing Google Workspace or Microsoft 365 addresses ([Custom domains](guides/custom-domains.md)) |
-| **Three ways in** | A REST API (OpenAPI 3.1), an MCP server at `/mcp` and the `pmail` CLI. There is also a Rust SDK. Signed webhooks tell your application what happened |
-| **Inbound you can trust** | Every message is stored before it is acknowledged, parsed, and given an authentication verdict (SPF, DKIM, DMARC, ARC), a spam signal and trust metadata. Mail that fails authentication, looks like spam or carries an unsafe attachment is quarantined |
+| **Three ways in** | A REST API (OpenAPI 3.1), an MCP server at `/mcp` and the `pmail` CLI. There are also Rust and TypeScript SDKs, and agent skills for Claude Code, Codex and Cursor. Signed webhooks, an ordered event feed with durable consumers, and a resumable live stream tell your application what happened, all from one log with one event ID |
+| **Inbound you can trust** | Every message is stored before it is acknowledged, parsed, and given an authentication verdict (SPF, DKIM, DMARC, ARC), a spam signal and trust metadata. Mail that fails authentication, looks like spam or carries an unsafe attachment is quarantined. A screening hold can keep mail that tries to steer agents away from them until it has a verdict. Calendar invitations arrive as verified, structured objects |
 | **Triage** | Every inbound message gets a category, a needs-reply score, an urgency from 0 to 3, a short summary and risk flags such as a payment-change request or suspected prompt injection |
+| **Approval before send** | An agent can write a draft that a person approves, bound to the exact text, before it leaves, and a draft can be scheduled. Drafts, scheduled sends and calendar replies all go through the one send pipeline ([Sending › Drafts, approval and scheduled send](guides/sending.md#drafts-approval-and-scheduled-send)) |
 | **Safe retries** | Send, reply, reply-all and forward require an `Idempotency-Key`. A retry returns the first result instead of sending a second email. A send whose outcome cannot be known is marked `uncertain` and is never resent automatically |
 | **Four search modes** | `keyword` (full-text plus exact references such as plates and invoice numbers), `semantic`, `hybrid` (the default) and `agentic`, which plans searches and returns an answer whose citations are checked by code |
 | **Agents that can prove who they are** | Each identity can sign short-lived agent assertions that any service verifies against the identity's published key set. Where the operator and the workspace turn it on, agents can also sign their web requests with Web Bot Auth. Private keys never leave the Worker ([Using it from an agent](guides/agents.md#agent-assertions)) |
 | **Email for the people behind the agents** | Usage alerts at 80% and 100% of an allowance, opt-in new-mail notifications that carry counts and never content, and a daily list of what needs a person ([Notifications by email](guides/receiving.md#notifications-by-email)) |
 | **Your account, your data** | D1, Durable Objects, R2, Queues, Vectorize and Workers AI in the Cloudflare account you deploy to. D1, Durable Objects and R2 can be pinned to the EU |
-| **Privacy tools** | Retention policies, erasure with receipts, legal holds and subject-access export |
+| **Privacy tools** | Retention policies, per workspace and per mailbox, erasure with receipts, legal holds and subject-access export |
 
 ## Who it is for
 
@@ -63,7 +64,7 @@ garages, insurers and councils. Nothing in it is specific to car rental.
 2. The Worker parses and authenticates it, finds its thread and stores it in the identity's mailbox
    (one Durable Object per identity). It is searchable in the same transaction.
 3. Triage and semantic indexing run in the background. Each step emits an event, which is delivered
-   to your webhook endpoints, signed.
+   to your webhook endpoints, signed, and kept in the tenant's event log for the feed and the stream.
 4. Your agent reads, searches and replies through the API, MCP or CLI. Outbound mail leaves through
    Cloudflare Email Sending, or, depending on how a tenant domain is connected, through Amazon SES or the
    tenant's own SMTP provider. Delivery events come back on a queue.
@@ -78,7 +79,10 @@ Pylota Mail v1.0 deliberately does not include ([PRD §4](project/prd.md#4-goals
 - IMAP, POP3 or SMTP submission access;
 - bulk marketing campaigns or list management. Marketing mail is supported one message at a time,
   with consent and one-click unsubscribe;
-- scheduled send or server-side drafts (planned for v1.1);
+- open tracking;
+- a calendar store: invitations are read and sent, and your own calendar keeps the state;
+- general file storage: an upload only stages an attachment for a send;
+- fetching attachments from a URL;
 - OAuth 2.1 for the MCP endpoint (planned for v1.1; v1.0 uses API keys as bearer tokens);
 - running anywhere other than Cloudflare Workers.
 

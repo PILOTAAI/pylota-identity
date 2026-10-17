@@ -6,7 +6,7 @@ This page is the map. The [design documents](design/index.md) hold the detail fo
 ## 1. Shape of the system
 
 Pylota Mail is **one Cloudflare Worker written in Rust** (compiled to WebAssembly with `workers-rs`).
-It has five entry points and six Durable Object classes. It stores data in D1, Durable Object SQLite,
+It has five entry points and seven Durable Object classes. It stores data in D1, Durable Object SQLite,
 R2 and Vectorize, and moves work through Queues.
 
 ```text
@@ -41,14 +41,19 @@ R2 and Vectorize, and moves work through Queues.
  SES events ─────── SNS ──▶ fetch() POST /hooks/ses ──▶ pm-outbound (transport events)     │
                     │                                                                      │
  mailbox DO outbox ─▶ pm-webhooks ──▶ queue() ── signed POST ──▶ integrator endpoints      │
+                    │                 ├─ each event ─▶ TenantEvents DO (tenant log)        │
+                    │                 │  ─▶ feed, durable consumers, WebSocket streams     │
                     │                 └─ new mail ─▶ Notifier DO (tenant) ◀─ TenantQuota   │
                     │                    alarm ─▶ system identity send ─▶ pm-outbound      │
+ mailbox DO ingest ─▶ pm-screen ───▶ queue() ── steering scan, classifier (AI)             │
+                    │                 └─ verdict ─▶ mailbox DO: received or quarantined    │
  mailbox DO commit ─▶ pm-index ────▶ queue() ── chunk, embed (AI) ──▶ Vectorize            │
                     │                         └─ triage (AI), attachment text (toMarkdown) │
                     │                                                                      │
  scheduled() ───────▶ DomainMonitor DOs (DNS health), JobRunner DOs (erasure, retention,   │
                     │  re-embed, export, backup), address retirement, state alerts,        │
-                    │  the SES backstop and account check                                  │
+                    │  the SES backstop and account check, the scheduled-drafts watchdog,  │
+                    │  agent sign-up expiry                                                │
                     └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -59,11 +64,11 @@ configured. The `ses_ingest` ledger in D1 passes each SES pointer to `pm-inbound
 
 | Handler | Triggered by | Does |
 |---|---|---|
-| `fetch` | HTTPS to the API host, and to the console host when `PM_CONSOLE_HOST` differs | On the API host: REST API `/v1/*`, MCP `/mcp`, `/openapi.json`, `/health`, `/.well-known/*` (the security contact, identity JWKS and the Web Bot Auth key directory), signed links `/v1/links/*`, the SNS endpoints `/hooks/ses` (SES delivery events) and `/hooks/ses/inbound` (SES inbound notifications), and the Stripe webhook `/billing/stripe/webhook`. On the console host: `/console/*` |
+| `fetch` | HTTPS to the API host, and to the console host when `PM_CONSOLE_HOST` differs | On the API host: REST API `/v1/*`, MCP `/mcp`, `/openapi.json`, `/health`, `/.well-known/*` (the security contact, identity JWKS and the Web Bot Auth key directory), signed links `/v1/links/*`, the SNS endpoints `/hooks/ses` (SES delivery events) and `/hooks/ses/inbound` (SES inbound notifications), and the Stripe webhook `/billing/stripe/webhook`. Uploads arrive as a `PUT` to their signed link ([Uploads](design/uploads.md)); `GET /v1/events/stream` upgrades to a WebSocket that the Worker hands to the tenant's `TenantEvents` object ([Event feed](design/event-feed.md)); `POST /v1/agent-signup` takes no key and answers only while `PM_AGENT_SIGNUP` is on ([Agent self-sign-up](design/agent-signup.md)). On the console host: `/console/*` |
 | `email` | Email Routing, for domains with `inbound = routing` | Looks up the recipient, writes raw mail to R2, queues a pointer, and rejects unknown or retired addresses |
-| `queue` | Ten Cloudflare queues: five work queues and their five dead-letter queues | Inbound processing, outbound transport, delivery events, webhook delivery, indexing, triage, dead-letter recording. The SES backstop is an SQS queue in AWS, polled by `scheduled`, not one of these |
-| `scheduled` | Cron (every minute and every 15 minutes) | Every minute: address retirement, the platform-event outbox sweep, restarting queued jobs, the state-alert evaluator (with alert email and the automatic containment rules), the master-key re-seal sweep, draining the SES backstop queue. Every 15 minutes: domain health scheduling, retention, usage roll-up, the SES account check, the capacity checks, the nightly backup job. While `PM_FREEZE = "on"` they do nothing ([Observability › Restore from PITR](design/observability.md#restore-from-pitr)) |
-| Durable Object `alarm` | Alarms set by each object | State machines: domain health, jobs, outbox dispatch, in each mailbox the transport-claim, dispatch-retry, lock and reconciliation work for its own sends, and in each tenant's `Notifier` the notification windows and the daily 09:00 run |
+| `queue` | Twelve Cloudflare queues: six work queues and their six dead-letter queues | Inbound processing, screening (`pm-screen`, [Screening](design/screening.md)), outbound transport, delivery events, webhook delivery (after appending each event to its tenant's event log), indexing, triage, dead-letter recording. The SES backstop is an SQS queue in AWS, polled by `scheduled`, not one of these |
+| `scheduled` | Cron (every minute and every 15 minutes) | Every minute: address retirement, the platform-event outbox sweep, restarting queued jobs, the state-alert evaluator (with alert email and the automatic containment rules), the master-key re-seal sweep, draining the SES backstop queue, the scheduled-drafts watchdog ([Drafts](design/drafts.md)). Every 15 minutes: domain health scheduling, retention, usage roll-up, the SES account check, the capacity checks, the nightly backup job, agent sign-up expiry. While `PM_FREEZE = "on"` they do nothing ([Observability › Restore from PITR](design/observability.md#restore-from-pitr)) |
+| Durable Object `alarm` | Alarms set by each object | State machines: domain health, jobs, outbox dispatch, in each mailbox the transport-claim, dispatch-retry, lock and reconciliation work for its own sends, scheduled drafts, screening deadlines, upload expiry and per-identity message expiry, in each tenant's `Notifier` the notification windows and the daily 09:00 run, and in each tenant's `TenantEvents` the revalidation of open streams. `TenantEvents` also receives its WebSocket messages and closes through the three hibernation handlers |
 
 ### Inbound sources and outbound transports
 
@@ -107,12 +112,13 @@ dispute) ([Billing › Stripe integration](design/billing.md#stripe-integration)
 
 | Class | One per | Holds |
 |---|---|---|
-| `IdentityMailbox` | identity | The mailbox: threads, messages, recipients, attachment metadata, labels, FTS5 index, references, contacts, triage, send ledger, idempotency records, event outbox, thread locks, chunk map |
+| `IdentityMailbox` | identity | The mailbox: threads, messages, recipients, attachment metadata, labels, FTS5 index, references, contacts, triage, send ledger, idempotency records, event outbox, thread locks, chunk map, drafts, uploads, screening records and feedback, hourly and daily event counts |
 | `DomainMonitor` | domain | The domain verification and health state machine, check history, reminder schedule |
 | `JobRunner` | long-running job | The erasure, retention, export, re-embed, re-parse, re-index, domain-removal or backup state machine, with a step journal |
-| `TenantQuota` | tenant | Plan allowances and open holds (inboxes, sends, triage, custom domains, storage, seats), exact daily counters (agentic searches, AI usage), abuse-rate windows and the usage-alert markers that make each 80% and 100% alert go out once |
+| `TenantQuota` | tenant | Plan allowances and open holds (inboxes, sends, triage, custom domains, storage, seats), exact daily counters (agentic searches, AI usage, screening model calls), abuse-rate windows (which the deliverability rates read) and the usage-alert markers that make each 80% and 100% alert go out once |
 | `SesControl` | deployment (only when SES is configured) | The token bucket that keeps Amazon SES control-plane calls at one per second ([Domains on any DNS host §4.8](design/domain-connections.md#48-ses-api-rate-one-request-per-second)) |
 | `Notifier` | tenant | Notification email for the workspace's people: pending items, coalescing windows, the daily 09:00 schedule and the daily caps. It holds person and identity IDs and counts, never mail content ([Notifications](design/notifications.md#8-notifier-object)) |
+| `TenantEvents` | tenant | The tenant's ordered event log (the envelopes webhooks deliver), durable consumer positions and stream-token hashes; WebSocket streams attach to it ([Event feed](design/event-feed.md)) |
 
 Every Durable Object ID is created with `unique_id_with_jurisdiction(<jurisdiction>)` (or `unique_id()`
 when the jurisdiction is `default`) and stored in D1. Objects are addressed with `id_from_string`. Names
@@ -123,11 +129,11 @@ are never hashed into IDs, because `workers-rs` only applies a jurisdiction to u
 
 | Store | Binding | Holds | Why there |
 |---|---|---|---|
-| D1 | `DB` | The control plane: tenants, identities, addresses (the directory), domains, API keys (hashed), webhook endpoints and delivery log, suppressions, allow and block lists, jobs, erasure requests, audit log, non-mail idempotency records, the sealed thread, link, cursor and Web Bot Auth signing keys, the agents' identity keys (sealed) and key tombstones, dead-letter items, the `ses_ingest` ledger, and the console's people, members, sessions, notification preferences and billing accounts | Small, relational, and queried across tenants for routing and administration |
-| Durable Object SQLite | `MAILBOX`, `DOMAINS`, `JOBS`, `QUOTA`, `SES_CONTROL`, `NOTIFY` | Everything per mailbox, in one transaction; each other object's own state | Strong consistency per mailbox, no cross-tenant write contention, 10 GB per object, one-call deletion |
-| R2 | `BLOBS` (and the optional `BACKUP`) | Raw `.eml`, attachments, extracted attachment text, exports | Large objects, free egress, erasure by prefix |
+| D1 | `DB` | The control plane: tenants, identities, addresses (the directory), domains, API keys (hashed), webhook endpoints and delivery log, suppressions, allow and block lists, jobs, erasure requests, audit log, non-mail idempotency records, the sealed thread, link, cursor and Web Bot Auth signing keys, the agents' identity keys (sealed) and key tombstones, dead-letter items, the `ses_ingest` ledger, the console's people, members, sessions, notification preferences and billing accounts, the content-free draft index (`draft_index`), and agent sign-ups with their refusals | Small, relational, and queried across tenants for routing and administration |
+| Durable Object SQLite | `MAILBOX`, `DOMAINS`, `JOBS`, `QUOTA`, `SES_CONTROL`, `NOTIFY`, `EVENTS` | Everything per mailbox, in one transaction; each other object's own state | Strong consistency per mailbox, no cross-tenant write contention, 10 GB per object, one-call deletion |
+| R2 | `BLOBS` (and the optional `BACKUP`) | Raw `.eml`, attachments, extracted attachment text, draft attachments, uploads (never copied to `BACKUP`), exports | Large objects, free egress, erasure by prefix |
 | Vectorize | `VECTORS` (index `pm-mail-chunks`) | Chunk vectors and filter metadata only, never text | Semantic retrieval |
-| Queues | `Q_INBOUND`, `Q_OUTBOUND`, `Q_DELIVERY`, `Q_WEBHOOKS`, `Q_INDEX` | Pointers only (≤ 128 KB) | At-least-once async work with dead-letter queues |
+| Queues | `Q_INBOUND`, `Q_OUTBOUND`, `Q_DELIVERY`, `Q_WEBHOOKS`, `Q_INDEX`, `Q_SCREEN` | Pointers only (≤ 128 KB) | At-least-once async work with dead-letter queues |
 
 R2 keys are tenant-prefixed so that erasure can list them:
 
@@ -137,6 +143,8 @@ t/{tenant_id}/i/{identity_id}/m/{message_id}/a/{attachment_id}
 t/{tenant_id}/i/{identity_id}/m/{message_id}/a/{attachment_id}.md      extracted text
 t/{tenant_id}/i/{identity_id}/out/{message_id}.eml                     composed outbound MIME
 t/{tenant_id}/i/{identity_id}/out/{message_id}/a/{attachment_id}       outbound attachment
+t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}      draft attachment
+t/{tenant_id}/i/{identity_id}/up/{upload_id}                           upload (≤ 7 days)
 t/{tenant_id}/exports/{export_id}.zip
 inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml                            before routing resolves (≤ 15 days)
 inbound-staging/ses/{key}                                              SES object copied from S3 (≤ 15 days)
@@ -201,10 +209,14 @@ Platform (deployment) ── platform keys, platform domain, platform webhooks
    - updates contacts;
    - appends `message.received` (or `message.quarantined`) to the outbox.
 
-   It sets an alarm to drain the outbox.
+   It sets an alarm to drain the outbox. With the tenant's `screening.mode` at `hold`, a message no
+   quarantine rule held is stored as `screening` instead, hidden from agents, and `message.received` waits
+   for the verdict.
 5. After commit, attachments are written to R2. `pm-index` jobs are queued for attachment-text
    extraction, chunking and embedding, and triage. Each completion appends its own event, for example
-   `message.triaged`.
+   `message.triaged`. A message being screened is queued on `pm-screen` instead: a deterministic scan and
+   a separate classifier decide, before its deadline, whether it becomes `received` or `quarantined`, and
+   embedding and triage follow the verdict ([Screening](design/screening.md)).
 
 Mail for an `inbound = ses` domain skips steps 1 and 2. SES has already accepted it and stored it in S3;
 the SNS handler (or the every-minute backstop) verifies the notification, records each recipient in the
@@ -237,6 +249,8 @@ See [Inbound pipeline](design/inbound.md).
 4. Provider delivery events arrive on `pm-delivery-events`. They are routed by sender address to the
    mailbox, matched by provider message ID, and update each recipient's status.
 
+Drafts become messages through the same `submit` ([Drafts](design/drafts.md)).
+
 See [Outbound and safe retries](design/outbound.md).
 
 ### 4.3 Search
@@ -256,7 +270,10 @@ Tenant scope fans out to each identity's mailbox in parallel and merges the resu
 ### 4.4 Events and webhooks
 
 Every state change appends an event to the owning Durable Object's **outbox**, in the same transaction
-as the change. An alarm drains the outbox to `pm-webhooks`. The consumer:
+as the change. An alarm drains the outbox to `pm-webhooks`. Before resolving endpoints, the consumer
+appends each event once to the tenant's `TenantEvents` log, so agents and integrators can read the same
+events with a cursor (`GET /v1/events`), through durable consumers, or over a WebSocket stream that resumes
+without loss. See [Event feed and live stream](design/event-feed.md). The consumer then:
 
 - resolves matching endpoints (platform, partner and tenant), from D1 with a short cache;
 - signs each delivery per endpoint (Standard Webhooks);
@@ -334,7 +351,7 @@ See [Notifications](design/notifications.md).
 | Events are emitted exactly when state changes | Transactional outbox in the same Durable Object transaction; consumers deduplicate on `event_id` |
 | Webhooks are delivered at least once | Queue retries; endpoint consumers deduplicate on `webhook-id` |
 | One outbound email per idempotency key | Reservation in the mailbox transaction; an uncertain send is never retried automatically |
-| Ordering | Per mailbox only. Webhooks carry `occurred_at` and a per-identity `sequence` for consumers that need order |
+| Ordering | Per mailbox only. Webhooks carry `occurred_at` and a per-identity `sequence` for consumers that need order. The tenant's event log orders events by append, and a reader that resumes from a cursor misses nothing appended after it |
 
 ## 6. Code layout
 
@@ -352,6 +369,8 @@ crates/worker       handlers, router, auth, console, Durable Object classes, sta
 crates/sdk          Rust client (reqwest), used by the CLI
 crates/cli          `pmail` (clap): setup, deploy, doctor, admin, mail
 crates/conformance  MIME corpus + RFC conformance runner (native and against workerd)
+sdks/typescript     TypeScript SDK `@pylotahq/mail`, generated from openapi.yaml, with Vitest tests
+integrations/       agent skills and plugins, checked against the contract of the same commit
 xtask               build-worker, size budget, itest, fuzz, release bundling
 ```
 
@@ -377,7 +396,7 @@ See [Rust workspace and platform](design/rust-workspace.md).
 |---|---|---|
 | Cloudflare Email Routing | Inbound | Outside our control; senders retry on temporary failure |
 | Cloudflare Email Sending | Outbound (default) | Queue backoff. The runbook switches the transport to SES |
-| Workers AI | Embeddings, rerank, triage, agentic planner, attachment text | Search degrades to keyword or hybrid without rerank; triage is marked `failed` and retried; agentic search degrades to hybrid |
+| Workers AI | Embeddings, rerank, triage, agentic planner, attachment text, the screening classifier | Search degrades to keyword or hybrid without rerank; triage is marked `failed` and retried; agentic search degrades to hybrid; screening gives `unavailable`, handled by the tenant's `screening.on_unavailable` (quarantine by default) |
 | Vectorize | Semantic search | Hybrid search falls back to keyword, with `semantic_coverage` and `degraded` set |
 | DNS-over-HTTPS resolvers (Cloudflare, Google) | DKIM, DMARC and domain checks | A single-resolver failure never flips a domain state |
 | Amazon SES, S3, SNS, SQS (optional) | Inbound and outbound for domains on any DNS host (`dns_records`, `send_only`, `smtp_relay` with `inbound: ses`), failover | Outbound errors are classified like Cloudflare's. Inbound: SNS retries the push; the SQS backstop keeps each notification for 14 days; S3 keeps the object until it is ingested. Paused SES sending moves SES domains to fallback |
@@ -388,5 +407,6 @@ See [Rust workspace and platform](design/rust-workspace.md).
 
 - No Workflows (`workers-rs` has no binding). State machines live in Durable Objects with alarms ([ADR 0005](adr/0005-state-machines.md)).
 - No KV for correctness-critical state (it is eventually consistent).
-- No server-side fetching of remote content in mail (tracking and SSRF).
+- No server-side fetching of remote content in mail (tracking and SSRF), and no attachment fetched from a URL
+  ([Uploads](design/uploads.md)).
 - No handwritten JavaScript. The `worker-build` shim is generated ([ADR 0001](adr/0001-rust-on-workers.md)).

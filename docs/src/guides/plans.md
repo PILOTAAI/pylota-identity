@@ -128,6 +128,7 @@ When an allowance is spent, the action that needs it is refused **before anythin
     "message": "This workspace has used its sends for this billing period.",
     "retryable": false,
     "fix": "Upgrade the plan or add a top-up, then retry with the same Idempotency-Key.",
+    "docs": "https://pylotamail.com/docs/reference/errors#code-billing_limit",
     "request_id": "req_01JA2Q7M…",
     "details": { "feature": "sends", "granted": 12000, "used": 12000,
                  "resets_at": "2026-11-01T00:00:00Z",

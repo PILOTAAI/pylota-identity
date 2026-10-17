@@ -48,15 +48,22 @@ effective policy read-only.
 Every field of the [tenant policy](../../reference/configuration.md#tenant-policy) belongs to one class.
 The field-by-field table is in [Configuration › Who may change a field](../../reference/configuration.md#who-may-change-a-field);
 `core::policy::FIELDS` holds the same table as data, and a unit test fails when a field of `TenantPolicy`
-has no entry.
+has no entry. The parity fields have their entries too: `drafts.require_approval` and `drafts.key_approval`
+([Drafts §3](drafts.md#3-approval-policy)), the three `screening.*` fields
+([Screening hold §2](screening.md#2-policy)), and `inbound.trusted_arc_sealers` (platform-only) and
+`events.labels_changed` (free) ([Parity additions § 4](parity-additions.md#4-label-change-events-fr-wh-6),
+[§ 6.2](parity-additions.md#62-the-policy-field)).
 
 | Class | Fields | A workspace writer |
 |---|---|---|
-| Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones` | `403 scope_denied`, `details.reason = "not_writable"` |
-| Platform or own partner | `quarantine.key_release` | `403 scope_denied`, `details.reason = "not_writable"` ([J14](../edge-cases.md)) |
+| Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones`, `inbound.trusted_arc_sealers` | `403 scope_denied`, `details.reason = "not_writable"` |
+| Platform or own partner | `quarantine.key_release`, `drafts.key_approval` | `403 scope_denied`, `details.reason = "not_writable"` ([J14](../edge-cases.md)) |
 | Lower-only | The fields the configuration table lists as lower-only, `accounts.require_approval` among them | At most its **workspace ceiling**; above it `403 scope_denied`, `details.reason = "above_ceiling"`, `details.ceiling`, `details.ceiling_source` ([J23](../edge-cases.md)) |
-| Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp` | Any value as a person; a key may only tighten, unless keys may take decisions reserved for people ([§3](#3-decisions-reserved-for-people), [J25](../edge-cases.md)) |
+| Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp`, `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`, `screening.deadline_seconds` | Any value as a person; a key may only tighten, unless keys may take decisions reserved for people ([§3](#3-decisions-reserved-for-people), [J25](../edge-cases.md)) |
 | Free | Every other field | Any valid value |
+
+While a tenant is a provisional agent sign-up, its effective policy also takes a fixed overlay, applied
+after every class and ceiling, which only tightens ([Agent self-sign-up §4.2](agent-signup.md#42-policy-overlay)).
 
 **Workspace ceiling.** For a lower-only field, the loosest value a workspace writer may set is the strictest
 of:
@@ -93,15 +100,16 @@ the tenant lower sets the field, which sets the value and the ceiling together.
 ## 3. Decisions reserved for people
 
 FR-CON-6 makes releasing quarantined mail a person's decision on Pylota Mail Cloud, because an agent's
-key can be steered by the mail it reads. Two more decisions have the same effect, letting mail or codes
-that nobody reviewed reach agents, so they follow the same rule, implemented once in
-`auth::people::key_may_decide(scope, tenant_policy) -> bool`:
+key can be steered by the mail it reads. Three more decisions have the same effect, letting mail or codes
+that nobody reviewed reach agents, or mail that nobody approved leave them, so they follow the same rule,
+implemented once in `auth::people::key_may_decide(decision, scope, tenant_policy) -> bool`:
 
 | Decision | Where |
 |---|---|
 | Release a quarantined message | `POST …/messages/{message_id}/release` ([Security §5.3](security.md#53-cross-level-read-access)) |
 | Loosen a guard field of the policy | `PATCH …/policy`, from a tenant key (this section) |
 | Approve a service account | `POST …/accounts/{account_id}/approve` ([Service sign-up ledger §4](service-accounts.md#4-approval)) |
+| Approve a draft | `POST …/drafts/{draft_id}/approve` ([Drafts §4.6](drafts.md#46-approve)) |
 
 An API key may take these decisions only when `PM_QUARANTINE_KEY_RELEASE` is `on`, or `PM_CONSOLE` is `off`
 (no person could take them), or the tenant's policy has `quarantine.key_release: true` (a platform key or the
@@ -115,10 +123,25 @@ approval is never made by the key that requested the entry (`403 permission_deni
 `details.reason = "self_approval"`, [E11](../edge-cases.md)). A console session is a person, so
 `key_may_decide` is never asked for it.
 
+For approving a draft the tenant's opt-in is `drafts.key_approval` instead of `quarantine.key_release`:
+`key_may_decide(Decision::ApproveDraft, …)` reads that field. As under `quarantine.key_release`, the opt-in
+admits only a platform key or the tenant's own partner key, never a tenant key, and a key never approves a
+revision it wrote. Loosening `drafts.require_approval` is a guard-field decision and uses
+`quarantine.key_release` like the other guard fields. Releasing mail held by screening is a quarantine
+release and follows the release rule above unchanged ([Screening hold §10](screening.md#10-release)).
+
 **Guard fields.** A write by a tenant key **tightens** a guard field when the new value is at least as
 strict as the tenant's current effective value: `true` for `send_allowlist_only`,
 `quarantine.on_auth_fail` and `quarantine.unsolicited_otp`, and a value at or below the current
-`quarantine.spam_threshold` (a lower threshold quarantines more). A tightening is always accepted. Any other
+`quarantine.spam_threshold` (a lower threshold quarantines more). For `drafts.require_approval`, tightening
+means a level at or above the current one in the order `never` < `new_recipients` < `external` < `always`
+([Drafts §3.1](drafts.md#31-draftsrequire_approval)). For the screening fields
+([Screening hold §2](screening.md#2-policy)): `screening.mode` tightens when the new value is at least as
+strict in the order `off` < `monitor` < `hold`; `screening.on_unavailable` when the new value is
+`quarantine`, or equals the current one; `screening.deadline_seconds` when the effective
+`screening.on_unavailable` after the write is `quarantine` (any deadline is then equally safe: no unscreened
+mail reaches agents, and a shorter one only holds more), or the new value is at least the current one (more
+time to reach a verdict). A tightening is always accepted. Any other
 value loosens: accepted when `key_may_decide` is true, otherwise `403 permission_denied` with
 `details.reason = "person_required"` and `details.field` ([J25](../edge-cases.md)). Guard fields have no
 ceilings: a person in the console may set any value, and platform and partner keys write them freely, as
@@ -206,8 +229,8 @@ same refusals for the `policy` it carries, with the same `details`.
 `policy::view` as `GET …/policy`, for the session principal:
 
 - **Every role** sees the effective policy, grouped as Sending (caps, recipients, allow-list only, large
-  attachments and link lifetime, AI disclosure, domain fallback), Automatic replies, Quarantine, Inbound,
-  Retention, Triage, Search, Webhooks, Abuse thresholds and Service accounts. A field the session cannot
+  attachments and link lifetime, AI disclosure, domain fallback), Drafts, Automatic replies, Quarantine,
+  Screening, Inbound, Retention, Triage, Search, Webhooks, Abuse thresholds and Service accounts. A field the session cannot
   change is shown as text with the reason: "set by the platform operator", "set by your provider" (a
   partner ceiling; the partner's name is never shown to a tenant) or "the deployment's limit".
 - **Owners and admins** get one `<form method="post">` with the CSRF token ([Console › CSRF](console.md#csrf))
@@ -241,7 +264,7 @@ same refusals for the `policy` it carries, with the same `details`.
 ## 8. A partner's tenants
 
 On Pylota Mail Cloud, Pylota's partner key creates each operator's workspace and sets its policy, for
-example `quarantine.key_release: true` and a lower `tenant_daily_send_cap`. Every lower-only value it sets
+example `quarantine.key_release: true`, `drafts.key_approval: true` and a lower `tenant_daily_send_cap`. Every lower-only value it sets
 becomes that tenant's partner ceiling, so:
 
 - a tenant key that Pylota minted with `policy:write`, or a person Pylota invited as owner or admin, may
@@ -249,7 +272,8 @@ becomes that tenant's partner ceiling, so:
 - guard fields follow [§3](#3-decisions-reserved-for-people): because Pylota's tenants have
   `quarantine.key_release: true`, Pylota's partner key may loosen them; a person may too; the tenant and
   identity keys Pylota's agents hold may not;
-- `quarantine.key_release` and the platform-only fields stay out of reach of the tenant;
+- `quarantine.key_release`, `drafts.key_approval` and the platform-only fields stay out of reach of the
+  tenant;
 - Pylota receives `tenant.policy_updated` on its partner endpoints whenever a policy changes.
 
 ## 9. Tests

@@ -20,11 +20,13 @@ There are three layers:
 | `QUOTA` | Durable Object namespace | class `TenantQuota` | SQLite-backed |
 | `SES_CONTROL` | Durable Object namespace | class `SesControl` | SQLite-backed. One object per deployment, used only when SES is configured: the SES control-plane token bucket |
 | `NOTIFY` | Durable Object namespace | class `Notifier` | SQLite-backed. One object per tenant: coalescing, schedules and caps of notification email ([Notifications](../project/design/notifications.md#8-notifier-object)) |
+| `EVENTS` | Durable Object namespace | class `TenantEvents` | SQLite-backed. One object per tenant: the tenant's event log, durable consumers and WebSocket streams ([Event feed](../project/design/event-feed.md)) |
 | `Q_INBOUND` | Queue producer and consumer | `pm-inbound` (DLQ `pm-inbound-dlq`) | Batch 10, max retries 10, `retry_delay` 120 s, so ten deliveries of a message that keeps failing span about 18 minutes and its third attempt runs headers-only ([Inbound › Degraded mode](../project/design/inbound.md#the-pm-inbound-consumer)) |
 | `Q_OUTBOUND` | Queue producer and consumer | `pm-outbound` (DLQ `pm-outbound-dlq`) | Batch 10, max retries 100. They count only unexpected errors: provider rate-limit, quota and relay back-offs re-enqueue a new message with a delay, so they never use them up; every back-off ends `failed` (`quota_exhausted`) 24 hours after submit |
 | `Q_DELIVERY` | Queue consumer and producer | `pm-delivery-events` (DLQ `pm-delivery-events-dlq`) | Batch 10, max retries 20 (the G8 retry schedule, every 60 s for 15 minutes, needs at least 16). Fed by Email Sending event subscriptions; the producer is used only to redrive dead-lettered items |
 | `Q_WEBHOOKS` | Queue producer and consumer | `pm-webhooks` (DLQ `pm-webhooks-dlq`) | Batch 20, max retries 13 |
 | `Q_INDEX` | Queue producer and consumer | `pm-index` (DLQ `pm-index-dlq`) | Batch 10, max retries 10 |
+| `Q_SCREEN` | Queue producer and consumer | `pm-screen` (DLQ `pm-screen-dlq`) | Batch 10, `max_batch_timeout` 1 s, max retries 3. Screening jobs, kept apart from `pm-index` so a backlog there cannot push held mail past its deadline ([Screening hold §5](../project/design/screening.md#5-the-screen-job)) |
 | `VECTORS` | Vectorize | `pm-mail-chunks` | 1024 dimensions, cosine, 8 metadata indexes |
 | `VECTORS_NEXT` | Vectorize | the new index of a re-embed | Only while an embedding-model change is re-embedding; `pmail deploy` adds and removes it ([Search design › Index lifecycle](../project/design/search.md#7-index-lifecycle)) |
 | `AI` | Workers AI | – | Embeddings, rerank, triage, planner, `toMarkdown` |
@@ -37,17 +39,17 @@ There are three layers:
 | `RL_SEND` | Rate limiting | – | 120 per 60 s, keyed by identity ID |
 | `RL_AI` | Rate limiting | – | 60 per 60 s, keyed by tenant ID. Asked before every Workers AI text-generation call (triage model, agentic planning and answer calls), so one tenant takes at most a fifth of the account's 300 a minute ([Search › Indexing pipeline](../project/design/search.md#6-indexing-pipeline-pm-index), [F16](../project/edge-cases.md)) |
 | `RL_EMBED` | Rate limiting | – | 600 per 60 s, keyed by tenant ID. Asked before every embedding request (an `Embed` batch of up to 16 texts, or a query embedding); the account limit is 3,000 a minute ([F16](../project/edge-cases.md)) |
-| `RL_SIGNIN` | Rate limiting | – | 10 per 60 s, keyed by client network (`CF-Connecting-IP`; an IPv6 address by its /64 prefix). Applies to `POST /console/sign-in`, `/console/sign-in/link`, `/console/sign-in/code`, `/console/sign-in/verify`, `/console/sign-up` and `/console/waitlist`, and `GET /console/oauth/{provider}/start` ([Cloud sign-up](../project/design/cloud-signup.md#10-abuse-and-safety-on-cloud)) |
+| `RL_SIGNIN` | Rate limiting | – | 10 per 60 s, keyed by client network (`CF-Connecting-IP`; an IPv6 address by its /64 prefix). Applies to `POST /console/sign-in`, `/console/sign-in/link`, `/console/sign-in/code`, `/console/sign-in/verify`, `/console/sign-up` and `/console/waitlist`, and `GET /console/oauth/{provider}/start` ([Cloud sign-up](../project/design/cloud-signup.md#10-abuse-and-safety-on-cloud)), and `POST /v1/agent-signup` on the API host |
 | `RL_SIGN` | Rate limiting | – | 600 per 60 s, keyed by identity ID. Agent assertions and signed HTTP requests together ([Agent signing keys](../project/design/agent-keys.md#6-permissions-limits-and-plans)) |
 | `RL_PARTNER` | Rate limiting | – | 10 per 60 s, keyed by partner ID. `POST /v1/tenants` and `POST /v1/tenants/{tenant_id}/invitations` called with a partner key, across all of the partner's keys ([Security § 10](../project/design/security.md#10-rate-limiting-and-abuse)) |
 | `METRICS` | Analytics Engine dataset | `pylota_mail_metrics` | Metrics and alerts ([Observability](../project/design/observability.md#3-metrics)). Holds IDs and counts only |
 | `BACKUP` | R2 | the value of `PM_BACKUP_BUCKET` | Only when `PM_BACKUP_BUCKET` is set. Same jurisdiction as `BLOBS` |
 
 Every work queue has a dead-letter queue with a consumer (batch 100) that records items in D1
-(`dlq_items`). That makes ten queues in all.
+(`dlq_items`). That makes twelve queues in all.
 
 The Durable Object migrations (`new_sqlite_classes`: `IdentityMailbox`, `DomainMonitor`, `JobRunner`,
-`TenantQuota`, `SesControl` and `Notifier`, six classes) are part of the generated `wrangler.toml` and are
+`TenantQuota`, `SesControl`, `Notifier` and `TenantEvents`, seven classes) are part of the generated `wrangler.toml` and are
 versioned with the release ([Rust workspace › Generated wrangler.toml](../project/design/rust-workspace.md#8-generated-wranglertoml)). The generated file also turns invocation logs off and traces off in
 production (`[observability.logs] invocation_logs = false`), because invocation logs record request URLs
 and email recipients ([Observability › Signals](../project/design/observability.md#1-signals)).
@@ -60,14 +62,16 @@ Cron triggers:
   minting the Durable Object IDs that only the Worker can mint for rows written outside it: the system
   identity's mailbox, the `DomainMonitor` of a domain row with `monitor_do_id = ''` (the platform domain,
   and domains added with `pmail domains add --local-token`), the `Notifier` of a tenant row with
-  `notify_do_id = ''` (then `NotifierRequest::Init`), and the `SesControl` object when SES is
+  `notify_do_id = ''` (then `NotifierRequest::Init`), the `TenantEvents` object of a tenant row with
+  `events_do_id = ''` (`EventsRequest::Init` follows on first use), and the `SesControl` object when SES is
   configured.
   Retrying stuck sends, transport claims and uncertain-send bookkeeping run in each mailbox's own alarms,
   not in the cron.
 - `*/15 * * * *`: domain health scheduling, retention, usage roll-up, the
   nightly backup job once per UTC day when `PM_BACKUP_BUCKET` is set, and the new-workspace send-ramp
   evaluation once per UTC day (`crons/signup_ramp.rs`; it finds ramped Free workspaces with
-  `PM_BILLING=stripe`, and ramped tenants of partners on any deployment).
+  `PM_BILLING=stripe`, and ramped tenants of partners on any deployment), and the expiry of provisional
+  agent sign-ups (`crons/agent_signup.rs`).
 
 ## Variables
 
@@ -83,6 +87,7 @@ Cron triggers:
 | `PM_RERANK_MODEL` | `@cf/baai/bge-reranker-base` | Set to `none` to disable reranking |
 | `PM_AGENT_MODEL` | `@cf/qwen/qwen3.8-27b` | The function-calling model for agentic search |
 | `PM_TRIAGE_MODEL` | `@cf/openai/gpt-oss-20b` | A JSON-output model for triage |
+| `PM_SCREEN_MODEL` | `@cf/openai/gpt-oss-20b` | The JSON-output model of the screening classifier ([Screening hold §5.3](../project/design/screening.md#53-the-model-call)) |
 | `PM_AI_GATEWAY` | unset | Optional AI Gateway ID. Model calls go through it for logging and caching |
 | `PM_TRUSTED_AUTHSERV_ID` | empty (set by `pmail setup`) | The `Authentication-Results` authserv-id stamped by Cloudflare's MX. `pmail setup` runs the mail test as its last step and writes the authserv-id it observed here; `pmail doctor --mail-test` prints it too. While it is empty, SPF cannot be read (Email Workers do not see the client IP), so a sender whose DMARC policy is `quarantine` or `reject` and who aligns only through SPF gets the verdict `unverified` and is quarantined as `auth_unverified`, never `fail`. Headers from any other authserv-id are always ignored |
 | `PM_DOH_RESOLVERS` | `https://cloudflare-dns.com/dns-query,https://dns.google/resolve` | Two independent resolvers for domain checks and DKIM keys |
@@ -101,21 +106,24 @@ Cron triggers:
 | `PM_BREAK_GLASS_KEY_ID` | unset | The `key_…` ID of the long-lived platform key kept only in the operator's break-glass record. When set, every request authenticated with it pages (`break_glass_key_used`) and writes the audit row `key.break_glass_used` ([J36](../project/edge-cases.md)) |
 | `PM_HEARTBEAT_KEY_ID` | unset | The `key_…` ID of the platform key that the external heartbeat workflow uses. When set, the `heartbeat_missing` alert fires once that key has not been used for an hour |
 | `PM_FREEZE` | `off` | `on` freezes the whole deployment for a restore: inbound mail gets a temporary failure, queued work and alarms wait, and only platform keys can use the API. Set only by `pmail ops freeze` and `pmail ops unfreeze` ([Observability › Restore from PITR](../project/design/observability.md#restore-from-pitr)). A variable, so that a D1 restore cannot undo it. `pmail ops freeze` also writes `PM_FREEZE_SINCE` (RFC 3339), which `GET /v1/platform/status` reports as `frozen_since` |
-| `PM_SCANNER_URL` | unset | Optional malware scanner endpoint (see [Inbound](../project/design/inbound.md#attachment-safety)) |
+| `PM_SCANNER_URL` | unset | Optional malware scanner endpoint for inbound attachments and uploads (see [Inbound](../project/design/inbound.md#attachment-safety) and [Uploads](../project/design/uploads.md#43-classification-and-the-scanner)) |
 | `PM_SECURITY_CONTACT` | unset | Served in `/.well-known/security.txt`. When it is a `mailto:` URI and `PM_ALERT_EMAIL` is unset, alert email goes to that address |
 | `PM_EVAL_REST` | `off` | Evaluation runs only: `on` sends every Workers AI and Vectorize call through the REST API with `PM_CF_API_TOKEN`, so `wrangler dev --local` needs no remote binding ([Testing § 9.2](../project/design/testing.md#92-running)). Read only when `PM_ENV = "local"`; ignored otherwise |
 | `PM_LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. Content is never logged at any level |
 | `PM_DEFAULT_POLICY` | `{}` | JSON merged over the built-in tenant policy defaults |
 | `PM_CONSOLE` | `on` | `on` serves the console at `/console`; `off` removes its routes |
-| `PM_QUARANTINE_KEY_RELEASE` | `on` | `on`: API keys with `quarantine:review` may release quarantined mail (`POST …/release`). `off`: only a signed-in person can, in the console, and API keys get `403 permission_denied` (FR-CON-6), except on a tenant whose policy has `quarantine.key_release: true` ([Tenant policy](#tenant-policy)). The same rule decides whether API keys may take the other decisions reserved for people: loosening a guard field of the policy and approving a service account ([Workspace policy §3](../project/design/workspace-policy.md#3-decisions-reserved-for-people)). Pylota Mail Cloud sets `off`. With `PM_CONSOLE=off` it is always treated as `on` |
+| `PM_QUARANTINE_KEY_RELEASE` | `on` | `on`: API keys with `quarantine:review` may release quarantined mail (`POST …/release`). `off`: only a signed-in person can, in the console, and API keys get `403 permission_denied` (FR-CON-6), except on a tenant whose policy has `quarantine.key_release: true` ([Tenant policy](#tenant-policy)). The same rule decides whether API keys may take the other decisions reserved for people: loosening a guard field of the policy and approving a service account ([Workspace policy §3](../project/design/workspace-policy.md#3-decisions-reserved-for-people)), and approving a draft (on a tenant with `drafts.key_approval: true`, a platform key or the tenant's own partner key may approve even with `off`). Pylota Mail Cloud sets `off`. With `PM_CONSOLE=off` it is always treated as `on` |
 | `PM_CONSOLE_HOST` | the value of `PM_API_HOST` | The host that serves the console. When it differs from `PM_API_HOST`, console paths answer only on this host and API paths only on `PM_API_HOST`; anything else gets `404`, and no cookie is set or read on the API host. Every console POST must carry `Origin: https://{PM_CONSOLE_HOST}` (CSRF defence in depth), and console links in mail use that origin. Both host variables are compared with the request's `Host` as written, so they may carry a port, which only the local test harness uses (`console.localhost:8799`). It is read even with `PM_CONSOLE=off`, because invitation links use it |
 | `PM_SIGNUP` | `closed` | Self-serve sign-up: `closed` (people join by invitation or `pmail setup --owner-email`), `waitlist` (double opt-in, invited in batches with `pmail waitlist invite`) or `open` ([Cloud sign-up](../project/design/cloud-signup.md#6-sign-up)) |
 | `PM_SYSTEM_FROM` | `Pylota Mail <no-reply@{PM_PLATFORM_DOMAIN}>` | The display name and address of the **system identity**, which `pmail setup` creates on the default tenant and which sends sign-in, invitation and notification mail through the platform domain. Its local part may be a reserved name; it is never listed to tenants ([Identities and domains › The system identity](../project/design/identity-domains.md#the-system-identity)). Read even with `PM_CONSOLE=off` |
+| `PM_DOCS_URL` | `https://pylotamail.com/docs` | The base URL of the published docs, used to build each error's `docs` link (`{PM_DOCS_URL}/reference/errors#code-{code}`). `https`, at most 200 bytes, no query or fragment; a trailing `/` is removed. `pmail setup` and `pmail deploy` refuse an invalid value; the Worker falls back to the default and logs `docs_url_invalid` |
 | `PM_NOTIFICATIONS` | `on` | `on` sends notification email to people: usage alerts, new-mail notifications and the daily "needs a person" email, each as their preferences allow. `off` sends only `account` emails ([Notifications](../project/design/notifications.md)). Read even with `PM_CONSOLE=off` |
 | `PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL` | unset | Terms of Service, Privacy Policy and Data Processing Addendum, linked from the sign-up checkbox. Required when `PM_SIGNUP` is not `closed` |
 | `PM_TERMS_VERSION` | unset | The terms version stored on the user (`users.terms_version`) when they accept. Required when `PM_SIGNUP` is not `closed` |
 | `PM_MAILBOX_PROVIDER_DOMAINS` | unset | Comma-separated organisational domains, in addition to the built-in list of shared mailbox providers that ships with each release, that a service-ledger entry may not name as an extra sender domain ([E15](../project/edge-cases.md)) |
 | `PM_SIGNUP_BLOCKED_DOMAINS` | unset | Comma-separated domains refused at sign-up, before any mail is sent, in addition to the built-in list of disposable-mail domains that ships with each release |
+| `PM_AGENT_SIGNUP` | `off` | `on` allows agent self-sign-up (`POST /v1/agent-signup`), only while `PM_SIGNUP` is `open`, billing is on and the console is on ([Agent self-sign-up](../project/design/agent-signup.md#1-when-agent-sign-up-is-on)). Pylota Mail Cloud keeps it `off` until gate D |
+| `PM_AGENT_SIGNUP_DAILY_CAP` | `200` | Agent sign-ups per UTC day for the whole deployment, 1–10,000 |
 | `PM_OAUTH_GOOGLE_CLIENT_ID` | unset | With the secret `PM_OAUTH_GOOGLE_CLIENT_SECRET`, enables "Continue with Google" |
 | `PM_OAUTH_GITHUB_CLIENT_ID` | unset | With the secret `PM_OAUTH_GITHUB_CLIENT_SECRET`, enables "Continue with GitHub" |
 | `PM_BILLING` | `off` | `off` (no plan checks and no usage alerts; only the daily caps in tenant policy apply) or `stripe` (plans, metering, Stripe checkout and portal) |
@@ -209,7 +217,8 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
     "per_tenant_per_hour": 2000,
     "extract_attachment_text": ["pdf", "office", "text", "html"],
     "extract_image_text": false,
-    "ses_bounce_retired": true
+    "ses_bounce_retired": true,
+    "trusted_arc_sealers": ["google.com", "microsoft.com"]
   },
   "retention": {
     "raw_days": 90,
@@ -247,6 +256,16 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
   "accounts": {
     "require_approval": false
   },
+  "drafts": {
+    "require_approval": "never",
+    "key_approval": false
+  },
+  "screening": {
+    "mode": "monitor",
+    "on_unavailable": "quarantine",
+    "deadline_seconds": 120
+  },
+  "events": { "labels_changed": false },
   "domain_fallback": true
 }
 ```
@@ -255,15 +274,16 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
 |---|---|
 | `tenant_daily_send_cap` | With `PM_BILLING=stripe`, a new workspace on the Free plan has an effective cap of min(this value, 50) until `tenants.ramp_lifted_at` is set: for its first 7 days, then until the daily evaluation (the `*/15` cron's `crons/signup_ramp.rs`) finds its bounce and complaint rates under the `abuse` thresholds. A paid plan lifts it once its invoice is paid, and a disputed payment restores it. A tenant a partner's key created follows the same ramp whatever `PM_BILLING` and its billing mode (`exempt` included), unless a platform key set the partner's `ramp_exempt`; an `exempt` tenant has no plan, so only the daily evaluation lifts it. The system identity is never counted against this cap ([Cloud sign-up › New-workspace send ramp](../project/design/cloud-signup.md#101-new-workspace-send-ramp)) |
 | `max_recipients` | 1–49. Cloudflare allows 50 recipients per message, and one is kept for the hidden journal copy of Message-ID strategy B ([Outbound design](../project/design/outbound.md#message-id-of-outbound-mail-spike-s7)) |
-| `large_attachments` | `refuse`, or `link` (expiring signed links, `link_ttl_hours` 1–168) |
+| `large_attachments` | `refuse`, or `link` (expiring signed links, `link_ttl_hours` 1–168). Applies to attachments from uploads too |
 | `ai_disclosure.mode` | `none`, `footer` (appended to text and HTML) or `header` (`X-AI-Generated: true`) |
 | `auto_reply.max_automatic_exchanges` | Automatic replies allowed per thread before a human must act ([D6](../project/edge-cases.md)) |
 | `inbound.per_sender_per_hour`, `inbound.unauthenticated_per_hour`, `inbound.per_tenant_per_hour` | Inbound volume caps; the excess is stored `throttled`, never triaged, embedded or evented, and not counted in `storage_gb`. The per-sender cap counts mail that fails authentication under `unauth:` + the address, so a forged `From` cannot use a real sender's allowance; the other two count only senders who are not known correspondents ([Inbound › Inbound volume caps](../project/design/inbound.md#inbound-volume-caps-d5-d13), [D5](../project/edge-cases.md), [D13](../project/edge-cases.md)) |
+| `inbound.trusted_arc_sealers` | ARC sealers (the `d=` of their `ARC-Seal`, A-label registrable domains, at most 20) whose verified seal can rescue mail that fails DMARC: verdict `arc_rescued`, not quarantined for authentication, never a source of verification codes ([Parity additions § 6](../project/design/parity-additions.md#6-trusted-arc-sealers-fr-in-15)). `["google.com", "microsoft.com"]` by default, the two verified on 2026-10-17; `[]` turns it off. Only a platform key can set it |
 | `inbound.ses_bounce_retired` | `true` bounces mail to retired addresses on SES-receiving domains with `550 5.1.6`, through SES receipt rules; `false` drops it without a bounce ([Domains on any DNS host › Retired and unknown recipients](../project/design/domain-connections.md#46-retired-and-unknown-recipients)) |
 | `quarantine.unsolicited_otp` | Quarantine password-reset and OTP mail that no `wait` asked for ([E5](../project/edge-cases.md)) |
 | `quarantine.key_release` | `true` lets a platform key or the partner key of the tenant's own partner (never a tenant or identity key) release this tenant's quarantined mail even when `PM_QUARANTINE_KEY_RELEASE` is `off`, and take the other decisions reserved for people (loosening a guard field, approving a service account other than one it requested; [Workspace policy §3](../project/design/workspace-policy.md#3-decisions-reserved-for-people)). `false` by default. Only a platform key, or the partner key of the tenant's own partner, can set it (a tenant key cannot call `PATCH /v1/tenants/{tenant_id}`: `403 permission_denied`; with `policy:write` it gets `403 scope_denied` on `PATCH …/policy`). With `PM_QUARANTINE_KEY_RELEASE=on` it changes nothing. On Pylota Mail Cloud, Pylota's partner key sets it to `true` on each operator's tenant ([J14](../project/edge-cases.md), [J16](../project/edge-cases.md)) |
 | `retention.message_days` | `null` keeps parsed messages indefinitely. A number deletes messages, attachments, index rows and vectors after that age, except held threads |
-| `retention.events_days` | 1–365, default 30. Webhook delivery rows, the event index and the event payloads kept for replay are deleted after this many days. Webhook replay reaches back 30 days from an event's `occurred_at`, or this many days if fewer ([Privacy design › Retention](../project/design/privacy.md#52-steps-of-a-tenant-retention-job)) |
+| `retention.events_days` | 1–365, default 30. Webhook delivery rows, the event index and the event payloads kept for replay are deleted after this many days. Webhook replay reaches back 30 days from an event's `occurred_at`, or this many days if fewer ([Privacy design › Retention](../project/design/privacy.md#52-steps-of-a-tenant-retention-job)). The tenant's event log keeps events this many days after they were appended, within its size budget ([Event feed § 2.5](../project/design/event-feed.md#25-retention-and-the-size-budget)) |
 | `triage.daily_model_cap` | Model-backed triage runs per day in the tenant's time zone; past it, triage is rules-only until local midnight. It applies whatever the billing mode, so an `exempt` workspace still has a ceiling on model spend ([Triage § 12](../project/design/triage.md#12-cost-controls)) |
 | `triage.categories` | `null` uses the built-in list. Otherwise an array of up to 20 `{ "name": "pcn", "description": "Penalty charge notices from councils" }`, which replaces it |
 | `triage.rules` | Deterministic rules. See [Triage](../guides/triage.md#rules) |
@@ -273,8 +293,23 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
 | `domains.cloudflare_zones` | Zones of the deployment's Cloudflare account, by name (A-label apex, lower case, up to 50), that the tenant's own keys and its partner key may use with the `cloudflare_zone` method, besides the zones this deployment created for the tenant (`nameservers`, `delegated_subdomain`). A listed zone grants names strictly under it; its apex stays platform-only. An entry written `=name` (for example `=notify.pylota.io`) grants that one host name and nothing under it: list a zone you also use yourself only this way ([H18](../project/edge-cases.md)). `replace_mx` is platform-only on listed zones and exact names; a tenant may use it only on a zone created for it. `[]` by default. A zone created for another tenant, or one under the zones of `PM_PLATFORM_DOMAIN`, `PM_API_HOST` or `PM_CONSOLE_HOST`, is refused even when listed (`403 scope_denied`, `details.reason = "zone_not_allowed"`). Platform keys may use any zone. Each listed zone must also be in the zone list of the Worker's `PM_CF_API_TOKEN`. Dropping a zone while the tenant still has domains in it is refused with `409 domain_in_use` (`details.reason = "zone_has_domains"`) ([H13](../project/edge-cases.md)). Only a platform key can set it ([Identities and domains › Zone permission](../project/design/identity-domains.md#zone-permission)) |
 | `web_bot_auth.allowed` | Lets the tenant's identities obtain signed HTTP requests (Web Bot Auth). `false` by default, and until it is `true` those requests get `403 policy_denied`. Only a platform key can set it: a tenant or partner key cannot turn it on. It has no effect while `PM_WEB_BOT_AUTH` is `off` ([Agent signing keys](../project/design/agent-keys.md#5-signed-http-requests-web-bot-auth)) |
 | `domain_fallback` | `false` fails sends on a failing domain instead of using the platform address. A domain or tenant paused for its complaint or bounce rate never falls back ([G12](../project/edge-cases.md)) |
-| `abuse.tenant_complaint_rate_pause`, `abuse.tenant_bounce_rate_pause` | Rates over the last 7 UTC days, with at least 500 outcomes, at which the tenant's sending, or one of its sending domains, is paused (`sending_paused_at`). The complaint default, 0.001, is Amazon SES's review rate ([Outbound › Tenant and domain auto-pause](../project/design/outbound.md#tenant-and-domain-auto-pause-g12)) |
+| `abuse.tenant_complaint_rate_pause`, `abuse.tenant_bounce_rate_pause` | Rates over the last 7 UTC days, with at least 500 outcomes, at which the tenant's sending, or one of its sending domains, is paused (`sending_paused_at`). The complaint default, 0.001, is Amazon SES's review rate ([Outbound › Tenant and domain auto-pause](../project/design/outbound.md#tenant-and-domain-auto-pause-g12)). Shown, with the current rate and headroom, by `GET /v1/metrics/rates` |
 | `accounts.require_approval` | `true` turns on the [service sign-up ledger](../project/design/service-accounts.md) gate: a verification code or link from a service reaches the tenant's agents only when an approved ledger entry matches the mail, otherwise the message is quarantined `account_unapproved`, and `wait` with `kind=verification` needs an approved entry (`403 policy_denied`, `details.reason = "account_not_approved"`). `false` by default; Pylota Mail Cloud sets it to `true` in `PM_DEFAULT_POLICY`. Lower-only, with `false` as the looser value, so a partner or workspace cannot turn it off where the deployment default or a ceiling has it on |
+| `drafts.require_approval` | `never`, `new_recipients` (approval when a recipient is neither known nor internal to the workspace), `external` (approval when a recipient is not internal) or `always`. It applies to draft sends and to direct sends, which get `403 approval_required` when approval is needed; an identity's `send_policy.require_approval` can only make it stricter. A guard field: a tenant key may loosen it only where API keys may take decisions reserved for people ([Drafts §3](../project/design/drafts.md#3-approval-policy)) |
+| `drafts.key_approval` | `true` lets a platform key or the partner key of the tenant's own partner (never a tenant or identity key), holding `drafts:approve`, approve this tenant's drafts even when `PM_QUARANTINE_KEY_RELEASE` is `off`. `false` by default. Only a platform key or the tenant's own partner key can set it; `quarantine.key_release` does not imply it. Pylota sets it on its operators' tenants |
+| `screening.mode` | `off`, `monitor` (default: mail is delivered at once and screened alongside, with a `message.screened` event) or `hold` (mail waits, hidden from agents, in status `screening` until its verdict). Guard field ([Screening hold §2](../project/design/screening.md#2-policy)) |
+| `screening.on_unavailable` | `quarantine` (default: no verdict by the deadline holds the message as `screening_unavailable`) or `deliver`. Guard field |
+| `screening.deadline_seconds` | 30–900, default 120: the longest a held message waits for its verdict. Guard field: a tenant key may lower it only while `on_unavailable` is `quarantine` |
+| `events.labels_changed` | `true` emits `message.labels_changed` for label changes, delivered only to endpoints that name it. `false` by default |
+
+**Provisional agent sign-ups.** While a tenant is a provisional agent sign-up, `core::policy::effective`
+applies a fixed overlay after the stored policy, taking the stricter value of each field: both daily send
+caps 10, `max_recipients` 1, `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.unsolicited_otp`
+and `accounts.require_approval` `true`, `quarantine.spam_threshold` 0.5, `screening.mode` `hold` with
+`screening.on_unavailable` `quarantine`, `drafts.require_approval` `always`, `auto_reply.allowed`,
+`inbound.extract_image_text`, `triage.enabled` and `search.agentic_enabled` `false`,
+`triage.daily_model_cap` 50, inbound caps 20, 20 and 100, `large_attachments` `refuse`. It is not stored and
+ends with verification ([Agent self-sign-up §4.2](../project/design/agent-signup.md#42-policy-overlay)).
 
 ### Who may change a field
 
@@ -287,11 +322,11 @@ Identity keys cannot write the policy at all: they can hold neither `tenants:man
 
 | Class | Fields | A partner key | A workspace writer |
 |---|---|---|---|
-| Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones` | `403 scope_denied` with `details.field` | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` |
-| Platform or own partner | `quarantine.key_release` | May set it on the tenants of its own partner, at creation and later | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` ([J14](../project/edge-cases.md)) |
+| Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones`, `inbound.trusted_arc_sealers` | `403 scope_denied` with `details.field` | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` |
+| Platform or own partner | `quarantine.key_release`, `drafts.key_approval` | May set it on the tenants of its own partner, at creation and later | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` ([J14](../project/edge-cases.md)) |
 | Lower-only | `identity_daily_send_cap`, `tenant_daily_send_cap`, `max_recipients`, `auto_reply.allowed`, `auto_reply.max_automatic_exchanges`, `inbound.per_sender_per_hour`, `inbound.unauthenticated_per_hour`, `inbound.per_tenant_per_hour`, `inbound.extract_image_text`, `retention.raw_days`, `retention.events_days`, `triage.enabled`, `triage.daily_model_cap`, `search.agentic_enabled`, `search.agentic_daily_cap`, `search.agentic_max_steps`, `search.agentic_max_seconds`, `abuse.complaint_rate_pause`, `abuse.bounce_rate_pause`, `abuse.tenant_complaint_rate_pause`, `abuse.tenant_bounce_rate_pause`, `accounts.require_approval` | May set a value at or below the field's ceiling; above it, `403 scope_denied` with `details.field` | May set a value at or below its workspace ceiling; above it, `403 scope_denied` with `details.field`, `details.reason = "above_ceiling"`, `details.ceiling` and `details.ceiling_source` ([J23](../project/edge-cases.md)) |
-| Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp` | May set any valid value | A person may set any valid value. A tenant key may only tighten them (a value at least as strict as the current one), unless API keys may take decisions reserved for people on this tenant; otherwise `403 permission_denied` with `details.field` and `details.reason = "person_required"` ([J25](../project/edge-cases.md)) |
-| Free | Every other field: `large_attachments`, `link_ttl_hours`, `ai_disclosure`, `inbound.extract_attachment_text`, `inbound.ses_bounce_retired`, `retention.message_days`, `triage.categories`, `triage.rules`, `search.refs_packs`, `search.custom_refs`, `webhook_text_bytes`, `domain_fallback` | May set any valid value | May set any valid value |
+| Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp`, `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`, `screening.deadline_seconds` | May set any valid value | A person may set any valid value. A tenant key may only tighten them (a value at least as strict as the current one), unless API keys may take decisions reserved for people on this tenant; otherwise `403 permission_denied` with `details.field` and `details.reason = "person_required"` ([J25](../project/edge-cases.md)) |
+| Free | Every other field: `large_attachments`, `link_ttl_hours`, `ai_disclosure`, `inbound.extract_attachment_text`, `inbound.ses_bounce_retired`, `retention.message_days`, `triage.categories`, `triage.rules`, `search.refs_packs`, `search.custom_refs`, `webhook_text_bytes`, `domain_fallback`, `events.labels_changed` | May set any valid value | May set any valid value |
 
 - **Ceiling.** A lower-only field's ceiling for a partner key is the more restrictive of the deployment
   default (the built-in defaults above merged with `PM_DEFAULT_POLICY`) and the tenant's platform ceiling,
@@ -314,7 +349,11 @@ Identity keys cannot write the policy at all: they can hold neither `tenants:man
 - **`null` from a partner key or workspace writer** on a lower-only field resets it to the deployment
   default, so it is compared as that value: refused when a stricter ceiling applies.
 - **Guard fields** have no ceilings. Tightening means `true` for the three switches and a value at or below
-  the current `quarantine.spam_threshold`. API keys may take decisions reserved for people when
+  the current `quarantine.spam_threshold`. For `drafts.require_approval`, tightening means a level at or
+  above the current one in the order `never` < `new_recipients` < `external` < `always`. For
+  `screening.mode`, tightening is a value at least as strict in the order `off` < `monitor` < `hold`; for
+  `screening.on_unavailable`, `quarantine`; for `screening.deadline_seconds`, any value while the effective
+  `on_unavailable` after the write is `quarantine`, otherwise a value at least the current one. API keys may take decisions reserved for people when
   `PM_QUARANTINE_KEY_RELEASE` is `on`, `PM_CONSOLE` is `off`, or the tenant's `quarantine.key_release` is
   `true` ([Workspace policy §3](../project/design/workspace-policy.md#3-decisions-reserved-for-people)).
 - Ceilings are checked when a value is written. Changing `PM_DEFAULT_POLICY` later does not rewrite
@@ -323,6 +362,9 @@ Identity keys cannot write the policy at all: they can hold neither `tenants:man
   may not exceed the tenant's effective `identity_daily_send_cap` for any key but a platform key
   (`403 scope_denied`, `details.field = "send_policy.daily_cap"`), so a lower-only cap cannot be raised
   one identity at a time.
+- **An identity's `send_policy.require_approval`** can only be stricter than the tenant's; a looser value
+  than the identity's current one gets `403 scope_denied` from an identity key and `403 permission_denied`
+  (`person_required`) from a tenant key unless keys may take decisions reserved for people.
 - **`quarantine.on_auth_fail: false`** is a guard value, and it removes a guarantee: mail whose authentication
   verdict is `fail` or `unverified` is then stored as `received` and evented to agents with that verdict,
   instead of being quarantined (rules 3 and 3a of
@@ -350,7 +392,8 @@ the profile in the file. Without `--profile` or `PYLOTA_MAIL_PROFILE`, the profi
 when the file sets it, else the one named `default`. `pmail setup` and `pmail login` write the profile
 named by `--profile`, default `default`; `PYLOTA_MAIL_PROFILE` and `default_profile` do not change it.
 The file is created with mode `0600`, and `pmail` refuses to read it (exit 3) if its group or other users
-have any access to it, or if another user owns it.
+have any access to it, or if another user owns it. `pmail mcp stdio` takes its key only from
+`PYLOTA_MAIL_KEY` or the profile; `--key` is refused.
 
 The commands that use `CLOUDFLARE_API_TOKEN` are listed in
 [CLI › Commands that use your Cloudflare token](cli.md#commands-that-use-your-cloudflare-token). The

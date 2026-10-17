@@ -5,7 +5,7 @@ signed HTTPS deliveries with retries, dead letters and replay.
 
 | | |
 |---|---|
-| Requirements | FR-WH-1 … FR-WH-5, NFR-REL-3, NFR-REL-4, FR-PRV-6, FR-IDN-6 (key events), FR-CON-14 (the Notifier hand-off), FR-KEY-4 (partner endpoints) |
+| Requirements | FR-WH-1 … FR-WH-7, NFR-REL-3, NFR-REL-4, FR-PRV-6, FR-IDN-6 (key events), FR-CON-14 (the Notifier hand-off), FR-KEY-4 (partner endpoints) |
 | Edge cases | [J4](../edge-cases.md), [J13](../edge-cases.md) (held deliveries), [J15](../edge-cases.md), [J29](../edge-cases.md) (mail events need `messages:read`), [A15](../edge-cases.md) (system identity events), [I5](../edge-cases.md), [K1](../edge-cases.md) (integrator side), [C5](../edge-cases.md) (sequence), [O14](../edge-cases.md), [O16](../edge-cases.md) (Notifier hand-off) |
 | Code | `crates/worker/src/mailbox/outbox.rs` (and the outbox modules of `DomainMonitor` and `JobRunner`), `webhooks/envelope.rs` (build plan M6: the envelope, `WebhookJob` and the identity payload builders), `handlers/webhooks.rs`, `consumers/webhooks.rs`, `webhooks/{sign.rs, client.rs, replay.rs, payloads.rs}` (build plan M8), `crons/outbox_sweep.rs`; the SSRF guard is `crates/core/src/ssrf.rs` and `crates/worker/src/net.rs` ([Security](security.md#9-ssrf-controls)) |
 | Contract | [Webhook events](../../reference/events.md) (envelope, types, signing, retry schedule), [REST API › Webhooks](../../reference/api.md#webhooks) |
@@ -17,6 +17,7 @@ signed HTTPS deliveries with retries, dead letters and replay.
                   dispatch: event_index rows (D1) ─▶ pm-webhooks Fanout{event pointer} ─▶ dispatched_at
                         │
                         ▼
+                  consumer: Fanout ─▶ payloads (GetEvents) ─▶ EventsRequest::Append (TenantEvents, per tenant) ─▶ then endpoints
                   consumer: Fanout ─▶ matching endpoints (D1, cached) ─▶ Deliver{endpoint, attempt 1} each
                             then, for new mail: NotifierRequest::Event ─▶ the tenant's Notifier (never blocks)
                   consumer: Deliver ─▶ payload from owner (GetEvents) ─▶ SSRF check ─▶ sign ─▶ POST (15 s)
@@ -62,6 +63,8 @@ pub fn append(tx: &impl Sql, ids: &impl Ids, clock: &impl Clock, owner: &Owner,
    -- (NULL for a tenant no partner created), which never changes, so replay can select on it
    ```
 
+   For `draft.approved` and `draft.rejected`, the same batch inserts the decision's `audit_log` row with
+   `INSERT OR IGNORE` and the deterministic `aud_` ID of [Drafts §4.6](drafts.md#46-approve).
 3. `send_batch` to `pm-webhooks`: one `WebhookJob::Fanout` per event (at most 100 per call). Queue
    messages carry pointers only, never the payload ([I5](../edge-cases.md)).
 4. `UPDATE outbox SET dispatched_at = ?1 WHERE seq IN (SELECT value FROM json_each(?2))`, with `?2` the
@@ -106,8 +109,9 @@ once, not every minute for an hour.
 
 The other events without an owner object are written the same way, in the D1 batch of the change that
 causes them, with a new event ID from that request: `member.*`, `billing.*`, `tenant.policy_updated`
-([Workspace policy §4](workspace-policy.md#4-the-write)) and `account.*` ([Service sign-up ledger §6](service-accounts.md#6-events)),
-which also set `identity_id`, so identity filters apply to them.
+([Workspace policy §4](workspace-policy.md#4-the-write)), `account.*` ([Service sign-up ledger §6](service-accounts.md#6-events))
+and `signup.verified` ([Agent self-sign-up §18](agent-signup.md#18-events-and-audit)), which also set
+`identity_id`, so identity filters apply to them.
 
 ## Event envelope and payloads
 
@@ -148,8 +152,12 @@ in `webhooks/payloads.rs` (M8), which imports them.
 | Builder | Event types | `data` (per [events](../../reference/events.md)) |
 |---|---|---|
 | `message_summary(row)` | used inside others | `id`, `thread_id`, `direction`, `status`, `from`, `to`, `cc`, `delivered_to`, `is_primary_recipient`, `subject`, `sent_at`, `received_at`, `kind`, `labels`, `in_reply_to`, `flags` |
-| `message_received(row, attachments, policy)` | `message.received` | `message`, `thread_id`, `trust`, `extracted_text`, `extracted_text_truncated`, `attachments[]` (`id`, `filename`, `content_type`, `size`); plus `reprocessed: true` when re-emitted by a re-parse |
-| `message_quarantined(…)` | `message.quarantined` | as above without `extracted_text`, plus `quarantine_reason` |
+| `message_received(row, attachments, policy)` | `message.received` | `message`, `thread_id`, `trust`, `extracted_text`, `extracted_text_truncated`, `attachments[]` (`id`, `filename`, `content_type`, `size`), `screening` when the message has a screening record; plus `reprocessed: true` when re-emitted by a re-parse, and `released: true` when a release emits it ([Screening hold §10](screening.md#10-release)) |
+| `message_quarantined(…)` | `message.quarantined` | as above without `extracted_text`, plus `quarantine_reason`; `screening` when the message has a record, and `rescreened: true` when late content moved it back to quarantine |
+| `message_screened(row, screening)` | `message.screened` | `message_id`, `thread_id`, `message_status`, `quarantine_reason`, `late`, `screening` ([Screening hold §20](screening.md#20-events)) |
+| `message_labels_changed(rows, added, removed, ctx)` | `message.labels_changed` (opt-in) | `messages[]` (`message_id`, `thread_id`, visible messages only), `added`, `removed`, `actor`, `source`, `request_id`, `part`, `parts` ([Parity additions § 4.2](parity-additions.md#42-payload)) |
+| `calendar_received(row)` | `calendar.received` | `message_id`, `thread_id`, `object_status`, `method`, `uid`, `sequence`, `recurrence_id`, `verified`, `verified_by`, `reason`, `organized_here` (`released`, `reprocessed`) ([Calendar invitations §4.4](calendar-invitations.md#44-the-calendarreceived-event)) |
+| `draft_summary(row)`, `draft_event(row, extra)` | `draft.approval_requested`, `draft.approved`, `draft.rejected`, `draft.sent`, `draft.failed` | per events ([Drafts §15](drafts.md#15-events)) |
 | `message_released(row, actor, reason)` | `message.released` | `message`, `released_by_key_id` or `released_by_user_id` (the other `null`), `reason` |
 | `message_triaged(row)` | `message.triaged` | `message_id`, `thread_id`, `triage` |
 | `message_sent(row)` | `message.sent` | `message`, `provider`, `provider_message_id`, `sent_via_fallback` |
@@ -174,6 +182,10 @@ re-reads the endpoint to skip a deleted or disabled one, and holds a delivery wh
 is suspended ([Delivering an attempt](#delivering-an-attempt)), so these two are the only places that
 decide which endpoints receive an event.
 
+0. **Append to the event log** first, as [Event feed § 2.4](event-feed.md#24-append) specifies; endpoints are
+   resolved only for events whose append succeeded or was skipped by rule. An append failure retries the
+   tenant's `Fanout` messages and queues no `Deliver`. The append reads each payload once per owner per
+   queue batch (`GetEvents`).
 1. Load the enabled endpoints that can see the event, cached in the isolate for 30 seconds per tenant
    (per partner for an event with no tenant). `?1` is the event's `tenant_id`; `?2` is that tenant's
    `partner_id` (read with the endpoints, from `tenants`, and cached with them), or, for `webhook.disabled`,
@@ -188,7 +200,9 @@ decide which endpoints receive an event.
    ```
 
 2. An endpoint matches when:
-   - its `event_types_json` is `["*"]` (which includes types added later) or contains the event type;
+   - its `event_types_json` is `["*"]` (which includes types added later) and the type is not in
+     `OPT_IN_EVENT_TYPES` (`message.labels_changed`, [Parity additions § 4.1](parity-additions.md#41-opt-in-twice)),
+     or it contains the event type;
    - its `identity_ids_json` is null, or contains the event's `identity_id` (events without an identity,
      such as `domain.*`, match only endpoints without an identity filter);
    - platform endpoints see every tenant's events;
@@ -219,8 +233,8 @@ that changes `url` or `event_types`, and for a replay ([J29](../edge-cases.md)):
 
 | The endpoint's `event_types` (after the change) | The key must also hold |
 |---|---|
-| `["*"]`, or any `message.*` type, or `verification.received` | `messages:read` |
-| `["*"]`, or `message.quarantined` | `quarantine:review` as well |
+| `["*"]`, or any `message.*` type, or `verification.received`, or `calendar.received` | `messages:read` |
+| `["*"]`, `message.quarantined` or `message.screened` | `quarantine:review` as well |
 
 A key without them gets `403 permission_denied` with `details.required` listing the missing permissions,
 and nothing is stored or queued. Keys at these levels (tenant, partner, platform) reach every identity of
@@ -231,7 +245,9 @@ when the endpoint's types need a permission the replaying key does not hold.
 the same update, audit-logged (`webhook.update`) with the old and new host names. Nothing is delivered to the new URL until
 `POST /v1/webhooks/{id}/test` to it succeeds (a `2xx`), which sets `enabled = 1` and clears the reason.
 `PATCH … enabled: true` on a `url_changed` endpoint gets `400 invalid_request` (message "Send a test
-delivery to confirm the new URL"). Events that occur meanwhile are not queued for it (the fan-out reads
+delivery to confirm the new URL"). A change to another host also removes every custom delivery header in
+the same update, so a token meant for one receiver is never sent to a host someone else chose
+([Parity additions § 8.2](parity-additions.md#82-rules)). Events that occur meanwhile are not queued for it (the fan-out reads
 enabled endpoints only); they can be replayed after the test.
 
 **Endpoints of a person who leaves ([W47](../edge-cases.md)).** An endpoint records who created it:
@@ -256,9 +272,11 @@ The `Fanout` consumer sees every outbox event, so it also feeds new-mail notific
 ([Notifications §3](notifications.md#3-how-notifications-are-produced), FR-CON-14). After step 3 above (the
 `Deliver` messages are queued), and before the ack:
 
-1. **Which events.** By the `event_type` in the `Fanout` message: `message.received`,
-   `message.released` (a message released from quarantine counts when it is released), and
-   `message.triaged`. No other type is handed over, and no event of the system identity.
+1. **Which events.** By the `event_type` in the `Fanout` message: `message.received` (including one with
+   `released: true`, which a release emits) and `message.triaged`. `message.released` is no longer handed
+   over: its paired `message.received` carries the release, so a released message is counted once
+   ([Screening hold §10](screening.md#10-release)). No other type is handed over (not `calendar.received`,
+   whose invitation's own `message.received` already counts), and no event of the system identity.
 2. **Whether anyone follows new mail.**
 
    ```sql
@@ -267,17 +285,17 @@ The `Fanout` consumer sees every outbox event, so it also feeds new-mail notific
    ```
 
    The answer is cached in the isolate for 60 seconds per tenant, so a preference turned on starts
-   counting within a minute. All three types go on only with `any_new_mail`, whatever the preferences'
+   counting within a minute. Both types go on only with `any_new_mail`, whatever the preferences'
    filter: `message.triaged` serves both a `needs_reply` filter and the `needs_reply_count` that every
    `new_mail` email shows. A tenant where nobody follows new mail never reaches the Notifier from this
    path.
-3. **The payload.** Read the event with `MailboxRequest::GetEvents` on its owner, as the `Deliver`
-   consumer does (one call per owner for a queue batch). A `message.received` re-emitted by a re-parse
+3. **The payload.** Use the payload the append step read (one `GetEvents` per owner per queue batch,
+   [Event feed § 2.4](event-feed.md#24-append)). A `message.received` re-emitted by a re-parse
    (`data.reprocessed: true`, [Inbound › Re-parsing](inbound.md#re-parsing-j3)) is skipped: it is not
    new mail.
 4. **Hand-off.** Send `NotifierRequest::Event { tenant_id, identity_id, message_id, flags }` to the object
    named by `tenants.notify_do_id`, with the event's tenant and identity in the RPC envelope. `flags` come
-   from the payload: the message's flags for `message.received` and `message.released`, the triage verdict for
+   from the payload: the message's flags for `message.received`, the triage verdict for
    `message.triaged`. The Notifier applies the visibility rule (only mail visible in
    the inbox counts, [O15](../edge-cases.md)) and the coalescing ([O14](../edge-cases.md)). It uses a
    triage result for a message it holds in `held` for a `needs_reply` filter (up to 5 minutes,
@@ -315,7 +333,9 @@ pub fn signature_header(current: &[u8], previous: Option<&[u8]>, content: &[u8])
   separated by one space, the new secret's first: `v1,{new} v1,{old}`.
 - Other headers: `Content-Type: application/json` and
   `User-Agent: PylotaMail/1.0 (+https://github.com/PILOTAAI/pylota-mail)` (the version is the deployed
-  release).
+  release), and the endpoint's custom headers, added before these so they cannot override them
+  ([Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)). Custom headers are not
+  signed: a receiver still verifies the signature.
 
 ### Secrets
 
@@ -332,6 +352,10 @@ pub fn signature_header(current: &[u8], previous: Option<&[u8]>, content: &[u8])
 - **Use.** Decrypted per delivery and cached in the isolate for at most 60 seconds, keyed by endpoint ID
   and a hash of `secret_enc`. A decryption failure records the attempt as failed with error
   `secret_unavailable` and alerts.
+- **Custom delivery headers.** `headers_sealed` holds the endpoint's custom headers (a JSON map), sealed
+  in the same envelope with associated data `pm1|webhook_endpoints|headers_sealed|{endpoint_id}`, with an
+  entry in `crates/core/src/sealed.rs`; values are write-only, unsealed per delivery and cached like the
+  secret ([Parity additions § 8.3](parity-additions.md#83-delivery-and-storage)).
 - **Rotation.** `POST /v1/webhooks/{id}/rotate-secret` with `overlap_hours` (0–168): the current secret
   is unsealed and re-sealed with the associated data of `prev_secret_enc` (the column is part of the
   associated data, so the ciphertext cannot simply be copied), `prev_secret_expires_at = now + overlap`
@@ -373,7 +397,7 @@ For `Deliver { event_id, endpoint_id, attempt, first_attempt, replay }`:
 
    `succeeded` or `dead` → ack. `failed` → make sure attempt `n + 1` is queued (step 7) and ack, without
    a second HTTP request. Unless `replay`, also ack if any attempt for this endpoint and event succeeded.
-2. **Endpoint**: re-read the row, with the status of its partner (its own `partner_id`, or its tenant's:
+2. **Endpoint**: re-read the row (with `headers_sealed`), with the status of its partner (its own `partner_id`, or its tenant's:
    `LEFT JOIN tenants t ON t.id = e.tenant_id LEFT JOIN partners p ON p.id = COALESCE(e.partner_id, t.partner_id)`).
    Deleted → ack. Disabled → record the attempt as `dead` with `endpoint_disabled` (so it can be
    replayed) and ack.
@@ -502,7 +526,7 @@ events (FR-WH-3):
 
 `POST /v1/webhooks/{id}/test` writes a `webhook.test` platform event (`data: { "message": "hello" }`) to
 `event_index` (with the endpoint's `tenant_id` and partner, as `webhook.disabled`), performs **one**
-attempt synchronously within the request (same signing, SSRF rules and 15-second deadline), records it in
+attempt synchronously within the request (same signing, custom headers, SSRF rules and 15-second deadline), records it in
 `webhook_deliveries`, and returns that delivery row. It is never retried, never fanned out and never
 replayed ([Replay](#replay)). A test works on a disabled endpoint; a `2xx` on an endpoint disabled with
 `url_changed` re-enables it.
@@ -542,7 +566,8 @@ The queue is configured with batch size 20 and `max_retries` 13 ([Configuration]
 `webhook_attempts_total{result}`, `webhook_dead_total{event_class}`, `webhook_disabled_total{reason}`,
 `webhook_delivery_latency_ms{event_class, first_attempt}` (from `occurred_at` to the first successful
 attempt, written once per delivery; NFR-REL-3 is measured on it), `outbox_undispatched_age_ms{owner}`
-(at dispatch time), `webhook_ssrf_blocked_total`. The labels are defined in
+(at dispatch time), `webhook_ssrf_blocked_total`. See also the event-log metrics of
+[Event feed § 16](event-feed.md#16-observability). The labels are defined in
 [Observability › Catalogue](observability.md#32-catalogue):
 
 - `event_class` is `inbound` for `message.received` and `message.quarantined`, and `other` for every
@@ -573,8 +598,8 @@ event and endpoint IDs, status codes and durations, never payloads or URLs' quer
 | `it::webhooks::j15_partner_scope_filter` | With partners P and Q, each with a partner endpoint subscribed to `*`: events of P's tenants reach P's endpoint and platform endpoints, never Q's; events of a tenant no partner created reach no partner endpoint; a tenant endpoint still receives only its tenant; replay to P's endpoint never selects Q's or an unpartnered tenant's events; a `410` on P's endpoint sends `webhook.disabled` to P's other endpoint and to platform endpoints, never to Q's or to tenant endpoints; `POST /v1/webhooks` with a partner key returns `scope: "partner"` and `partner_id`, and the 21st partner endpoint gets `422 webhook_limit_reached` ([J15](../edge-cases.md), FR-WH-1, FR-KEY-4) |
 | `it::webhooks::disable_after_100_failures_24h` | 100 failures within 24 h do not disable; 100 spread over ≥ 24 h do |
 | `it::webhooks::replay_by_ids_and_window` | Replay by IDs and by window with `status: dead`; the limit is 30 days from `occurred_at` (an event that went `dead` on day 3 cannot be replayed after day 30), or `events_days` when shorter; erased events are not replayed; a `webhook.test` event is never replayed, also when named by ID; a partner endpoint's replay selects on `event_index.partner_id` (an event written by the outbox carries its tenant's partner) |
-| `it::webhooks::notifier_handoff_never_blocks` | `message.received` reaches the tenant's Notifier only when a `new_mail` preference is on (after the 60-second cache), and never for a re-parse; `message.triaged` reaches it under the same condition, with `filter = all` as with `needs_reply`; a failing Notifier leaves every delivery queued and the event acked |
+| `it::webhooks::notifier_handoff_never_blocks` | `message.received` reaches the tenant's Notifier only when a `new_mail` preference is on (after the 60-second cache), and never for a re-parse; `message.triaged` reaches it under the same condition, with `filter = all` as with `needs_reply`; a failing Notifier leaves every delivery queued and the event acked; payloads are read once per batch, by the append step; a release hands over its `message.received` (`released: true`) once and never `message.released` |
 | `it::webhooks::identity_key_events` | Creating, rotating and revoking an identity key emits `identity.key_created`, `identity.key_rotated` (with `previous_kid`) and `identity.key_revoked` with the identity's `identity_id` and the next `sequence`; an existing active key returned by `POST …/keys` and a second revoke emit nothing |
-| `it::webhooks::filters` | Event-type and identity filters; `*` includes new types; platform endpoints see every tenant (FR-WH-1) |
+| `it::webhooks::filters` | Event-type and identity filters; `*` includes new types except the opt-in `message.labels_changed`, which reaches only endpoints that name it; platform endpoints see every tenant (FR-WH-1, FR-WH-6) |
 | `it::webhooks::payload_text_cap` | `extracted_text` capped at `webhook_text_bytes`, never above 64 KB; quarantined events carry none (FR-WH-4) |
 | `it::logs::i5_no_content_in_logs` | Queue messages and logs carry no content ([I5](../edge-cases.md), FR-PRV-6) |

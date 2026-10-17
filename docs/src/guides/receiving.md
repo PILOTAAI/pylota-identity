@@ -92,7 +92,7 @@ Every inbound message carries an authentication verdict and trust metadata
 
 | Field | Meaning |
 |---|---|
-| `verdict` | `pass`, `fail`, `softfail`, `none`, `unaligned` or `unverified` (SPF alignment could not be checked yet, because the deployment's `PM_TRUSTED_AUTHSERV_ID` is not set). Computed by Pylota Mail's own DKIM, ARC and DMARC verification, plus Cloudflare's `Authentication-Results` header when its authserv-id is trusted ([D9](../project/edge-cases.md)) |
+| `verdict` | `pass`, `arc_rescued`, `fail`, `softfail`, `none`, `unaligned` or `unverified` (SPF alignment could not be checked yet, because the deployment's `PM_TRUSTED_AUTHSERV_ID` is not set). `arc_rescued` means DMARC failed only because a trusted forwarder (by default Google or Microsoft) changed the message, and that forwarder's ARC seal records a DMARC pass before it did ([Parity additions § 6](../project/design/parity-additions.md#6-trusted-arc-sealers-fr-in-15)). It is not `pass`: rules that need proven authenticity, such as service sign-up codes, still require `pass`. Computed by Pylota Mail's own DKIM, ARC and DMARC verification, plus Cloudflare's `Authentication-Results` header when its authserv-id is trusted ([D9](../project/edge-cases.md)) |
 | `known_sender` | The identity has exchanged mail with this address before |
 | `spam_score` | 0 to 1. Above the tenant's `quarantine.spam_threshold` (default 0.8) the message is quarantined |
 | `automated` | Auto-reply, mailing list, bounce or read receipt |
@@ -126,7 +126,7 @@ removed from `extracted_text`, snippets and the triage input, and raises the `hi
 | Mail | Behaviour |
 |---|---|
 | S/MIME or PGP encrypted | Stored with the flag `encrypted`. The body is unavailable ([B9](../project/edge-cases.md)) |
-| Calendar invitations | `kind: calendar` with a parsed summary. Never accepted automatically ([B8](../project/edge-cases.md)) |
+| Calendar invitations | `kind: calendar` with a verified, structured `calendar` object and a `calendar.received` event; never accepted automatically ([B8](../project/edge-cases.md), [Calendar invitations](../project/design/calendar-invitations.md)) |
 | Read-receipt requests | Ignored. Pylota Mail never sends read receipts |
 | Forwarded messages (`message/rfc822`) | Parsed as a nested message and never merged into the outer thread ([B6](../project/edge-cases.md)) |
 | Malformed MIME | Kept raw, parsed as far as possible, flagged `parse_degraded`. Never dropped ([B2](../project/edge-cases.md)) |
@@ -163,6 +163,8 @@ Its `message.quarantined` event carries no `extracted_text`.
 | `blocked_sender` | The sender matched a receive-block rule (see [Blocked senders and throttling](#blocked-senders-and-throttling)). These messages get status `hidden`, not `quarantined`: they are never evented, never shown in the quarantine and cannot be released | Tenant lists |
 | `account_unapproved` | A verification code or link from a service for which the identity has no approved service sign-up entry ([E9](../project/edge-cases.md), [Service sign-up ledger](../project/design/service-accounts.md)). Senders on your receive-allow list are exempt | `accounts.require_approval` (default `false`; `true` on Pylota Mail Cloud) |
 | `otp_unsolicited` | A password-reset or one-time-code message that no `wait` asked for in the previous 30 minutes ([E5](../project/edge-cases.md)) | `quarantine.unsolicited_otp` (default `true`) |
+| `steering_suspected` | Screening judged that the message tries to give instructions to an AI agent (see [Screening](#screening)) | `screening.mode` `hold` |
+| `screening_unavailable` | Screening could not reach a verdict before the deadline, and the workspace fails closed | `screening.on_unavailable` (default `quarantine`) |
 
 Review and release with a key that holds `quarantine:review`:
 
@@ -177,14 +179,43 @@ curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_
   -d '{"reason":"Known supplier, DKIM key rotated"}'
 ```
 
-Releasing moves the message to `received`, emits `message.released`, runs triage and writes an audit
-entry. The CLI commands are `pmail quarantine list` and `pmail quarantine release`.
+Releasing moves the message to `received`, emits `message.released` (and then `message.received` with
+`released: true` when the message had never reached agents before), runs triage and writes an audit entry.
+The CLI commands are `pmail quarantine list` and `pmail quarantine release`.
 
 Release is a human decision. Give `quarantine:review` to the people who review mail, not to agents
 ([Security](security.md#quarantine)). Where `PM_QUARANTINE_KEY_RELEASE` is `off`, as on Pylota Mail Cloud,
 every key gets `403 permission_denied` and a person releases in the console, unless the workspace's
 policy has `quarantine.key_release: true`, which lets the partner's key (never the workspace's own keys)
 release ([Configuration › Tenant policy](../reference/configuration.md#tenant-policy)).
+
+## Screening
+
+Screening looks for mail that tries to steer your agents: instructions to ignore earlier instructions, to act
+for someone else, or to send data where it should not go
+([Screening hold](../project/design/screening.md)). A deterministic scan runs on every message, and a model
+classifier decides the unclear ones. The tenant policy chooses one of three modes:
+
+| `screening.mode` | What happens |
+|---|---|
+| `off` | No screening |
+| `monitor` (default) | Mail is `received` at once, as without screening; each message gets a screening record and a `message.screened` event, so you can see what screening would have held |
+| `hold` | Mail that passes the other quarantine rules waits in status `screening` until a verdict, at most `screening.deadline_seconds` (default 120). A clear verdict makes it `received`; a suspect one quarantines it as `steering_suspected`. When no verdict can be reached in time, `screening.on_unavailable` decides: `quarantine` (the default, fail closed) or `deliver` |
+
+- **`status: "screening"`** is hidden exactly like `quarantined`: lists, search, MCP tools and `wait` leave it
+  out, and a key without `quarantine:review` never sees it. `messages list --status screening` shows it to a
+  reviewer. A release of a message still being screened gets `409 not_quarantined`; wait for its verdict.
+- **`message.received` comes once per message**, when it first becomes visible to agents: at ingest
+  without a hold, after a clear verdict, or after a release (`released: true`). A consumer that reacts only to
+  `message.received` therefore never sees held mail and never misses released mail. Every message and event
+  carries the `screening` object.
+- **Feedback.** Tell Pylota Mail whether a verdict was right with
+  `POST …/messages/{message_id}/feedback` (`messages:write`; `correct`, `false_positive`, `missed_threat`,
+  `legitimate_instruction` or `spam`), or `pmail messages feedback`. Feedback changes nothing about the
+  message; it feeds the workspace's precision and recall (`pmail screening summary`, and the console's
+  Screening page).
+- **Agents should not hold `quarantine:review`.** Release of screened mail is the same human decision as
+  any release ([Quarantine](#quarantine)).
 
 ## Blocked senders and throttling
 
@@ -407,7 +438,7 @@ webhooks and the API: notifications change nothing that your endpoints receive.
 |---|---|---|
 | `usage` | An allowance reached 80% or 100% of its limit ([Plans › Usage alerts](plans.md#usage-alerts)) | On for the owner and admins |
 | `new_mail` | New mail arrived in inboxes the person follows | Off for everyone: opt in |
-| `needs_person` | Once a day, what needs a person: quarantined mail, uncertain sends, failing domains and failing webhooks | Daily for the owner and admins |
+| `needs_person` | Once a day, what needs a person: quarantined mail, uncertain sends, drafts awaiting approval, failed scheduled sends, failing domains and failing webhooks | Daily for the owner and admins |
 | `account` | Security and billing events, such as two-step verification turned off or a failed payment | Always sent to the person concerned (the owner, for billing). Cannot be turned off |
 | `digest` | Once a day, the items a daily cap held back, as counts | Sent only to a person whose items were held back |
 

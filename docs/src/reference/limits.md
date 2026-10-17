@@ -13,7 +13,7 @@ Pylota Mail. Cloudflare's and Amazon's were read from their documentation on 202
 | Recipients per message (`to` + `cc` + `bcc`) | 49, default policy 10. Cloudflare allows 50; one is kept for the hidden journal copy of Message-ID strategy B | Cloudflare / Pylota Mail / policy | `400 too_many_recipients` |
 | Subject length | 998 characters | RFC 5322 / Cloudflare | `400 invalid_request` |
 | Custom headers on a send | 16 KB total; at most 20 non-`X-` headers, service-set ones included; values ≤ 2,048 bytes. Names, matched case-insensitively: `X-` names matching `^X-[A-Za-z0-9_-]+$` (≤ 100 bytes), or `Importance`, `Priority`, `Sensitivity`, `Keywords`, `Comments`, `Organization` (sent in that casing). Values of `Importance`: `high`, `normal`, `low`; `Priority`: `normal`, `non-urgent`, `urgent`; `Sensitivity`: `personal`, `private`, `company-confidential` | Cloudflare (Email headers reference, read 2026-10-10) | Checked when the request arrives: `400 header_not_allowed` for a name, `400 invalid_request` for a value |
-| Attachments per send | 32 (REST); 10 per call in the MCP tool `mail_send` | Pylota Mail | `400 invalid_request` |
+| Attachments per send | 32 (REST); 10 per call in the MCP tool `mail_send`; each inline or from an upload | Pylota Mail | `400 invalid_request` |
 | Inbound MIME nesting depth | 32 | Pylota Mail | Deeper parts are kept raw; flag `parse_degraded` |
 | Inbound MIME parts | 500 | Pylota Mail | Further parts are kept raw; flag `parse_degraded` |
 | Attachment text extracted | 20 MB input, 200 pages, 2 MB text | Pylota Mail | `text_status: unavailable` beyond it |
@@ -21,14 +21,14 @@ Pylota Mail. Cloudflare's and Amazon's were read from their documentation on 202
 | Local part length | 64 characters, including the thread token | RFC 5321 | Username plus suffix at most 40 |
 | References kept on our replies | 20: the first plus the 19 most recent | Pylota Mail | The ones between are trimmed ([C2](../project/edge-cases.md)) |
 | Daily sending | Account quota, set and raised by Cloudflare. It is not exposed to the Worker, and the limits page does not say whether it counts messages or recipients, so the alert counts accepted recipients plus the strategy-B journal copy (`cf_recipients`) | Cloudflare | Queue backs off for up to 24 hours. An alert fires at 80% of `PM_DAILY_SEND_QUOTA` when you set it to your quota, otherwise on the first quota error ([G3](../project/edge-cases.md)) |
-| Stored message row (Durable Object SQLite) | 1,900,000 bytes per message row, inbound and outbound: `text` 512 KiB, `html_sanitized` 1 MiB, `extracted_text` 256 KiB, `references_json` 200 msg-ids and 32 KiB, `to` and `cc` 200 addresses each, DSN recipients 100; when the sum would pass the budget, `html_sanitized` is cut first, then `text`, then `extracted_text` | Cloudflare (2 MB per row, string or BLOB; 100 bound parameters per query; 100 KB per statement; 100 columns per table: [Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-10) / Pylota Mail | Flag `body_truncated`; the full message stays in the raw MIME ([Inbound › Storage caps](../project/design/inbound.md#storage-caps)) |
+| Stored message row (Durable Object SQLite) | 1,900,000 bytes per message row, inbound and outbound: `text` 512 KiB, `html_sanitized` 1 MiB, `extracted_text` 256 KiB, `calendar_json` 256 KiB, `references_json` 200 msg-ids and 32 KiB, `to` and `cc` 200 addresses each, DSN recipients 100; when the sum would pass the budget, `html_sanitized` is cut first, then `text`, then `extracted_text` | Cloudflare (2 MB per row, string or BLOB; 100 bound parameters per query; 100 KB per statement; 100 columns per table: [Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-10) / Pylota Mail | Flag `body_truncated`; the full message stays in the raw MIME ([Inbound › Storage caps](../project/design/inbound.md#storage-caps)) |
 | Inbound volume per identity | 60 an hour per sender (`unauth:` + address when authentication fails), 120 an hour across unauthenticated senders who are not known correspondents | Policy (`inbound.*`) | Stored `throttled`: not triaged, embedded or evented, not counted in `storage_gb` ([D5](../project/edge-cases.md), [D13](../project/edge-cases.md)) |
 | Inbound volume per tenant | 2,000 an hour from senders who are not known correspondents | Policy (`inbound.per_tenant_per_hour`) | As above |
 | Unknown recipients per domain | 20 misses a second | Pylota Mail | Further mail to unknown addresses on the domain gets a temporary failure for the rest of the second ([A16](../project/edge-cases.md)) |
 | Role mail relayed (`postmaster@`, `abuse@` and the other RFC 2142 names) | 30 an hour per domain, 5 an hour per envelope sender | Pylota Mail | A temporary failure; the sender's server retries ([D14](../project/edge-cases.md)) |
 | Hop count of a send (`X-Pylota-Mail-Hop`) | Below 10, for every `kind` | Pylota Mail | `409 loop_detected` ([N13](../project/edge-cases.md)) |
 | Unknown transport outcomes in a row | 3 per transport (Cloudflare account, SES region, SMTP relay) | Pylota Mail | The transport's breaker opens for 5 minutes, doubling to at most 1 hour; queued messages wait unclaimed instead of becoming `uncertain` ([J28](../project/edge-cases.md)) |
-| Tenant and domain complaint and bounce rates | Complaints 0.1%, bounces 5%, over 7 UTC days with at least 500 outcomes | Policy (`abuse.tenant_*`); the complaint default is Amazon SES's review rate ([SES sending review FAQ](https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html), read 2026-10-10) | Sending paused: `409 sending_paused`, no fallback; a platform key resumes ([G12](../project/edge-cases.md)) |
+| Tenant and domain complaint and bounce rates | Complaints 0.1%, bounces 5%, over 7 UTC days with at least 500 outcomes | Policy (`abuse.tenant_*`); the complaint default is Amazon SES's review rate ([SES sending review FAQ](https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html), read 2026-10-10) | Sending paused: `409 sending_paused`, no fallback; a platform key resumes ([G12](../project/edge-cases.md)). Readable before they apply with `GET /v1/metrics/rates` |
 
 ## Domains and addresses
 
@@ -97,10 +97,14 @@ Applies to domains connected with `smtp_relay`.
 | Search response size | 256 KB. Above it, results are cut and `truncated: true` |
 | Tenant search fan-out | 100 identities |
 | `wait` timeout | 60 seconds |
+| Concurrent long polls of the event feed | 5 per key, 20 per tenant |
 | Idempotency key retention | 30 days |
 | Cursor lifetime | 24 hours |
 | Metadata on identities and messages | 16 keys, 512 bytes per value |
 | Labels | 64 per message, 64 characters each |
+| Batch reads and updates | 100 message IDs per request; `batch-get` responses at most 1,048,576 bytes, `extracted_text` at most 16,384 bytes per message (2,048 by default); `batch-update` at most 64 labels to add, 64 to remove and 10 in `require_absent`. One request against the rate limits |
+| Allow and block list entries | 10,000 per scope (the tenant, and each identity), 50,000 per tenant (`422 list_limit_reached`) |
+| Per-identity message retention | `retention.message_hours` 1–8,760; a due message is erased within 15 minutes while R2, Vectorize and the mailbox answer (target) |
 
 ## Agent signing keys
 
@@ -135,6 +139,111 @@ From [Service sign-up ledger](../project/design/service-accounts.md).
 | `account_identifier` | 1–254 characters |
 | `purpose` | 1–500 characters |
 | `note` (approve, reject, close) | At most 500 characters |
+
+## Drafts and scheduled send
+
+From [Drafts, approvals and scheduled send](../project/design/drafts.md).
+
+| Limit | Value | Source |
+|---|---|---|
+| Drafts per identity, not counting `sent` and `canceled` records | 1,000; then `422 draft_limit_reached` | Pylota Mail |
+| `send_at` | At least 60 seconds and at most 90 days after the request | Pylota Mail ([Drafts §6.1](../project/design/drafts.md#61-the-window)) |
+| Late limit of a scheduled send | 1 hour after `send_at`; then `failed` with `send_window_missed` | Pylota Mail ([Drafts §6.4](../project/design/drafts.md#64-transient-conditions-and-the-late-limit)) |
+| Attempts after an interrupted send | 3; then `failed` with `send_interrupted` | Pylota Mail |
+| Scheduled sends per alarm run of one mailbox | 10, then the alarm re-arms at once | Pylota Mail |
+| Pending approval | 7 days after it was requested, or `send_at` + 1 hour when later | Pylota Mail |
+| Draft retention | 30 days after the last change (or `retention.message_days` when shorter); `sent` and `canceled` records 30 days | Pylota Mail |
+| `text`, `html` | 524,288 and 1,048,576 bytes | Pylota Mail ([Inbound › Storage caps](../project/design/inbound.md#storage-caps)) |
+| Attachments | 32 per draft; inline bytes within the 7 MiB request body | Pylota Mail |
+| Recipients, subject, headers, labels, metadata | As for sends | [Mail](#mail) |
+| `note`, `reason` | 500 characters | Pylota Mail |
+| `on_behalf_of` | 1–128 printable ASCII characters, no `@` | Pylota Mail |
+| `client_id` | 1–255 printable ASCII characters without `@`, unique per identity | Pylota Mail |
+| Durable Object alarm | One per object; at-least-once; 6 retries from 2 seconds | [Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), read 2026-10-17 |
+| Alarm handler wall time | 15 minutes | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-10-17 |
+
+## Screening
+
+From [Screening hold](../project/design/screening.md#19-billing-and-limits).
+
+| Limit | Value |
+|---|---|
+| Deadline | 30–900 seconds, default 120 (`screening.deadline_seconds`) |
+| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage |
+| Classifier input | 6,000 estimated tokens; the deterministic scan covers the whole stored text, so size never makes a verdict unavailable |
+| Signals per record | 32 |
+| Feedback per message | 20; the next gets `422 feedback_limit_reached` |
+| Feedback notes | 1–500 characters |
+| Summary window | Default 30 days, at most 92 |
+
+## Calendar
+
+From [Calendar invitations](../project/design/calendar-invitations.md).
+
+| Limit | Value |
+|---|---|
+| Calendar parts read per message | 10 |
+| Calendar part read | 1 MiB decoded; larger: `object_status: "too_large"` |
+| Content lines; one unfolded line | 20,000; 64 KiB |
+| Components per object | 500 |
+| Overrides (`RECURRENCE-ID`) read; kept in the object | 1,000; 100 |
+| Attendees read per component; kept | 1,000; 100 |
+| Distinct party addresses per object | 1,000 |
+| `VTIMEZONE`s; observances; `RDATE`s per observance | 20; 50; 100 |
+| `EXDATE` and `RDATE` values per component | 10,000 each |
+| `UID` | 1,024 bytes |
+| `summary`, `location`, `description` excerpt, `comment`, names | 1,000, 1,024, 2,000, 2,000 and 256 characters |
+| `RRULE` text; `INTERVAL`; `COUNT`; values per `BY…` part | 512 bytes; 1–1,000; 1–100,000; 366 |
+| Stored calendar object | 262,144 bytes per message |
+| Outbound `calendar.ics` | 262,144 bytes (`413 calendar_too_large`) |
+| Generated `VTIMEZONE`s | 10 per message, 8 KiB each |
+| Calendar-reply `comment` | 1,000 characters |
+
+## Uploads
+
+From [Uploads](../project/design/uploads.md).
+
+| Limit | Value | Source | What happens |
+|---|---|---|---|
+| Upload size | 1–26,214,400 bytes (25 MiB) | Pylota Mail; below the Workers request-body limit of every account plan (100 MB Free and Pro, 200 MB Business; [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-10-17) | `400 invalid_request` at create; a `PUT` of another length gets `400 upload_size_mismatch` |
+| Live uploads per identity | 100, and 524,288,000 declared bytes | Pylota Mail | `422 upload_limit_reached` |
+| Upload lifetime | 900–604,800 seconds, default 86,400; never past the identity's mail retention | Pylota Mail | Deleted at `expires_at`; `410 upload_expired` for 7 days, then `404` |
+| Upload URL | 3,600 seconds, never past `expires_at` | Pylota Mail | `404 upload_not_found`; `GET` the upload for a new URL |
+| Failed `PUT`s | 10 caused by the client | Pylota Mail | `expired` (`too_many_attempts`) |
+| Attachments per message, decoded | 26,214,400 bytes in total | Pylota Mail | `413 message_too_large` (`attachments_total`) |
+
+## Agent self-sign-up
+
+From [Agent self-sign-up](../project/design/agent-signup.md).
+
+| Limit | Value |
+|---|---|
+| Sign-ups per client network (IPv4 address or IPv6 /64) | 5 per UTC day; and `RL_SIGNIN`, 10 requests per 60 seconds, shared with the console's sign-in and sign-up forms |
+| Sign-ups per ASN | 100 per UTC day |
+| Sign-ups per deployment | `PM_AGENT_SIGNUP_DAILY_CAP` per UTC day (default 200, 1–10,000) |
+| Sign-ups naming one person (base address) | 3 per UTC day, and one live provisional sign-up |
+| Code emails to one person (base address) | 5 per UTC day; 3 per rolling hour per sign-up |
+| `signup` class share of the system identity's day | 5% |
+| Request body | 4,096 bytes |
+| `username` | 2–32 characters of `[a-z0-9-]`, starting with a letter or digit; never released |
+| `agent_name`, `source` | 1–78 characters; 1–64 characters of `[A-Za-z0-9._/+-]` |
+| Provisional life | 7 days from the sign-up, not extended by replacements |
+| Code and link | 6 digits; 24 hours; 10 attempts per code; 30 failed codes per sign-up |
+| Replacements of the person | 2, before verification only |
+| Sends while provisional | To the person only; 1 recipient per message; 10 messages per UTC day |
+| Inbound while provisional | 20 per sender per hour, 20 unauthenticated per hour, 100 per hour for the workspace; the excess is stored `throttled` |
+
+## Deliverability metrics
+
+From [Deliverability metrics](../project/design/metrics.md).
+
+| Limit | Value | What happens |
+|---|---|---|
+| Hourly event-count buckets | Kept 192 hours; at most 168 per request | `400 query_range_too_wide` |
+| Daily event-count buckets | Kept 92 days; at most 92 per request | `400 query_range_too_wide` |
+| Identities per tenant- or domain-scope count | 100 (narrow with `identity_ids`) | `422 scope_too_large` |
+| Per-mailbox deadline in a fan-out | 2,000 ms | `partial: true`, `failed_identities` |
+| Rate limit of `GET /v1/metrics/events` | `RL_SEARCH`, 120 per 60 seconds per key | `429 rate_limited` |
 
 ## Notifications
 
@@ -187,7 +296,7 @@ A plan or top-up increase counts from the moment its invoice is paid.
 | Code verification attempts | 10 per code; the token is burned after 10 failures |
 | Failed sign-in codes per address | 30 per UTC day; then sign-in by code is locked for that address until 00:00 UTC (links still work) |
 | Sign-in requests per client network (`RL_SIGNIN`) | 10 per minute, keyed by `CF-Connecting-IP` (an IPv6 address by its /64 prefix), across sign-in, sign-up, waitlist, pending-step and OAuth-start requests |
-| System mail per recipient | 10 a UTC day (sign-in, sign-up, waitlist and invitation mail together) |
+| System mail per recipient | 10 a UTC day (sign-in, sign-up, waitlist and invitation mail together); agent sign-up code emails have their own 5 a day |
 | Sign-in mail per client network | 20 a UTC day per IPv4 address or IPv6 /64, and 200 per ASN |
 | Invitation emails per workspace | 50 a UTC day, new and re-sent; then `429 daily_cap_reached` (`details.cap: "invitations"`) |
 | Self-serve Free workspaces | One per person; `+tag` variants of an address count as the same person |
@@ -205,6 +314,18 @@ A plan or top-up increase counts from the moment its invoice is paid.
 | Workspace policy saves | Owner and admin only; each save needs a sign-in within the last 10 minutes, and a change that deletes mail needs a second, confirmed `POST` ([Workspace policy §6](../project/design/workspace-policy.md#6-the-console-page)) |
 | Invitation lifetime | 7 days |
 
+## SDKs and agent tooling
+
+| Limit | Value | Source |
+|---|---|---|
+| MCP tools per key (`mcp_tools`) | 64 names | Pylota Mail |
+| TypeScript SDK attempt timeout | 30 s (1–120 s); `waitForMessage`: its `timeout` + 15 s | Pylota Mail |
+| TypeScript SDK retries | 3 (0–10), backoff 0.5 s, 1 s, 2 s + up to 250 ms; `Retry-After` slept up to 60 s (1–300 s); `request_in_progress` 5 more attempts | Pylota Mail |
+| TypeScript SDK `collect` | 10,000 items by default | Pylota Mail |
+| Webhook timestamp tolerance (SDK and `pmail webhooks verify`) | 300 s by default, at most 600 s | Pylota Mail |
+| MCP result-size hint | `_meta["anthropic/maxResultSizeChars"]` = 100,000 on tools under the 96 KB cap | Claude Code persists larger text results above 50,000 characters ([MCP output limits](https://code.claude.com/docs/en/mcp), read 2026-10-17) |
+| MCP tool descriptions and server instructions | 4,096 characters | Claude Code cuts longer ones (same page) |
+
 ## Webhooks
 
 | Limit | Value |
@@ -216,3 +337,33 @@ A plan or top-up increase counts from the moment its invoice is paid.
 | Retry window | About 72 hours, 13 attempts |
 | Replay window | 30 days from the event's `occurred_at` (never from when the delivery went dead), or the tenant's `retention.events_days` if that is shorter |
 | Response body read | 4 KB |
+| Custom delivery headers | 10 per endpoint; names 1–64 characters; values 1–1,024 bytes and 4,096 bytes together (`422 webhook_header_limit_reached`) |
+
+## Event feed and stream
+
+From [Event feed and live stream](../project/design/event-feed.md#12-billing-and-limits). Reads, consumers
+and streams are never metered: no `402 billing_limit`, on any plan.
+
+| Limit | Value | Source | What happens |
+|---|---|---|---|
+| Page size (`limit`) | 1–500, default 100 | Pylota Mail | `400 invalid_request` outside it |
+| Response body | 4 MiB of envelopes | Pylota Mail | The page ends early with `has_more: true` |
+| Scan window | 10,000 log positions per read | Pylota Mail | An empty page with `has_more: true`; ask again |
+| Long poll (`wait`) | 0–60 seconds, default 0; checked every second | Pylota Mail | – |
+| Concurrent long polls | 5 per key, 20 per tenant | Pylota Mail | `429 rate_limited`, `details.bucket = "events_wait"`, `Retry-After: 5` |
+| Type patterns | At most 50, each at most 64 characters | Pylota Mail | `400 invalid_request` |
+| Identity filter | At most 100 identity IDs | Pylota Mail | `400 invalid_request` |
+| Retention | `retention.events_days` after the append (1–365, default 30) | Policy | Older cursors get `410 cursor_expired` |
+| Log size per tenant | 6,000,000,000 bytes of envelopes; pruned, oldest first, to 5,000,000,000 | Pylota Mail, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-17) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
+| Durable consumers | 20 per tenant | Pylota Mail: the same as webhook endpoints per tenant; each is a polling client, and Pylota needs one per tenant plus a few local tools (AgentMail allows 10 per scope) | `422 event_consumer_limit_reached` |
+| Consumer name | 1–64 characters of `[a-z0-9._-]`, starting with a letter or digit | Pylota Mail | `400 invalid_request` |
+| Stream connections | 100 per tenant; 10 per key (the oldest is replaced) | Pylota Mail; Cloudflare allows 32,768 per object ([Durable Object State](https://developers.cloudflare.com/durable-objects/api/state/), read 2026-10-17) | `429 rate_limited` (`streams`) or close `4429`; `4409` for the replaced connection |
+| Stream token | Single use, 60 seconds, at most 100 unredeemed per tenant | Pylota Mail | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
+| Client message | At most 16 KiB; at most 100 per 10 seconds | Pylota Mail; Cloudflare's received-message limit is 32 MiB ([Workers WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/), read 2026-10-17) | Close `1009`, or `1008` for the rate |
+| Server message | At most 100 events and 1 MiB | Pylota Mail | – |
+| Acknowledgement window | 1,000 events or 8 MiB sent and not acknowledged | Pylota Mail | Sending pauses; after 60 seconds full, close `4408` |
+| Subscribe deadline | 60 seconds after the upgrade | Pylota Mail | Close `4400` (`subscribe_timeout`) |
+| Heartbeat | Server every 60 seconds; client ping every 30 seconds; dead after 90 seconds of silence | Pylota Mail | – |
+| Revocation | Streams close within 60 seconds; nothing is sent after the last validation is 60 seconds old | Pylota Mail | Close `4401`, `4403` or `4404` |
+| Close reason | At most 123 bytes | RFC 6455 § 5.5 (125-byte control frames, read 2026-10-17) | The full error is in the `error` message ([Errors › Stream close codes](errors.md#stream-close-codes)) |
+| Connection attachment | At most 16,384 bytes | Cloudflare ([Durable Objects › WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/), read 2026-10-17) | The largest valid state is under 9,000 bytes |

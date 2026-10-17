@@ -1,8 +1,9 @@
 # Sending and safe retries
 
 This guide covers everything about outbound mail: sending, replying and forwarding, who a reply goes
-to, attachments, the kinds of mail, and how to retry without ever sending an email twice. It ends with
-delivery events, bounces and suppressions, caps, domain fallback and testing.
+to, attachments, drafts with approval and scheduled send, calendar invitations, the kinds of mail, and how
+to retry without ever sending an email twice. It ends with delivery events, bounces and suppressions, caps,
+domain fallback and testing.
 
 All four send operations need the `messages:send` permission and an `Idempotency-Key` header. They
 return `202 Accepted` with the [Message object](../reference/api.md#message-object)
@@ -39,6 +40,7 @@ EOF
 | `thread_id` | Continue an existing thread without quoting. `References` are set from the thread |
 | `from_address` | An active address of the identity, or a retiring one on a thread that already uses it. The default is the primary. See [Who a reply goes to](#who-a-reply-goes-to) |
 | `attachments` | See [Attachments](#attachments) |
+| `calendar` | An iCalendar invitation to send as iMIP. See [Calendar invitations](#calendar-invitations) |
 | `labels`, `metadata` | Your own labels and key-value data on the stored message |
 | `headers` | Custom headers. See [Custom headers](#custom-headers) |
 
@@ -83,8 +85,11 @@ the thread lock, then fails with `409 thread_busy` (retryable, after `details.re
   deliveries end `suppressed`. With `policy.send_allowlist_only: true`, only recipients on the
   **send-allow** list are sent to; the others are `suppressed` the same way.
 - `send_policy.require_known_recipient` is `true` by default: the identity only delivers to addresses
-  it has sent to before, to addresses on the send-allow list, and, in a reply, to the authenticated sender
-  it is answering. Mail received from an address does not make it known. Other recipients are
+  it has sent to before, to addresses on the send-allow list, in a reply, to the authenticated sender
+  it is answering, in a send from an approved draft, to the recipients the approval covered
+  ([Drafts, approval and scheduled send](#drafts-approval-and-scheduled-send)), and in a calendar reply, to
+  the organizer of the verified invitation ([Calendar invitations](#calendar-invitations)). Mail received
+  from an address does not make it known. Other recipients are
   `suppressed` (`policy: unknown_recipient`), not refused with an error. Set it to `false` for an identity
   that writes to new people by design, such as booking confirmations ([E2](../project/edge-cases.md)).
 - Suppressed recipients are skipped and the rest are delivered. See
@@ -115,6 +120,60 @@ most 7 MiB (`413 payload_too_large`).
 that do not fit are replaced by expiring signed download links in the message, valid for
 `link_ttl_hours` (default 72, range 1–168). The default, `"refuse"`, returns the `413`
 ([G5](../project/edge-cases.md)).
+
+**Uploads for files that are too big to send inline.** Base64 in the request body caps a file at about
+5.25 MiB, and an MCP client would have to write the file out as text. Instead, stage the file once:
+`POST /v1/identities/{identity_id}/uploads` (`messages:send` or `drafts:write`) with `filename`,
+`content_type`, `size` and `sha256`, then `PUT` the exact bytes to the returned `upload_url` (no API key; it
+works for one hour and only for those bytes), and attach it as `{ "upload_id": "upl_…" }` on a send, reply,
+reply-all, forward or draft ([Uploads](../project/design/uploads.md)). An upload is at most 25 MiB and expires
+after a day by default (at most 7); every message that uses it keeps its own copy, so expiry never changes
+a sent message. The attachments of one message may total 25 MiB; the composed message must still fit the
+5 MiB limit, so larger files go out as signed links under `large_attachments: "link"`. `pmail send --attach`
+uploads files over 1 MiB for you. Pylota Mail never fetches an attachment from a URL.
+
+## Drafts, approval and scheduled send
+
+A draft is a message that is stored but not sent yet ([Drafts](../project/design/drafts.md)). Create one with
+`POST /v1/identities/{identity_id}/drafts` (`drafts:write`), revise it with `PATCH` (each save is a new
+revision, guarded by `If-Match`), and send it with `POST …/drafts/{draft_id}/send` (`messages:send`; an
+`Idempotency-Key` is required, as for every send). A draft can be a new message, a reply or a forward,
+can carry uploads and a `calendar` object, and becomes an outbound message through the same pipeline as a
+direct send, with the same policy, caps, holds and retry rules. The sent message carries `draft_id`.
+
+- **Approval.** The tenant policy `drafts.require_approval` (`never` by default, `new_recipients`,
+  `external` or `always`), or an identity's stricter `send_policy.require_approval`, decides when a send
+  needs a person. Then the draft moves to `pending_approval` and the send answers `202` with that status;
+  a direct send that would need approval is refused with `403 approval_required`, so an agent cannot go
+  around it. Or give the agent `drafts:write` without `messages:send`: it can only write drafts.
+- **Who approves.** An approver holds `drafts:approve`, which identity keys can never hold, and approves the
+  exact revision and digest they read (`POST …/approve` with `revision`, `digest` and `send`). An edit after
+  approval asks again. On Pylota Mail Cloud only people approve, in the console, unless the operator or the
+  workspace's partner set `drafts.key_approval`, which lets the partner's key approve (never the workspace's
+  own keys). `POST …/reject` sends a reason back to the writer.
+- **Scheduled send.** `send_at` (60 seconds to 90 days ahead) sends the draft at that time; a send more
+  than an hour late fails with `send_window_missed` rather than going out unexpectedly late, and appears in
+  the workspace's "Needs a person".
+- **Events.** `draft.approval_requested`, `draft.approved`, `draft.rejected`, `draft.sent` and
+  `draft.failed`.
+
+The CLI is `pmail drafts …`; `pmail drafts send` without `--idempotency-key` derives one from the draft and
+its revision, so re-running it never sends twice.
+
+## Calendar invitations
+
+Pylota Mail reads and sends calendar invitations (iMIP), but keeps no calendar: your own calendar system
+holds the state ([Calendar invitations](../project/design/calendar-invitations.md)).
+
+- **Send an invitation** by adding `calendar` to a send or a reply: `{ "ics": "BEGIN:VCALENDAR…", "attach_copy":
+  true }`, at most 256 KiB. The object is validated and normalised before anything is sent; `calendar` is
+  refused on reply-all and forward. Invitation recipients go through the usual recipient filters, so an
+  attendee the identity has never written to is `suppressed` unless you allow first contact.
+- **Answer a received invitation** with `POST …/messages/{message_id}/calendar-reply` (`messages:send`,
+  `Idempotency-Key` required): `{ "partstat": "accepted" }`, `declined` or `tentative`, with an optional
+  `comment` and `recurrence_id`. Only a verified invitation can be answered, and the reply goes to its
+  organizer. `pmail calendar-reply` is the CLI form.
+- An agent should never accept an invitation on its own initiative; answer only when the operator wants it.
 
 ## Who a reply goes to
 

@@ -23,7 +23,10 @@ of truth for both.
   | `usr_` | console user | `inv_` | invitation |
   | `dlq_` | dead-letter item | `hld_` | quota hold |
   | `prb_` | alignment probe | `ptn_` | partner |
-  | `sac_` | service-ledger entry | | |
+  | `sac_` | service-ledger entry | `drf_` | draft |
+  | `evc_` | durable event consumer | `wsc_` | WebSocket connection |
+  | `sfb_` | screening feedback | `upl_` | upload (mailbox) |
+  | `asu_` | agent sign-up | | |
 
 - **Times** are stored as Unix milliseconds (`INTEGER`) and exposed in the API as RFC 3339 UTC strings.
 - **Email addresses** are stored lower-cased, with the domain as an IDNA A-label (punycode). Local parts
@@ -105,6 +108,9 @@ CREATE TABLE tenants (
                                                            -- from M26 the every-minute cron mints a Notifier and
                                                            -- sends Init for each row still at '', as it mints
                                                            -- mailbox_do_id
+  events_do_id     TEXT NOT NULL DEFAULT '',               -- TenantEvents Durable Object id; minted with the row;
+                                                           -- '' on rows written before M30, minted by the
+                                                           -- every-minute cron; Init on first use (Event feed § 2.1)
   require_two_factor      INTEGER NOT NULL DEFAULT 0       -- members need two-step verification (console)
                           CHECK (require_two_factor IN (0,1)),
   onboarding_dismissed_at INTEGER,                         -- first-run checklist dismissed: written by the dismiss
@@ -113,6 +119,11 @@ CREATE TABLE tenants (
                                                            -- set by the daily evaluation (crons/signup_ramp.rs) or
                                                            -- by the billing webhook on a paid plan; read at
                                                            -- outbound policy step 18
+  provisional_until INTEGER,                               -- set while the tenant is a provisional agent sign-up:
+                                                           -- when it expires. Written by the create batch, cleared
+                                                           -- by verification; read by key authentication (the
+                                                           -- permission overlay) and core::policy::effective
+                                                           -- (Agent self-sign-up § 15)
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL
 );
@@ -230,6 +241,7 @@ CREATE TABLE identities (
                      CHECK (status IN ('active','paused','deleting','deleted')),
   pause_reason       TEXT CHECK (pause_reason IN ('manual','abuse_threshold','tenant_suspended')),
   send_policy_json   TEXT NOT NULL DEFAULT '{}',
+  message_hours      INTEGER CHECK (message_hours IS NULL OR message_hours BETWEEN 1 AND 8760),  -- retention.message_hours (Parity additions § 7)
   metadata_json      TEXT NOT NULL DEFAULT '{}',           -- ≤ 16 string keys, ≤ 512 bytes each
   mailbox_do_id      TEXT NOT NULL,                        -- IdentityMailbox Durable Object id; '' until the
                                                            -- every-minute cron mints it (the system identity)
@@ -290,6 +302,10 @@ CREATE TABLE api_keys (
   identity_id       TEXT REFERENCES identities(id),
   mode              TEXT NOT NULL CHECK (mode IN ('live','test')),
   permissions_json  TEXT NOT NULL,                         -- array of permission strings
+  mcp_tools_json    TEXT CHECK (mcp_tools_json IS NULL OR json_type(mcp_tools_json) = 'array'),
+                                                           -- NULL = every tool the permissions and level
+                                                           -- allow; else a JSON array of 0–64 tool names
+                                                           -- (SDKs, skills and agent tooling § 5.3)
   created_by_key_id TEXT,
   created_by_user_id TEXT REFERENCES users(id),            -- usr_: the person behind the key (console mint, or
                                                            -- copied from the parent key); NULL otherwise
@@ -332,6 +348,10 @@ CREATE TABLE webhook_endpoints (
   secret_enc             TEXT NOT NULL,                    -- AES-256-GCM(PM_MASTER_KEY), base64
   prev_secret_enc        TEXT,
   prev_secret_expires_at INTEGER,
+  headers_sealed         TEXT,                             -- pm1 envelope of the custom delivery headers (JSON map),
+                                                           -- or NULL (Parity additions § 8)
+  header_names_json      TEXT NOT NULL DEFAULT '[]',       -- the names only, for reads
+  headers_version        INTEGER NOT NULL DEFAULT 0,       -- compare-and-swap for PATCH …/headers
   consecutive_failures   INTEGER NOT NULL DEFAULT 0,
   created_at             INTEGER NOT NULL,
   updated_at             INTEGER NOT NULL,
@@ -416,22 +436,26 @@ CREATE TABLE suppressions (
   PRIMARY KEY (tenant_id, address_hash)
 );
 
+-- Allow and block lists, per tenant or per identity (Parity additions § 3.5). '' stands for the tenant scope,
+-- because SQLite treats NULL values in a composite primary key as distinct.
 CREATE TABLE sender_lists (
-  tenant_id  TEXT NOT NULL REFERENCES tenants(id),
-  direction  TEXT NOT NULL CHECK (direction IN ('receive','send')),
-  kind       TEXT NOT NULL CHECK (kind IN ('allow','block')),
-  entry      TEXT NOT NULL,                                -- user@example.com or @example.com
-  note       TEXT,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (tenant_id, direction, kind, entry)
+  tenant_id   TEXT NOT NULL REFERENCES tenants(id),
+  identity_id TEXT NOT NULL DEFAULT '',                    -- '' = tenant scope; else an idn_ of this tenant
+  direction   TEXT NOT NULL CHECK (direction IN ('receive','send')),
+  kind        TEXT NOT NULL CHECK (kind IN ('allow','block')),
+  entry       TEXT NOT NULL,                               -- user@example.com or @example.com
+  note        TEXT,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, identity_id, direction, kind, entry)
 );
+CREATE INDEX sender_lists_identity ON sender_lists(identity_id, direction) WHERE identity_id <> '';
 
 CREATE TABLE jobs (
   id                TEXT PRIMARY KEY,                      -- job_
   tenant_id         TEXT,
   kind              TEXT NOT NULL
                     CHECK (kind IN ('erasure','retention','export','reembed','reparse','reindex','domain_remove',
-                                    'backup','restore_reconcile')),
+                                    'backup','restore_reconcile','event_log_rebuild')),
   status            TEXT NOT NULL CHECK (status IN ('queued','running','completed','failed','canceled')),
   runner_do_id      TEXT NOT NULL,                         -- JobRunner Durable Object id
   params_json       TEXT NOT NULL,                         -- JobRequest::Start params; a counterparty erasure may
@@ -500,8 +524,9 @@ CREATE TABLE rpc_intents (
   object_id   TEXT NOT NULL,                               -- tenants.quota_do_id or identities.mailbox_do_id
   tenant_id   TEXT NOT NULL REFERENCES tenants(id),
   identity_id TEXT,                                        -- mailbox intents
-  op          TEXT NOT NULL CHECK (op IN ('init','emit_event')),
-  body_json   TEXT NOT NULL,                               -- the request body (InitMailbox, EmitEvent, …): IDs and
+  op          TEXT NOT NULL CHECK (op IN ('init','emit_event','set_retention')),  -- set_retention: the identity's
+                                                           -- retention.message_hours (Parity additions § 7.2)
+  body_json   TEXT NOT NULL,                               -- the request body (InitMailbox, EmitEvent, SetRetention, …): IDs and
                                                            -- a thin event payload, never message content
   occurred_at INTEGER NOT NULL,                            -- the D1 change time: the event time, and the time part
                                                            -- of the derived event ID
@@ -607,6 +632,31 @@ CREATE UNIQUE INDEX service_accounts_live ON service_accounts(identity_id, servi
 CREATE INDEX service_accounts_identity ON service_accounts(identity_id, status, created_at);
 CREATE INDEX service_accounts_tenant ON service_accounts(tenant_id, status, created_at);
 
+-- Drafts, approvals and scheduled send § 9.2: one row per draft that is pending_approval, scheduled or failed;
+-- written only by the draft's mailbox (§ 9.3); read by GET /v1/tenants/{tenant_id}/drafts, the console's
+-- Overview and drafts page, the Notifier's needs-a-person count and the drafts_due watchdog. It holds no mail
+-- content.
+CREATE TABLE draft_index (
+  draft_id            TEXT PRIMARY KEY,                    -- drf_
+  tenant_id           TEXT NOT NULL REFERENCES tenants(id),
+  identity_id         TEXT NOT NULL REFERENCES identities(id),
+  status              TEXT NOT NULL CHECK (status IN ('pending_approval','scheduled','failed')),
+  version             INTEGER NOT NULL,                    -- the mailbox's drafts.index_version
+  revision            INTEGER NOT NULL,
+  draft_kind          TEXT NOT NULL CHECK (draft_kind IN ('new','reply','reply_all','forward')),
+  approval_reason     TEXT CHECK (approval_reason IN ('requested','new_recipients','external','always')),
+  recipient_count     INTEGER NOT NULL,
+  attachment_count    INTEGER NOT NULL,
+  send_at             INTEGER,
+  status_at           INTEGER NOT NULL,
+  failure_reason      TEXT,
+  requested_by_key_id TEXT,
+  updated_at          INTEGER NOT NULL
+);
+CREATE INDEX draft_index_tenant ON draft_index(tenant_id, status, status_at, draft_id);
+CREATE INDEX draft_index_identity ON draft_index(identity_id, status);
+CREATE INDEX draft_index_due ON draft_index(send_at) WHERE status = 'scheduled';
+
 -- Thumbprints of deleted identity keys, never published again (O7). Written by identity- and tenant-scope
 -- erasure in the step that deletes identity_keys; read by key generation, which draws a new seed when the
 -- thumbprint of a new key is found here. Key IDs are not personal data and are never deleted.
@@ -666,7 +716,8 @@ CREATE UNIQUE INDEX signing_keys_current ON signing_keys(purpose) WHERE verify_u
 CREATE TABLE dlq_items (
   id            TEXT PRIMARY KEY,                          -- dlq_
   queue         TEXT NOT NULL
-                CHECK (queue IN ('pm-inbound','pm-outbound','pm-delivery-events','pm-webhooks','pm-index')),
+                CHECK (queue IN ('pm-inbound','pm-outbound','pm-delivery-events','pm-webhooks','pm-index',
+                                 'pm-screen')),
   message_id    TEXT NOT NULL,                             -- Cloudflare queue message id
   body_json     TEXT NOT NULL,                             -- the pointer as received (bodies stay under 4 KB)
   body_sha256   TEXT NOT NULL,
@@ -840,6 +891,8 @@ CREATE TABLE pending_auth (
   oauth_subject  TEXT,
   oauth_email    TEXT,                                     -- becomes oauth_identities.email_at_link
   login_token_id TEXT REFERENCES login_tokens(id),         -- link_code: the emailed code (purpose oauth_link)
+  agent_signup_id TEXT REFERENCES agent_signups(id) ON DELETE CASCADE,  -- two_factor step of an agent sign-up
+                                                           -- link (Agent self-sign-up § 7.2)
   attempts       INTEGER NOT NULL DEFAULT 0,               -- wrong link codes; at 5 the row is used up
   created_at     INTEGER NOT NULL,
   expires_at     INTEGER NOT NULL,                         -- two_factor: + 5 minutes; link_code: + 10 minutes
@@ -857,6 +910,56 @@ CREATE TABLE waitlist (                                    -- PM_SIGNUP = waitli
                                                            -- valid 7 days while PM_SIGNUP = waitlist
   invite_token_hash TEXT UNIQUE,                           -- HMAC(link key {key_kid}, sign-up link token)
   key_kid      TEXT                                        -- signing_keys kid (purpose 'link') of invite_token_hash
+);
+
+-- One row per agent sign-up (Agent self-sign-up § 15). The clear human address is kept only while the sign-up
+-- is provisional; the row is deleted by the tenant-scope erasure of its tenant.
+CREATE TABLE agent_signups (
+  id                TEXT PRIMARY KEY,                        -- asu_
+  tenant_id         TEXT NOT NULL UNIQUE REFERENCES tenants(id),
+  identity_id       TEXT NOT NULL REFERENCES identities(id),  -- the 'agent' identity
+  key_id            TEXT NOT NULL REFERENCES api_keys(id),    -- the key returned at sign-up
+  state             TEXT NOT NULL
+                    CHECK (state IN ('provisional','verified','expired','abandoned','refused')),
+  human_email       TEXT,                                    -- normalised; NULL once the state leaves provisional
+  human_hash        TEXT NOT NULL,                           -- hex HMAC-SHA256(PM_HASH_KEY, base address)
+  human_status      TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (human_status IN ('pending','delivered','bounced')),  -- delivery hook (§ 13.3)
+  replacements_used INTEGER NOT NULL DEFAULT 0 CHECK (replacements_used BETWEEN 0 AND 2),
+  code_seq          INTEGER NOT NULL DEFAULT 1,              -- +1 with every new code (resend, replacement)
+  code_hash         TEXT,                                    -- HMAC(link key {key_kid}, "asu:{id}:{code_seq}:{code}");
+                                                             -- NULL when burned, used or ended
+  link_hash         TEXT UNIQUE,                             -- HMAC(link key {key_kid}, link token)
+  key_kid           TEXT,                                    -- signing_keys kid (purpose 'link') of both hashes
+  code_expires_at   INTEGER,                                 -- code and link: issued + 24 hours
+  attempts          INTEGER NOT NULL DEFAULT 0,              -- reserved tries of the current code (≤ 10)
+  failed_total      INTEGER NOT NULL DEFAULT 0,              -- wrong codes over the sign-up's life (≤ 30)
+  sends_json        TEXT NOT NULL DEFAULT '[]',              -- times of the code emails of the last hour (≤ 3)
+  mail_message_ids_json TEXT NOT NULL DEFAULT '[]',          -- msg_ IDs of the code emails (system identity)
+  mail_status       TEXT NOT NULL DEFAULT 'queued'
+                    CHECK (mail_status IN ('queued','not_sent')),  -- the latest code email
+  source            TEXT,                                    -- [A-Za-z0-9._/+-]{1,64}
+  network_hash      TEXT NOT NULL,                           -- 16 hex: HMAC(PM_HASH_KEY, IPv4 or IPv6 /64)
+  terms_version     TEXT NOT NULL,                           -- PM_TERMS_VERSION accepted by the caller
+  expires_at        INTEGER NOT NULL,                        -- created_at + 7 days; equals tenants.provisional_until
+  verified_at       INTEGER,
+  verified_via      TEXT CHECK (verified_via IN ('code','link','claim')),
+  verified_user_id  TEXT REFERENCES users(id),
+  verify_token      TEXT,                                    -- the winner's nonce guarding the verification batch
+  ended_at          INTEGER,                                 -- expired, abandoned or refused
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX agent_signups_live_human ON agent_signups(human_hash) WHERE state = 'provisional';
+CREATE INDEX agent_signups_expiry ON agent_signups(expires_at) WHERE state = 'provisional';
+CREATE INDEX agent_signups_created ON agent_signups(created_at);         -- the platform listing
+
+-- People who stopped agents naming them (Agent self-sign-up § 9). Keyed hash only; kept as an objection to
+-- contact.
+CREATE TABLE agent_signup_refusals (
+  human_hash TEXT PRIMARY KEY,                               -- hex HMAC-SHA256(PM_HASH_KEY, base address)
+  reason     TEXT NOT NULL CHECK (reason IN ('refused','complaint')),
+  created_at INTEGER NOT NULL
 );
 
 -- Notification preferences of a person in one workspace (Notifications § 2). A missing row means the default:
@@ -933,9 +1036,9 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER 
 -- request router (read_only), the outbound submit and consumer (read_only, free_sending) and the tenant
 -- retention job (emergency_prune); shown by GET /v1/platform/status. A missing row means the default.
 CREATE TABLE ops_switches (
-  name       TEXT PRIMARY KEY CHECK (name IN ('read_only','free_sending','emergency_prune')),
+  name       TEXT PRIMARY KEY CHECK (name IN ('read_only','free_sending','emergency_prune','agent_signup')),
   state      TEXT NOT NULL CHECK (state IN ('on','off')),  -- defaults: read_only off, free_sending on,
-                                                           -- emergency_prune off
+                                                           -- emergency_prune off, agent_signup on
   set_by     TEXT NOT NULL CHECK (set_by IN ('auto','platform')),
   reason     TEXT NOT NULL,                                -- the containment rule, or the operator's note
   actor_key_id TEXT,                                       -- the platform key, when set_by = 'platform'
@@ -1000,7 +1103,7 @@ CREATE TABLE platform_objects (
 - **Sealed values.** These columns hold the pm1 envelope of
   [Security § 7.2](security.md#72-encryption-envelope) under `PM_MASTER_KEY`, with associated data
   `pm1|{table}|{column}|{row id}` (for example `pm1|domains|smtp_sealed|{domain_id}`):
-  `webhook_endpoints.secret_enc` and `prev_secret_enc`, `identity_keys.private_enc`,
+  `webhook_endpoints.secret_enc`, `prev_secret_enc` and `headers_sealed`, `identity_keys.private_enc`,
   `signing_keys.ciphertext`, `domains.smtp_sealed` and `smtp_pending_sealed`, `users.totp_sealed`,
   `users.totp_pending_sealed`, `users.recovery_codes_sealed` and `oauth_states.pkce_sealed`. Each is an
   entry of the sealed-column
@@ -1020,7 +1123,8 @@ CREATE TABLE platform_objects (
   [Webhooks › Retry schedule](webhooks.md#retry-schedule-j4-fr-wh-3); read by
   `GET /v1/webhooks/{webhook_id}/deliveries`), `sender_lists.tenant_id`, `direction`, `kind`, `entry`,
   `note` and `created_at` (`PUT /v1/tenants/{tenant_id}/lists/{direction}/{kind}/{entry}`; read by the
-  list endpoints, and `entry` by the inbound and outbound list checks), `members.created_at` (the
+  list endpoints, and `entry` by the inbound and outbound list checks; `identity_id` is written by the
+  identity-scope routes and read by the same checks, [Parity additions § 3](parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17)), `members.created_at` (the
   Member object of `GET /v1/tenants/{tenant_id}/members`) and the mailbox's `threads.archived`
   (`PATCH …/threads/{thread_id}`; the `archived` list filter).
 - **Who acted.** `audit_log.actor_key_id` names the API key and `actor_user_id` the person who acted in
@@ -1036,8 +1140,9 @@ CREATE TABLE platform_objects (
   same batch (`api_keys_creator`), and returned in the API key object.
 - **RPC intents.** `rpc_intents` rows are written in the D1 batch of tenant creation (`init` of the
   `TenantQuota`), identity creation (`init` of the mailbox, carrying `identity.created`), identity updates,
-  pauses and resumes, tenant suspension and resumption (one `emit_event` per identity paused or resumed)
-  and identity-key changes (the `identity.key_*` events). The handler deletes its rows once the calls
+  pauses and resumes, tenant suspension and resumption (one `emit_event` per identity paused or resumed),
+  identity-key changes (the `identity.key_*` events) and changes of an identity's `retention.message_hours`
+  (`set_retention`, carrying `MailboxRequest::SetRetention`, [Parity additions § 7.2](parity-additions.md#72-how-the-mailbox-learns-it)). The handler deletes its rows once the calls
   succeed; the every-minute cron (`crons/intents.rs`) re-sends due rows in `occurred_at` order per object
   and deletes each on success, or when the object answers that it is erased
   ([Design conventions § 9](index.md#9-durable-object-calls-after-a-d1-change)). Tenant erasure deletes the
@@ -1131,6 +1236,17 @@ CREATE TABLE platform_objects (
   `exports.identity_id` is written by `POST /v1/exports` and returned in the export object;
   `erasure_requests.completed_at` and `status` are also read by an export's `complete` step
   ([Privacy § 6.11](privacy.md#611-exports-and-copies-in-flight-i11)).
+- **Parity tables and columns.** Each page that adds them names its writers and readers:
+  `draft_index` ([Drafts § 9.2–9.3](drafts.md#92-d1-draft_index)), `tenants.events_do_id`
+  ([Event feed § 2.1](event-feed.md#21-identity-and-lifecycle)), `agent_signups`, `agent_signup_refusals`,
+  `tenants.provisional_until`, `pending_auth.agent_signup_id` and the `agent_signup` switch
+  ([Agent self-sign-up § 15](agent-signup.md#15-storage)), `api_keys.mcp_tools_json`
+  ([SDKs, skills and agent tooling § 5.3](sdk-and-skills.md#53-per-key-tool-allow-list)),
+  `identities.message_hours` ([Parity additions § 7.2](parity-additions.md#72-how-the-mailbox-learns-it)) and the
+  `webhook_endpoints` header columns ([Parity additions § 8.3](parity-additions.md#83-delivery-and-storage)).
+  Tenant erasure deletes `draft_index` and `agent_signups` rows in `delete_d1_rows`, `agent_signups` before
+  `api_keys` and `identities` ([Privacy § 6.6](privacy.md#66-tenant-scope)); `agent_signup_refusals` is never
+  deleted by erasure, because it records an objection to contact, as `suppressions` does.
 
 ## 2. `IdentityMailbox` Durable Object (SQLite)
 
@@ -1162,15 +1278,29 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --       orphan_sweep_cursor  the last R2 key the rolling orphan sweep listed (I9)
 --       outbox_backoff  consecutive failed outbox dispatches; the retry delay is 30 s doubled per failure,
 --                       at most 5 minutes; cleared by a successful dispatch (Webhooks › Dispatching)
---       alarm:{purpose} pending wake-ups: outbox, claim, dispatch, maintenance (Design § 4). Thread locks
---                       expire lazily and reconciliation is event-driven, so neither has an alarm.
+--       retention_message_hours, retention_version  the identity's retention.message_hours and the
+--                       identities.updated_at of the last SetRetention applied (Parity additions § 7.2)
+--       expiry_backoff  consecutive failed expiry slices; 30 s doubled, at most 5 minutes
+--       expiry:{YYYY-MM-DD}  that UTC day's expiry counts, flushed to the audit log by maintenance
+--       draft_index_backoff  consecutive failed draft_index writes to D1 (Drafts § 9.3)
+--       draft_att:{attachment_id}  an inline draft attachment written to R2 and not yet committed (Drafts § 7)
+--       screen_freeze_seen  '1' when the screen alarm ran during PM_FREEZE; cleared by the first run after it
+--       screen_hour     {"h": "YYYY-MM-DDTHH", "n": hold-mode verdicts, "u": of them unavailable, "r": 0|1}
+--                       for the screening_unavailable condition (Screening § 22); replaced when the UTC hour
+--                       changes; "r" = 1 once the condition was reported in that hour
+--       alarm:{purpose} pending wake-ups: outbox, claim, dispatch, maintenance (Design § 4); drafts (scheduled
+--                       sends, claims and approval expiry) and draft_index (Drafts § 6.2, § 9.3); screen (the
+--                       earliest deadline_at of a pending screenings row, Screening § 6.1); uploads (the
+--                       earliest upload expiry, tombstone purge or object-delete retry, Uploads § 5.3); expiry
+--                       (per-identity retention, Parity additions § 7.4). Thread locks expire lazily and
+--                       reconciliation is event-driven, so neither has an alarm.
 -- parser_version is a column of messages (and a core constant), not a meta key.
 
 CREATE TABLE IF NOT EXISTS threads (
   seq                INTEGER PRIMARY KEY AUTOINCREMENT,    -- per mailbox; used in thread tokens; never reused,
                                                            -- even after the newest thread is erased (C1)
   id                 TEXT NOT NULL UNIQUE,                 -- thr_
-  -- The summary columns below count VISIBLE messages only (not quarantined, hidden or throttled),
+  -- The summary columns below count VISIBLE messages only (not quarantined, screening, hidden or throttled),
   -- recomputed by Threading § 3.4; message_count = 0 means the thread is never listed
   subject            TEXT NOT NULL,                        -- normalised subject of the first visible message ('' none yet)
   first_at           INTEGER NOT NULL,
@@ -1198,7 +1328,7 @@ CREATE TABLE IF NOT EXISTS messages (
   thread_seq          INTEGER NOT NULL REFERENCES threads(seq),
   direction           TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
   status              TEXT NOT NULL CHECK (status IN (
-                        'received','quarantined','throttled','hidden',                     -- inbound
+                        'received','quarantined','screening','throttled','hidden',         -- inbound
                         'queued','submitted','delivered','deferred','bounced','complained',
                         'rejected','failed','uncertain','suppressed','canceled')),         -- outbound
   rfc_message_id      TEXT,                                -- normalised, without angle brackets
@@ -1228,27 +1358,39 @@ CREATE TABLE IF NOT EXISTS messages (
   snippet             TEXT,                                -- ≤ 240 chars of extracted_text
   sent_at             INTEGER,                             -- Date header, or submit time
   received_at         INTEGER NOT NULL,                    -- our clock
+  received_evented_at INTEGER,                             -- when message.received was first appended for this
+                                                           -- message; NULL until then. Written by ingest (status
+                                                           -- received), the screening commit (clear, or
+                                                           -- unavailable delivered) and release; read by release,
+                                                           -- which appends message.received only while it is
+                                                           -- NULL (Screening § 10)
   kind                TEXT NOT NULL,                       -- inbound: normal|automated|dsn|list|calendar|mdn
                                                            -- outbound: transactional|marketing|auto_reply
   automated_json      TEXT,                                -- classification evidence
-  auth_json           TEXT,                                -- spf, dkim[], dmarc, arc, authserv
-  verdict             TEXT CHECK (verdict IN ('pass','fail','softfail','none','unaligned','unverified')),
+  auth_json           TEXT,                                -- spf, dkim[], dmarc, arc, authserv; spf.aligned;
+                                                           -- arc.sealer, arc.sealer_trusted, arc.aar, arc.rescue
+                                                           -- (Parity additions § 5.2, § 6.3)
+  verdict             TEXT CHECK (verdict IN ('pass','arc_rescued','fail','softfail','none','unaligned',
+                                              'unverified')),
   spam_score          REAL,
   known_sender        INTEGER,
   quarantine_reason   TEXT                                 -- NULL unless status is quarantined or hidden
                       CHECK (quarantine_reason IN ('auth_failed','auth_unverified','spam','risky_attachment',
-                                                   'blocked_sender','otp_unsolicited','account_unapproved')),  -- blocked_sender: a
-                                                           -- receive-block entry only (D7)
+                                                   'blocked_sender','otp_unsolicited','account_unapproved',
+                                                   'steering_suspected','screening_unavailable')),  -- blocked_sender:
+                                                           -- a receive-block entry only (D7); the last two:
+                                                           -- Screening § 4.3, § 7
   flags_json          TEXT NOT NULL DEFAULT '[]',          -- parse_degraded, message_id_conflict, encrypted,
                                                            -- hidden_text, sent_via_fallback, reprocessed, bcc,
                                                            -- thread_join_unverified, reconciled, loopback,
                                                            -- body_truncated, display_name_spoof,
                                                            -- lookalike_domain, reply_to_mismatch,
                                                            -- shared_domain_sender, sender_suppressed,
-                                                           -- body_redacted, dsn_untrusted. The API
-                                                           -- returns the trust ones (hidden_text, display_name_spoof,
-                                                           -- lookalike_domain, reply_to_mismatch,
-                                                           -- thread_join_unverified, shared_domain_sender) in
+                                                           -- body_redacted, dsn_untrusted, steering_suspected. The
+                                                           -- API returns the trust ones (hidden_text,
+                                                           -- display_name_spoof, lookalike_domain, reply_to_mismatch,
+                                                           -- thread_join_unverified, shared_domain_sender,
+                                                           -- steering_suspected) in
                                                            -- trust.flags, the rest in flags. Every row stays within
                                                            -- the 1,900,000-byte budget of Inbound › Storage caps
   read                INTEGER NOT NULL DEFAULT 0,
@@ -1256,8 +1398,13 @@ CREATE TABLE IF NOT EXISTS messages (
   triage_json         TEXT,
   operation           TEXT                                 -- send | reply | reply_all | forward; NULL for inbound
                       CHECK (operation IN ('send','reply','reply_all','forward')),
+  draft_id            TEXT,                                -- the draft an outbound message was sent from (Drafts § 5.4)
   parser_version      INTEGER,
-  metadata_json       TEXT NOT NULL DEFAULT '{}'
+  metadata_json       TEXT NOT NULL DEFAULT '{}',
+  calendar_json       TEXT,                                -- the calendar object (Calendar invitations §2.9),
+                                                           -- at most 262,144 bytes; NULL without a calendar part
+  calendar_uid_hash   TEXT                                 -- hex SHA-256 of the primary UID's bytes; NULL unless
+                                                           -- object_status = 'parsed'
 );
 CREATE INDEX IF NOT EXISTS messages_thread   ON messages(thread_seq, received_at);
 CREATE INDEX IF NOT EXISTS messages_rfcid    ON messages(rfc_message_id);
@@ -1266,6 +1413,8 @@ CREATE INDEX IF NOT EXISTS messages_hash     ON messages(raw_sha256);
 CREATE INDEX IF NOT EXISTS messages_time     ON messages(received_at DESC);
 CREATE INDEX IF NOT EXISTS messages_from     ON messages(from_address);
 CREATE INDEX IF NOT EXISTS messages_status   ON messages(direction, status);
+CREATE INDEX IF NOT EXISTS messages_calendar_uid ON messages(calendar_uid_hash)
+  WHERE calendar_uid_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS deliveries (                    -- per-recipient outbound status
   message_rowid   INTEGER NOT NULL REFERENCES messages(rowid) ON DELETE CASCADE,
@@ -1301,7 +1450,10 @@ CREATE TABLE IF NOT EXISTS attachments (
   text_pages    INTEGER,
   risk          TEXT CHECK (risk IN ('executable','macro','encrypted_archive','archive_bomb',
                                      'type_mismatch','encrypted_document')),
-  scan_status   TEXT NOT NULL DEFAULT 'skipped' CHECK (scan_status IN ('skipped','pending','clean','infected','error'))
+  scan_status   TEXT NOT NULL DEFAULT 'skipped' CHECK (scan_status IN ('skipped','pending','clean','infected','error')),
+  upload_id     TEXT                                       -- upl_ a sent attachment was copied from; NULL for inline
+                                                           -- base64 and inbound. Not a foreign key: the upload may be
+                                                           -- gone (Uploads § 5.1)
 );
 CREATE INDEX IF NOT EXISTS attachments_message ON attachments(message_rowid);
 
@@ -1351,14 +1503,21 @@ CREATE INDEX IF NOT EXISTS contacts_domain ON contacts(domain);
 CREATE TABLE IF NOT EXISTS idempotency (
   key_hash      TEXT PRIMARY KEY,                          -- hex SHA-256 of the Idempotency-Key header
   fingerprint   TEXT NOT NULL,                             -- sha256(operation, target, canonical body)
-  operation     TEXT NOT NULL,
+  operation     TEXT NOT NULL,                             -- send, reply, reply_all, forward; and draft_create,
+                                                           -- draft_send, draft_approve, draft_reject (Drafts § 9.1)
   message_id    TEXT,
+  draft_id      TEXT,                                      -- the draft a draft route's record, or a draft send's
+                                                           -- ledger row, belongs to; erasure deletes by it (Drafts § 13.2)
   response_json TEXT NOT NULL,                             -- the 202 Message with extracted_text, text and html
                                                            -- set to null; a replay fills them from the row
-                                                           -- (Outbound › Reservation), so it stays a few KB
+                                                           -- (Outbound › Reservation), so it stays a few KB. After
+                                                           -- expiry (Parity additions § 7.6) only
+                                                           -- {expired_at, message_id}, with fingerprint replaced by
+                                                           -- its HMAC under PM_HASH_KEY
   created_at    INTEGER NOT NULL,
   expires_at    INTEGER NOT NULL                           -- created_at + 30 days
 );
+CREATE INDEX IF NOT EXISTS idempotency_draft ON idempotency(draft_id) WHERE draft_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS erased_ids (                    -- message IDs an erasure deleted (I10): writers that
   message_id TEXT PRIMARY KEY,                             -- finish after the erasure see them and delete what they
@@ -1401,6 +1560,146 @@ CREATE TABLE IF NOT EXISTS verifications (                 -- codes and links fo
                                                            -- require approval. Read by wait before a release
 );
 
+-- Drafts, approvals and scheduled send (Drafts § 9.1)
+CREATE TABLE IF NOT EXISTS drafts (
+  rowid              INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,                 -- drf_
+  client_id          TEXT,                                 -- caller's idempotent-create key (Drafts § 4.1)
+  client_fingerprint TEXT,                                 -- sha256 of the canonical create body
+  draft_kind         TEXT NOT NULL CHECK (draft_kind IN ('new','reply','reply_all','forward')),
+  kind               TEXT NOT NULL CHECK (kind IN ('transactional','marketing','auto_reply')),
+  status             TEXT NOT NULL CHECK (status IN ('editing','pending_approval','approved','scheduled',
+                                                     'sending','sent','failed','rejected','canceled')),
+  status_at          INTEGER NOT NULL,                     -- when it entered this status
+  revision           INTEGER NOT NULL DEFAULT 1,
+  index_version      INTEGER NOT NULL DEFAULT 1,           -- +1 on every write; guards the D1 index (Drafts § 9.3)
+  digest             TEXT,                                 -- hex sha256 of the current content (Drafts § 2.4); NULL once cleared
+  source_message_id  TEXT,                                 -- in_reply_to or forward_of (msg_); NULL for new
+  thread_seq         INTEGER,                              -- the source's thread, or thread_id of a new draft;
+                                                           -- no foreign key: erasure deletes the draft first (§ 13.2)
+  from_address       TEXT,
+  to_json            TEXT NOT NULL DEFAULT '[]',
+  cc_json            TEXT NOT NULL DEFAULT '[]',
+  bcc_json           TEXT NOT NULL DEFAULT '[]',
+  resolved_json      TEXT,                                 -- reply kinds: {to, cc} as resolved for the last digest
+  subject            TEXT,
+  text               TEXT,                                 -- ≤ 524 288 bytes
+  html               TEXT,                                 -- ≤ 1 048 576 bytes, as written
+  headers_json       TEXT NOT NULL DEFAULT '{}',
+  attachments_json   TEXT NOT NULL DEFAULT '[]',           -- [{id, filename, content_type, disposition,
+                                                           --   content_id, size, sha256, source, r2_key, upload_id?}]
+  include_attachments INTEGER,                             -- forward only
+  calendar_json      TEXT,                                 -- new and reply drafts: the calendar field of the send
+                                                           -- routes ({ics, attach_copy}, Calendar invitations § 5.1),
+                                                           -- part of the digest; NULL otherwise
+  unsubscribe_json   TEXT,
+  consent_json       TEXT,
+  labels_json        TEXT NOT NULL DEFAULT '[]',
+  metadata_json      TEXT NOT NULL DEFAULT '{}',
+  send_at            INTEGER,
+  next_attempt_at    INTEGER,                              -- a scheduled fire waiting after a transient condition
+  approval_json      TEXT NOT NULL DEFAULT '{"state":"none"}',  -- Drafts § 2.1 approval
+  send_json          TEXT,                                 -- Drafts § 2.1 send request, with the authority
+  claim_json         TEXT,                                 -- {token, claimed_at, prior_status, origin, attempt}
+  rejection_json     TEXT,
+  failure_json       TEXT,
+  message_id         TEXT,                                 -- msg_ once sent
+  sent_at            INTEGER,
+  created_by_key_id  TEXT,
+  updated_by_key_id  TEXT,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS drafts_client  ON drafts(client_id) WHERE client_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS drafts_due     ON drafts(status, send_at);
+CREATE INDEX IF NOT EXISTS drafts_source  ON drafts(source_message_id) WHERE source_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS drafts_thread  ON drafts(thread_seq) WHERE thread_seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS drafts_message ON drafts(message_id) WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS drafts_created ON drafts(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS drafts_updated ON drafts(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS draft_sync (                     -- index rows waiting to be written to D1 (Drafts § 9.3)
+  draft_id  TEXT PRIMARY KEY,
+  version   INTEGER NOT NULL,                              -- drafts.index_version it describes
+  op        TEXT NOT NULL CHECK (op IN ('upsert','delete')),
+  row_json  TEXT,                                          -- the draft_index row for an upsert: IDs, status, kind,
+                                                           -- counts, times, key IDs; never content
+  queued_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS screenings (           -- one row per screened inbound message (Screening § 3, § 14)
+  message_rowid  INTEGER PRIMARY KEY REFERENCES messages(rowid) ON DELETE CASCADE,
+  mode           TEXT NOT NULL CHECK (mode IN ('monitor','hold')),
+  status         TEXT NOT NULL CHECK (status IN ('pending','clear','suspect','unavailable')),
+  reason         TEXT CHECK (reason IN ('rules','model','late_signal','model_clear','nothing_to_screen',
+                                        'deadline_exceeded','model_unavailable','invalid_output',
+                                        'ai_rate_limited','model_cap','test_forced')),   -- NULL while pending
+  signals_json   TEXT NOT NULL DEFAULT '[]',      -- [{source, kind, field, severity}], at most 32; no text
+  model          TEXT,                            -- model ID, 'rules', or NULL
+  on_unavailable TEXT NOT NULL CHECK (on_unavailable IN ('quarantine','deliver')),   -- fixed at ingest
+  account_id     TEXT,                            -- sac_ matched by rule 4a at ingest; read by the clear
+                                                  -- commit for the verifications row
+  outcome        TEXT CHECK (outcome IN ('received','quarantined','unchanged')),    -- NULL while pending
+  started_at     INTEGER NOT NULL,                -- ingest commit
+  deadline_at    INTEGER NOT NULL,                -- started_at + deadline_seconds × 1000
+  completed_at   INTEGER,
+  late           INTEGER NOT NULL DEFAULT 0,      -- 1 once a late signal changed the verdict (Screening § 8)
+  released_by_key_id  TEXT,                       -- set by release (Screening § 10)
+  released_by_user_id TEXT,
+  released_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS screenings_pending ON screenings(deadline_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS screenings_started ON screenings(started_at);
+
+CREATE TABLE IF NOT EXISTS screening_feedback (   -- Screening § 11; at most 20 rows per message
+  id               TEXT PRIMARY KEY,              -- sfb_
+  message_rowid    INTEGER NOT NULL REFERENCES messages(rowid) ON DELETE CASCADE,
+  verdict          TEXT NOT NULL CHECK (verdict IN ('correct','false_positive','missed_threat',
+                                                    'legitimate_instruction','spam')),
+  screening_status TEXT NOT NULL CHECK (screening_status IN ('clear','suspect','unavailable')),
+  notes            TEXT,                          -- ≤ 500 characters, the caller's text; never mail content
+  actor_key_id     TEXT,                          -- one of the two is set
+  actor_user_id    TEXT,
+  created_at       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS screening_feedback_message ON screening_feedback(message_rowid, created_at);
+
+CREATE TABLE IF NOT EXISTS uploads (                       -- files an agent staged to send (Uploads § 5.1)
+  id            TEXT PRIMARY KEY,                          -- upl_
+  filename      TEXT NOT NULL,                             -- sanitised: no path, ≤ 255 bytes
+  content_type  TEXT NOT NULL,                             -- as declared, ≤ 127 bytes
+  size          INTEGER NOT NULL CHECK (size BETWEEN 1 AND 26214400),
+  sha256        TEXT NOT NULL,                             -- lower-case hex, 64 characters
+  status        TEXT NOT NULL CHECK (status IN ('pending','uploading','ready','rejected','expired')),
+  status_reason TEXT CHECK (status_reason IN ('risk','infected','expired','too_many_attempts','object_missing')),
+  sniffed_type  TEXT,
+  risk          TEXT CHECK (risk IN ('executable','macro','encrypted_archive','archive_bomb',
+                                     'type_mismatch','encrypted_document')),
+  scan_status   TEXT NOT NULL DEFAULT 'skipped' CHECK (scan_status IN ('skipped','clean','infected','error')),
+  r2_key        TEXT NOT NULL,                             -- t/{ten}/i/{idn}/up/{upl}
+  object_state  TEXT NOT NULL DEFAULT 'absent' CHECK (object_state IN ('absent','present','deleting')),
+  put_token     TEXT,                                      -- the PUT holding the claim (status uploading)
+  lease_until   INTEGER,                                   -- the claim lapses after this time
+  failed_puts   INTEGER NOT NULL DEFAULT 0,                -- counted failures; the 10th expires the upload
+  use_count     INTEGER NOT NULL DEFAULT 0,
+  last_used_at  INTEGER,
+  created_at    INTEGER NOT NULL,
+  expires_at    INTEGER NOT NULL,
+  ended_at      INTEGER                                    -- when it became rejected or expired
+);
+CREATE INDEX IF NOT EXISTS uploads_status_expiry ON uploads(status, expires_at);
+CREATE INDEX IF NOT EXISTS uploads_created ON uploads(created_at, id);
+
+CREATE TABLE IF NOT EXISTS metric_counts (                 -- event counts per hour and day (Deliverability
+                                                           -- metrics § 4.2); no personal data
+  bucket TEXT NOT NULL,                  -- 'h:YYYY-MM-DDTHH' (UTC hour) or 'd:YYYY-MM-DD' (UTC day)
+  type   TEXT NOT NULL CHECK (type IN ('received','quarantined','sent','delivered','deferred','bounced',
+                                       'complained','rejected','failed','uncertain','suppressed','canceled')),
+  domain TEXT NOT NULL DEFAULT '',       -- lower-case A-label DNS name; '' when none
+  value  INTEGER NOT NULL,
+  PRIMARY KEY (bucket, type, domain)
+) WITHOUT ROWID;                         -- h: rows deleted after 192 hours, d: rows after 92 days (maintenance)
+
 CREATE TABLE IF NOT EXISTS rate_windows (                  -- inbound volume caps (D5, D13) and token
                                                            -- brute-force limits (D10); keys in Inbound › Inbound
                                                            -- volume caps and Threading § 2.5
@@ -1413,17 +1712,25 @@ CREATE TABLE IF NOT EXISTS rate_windows (                  -- inbound volume cap
 
 ### Mailbox notes
 
-- **Erasure** deletes the message row (cascading to deliveries, attachments, labels, refs, chunks and
-  verifications). It also deletes the FTS rows (`DELETE FROM fts WHERE rowid = ?`), and the R2 objects
+- **Erasure** deletes the message row (cascading to deliveries, attachments, labels, refs, chunks,
+  verifications, screenings and screening_feedback). It also deletes the FTS rows (`DELETE FROM fts WHERE rowid = ?`), and the R2 objects
   and vectors listed before the delete, and inserts each message ID into `erased_ids` in the same
   transaction, so an index job or post-commit step that finishes later deletes what it wrote
   ([Search § 6.7](search.md#67-deletion-on-erasure), [I10](../edge-cases.md)). An identity-scope erasure
-  ends with `delete_all()` on the object. See [Privacy and erasure](privacy.md).
+  ends with `delete_all()` on the object. The drafts an erasure covers, with their `draft_sync` and
+  `idempotency` rows, and the uploads its messages were copied from, are deleted in the same transaction
+  ([Drafts § 13.2](drafts.md#132-erasure), [Uploads § 9](uploads.md#9-privacy)). See [Privacy and erasure](privacy.md).
+- **Parity additions are in schema v1.** `drafts`, `draft_sync`, `screenings`, `screening_feedback`,
+  `uploads`, `metric_counts`, `messages.draft_id`, `received_evented_at`, `calendar_json` and
+  `calendar_uid_hash`, `attachments.upload_id` and `idempotency.draft_id` are part of mailbox schema v1,
+  because no mailbox has been built from these documents yet. A deployment whose mailboxes already run a v1
+  without them needs a schema v2 migration, which rebuilds `messages` to widen its `CHECK` constraints and is
+  designed with its own ADR before it is taken ([Screening § 14](screening.md#14-storage)).
 - **Limits.** Durable Object SQLite allows 2 MB per string, BLOB or row, 100 bound parameters per query,
   100 KB per statement and 100 columns per table (read 2026-10-10). Every message row has a 1,900,000-byte
   budget ([Inbound › Storage caps](inbound.md#storage-caps)), and every list of values is bound as one
-  JSON array expanded with `json_each`, so no statement binds more than 100 parameters. The widest table,
-  `messages`, has 45 columns.
+  JSON array expanded with `json_each`, so no statement binds more than 100 parameters. The widest tables,
+  `messages` (49 columns) and `drafts` (42 columns), are under the limit.
 - **Size watch.** After a write transaction, when `meta.size_checked_at` is more than an hour old, and in
   the daily maintenance, the mailbox computes `pragma page_count * page_size`, writes `meta.size_bytes`
   and `size_checked_at`, and writes one `mailbox_size_bytes` point. When the previous `size_bytes` was at
@@ -1528,11 +1835,17 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --   alarm:reset             earliest allowances.resets_at (Billing › Monthly reset)
 --   tm:{msg}                the day (YYYY-MM-DD) on which CountTriageModel counted this message, so a
 --                           redelivered triage job is counted once; deleted after 2 days by the daily alarm
+--   sm:{msg}                the day on which CountScreenModel counted this message; deleted after 2 days by
+--                           the daily alarm (Screening § 5.2)
 --   tz                      the time zone the daily caps use now (IANA); tz_next {zone, from}: a changed
 --                           tenants.timezone, applied from `from` = the next local midnight of tz
 CREATE TABLE IF NOT EXISTS counters (
-  metric TEXT NOT NULL,                                    -- daily caps: sends, sends:idn_..., agentic,
+  metric TEXT NOT NULL,                                    -- read by GetRates as well as by RecordOutcome
+                                                           -- (Deliverability metrics § 3.3).
+                                                           -- daily caps: sends, sends:idn_..., agentic,
                                                            --   triage_model (the AI cap of Triage § 12),
+                                                           --   screen_model (the screening model cap,
+                                                           --   Screening § 5.2),
                                                            --   warned:{metric}:{80|100} (sends caps only);
                                                            -- usage: usage:{inbound|outbound|sends|triage|
                                                            --   search|agentic|ai_neurons|assertions|
@@ -1549,16 +1862,21 @@ CREATE TABLE IF NOT EXISTS counters (
                                                            --   pruned after 48 hours);
                                                            -- default tenant only: sysmail:{class}:{key}, the
                                                            --   system-mail budgets (SystemMail; Cloud sign-up
-                                                           --   § 10.2), keys hashed with PM_HASH_KEY
+                                                           --   § 10.2), keys hashed with PM_HASH_KEY, among them
+                                                           --   sysmail:signup:{recipient|human|network|asn|deployment}:{key}
+                                                           --   (per UTC day); asu:{outcomes|bounced|complained}
+                                                           --   (CountSignupOutcome, per UTC hour, pruned after
+                                                           --   48 hours; Agent self-sign-up § 13.3)
   window TEXT NOT NULL,                                    -- YYYY-MM-DD: the tenant's time zone (tz above) for
                                                            -- daily caps, UTC for usage:* (flushed to usage_daily),
                                                            -- for the outcome counters and for sysmail:*;
-                                                           -- YYYY-MM-DDTHH (UTC hour) for inbound_hour and the
-                                                           -- per-domain outcome counters
+                                                           -- YYYY-MM-DDTHH (UTC hour) for inbound_hour, the
+                                                           -- per-domain outcome counters and asu:*
   value  INTEGER NOT NULL,
   PRIMARY KEY (metric, window)
 );
-CREATE TABLE IF NOT EXISTS outcome_events (                -- RecordOutcome is idempotent by event ID: a retried
+CREATE TABLE IF NOT EXISTS outcome_events (                -- RecordOutcome (and CountSignupOutcome) is idempotent
+                                                           -- by event ID: a retried
   event_id TEXT PRIMARY KEY,                               -- delivery event is counted once (Outbound › Abuse
   at       INTEGER NOT NULL                                -- auto-pause); rows older than 7 days are deleted by
 );                                                         -- the daily alarm
@@ -1651,6 +1969,74 @@ CREATE TABLE IF NOT EXISTS sent (                          -- per-day counters f
   count   INTEGER NOT NULL,
   PRIMARY KEY (day, user_id)
 );                                                         -- rows older than 2 days are deleted by the daily alarm
+
+-- TenantEvents (one per tenant; Event feed and live stream § 2.2).
+-- TenantEvents schema v1 (crates/worker/src/events/schema/). Holds event envelopes (thin payloads: IDs,
+-- summaries, verdicts and at most policy.webhook_text_bytes of extracted text), consumer positions and
+-- stream-token hashes. Never raw MIME, attachments or verification values.
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+-- keys (every key the object reads or writes):
+--   schema_version     applied schema (Design § 4, rule 6)
+--   tenant_id          owner, written by EventsRequest::Init and checked on every request (Design § 5)
+--   created_at         written by Init
+--   epoch              16 random bytes, lower-case hex; written by Init and by Reset; part of every cursor
+--   cursor_secret      32 random bytes, base64; the HMAC key of this log's cursors; written by Init and by
+--                      Reset; never leaves the object
+--   head_seq           the last position assigned in this epoch (0 after Init or Reset); never decreases
+--   floor_seq          the highest position removed by retention or by the size budget (0 if none). A cursor
+--                      below it has expired. Erasure never raises it
+--   floor_reason       retention | size_limit: why floor_seq last moved
+--   payload_bytes      sum of length(envelope_json) over the events rows, kept in the same transaction as
+--                      every insert and delete
+--   last_appended_at   appended_at of the newest row; appended_at never decreases
+--   erased             '1' after EventsRequest::Erase (tenant erasure): every later request gets tenant_not_found
+--   alarm:maintenance  daily, and at once when the size budget is passed (Event feed § 2.6)
+--   alarm:revalidate   every 60 s while a WebSocket is attached (Event feed § 7.7)
+CREATE TABLE IF NOT EXISTS events (
+  seq           INTEGER PRIMARY KEY,                       -- log position: head_seq + 1 at append
+  event_id      TEXT NOT NULL UNIQUE,                      -- evt_; the deduplication key of Append
+  type          TEXT NOT NULL,
+  identity_id   TEXT,                                      -- the envelope's identity_id
+  message_id    TEXT,                                      -- data.message_id, else data.message.id (erasure)
+  thread_id     TEXT,                                      -- data.thread_id, else data.message.thread_id (holds)
+  occurred_at   INTEGER NOT NULL,                          -- the envelope's occurred_at: the outbox commit time
+  appended_at   INTEGER NOT NULL,                          -- max(now, meta.last_appended_at); retention counts
+                                                           -- from it
+  envelope_json TEXT NOT NULL                              -- the exact envelope bytes the owner's outbox holds,
+                                                           -- which are also the webhook body
+);
+CREATE INDEX IF NOT EXISTS events_identity ON events(identity_id, seq) WHERE identity_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS events_message ON events(message_id) WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS events_appended ON events(appended_at);
+CREATE TABLE IF NOT EXISTS consumers (                     -- durable consumers (Event feed § 6)
+  id                TEXT PRIMARY KEY,                      -- evc_
+  name              TEXT NOT NULL UNIQUE,                  -- unique per tenant: one object per tenant
+  owner_key_id      TEXT NOT NULL,                         -- key_ that created it: the only key that reads,
+                                                           -- commits and resets it
+  owner_identity_id TEXT,                                  -- the owner key's identity, for an identity key
+  types_json        TEXT NOT NULL,                         -- ["*"] or type patterns (Event feed § 4)
+  identity_ids_json TEXT,                                  -- NULL: every identity the owner key may see
+  committed_seq     INTEGER NOT NULL,                      -- events at or below are acknowledged
+  epoch             TEXT NOT NULL,                         -- meta.epoch when committed_seq was set; another
+                                                           -- epoch means reset_required
+  committed_at      INTEGER,
+  last_read_at      INTEGER,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS consumers_owner ON consumers(owner_key_id);
+CREATE TABLE IF NOT EXISTS stream_tokens (                 -- single-use stream tokens (Event feed § 7.2)
+  token_hash  TEXT PRIMARY KEY,                            -- hex SHA-256 of the token's 32 random bytes
+  key_id      TEXT NOT NULL,                               -- the minting key: the stream acts as this key
+  expires_at  INTEGER NOT NULL                             -- minted + 60 s; deleted on redemption or by the
+                                                           -- maintenance alarm
+);
+CREATE TABLE IF NOT EXISTS erased_refs (                   -- refuses late appends of erased data (R57, R58)
+  ref        TEXT PRIMARY KEY,                             -- msg_… or idn_…
+  erased_at  INTEGER NOT NULL                              -- deleted by the maintenance alarm after 7 days
+);
+-- Per-connection state (wsc_ connection IDs, positions, filters) is the WebSocket's attachment, not a row
+-- (Event feed § 7.9).
 ```
 
 ## 4. R2 objects
@@ -1664,7 +2050,9 @@ CREATE TABLE IF NOT EXISTS sent (                          -- per-day counters f
 | `t/{ten}/i/{idn}/m/{msg}/a/{att}` | Attachment bytes | same, plus `sha256` | Erasure, message retention |
 | `t/{ten}/i/{idn}/m/{msg}/a/{att}.md` | Extracted text (Markdown, with page markers) | same | as above |
 | `t/{ten}/i/{idn}/out/{msg}.eml` | Composed outbound MIME (sent copy) | same, plus `idem_key_sha256` (hex SHA-256 of the Idempotency-Key), `fingerprint` and `operation` | Retention, erasure; the submit path when the send is refused after it was written; for the system identity, as soon as the message leaves `queued` |
-| `t/{ten}/i/{idn}/out/{msg}/a/{att}` | Outbound attachment bytes (linked attachments, and copies for `GET …/attachments/{id}`) | `tenant`, `identity`, `message`, `sha256` | Retention, erasure |
+| `t/{ten}/i/{idn}/out/{msg}/a/{att}` | Outbound attachment bytes (linked attachments, copies for `GET …/attachments/{id}`, and copies of uploads) | `tenant`, `identity`, `message`, `sha256` | Retention, erasure |
+| `t/{ten}/i/{idn}/up/{upl}` | Upload bytes, verified against the declared SHA-256 ([Uploads § 5.1](uploads.md#51-mailbox-table)) | `tenant`, `identity`, `upload` | Rejection, expiry, `DELETE`, erasure; the orphan sweep after 15 days when no row names it |
+| `t/{ten}/i/{idn}/drafts/{drf}/a/{att}` | An inline draft attachment ([Drafts § 9.4](drafts.md#94-r2)) | – | When it is removed by `PATCH`, when the draft is sent or canceled (after commit), by erasure and by the retention purge of its draft; the orphan sweep removes uncommitted ones |
 | `t/{ten}/exports/{exp}.zip` | Subject-access export | `tenant`, `export` | 7 days after creation |
 
 For Email Routing, `email()` writes straight to the final key when routing resolved (the normal case);
@@ -1681,7 +2069,8 @@ mailbox's rolling orphan sweep once it is 15 days old ([Inbound › Orphan objec
 [I9](../edge-cases.md)).
 
 **Optional backup bucket.** When `PM_BACKUP_BUCKET` is set, the nightly `backup` job copies every `t/`
-object created since its last run to the same key in that bucket (binding `BACKUP`, same jurisdiction).
+object created since its last run to the same key in that bucket (binding `BACKUP`, same jurisdiction),
+except keys under `…/up/` (uploads are a staging area that empties within 7 days).
 Retention and erasure delete each key from both buckets. See [Privacy › R2 backup copy](privacy.md#54-optional-r2-backup-copy).
 
 ## 5. Vectorize
@@ -1702,7 +2091,7 @@ metadata indexes (8 of 10 allowed):
   sender_domain   string
   direction       string   (inbound | outbound)
   has_attachment  boolean
-  verdict         string
+  verdict         string   (the messages.verdict values, arc_rescued included)
   kind            string   (body | attachment)
 metadata stored: the indexed fields only. Never text, subject or addresses.
 ```

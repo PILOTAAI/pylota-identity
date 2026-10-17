@@ -223,7 +223,9 @@ The additions map onto Pylota as follows; each design page has a full **Pylota a
 
 ## 8. Follow-ups
 
-- Merge PR #5, then integrate the design pages into the shared reference pages and the register. The
-  integration list is in [ADR 0017](adr/0017-agentmail-parity.md#integration).
 - Re-read AgentMail's changelog before v1.0 ships, and record any new capability here with a decision.
 - Add an Arabic reply-attribution sample to the conformance corpus before adding the pattern (GAP-21).
+- Confirm the live behaviours the design pages leave to staging:
+  - whether Cloudflare Email Routing honours a valid ARC chain (`live::arc::cloudflare_forward_behaviour`);
+  - how Gmail, Outlook and Apple Calendar treat the iMIP forms sent (`live::calendar::*`);
+  - how R2 handles a streamed upload with a checksum (`it::uploads::v_put_stream_contract`).
