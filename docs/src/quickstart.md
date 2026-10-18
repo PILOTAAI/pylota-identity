@@ -474,5 +474,5 @@ The `timeout@` address is the best way to practise handling an uncertain send. S
 | `ask` returns `insufficient_evidence` | The mailbox does not hold an answer | Check the `trace` to see what was searched |
 | No webhook arrives | The endpoint failed or is not HTTPS | `pmail webhooks deliveries whk_…` shows each attempt and its error |
 
-Every error has a `fix` field with one sentence on what to do, a `docs` link to that error's entry in the
-documentation, and a `request_id` to quote in bug reports. The full list is in [Errors](reference/errors.md).
+Every error has a `fix` field with one sentence on what to do and a `request_id` to quote in bug reports.
+With the documentation links of FR-API-3 (P1), it also carries a `docs` link to that error's entry. The full list is in [Errors](reference/errors.md).

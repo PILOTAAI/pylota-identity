@@ -163,7 +163,10 @@ its revision, so re-running it never sends twice.
 ## Calendar invitations
 
 Pylota Mail reads and sends calendar invitations (iMIP), but keeps no calendar: your own calendar system
-holds the state ([Calendar invitations](../project/design/calendar-invitations.md)).
+holds the state ([Calendar invitations](../project/design/calendar-invitations.md)). Reading invitations
+is part of v1.0. Sending invitations and answering them (FR-CAL-8–11) are P1: they ship in v1.0 unless they
+threaten the release, and need spike S1's raw send on the Cloudflare transport
+([PRD § 5](../project/prd.md#5-scope-and-priorities)).
 
 - **Send an invitation** by adding `calendar` to a send or a reply: `{ "ics": "BEGIN:VCALENDAR…", "attach_copy":
   true }`, at most 256 KiB. The object is validated and normalised before anything is sent; `calendar` is

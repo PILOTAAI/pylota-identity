@@ -89,3 +89,4 @@
   - [0015 One person builds and operates Pylota Mail Cloud](project/adr/0015-solo-operator.md)
   - [0016 Plan items that v1.0 defers or does differently](project/adr/0016-plan-items-changed-for-v1.md)
   - [0017 What v1.0 adds, defers and refuses to match AgentMail](project/adr/0017-agentmail-parity.md)
+  - [0018 The TypeScript SDK in its own repository](project/adr/0018-typescript-sdk-in-its-own-repository.md)

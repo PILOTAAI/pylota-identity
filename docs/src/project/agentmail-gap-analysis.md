@@ -6,8 +6,9 @@ decisions. AgentMail is the hosted agent-email product that Pylota is moving off
 everything Pylota uses from it. Where it adds a capability, it must be harder to misuse and must say what
 happens in every failure case.
 
-Re-check every AgentMail fact before quoting it outside this repository. AgentMail ships weekly: its
-changelog has 27 dated entries between 2025-06-15 and 2026-10-14.
+Re-check every AgentMail fact before quoting it outside this repository. AgentMail ships often: its
+changelog has 27 dated entries between 2025-06-15 and 2026-10-14, with gaps of up to ten weeks (2026-03-18
+to 2026-05-28).
 
 ## 1. Method
 
@@ -46,14 +47,17 @@ capability token, never by the mailbox address. And a demo must not create a mai
 
 ## 2. AgentMail's model in brief
 
-- **Scopes.** Organisation › pod › inbox. Every collection exists at all three scopes: threads, drafts,
-  webhooks, domains, lists, metrics, API keys and accounts. `GET /v0/auth/me` reports the calling key's
+- **Scopes.** Organisation › pod › inbox. Threads, drafts, webhooks, lists, metrics, API keys and
+  accounts exist at all three scopes; domains exist only at organisation and pod scope (there is no
+  inbox-scope domain route; OpenAPI document, re-read 2026-10-18). `GET /v0/auth/me` reports the calling key's
   scope.
 - **Mail.** An inbox has one address. It offers threads, messages, attachments with signed download links
   and extracted text, raw MIME, labels (system and free-form), drafts with scheduled send, and allow and
   block lists. Lists come in three directions (send, receive, reply) at three scopes, and the most
   specific scope wins.
-  - Reply extraction (`extracted_text`/`extracted_html`) covers 11 languages.
+  - Reply extraction (`extracted_text`/`extracted_html`) strips quoted history "in English and many other
+    languages, including" ten named ones, Arabic among them
+    ([Reply & Attachment Extraction](https://docs.agentmail.to/reply-extraction.md), read 2026-10-18).
   - `authentication_results` gives SPF, DKIM and DMARC results with their domains and the ARC sealer.
   - Sending is idempotent through an `Idempotency-Key` held for 24 hours. Creates are idempotent through
     `client_id`.
@@ -93,7 +97,7 @@ capability token, never by the mailbox address. And a demo must not create a mai
   - A hosted MCP server with 43 tools plus 2 that need OAuth, authenticated by OAuth or `x-api-key`, with
     a stdio bridge.
   - A CLI with `--schema`, JMESPath `--query` and skill generation.
-  - Plugins for Claude Code, Codex, Cursor and OpenClaw, and framework toolkits.
+  - Plugins for Claude Code, Codex, Cursor, ChatGPT and OpenClaw, and framework toolkits.
   - IMAP (993) and SMTP (465 and 587), with the API key as the password.
   - x402 (USDC) and MPP pay-per-call servers, and a separate EU environment (an Enterprise feature).
 - **Plans (USD).** Free has 3 inboxes and 100 emails a day. Developer costs $20 a month for 10 inboxes
@@ -107,13 +111,13 @@ capability token, never by the mailbox address. And a demo must not create a mai
 |---|---|---|
 | Identity and address | The address is the inbox | Identities outlive addresses and domains, with rollback (U3) |
 | Unknown send outcomes | Idempotency for 24 h; no notion of an unknown outcome | Idempotency for 30 days, `uncertain` is never resent, and reconciliation follows (U2) |
-| Mail failing authentication | Dropped silently (DMARC enforcing) or labelled | Stored and quarantined with a reason, never lost (FR-IN-1, FR-IN-5) |
+| Mail failing authentication | Dropped silently (DMARC enforcing) or labelled | Never accepted and then dropped. On Email Routing, mail that fails both SPF and DKIM or the sender's DMARC policy is rejected by Cloudflare before the Worker runs ([Email lifecycle](https://developers.cloudflare.com/email-service/concepts/email-lifecycle/), read 2026-10-18; whether inside the SMTP session is not stated); every other failing message, and all failing mail through SES inbound, is stored and quarantined with a reason (FR-IN-1, FR-IN-5) |
 | Mail with a virus | Dropped silently, with no event | Quarantined `risky_attachment`, with a scanner hook (FR-IN-5, P1 scanner) |
 | Paused mailbox | Inbound mail is neither delivered nor bounced, and is lost after resume | Stored; sends refused with `identity_paused` (FR-IDN-3) |
 | Search | Full text, 100 results | Keyword, semantic, hybrid and agentic with verified citations (U1) |
-| Domains | One DNS recipe (SES records) plus Google Workspace coexistence | Six connection methods, health checks from two resolvers, aligned fallback, never unauthenticated mail (U4) |
+| Domains | One record set (SES records), with Domain Connect one-click setup (`GET /v0/domains/{domain_id}/setup-link`), send-only domains, subdomain inboxes and Google Workspace coexistence | Six connection methods, health checks from two resolvers, aligned fallback, never unauthenticated mail (U4) |
 | Erasure | Delete calls, plus an optional 24 h expiry that leaves copies | Five erasure scopes, receipts with per-store counts and probe queries, legal holds (U6) |
-| Webhook failure | Auto-disabled after 5 days, no notice, no redelivery | 72 h retries, dead-letter state, replay for 30 days, `webhook.disabled` event |
+| Webhook failure | Auto-disabled after 5 days, no notice, no redelivery | 72 h retries, dead-letter state, replay for 30 days. An endpoint is disabled sooner than on AgentMail, after 100 consecutive failures spread over at least 24 hours; the `webhook.disabled` event goes to platform and partner endpoints, never to the tenant's own endpoints ([Webhook events](../reference/events.md)) |
 | Agent identity proof | AgentID: 10-minute tokens, no revocation webhook, signature scheme undocumented | Ed25519 assertions verifiable against a published JWKS; pausing withdraws the keys at once (U10) |
 | Plan enforcement | Limits take up to 5 minutes to apply after a change | Atomic holds; `402 billing_limit` is safe to retry (FR-BILL-6) |
 | Seats | 2 / 2 / 10 seats by plan | Roles, enforced seats, audit, required two-step verification (U7) |
@@ -130,16 +134,16 @@ Each gap has a decision:
 
 | # | Capability | AgentMail | Pylota Mail before this change | Decision | Specified in |
 |---|---|---|---|---|---|
-| GAP-1 | Drafts, human approval before send, scheduled send | Drafts with `send_at`, reschedule, unschedule and cancel; approval works only by withholding send permissions; the draft is deleted once sent | Non-goal ("planned for v1.1") | **add**: drafts with approval bound to a content digest, two approval patterns, person-only approval on Cloud, the draft kept as a record after sending, schedule driven by Durable Object alarms through the one send pipeline | [Drafts](design/drafts.md) |
+| GAP-1 | Drafts, human approval before send, scheduled send | Drafts with `send_at`, reschedule, unschedule and cancel; approval works only by withholding send permissions; the draft is deleted once sent | Non-goal ("planned for v1.1") | **add**: drafts with approval bound to a content digest, two approval patterns, person-only approval on Cloud unless the partner opts its tenants in (`drafts.key_approval`), the draft kept as a record after sending, schedule driven by Durable Object alarms through the one send pipeline | [Drafts](design/drafts.md) |
 | GAP-2 | Pull feed of events for agents without a public URL | Polling webhooks: a queue with commit offsets, US only, 10 per scope | `wait` long poll (messages only); webhook replay | **add**: an ordered per-tenant event log, `GET /v1/events` with cursors and long poll, durable consumers with commit | [Event feed](design/event-feed.md) |
 | GAP-3 | Live event stream | WebSocket with the API key in the URL; no documented heartbeat, close codes or replay; body cut at 30 KiB | P2 ("WebSocket push") | **add**: a WebSocket stream on the event log, resumable with no loss, with documented close codes and no secret in URLs | [Event feed](design/event-feed.md) |
-| GAP-4 | Holding mail that tries to steer an agent | Agent Armor: model verdict, 15-minute deadline, Hold mode that only withholds a notification, release, feedback | A deterministic steering scan and a model risk flag, advisory only; no hold | **add**: `screening.mode` with a real hold (status `screening`, hidden), deterministic and model signals, fail-closed default, release through the existing person-only rules, feedback measured per tenant | [Screening](design/screening.md) |
+| GAP-4 | Holding mail that tries to steer an agent | Agent Armor: model verdict, 15-minute deadline, Hold mode that only withholds a notification, release, feedback | A deterministic steering scan and a model risk flag, advisory only; no hold | **add**: `screening.mode` with a real hold (status `screening`, hidden) that a tenant opts into (the default mode is `monitor`), deterministic and model signals, fail-closed default for held mail, release through the existing person-only rules, feedback measured per tenant | [Screening](design/screening.md) |
 | GAP-5 | Calendar invitations | A full calendar per inbox; inbound invitations imported only when authenticated, single-event and ≤ 1 MB; Windows time zones not imported | `kind = 'calendar'` and a six-field summary; invitations never answered | **add**: iMIP/iTIP parsing and verification with a bounded structured object, Windows time zones mapped, multi-component bundles, `calendar.received`, outbound iMIP from a supplied iCalendar payload, a reply route. No calendar store: Kairos owns calendar state for Pylota | [Calendar invitations](design/calendar-invitations.md) |
 | GAP-6 | Attachments larger than an inline JSON body | Base64 (6 MB per request) or a URL that AgentMail fetches (~30 MB); Agent Drive | Base64 inside a 7 MiB body; signed links for oversized attachments (P1) | **add**: per-identity uploads streamed through the Worker with SHA-256 checks, referenced by sends and drafts. URL fetching is refused (SSRF) and no general drive is built | [Uploads](design/uploads.md) |
 | GAP-7 | Agent self-sign-up | One call returns an org, inbox and key; send only to the human until a code is verified; receive-only without a human; claim by pasting the key | Person-first sign-up only (`PM_SIGNUP`) | **add**, behind `PM_AGENT_SIGNUP` (off by default): the human email is required (FR-IDN-2), a provisional workspace expires in 7 days, and a claim needs a matching verified email | [Agent self-sign-up](design/agent-signup.md) |
 | GAP-8 | Deliverability metrics | `/metrics/events`, `/usage`, `/rates` at three scopes | Usage routes and domain health; abuse windows not exposed | **add**: event counts and the exact windows the pause logic uses, with threshold and headroom | [Metrics](design/metrics.md) |
-| GAP-9 | TypeScript and Python SDKs | Both | Rust SDK only | **add** TypeScript (v1.0); Python decided on the SDK page | [SDKs and skills](design/sdk-and-skills.md) |
-| GAP-10 | Agent skills, plugins, MCP setup for agent tools | Skills repo, plugins for four tools, a stdio bridge with tool filtering, framework toolkits | MCP over Streamable HTTP with API keys; no skills | **add**: skills package, MCP tool annotations and allow-list, setup snippets, framework guides | [SDKs and skills](design/sdk-and-skills.md) |
+| GAP-9 | TypeScript and Python SDKs | Both | Rust SDK only | **add** TypeScript (P1, built in its own repository, [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)); Python decided on the SDK page | [SDKs and skills](design/sdk-and-skills.md) |
+| GAP-10 | Agent skills, plugins, MCP setup for agent tools | Skills repo, plugins for five clients, a stdio bridge with tool filtering, framework toolkits | MCP over Streamable HTTP with API keys; no skills | **add**: skills package, MCP tool annotations and allow-list, setup snippets, framework guides | [SDKs and skills](design/sdk-and-skills.md) |
 | GAP-11 | CLI for agents | `--schema`, `--query`, skill generation | `--json` on every command | **add**: `--schema`, `--query` | [SDKs and skills](design/sdk-and-skills.md) |
 | GAP-12 | Batch read and label update | Batch get; batch update ≤ 50, atomic for found IDs | One message per call | **add**: ≤ 100 per call, atomic in the mailbox | [Parity additions §2](design/parity-additions.md#2-batch-message-operations-fr-in-13) |
 | GAP-13 | Allow and block lists per mailbox | Org, pod and inbox scope; send, receive and reply; most specific wins | Tenant scope only | **add**: identity scope, most specific wins | [Parity additions §3](design/parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17) |
@@ -149,8 +153,8 @@ Each gap has a decision:
 | GAP-17 | Short-lived mailboxes | Org-wide 24 h expiry, early access, copies remain | Retention per tenant (raw 90 days, messages kept) | **add**: per-identity `retention.message_hours` with erasure receipts and holds | [Parity additions §7](design/parity-additions.md#7-per-identity-message-retention-fr-prv-7) |
 | GAP-18 | Static headers on webhook deliveries | Write-only custom headers | None | **add**: up to 10, values sealed and write-only | [Parity additions §8](design/parity-additions.md#8-webhook-delivery-headers-fr-wh-7) |
 | GAP-19 | Zone-file export | BIND zone file | JSON records only | **add**: `?format=bind` | [Parity additions §9](design/parity-additions.md#9-zone-file-export-fr-dom-15) |
-| GAP-20 | A documentation link in errors | `docs` and `fix` in every error | `fix` and `retryable`, no link | **add**: `docs` | [Parity additions §10](design/parity-additions.md#10-a-documentation-link-in-errors-fr-api-3) |
-| GAP-21 | Reply extraction in Arabic | 11 languages including Arabic | 11 languages including Japanese, no Arabic | **add** an Arabic attribution pattern once a corpus sample from real clients is in `crates/conformance` (a pattern must not be guessed) | Integration list, [ADR 0017](adr/0017-agentmail-parity.md) |
+| GAP-20 | A documentation link in errors | `docs` in every standard error; `fix` "omitted when no generic remedy applies"; one response carries only `message` | `fix` and `retryable`, no link | **add**: `docs` | [Parity additions §10](design/parity-additions.md#10-a-documentation-link-in-errors-fr-api-3) |
+| GAP-21 | Reply extraction in Arabic | English and many other languages, ten named, Arabic among them | 11 languages including Japanese, no Arabic | **defer**: an Arabic attribution pattern waits for a corpus sample from real clients in `crates/conformance` (a pattern must not be guessed); no requirement or milestone until then | [ADR 0017](adr/0017-agentmail-parity.md), [PRD § 5](prd.md#5-scope-and-priorities) P2 |
 | GAP-22 | Remote MCP with OAuth | OAuth or `x-api-key` | API key only; OAuth 2.1 deferred to v1.1 ([ADR 0016](adr/0016-plan-items-changed-for-v1.md)) | **defer** (unchanged): the SDK page records which clients cannot connect without OAuth | [SDKs and skills](design/sdk-and-skills.md) |
 | GAP-23 | Public-key API credentials | P-256 JWK credentials; the signing scheme is not documented | Bearer keys | **defer** to v1.1: Pylota's servers hold its keys, so agents never see a bearer secret. A design must name its signature scheme and replay window | [ADR 0017](adr/0017-agentmail-parity.md) |
 | GAP-24 | Agents signing in to third-party apps | AgentID: app directory, magic link, remembered approval for 180 days, 10-minute tokens | Signed agent assertions plus JWKS; the service sign-up ledger approves each account | **defer** an OIDC-compatible relying-party flow to v1.1; v1.0 keeps assertions plus the ledger, which already ties consent to a person's approval | [ADR 0017](adr/0017-agentmail-parity.md) |
@@ -200,8 +204,8 @@ its AgentMail cells were wrong:
   calendar invitations, SDK languages, and agent self-sign-up.
 
 [ADR 0017](adr/0017-agentmail-parity.md) lists the replacement rows. The integration of this change into
-`prd.md` applies them, with the read date 2026-10-17. Marketing copy may claim only what that table and
-§ U1–U10 list.
+`prd.md` applies them, with the read date 2026-10-17. The table is research, re-checked before any
+external use; marketing copy may claim only what PRD § U1–U10 list ([PRD § 4](prd.md#unique-selling-propositions)).
 
 ## 7. Pylota agentic OS
 

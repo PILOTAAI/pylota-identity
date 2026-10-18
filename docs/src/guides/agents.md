@@ -18,6 +18,10 @@ owns.
 | **Agent skills** | Coding agents in Claude Code, Codex and Cursor | Teach safe sending, untrusted mail, verification codes, drafts, search and events; install from the plugin marketplaces or `pmail skills generate` |
 | **`pmail mcp stdio`** | Clients that run only local MCP servers, such as Claude Desktop without request headers | Key from your profile, never in the client's config |
 
+The TypeScript SDK, the agent skills, `pmail mcp stdio` and the CLI's `--query` and `--schema` are P1: they
+ship in v1.0 unless they threaten the release ([PRD § 5](../project/prd.md#5-scope-and-priorities)). The
+TypeScript SDK is built in its own repository, `PILOTAAI/pylota-mail-typescript`, and installed from npm.
+
 A common setup: specialist agents use MCP with narrow identity keys, while the integrating
 application consumes webhooks and runs sends that need approval through the REST API.
 

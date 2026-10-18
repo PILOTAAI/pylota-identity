@@ -35,7 +35,7 @@ gate and its webhook reconciliation would have nothing to stand on.
    | Uploads for attachments | [Uploads](../design/uploads.md) | FR-UPL | Q (Q65–Q108) | M33 |
    | Agent self-sign-up, behind `PM_AGENT_SIGNUP` (off by default) | [Agent self-sign-up](../design/agent-signup.md) | FR-ASU | X | M34 |
    | Deliverability metrics | [Metrics](../design/metrics.md) | FR-MET | Y | M35 |
-   | TypeScript SDK, skills, MCP and CLI tooling for agents | [SDKs and skills](../design/sdk-and-skills.md) | FR-SDK-2 onward | Y | M36 |
+   | TypeScript SDK (built in its own repository, [ADR 0018](0018-typescript-sdk-in-its-own-repository.md)), skills, MCP and CLI tooling for agents | [SDKs and skills](../design/sdk-and-skills.md) | FR-SDK-2 onward | Y | M36 |
    | Batch operations, mailbox-scope lists, label events, authentication domains, trusted ARC sealers, per-mailbox retention, webhook headers, zone-file export, error documentation links | [Parity additions](../design/parity-additions.md) | existing families | Z | M37 |
 
    The PRD non-goal "Scheduled send and server-side drafts (planned for v1.1)" is removed, and so is the
@@ -59,6 +59,10 @@ gate and its webhook reconciliation would have nothing to stand on.
    - Pay-per-call through x402 or MPP is deferred. Plans are in GBP through Stripe; revisit when MPP is
      generally available to UK merchants.
    - Mailbox avatars (BIMI) are deferred to a guide.
+   - Arabic reply attribution waits for a conformance sample from real clients; a pattern is never guessed
+     (GAP-21).
+
+   Each deferral is a P2 entry in [PRD § 5](../prd.md#5-scope-and-priorities).
 
 5. **Refused.** The reasons are in [the gap register § 5](../agentmail-gap-analysis.md#5-deliberate-differences):
    - an IMAP or SMTP server;
@@ -72,14 +76,14 @@ gate and its webhook reconciliation would have nothing to stand on.
 
    | Capability | AgentMail (hosted) | Pylota Mail |
    |---|---|---|
-   | Authentication verdicts and quarantine before an agent reads | `authentication_results`; unauthenticated and spam mail hidden by label; DMARC-failing mail dropped under an enforcing policy | Per-message verdicts; failing mail quarantined with a reason, never dropped (U5) |
-   | Prompt-injection screening | Agent Armor (Labs, US only): advisory verdict; Hold mode withholds a notification but still lists the mail | Screening hold that hides the mail until a verdict, fail-closed by default, release by a person ([Screening](../design/screening.md)) |
-   | Drafts and scheduled send | Yes; approval works only by withholding send permissions | Yes, with approval bound to the content and person-only approval on Cloud ([Drafts](../design/drafts.md)) |
-   | Event delivery | Webhooks (8 attempts in ~27.5 h, auto-disabled after 5 days without notice), polling queue, WebSocket (key in the URL) | Webhooks (72 h, dead letters, replay), ordered pull feed, durable consumers, resumable stream ([Event feed](../design/event-feed.md)) |
+   | Authentication verdicts and quarantine before an agent reads | `authentication_results`; unauthenticated and spam mail hidden by label; DMARC-failing mail dropped under an enforcing policy | Per-message verdicts. Mail that Cloudflare Email Routing rejects for failing authentication never reaches the Worker; failing mail the Worker receives is quarantined with a reason. Nothing is accepted and then dropped silently (U5) |
+   | Prompt-injection screening | Agent Armor (Labs, US only): advisory verdict; Hold mode withholds a notification but still lists the mail | Opt-in screening hold (`screening.mode: hold`; the default `monitor` only records verdicts) that hides mail until a verdict; once held, it fails closed by default; release by a person ([Screening](../design/screening.md)) |
+   | Drafts and scheduled send | Yes; approval works only by withholding send permissions | Yes, with approval bound to the content; on Cloud only a person approves, unless the partner opts its tenants in to key approval (`drafts.key_approval`) ([Drafts](../design/drafts.md)) |
+   | Event delivery | Webhooks (8 attempts in ~27.5 h, auto-disabled after 5 days without notice), polling queue, WebSocket (key in the URL) | Webhooks (72 h, dead letters, replay; an endpoint is disabled after 100 consecutive failures over at least 24 h, and `webhook.disabled` reaches platform and partner endpoints, never the tenant's own), ordered pull feed, durable consumers, resumable stream ([Event feed](../design/event-feed.md)) |
    | Calendar | Per-inbox calendar store (Labs, US only) | Verified iMIP in and out; the consumer's calendar keeps state ([Calendar invitations](../design/calendar-invitations.md)) |
    | Team seats | 2 / 2 / 10 by plan | Enforced, with roles (U7) |
-   | Erasure with receipts | Delete per message, thread and inbox; optional 24 h expiry | Message, thread, counterparty, identity, tenant, with receipts; per-mailbox retention (U6) |
-   | Runs in your own cloud | "BYO cloud deployment" on Enterprise | Runs in your own Cloudflare account (U9) |
+   | Erasure with receipts | Delete per message, thread and inbox; optional 24 h expiry | Message, thread, counterparty, identity, tenant, with receipts (U6); per-mailbox retention (FR-PRV-7, P1) |
+   | Runs in your own cloud | "BYO cloud deployment" on Enterprise | Runs in your own Cloudflare account (U6) |
    | SDKs | Python, TypeScript | Rust, TypeScript ([SDKs and skills](../design/sdk-and-skills.md)) |
    | Agent self-sign-up | Yes; the human is optional | Yes, behind a flag; the accountable human is required (FR-IDN-2) |
 
@@ -92,7 +96,7 @@ those pages on 2026-10-18, on top of PR #5's final head (`97ba036`):
 2. `prd.md`:
    - § 4 drops the two superseded non-goals, adds the refusals as non-goals with their reasons, and
      carries the competitive rows of Decision 6.
-   - § 5's scope table gains the new features.
+   - § 5's scope table gains the new features, and its P2 column the deferrals of Decision 4.
    - § 6 gains § 6.16–§ 6.22 (FR-DRF, FR-EVT, FR-SCR, FR-CAL, FR-UPL, FR-MET, FR-ASU). FR-SDK-2 onward
      join § 6.11, and the parity additions' requirements join their existing sections.
 3. The reference pages carry the routes, schemas, errors, events, limits, policy fields, MCP tools and CLI

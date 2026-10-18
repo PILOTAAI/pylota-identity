@@ -362,8 +362,10 @@ Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI
   `messages get` with more than one ID (`POST …/messages/batch-get`), which only reads. Those endpoints
   ignore the header and never record it, so the CLI sends none and a retry simply asks again.
 - **Retries.** A request is retried at most 3 times when the error is retryable by
-  [Errors › How a client should retry](../../reference/errors.md#how-a-client-should-retry): network
-  errors and `5xx` with backoff 0.5 s, 1 s, 2 s plus up to 250 ms jitter; `429 rate_limited` after
+  [Errors › How a client should retry](../../reference/errors.md#how-a-client-should-retry): an envelope
+  with `retryable: true`, and a network error or a proxy `502`, `503` or `504` for a `GET`, a request with
+  an idempotency key or one of the endpoints above that store no result (a `PATCH`, `DELETE` or keyless
+  `PUT` is sent once), with backoff 0.5 s, 1 s, 2 s plus up to 250 ms jitter; `429 rate_limited` after
   `Retry-After` (at most 60 s; longer waits are reported, not slept). Retries reuse the same
   idempotency key. `409 request_in_progress` is retried after 1 s, at most 5 times.
 - Cursors are passed through; `--all` stops on `410 cursor_expired` with exit 6 and the items so far

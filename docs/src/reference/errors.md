@@ -33,19 +33,32 @@ service always carries `docs`.
 ## How a client should retry
 
 ```text
-if status == 2xx                         → done
-if error.retryable == false              → do not retry; fix the request
-if error.code == "rate_limited"          → sleep Retry-After, retry
-if status >= 500 or network error        → retry with exponential backoff + jitter
-                                           (0.5 s, 1 s, 2 s, 4 s … cap 60 s, give up after ~10 min)
+if status == 2xx                              → done
+if the body is this service's error envelope:
+    error.retryable == false                  → do not retry; fix the request
+    error.code == "rate_limited"              → sleep Retry-After, retry
+    error.retryable == true                   → retry with backoff
+if network error, timeout, or 502/503/504 without the envelope (the outcome is unknown):
+    a GET, or a request with an Idempotency-Key → retry with backoff
+    a POST that stores no result (a search, batch-get, a signing call, a stream-token mint)
+                                              → may be repeated
+    anything else (POST /v1/agent-signup, the mailbox restore, PATCH, DELETE, a PUT without a key)
+                                              → do not repeat it blindly; read the resource first
+any other answer without the envelope         → not from this service; do not retry
+backoff: 0.5 s, 1 s, 2 s, 4 s … plus jitter, cap 60 s; stop after a bounded number of retries
 for sends: ALWAYS reuse the same Idempotency-Key on every retry of the same message
 ```
 
 A network error on a send is always safe to retry with the same key. You get the original result back,
 whether or not the first attempt reached the server.
 
-The TypeScript SDK and `pmail` follow these rules; the TypeScript SDK ends a call whose outcome it could not
-learn with `OutcomeUnknownError`, which carries the idempotency key to retry with.
+The TypeScript SDK, the Rust SDK's `RetryPolicy::standard()` and `pmail` follow this decision order with
+at most 3 retries by default (0.5 s, 1 s, 2 s plus up to 250 ms of jitter) and `Retry-After` slept for at
+most 60 s. After a network error the TypeScript SDK repeats only a `GET` or a request with an
+`Idempotency-Key`; any other request, a `POST` that stores no result included, ends with
+`OutcomeUnknownError`, as does any call whose outcome it could not learn. The error carries the
+idempotency key to retry with when the request had one
+([SDKs, skills and agent tooling § 2.6](../project/design/sdk-and-skills.md#26-retries-timeouts-and-rate-limits)).
 
 ## Catalogue
 

@@ -11,7 +11,7 @@ pipeline; this page adds what they must contain.
 |---|---|
 | Requirements | PRD release criteria 1–7, NFR-QUAL-1, NFR-QUAL-2, NFR-QUAL-3, NFR-SEC-1, NFR-SEC-2, NFR-OPS-1 |
 | Edge cases | Every row marked `S` or `S+I` in the [edge-case register](../edge-cases.md) |
-| Code | `crates/core/src/**` (`#[cfg(test)]` modules), `crates/conformance/`, `crates/worker/tests/it/`, `crates/worker/tests/browser/`, `crates/worker/tests/live/`, `sdks/typescript/test/`, `fuzz/`, `xtask/` |
+| Code | `crates/core/src/**` (`#[cfg(test)]` modules), `crates/conformance/`, `crates/worker/tests/it/`, `crates/worker/tests/browser/`, `crates/worker/tests/live/`, `fuzz/`, `xtask/`; the TypeScript SDK's tests live in its own repository ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)) |
 
 ## 1. Principles
 
@@ -50,7 +50,7 @@ pipeline; this page adds what they must contain.
 | Integration | `it::` | `crates/worker/tests/it/` | `cargo xtask itest` | Section 6 |
 | Attack suite | `it::security::` | `crates/worker/tests/it/security/` | `cargo xtask itest` | Section 7 |
 | Browser | `browser::` | `crates/worker/tests/browser/`: Playwright specs in TypeScript, with `@playwright/test` and `@axe-core/playwright` at exact versions in its `package.json` and lockfile (pinned at build time) | `cargo xtask itest`, after the `it::` tests and against the same running Worker; `cargo xtask itest --suite browser` alone | Console pages with JavaScript disabled and the axe accessibility scan (FR-CON-1; build plan M21, M24, M26). Section 6.8 |
-| TypeScript SDK | `ts::`, `ts::it::` | `sdks/typescript/test/`: Vitest tests with a fake `fetch`, a fake WebSocket and the shared fixtures of `sdks/fixtures/` | `ts::` in the `ts-sdk` CI job (Node.js 22, 24 and 26), then `ts::runtime::` on the packed tarball; `ts::it::` with `cargo xtask itest --suite ts`, against the same running Worker | The TypeScript SDK and its packaging (FR-SDK-2–9; [SDKs, skills and agent tooling](sdk-and-skills.md#tests)) |
+| TypeScript SDK | `ts::`, `ts::it::` | The SDK repository `PILOTAAI/pylota-mail-typescript`, `test/`: Vitest tests with a fake `fetch`, a fake WebSocket and the shared fixtures that this repository's releases ship from `sdks/fixtures/` | In the SDK repository's CI: `ts::` on Node.js 22, 24 and 26, then `ts::runtime::` on the packed tarball; `ts::it::` against this repository's harness, started at the contract's tag with `cargo xtask itest --serve`. Their names reach `trace` through `sdks/typescript-tests.json` | The TypeScript SDK and its packaging (FR-SDK-2–9; [SDKs, skills and agent tooling](sdk-and-skills.md#tests)) |
 | Evaluation | – | `crates/conformance/golden/`, `crates/conformance/screening/`, `xtask` | `cargo xtask eval-search`, `eval-agentic`, `eval-triage`, `eval-screening` | Section 9 |
 | Live | `live::` | `crates/worker/tests/live/` | `cargo xtask live` | Section 10 |
 
@@ -219,8 +219,10 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    (`tokio-tungstenite` `=0.30.0`, the SDK's `stream` feature) for the event stream tests
    ([Event feed](event-feed.md)). The `it` test target declares
    `required-features = ["itest-hooks"]`, so `cargo test --workspace` never builds it.
-7. From M21, run the browser suite (section 6.8) while wrangler and the fake server are still up; from
-   M36, `--suite ts` runs the `ts::it::` tests the same way.
+7. From M21, run the browser suite (section 6.8) while wrangler and the fake server are still up. From
+   M36, `--serve` stops here instead and keeps wrangler and the fake server running, writing
+   `target/itest/serve.json` (URL, CA path, platform key), so the TypeScript SDK repository's CI can run its
+   `ts::it::` tests against this Worker; it stops both when that job ends.
 8. Stop wrangler and the fake server; delete `target/itest/state` unless `--keep` was passed.
 
 ### 6.2 Test hooks
@@ -293,8 +295,8 @@ traits that call it:
   `it::uploads::*` (workerd's R2), `it::metrics::*`, `it::signup::*`, which also holds the agent
   self-sign-up tests (the mail-sender fake for codes, the fake clock for expiry), and the parity additions'
   groups (`it::lists::*`, `it::retention::*` and the others named in
-  [Parity additions › Tests](parity-additions.md#15-tests)); `ts::it::*` runs against the same Worker and
-  fakes.
+  [Parity additions › Tests](parity-additions.md#15-tests)); the SDK repository's `ts::it::*` runs against
+  the same Worker and fakes through `--serve`.
 - **Another value of a deployment variable or secret.** A test that needs one (`PM_CONSOLE=off` for
   `it::console::disabled`, `PM_WEB_BOT_AUTH=off` for `it::http_signatures::disabled_and_policy`,
   `PM_BILLING=off` for `it::notify::billing_off_no_usage_alerts`, `PM_NOTIFICATIONS=off`, or the secrets
@@ -633,7 +635,9 @@ deployment (its own zone, platform domain, D1, R2, Vectorize and queues, [Archit
 The live tests of the AgentMail-parity milestones (M20 step 16) are defined on their design pages:
 `live::drafts::scheduled_send`, `live::events::stream_through_deploy`, `live::screening::t1_hold_round_trip`,
 `live::calendar::*`, `live::uploads::large_attachment_link`, `live::signup::end_to_end`,
-`live::signup::x40_refuse_one_click_headers`, `live::metrics::bounce_moves_rates` and `live::sdk::ts_round_trip`.
+`live::signup::x40_refuse_one_click_headers`, `live::metrics::bounce_moves_rates` and
+`live::sdk::ts_round_trip`. The last runs in the TypeScript SDK's own repository, against the same staging
+deployment, with a staging test key ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)).
 
 **Manual tests.** Rows marked **Manual** need a person in a browser (a Google consent screen, a Stripe
 Checkout page, Gmail's unsubscribe button). They are `#[ignore]`d in the nightly run. Before a release, a
@@ -676,8 +680,8 @@ credentials are rotated every quarter.
 | `sdk::<module>::<name>` | Native test in `crates/sdk` | `sdk::coverage::every_operation` |
 | `xtask::<name>` | A check run by `cargo xtask` over the workspace, the docs or the built bundle | `xtask::size_budget` |
 | `browser::<area>::<name>` | Playwright test against workerd (section 6.8) | `browser::console::no_js` |
-| `ts::<module>::<name>` | Vitest test of the TypeScript SDK with fakes and shared fixtures | `ts::retry::y20_timeout_retries_same_key_and_bytes` |
-| `ts::it::<area>::<name>` | Vitest test of the TypeScript SDK against workerd | `ts::it::send::y20_lost_response_one_email` |
+| `ts::<module>::<name>` | Vitest test of the TypeScript SDK with fakes and shared fixtures, in the SDK repository | `ts::retry::y20_timeout_retries_same_key_and_bytes` |
+| `ts::it::<area>::<name>` | Vitest test of the TypeScript SDK against this repository's workerd harness, in the SDK repository | `ts::it::send::y20_lost_response_one_email` |
 | `eval::<suite>` | An evaluation run (section 9): its `Covers:` line names the quality requirement | `eval::search` |
 
 - The row ID (`a6`, `j7`) starts the last segment, so `cargo test a6_` finds every test for a row. A test
@@ -699,8 +703,10 @@ lines from the source tree (including generated `conf::` names), and fails when:
 - a `Covers:` line names an unknown row or requirement.
 
 It also collects every test named in a design page's Tests table, and every test named in a milestone's
-acceptance. `trace` also collects Vitest titles and `// Covers:` lines from
-`sdks/typescript/test/**/*.test.ts`.
+acceptance. `ts::` tests live in the TypeScript SDK's own repository: `trace` reads their names and
+`Covers:` lines from `sdks/typescript-tests.json`, the inventory that SDK release produces and a pull
+request copies here, and a `ts::` name the register uses but the inventory lacks fails like any other
+missing test.
 
 **Landed milestones.** A file `MILESTONES` at the repository root lists the milestones that have landed,
 one ID per line; each milestone's pull request adds its own line. Until `M20` is listed, `trace` checks
@@ -761,16 +767,16 @@ adds the security and traceability jobs:
 
 | Workflow | Jobs | Trigger |
 |---|---|---|
-| `ci.yml` | `fmt`, `clippy`, `test` (with coverage), `layering`, `wasm`, `itest` (`cargo xtask itest --suite it`; includes the attack suite and the deterministic keyword recall), `browser` (`cargo xtask itest --suite browser`: the console without JavaScript and the axe scan, section 6.8), `fuzz-smoke`, `deny`, `audit` (`cargo audit`), `openapi`, `docs` (`mdbook build docs`, then `cargo xtask docs-check`), `trace` (`cargo xtask trace`), `ts-sdk` (generation check, Biome, `tsc`, Vitest on Node.js 22, 24 and 26, `publint`, `attw`, Deno, Bun and workerd smoke on the packed tarball), `skills` (`gen-skills` check, the four `xtask::skills_*` checks, `skills-ref validate`, `claude plugin validate --strict` when it runs unsigned) | Every pull request and push to `main` |
+| `ci.yml` | `fmt`, `clippy`, `test` (with coverage), `layering`, `wasm`, `itest` (`cargo xtask itest --suite it`; includes the attack suite and the deterministic keyword recall), `browser` (`cargo xtask itest --suite browser`: the console without JavaScript and the axe scan, section 6.8), `fuzz-smoke`, `deny`, `audit` (`cargo audit`), `openapi`, `docs` (`mdbook build docs`, then `cargo xtask docs-check`), `trace` (`cargo xtask trace`), `skills` (`gen-skills` check, the four `xtask::skills_*` checks, `skills-ref validate`, `claude plugin validate --strict` when it runs unsigned) | Every pull request and push to `main` |
 | `codeql.yml` | CodeQL for Rust | Every pull request, weekly |
 | `heartbeat.yml` | `pmail doctor --json --check health --check alerts` against production, and once a day `--mail-test`, with the keys of the `ops` environment ([Observability § 5.5](observability.md#55-alert-email-and-the-external-heartbeat)) | Every 15 minutes, and by hand |
 | `nightly.yml` | All fuzz targets for 10 minutes each; property tests at 65,536 cases; `eval-search`, `eval-agentic`, `eval-triage`, `eval-screening`, `eval::skills_safe_send` (report-only); the large benchmarks (`it::bench::*`, section 6.9); `live::` suite; `cargo audit` on `main` | Nightly |
-| `release.yml` | Builds a release, exactly as defined in [Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline): version check; the full `ci.yml` gate and the three evaluations; CLI binaries; `cargo xtask release` (bundle, unsigned `SHA256SUMS`, SBOMs, provenance) and `npm pack` of the TypeScript SDK, listed in `SHA256SUMS`, into a draft GitHub Release, then stops for the owner's offline signature (`cargo xtask release sign`, [Security § 11](security.md#11-supply-chain)). It never deploys Pylota Mail Cloud | Tag `v*` |
-| `release-publish.yml` | Verifies `SHA256SUMS.sig` against the public keys compiled into `pmail` and marks the draft a pre-release; a staging deploy of that release and the `live::` suite; then `cargo xtask release-gate` and, for a version without a pre-release part, promotion to a full release and `cargo publish`, and `npm publish` of that tarball by trusted publishing, after `cargo publish` | Manual (`workflow_dispatch` on the tag, started by `cargo xtask release sign`) |
+| `release.yml` | Builds a release, exactly as defined in [Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline): version check; the full `ci.yml` gate and the three evaluations; CLI binaries; `cargo xtask release` (bundle, `openapi.json` and the SDK fixtures tarball for the TypeScript SDK's repository, unsigned `SHA256SUMS`, SBOMs, provenance) into a draft GitHub Release, then stops for the owner's offline signature (`cargo xtask release sign`, [Security § 11](security.md#11-supply-chain)). It never deploys Pylota Mail Cloud | Tag `v*` |
+| `release-publish.yml` | Verifies `SHA256SUMS.sig` against the public keys compiled into `pmail` and marks the draft a pre-release; a staging deploy of that release and the `live::` suite; then `cargo xtask release-gate` and, for a version without a pre-release part, promotion to a full release and `cargo publish`. The npm package is published by the TypeScript SDK's own repository | Manual (`workflow_dispatch` on the tag, started by `cargo xtask release sign`) |
 | `cloud-deploy.yml` | Rolls a published release out to Pylota Mail Cloud: `pmail deploy --version <v> --gradual` (10% → 50% → 100%, [Architecture](../architecture.md)) with the `production` environment's secrets; refuses a pre-release | Manual (`workflow_dispatch`, input `version`) |
 
 **Required checks to merge into `main`:** `fmt`, `clippy`, `test`, `layering`, `wasm`, `itest`,
-`browser`, `fuzz-smoke`, `deny`, `audit`, `openapi`, `docs`, `trace`, `ts-sdk`, `skills`, `codeql`. The milestone gate's
+`browser`, `fuzz-smoke`, `deny`, `audit`, `openapi`, `docs`, `trace`, `skills`, `codeql`. The milestone gate's
 `cargo xtask itest` runs both suites that the `itest` and `browser` jobs split.
 
 **Required to publish a release:** all of the above on the tagged commit; the three evaluation gates

@@ -369,7 +369,8 @@ crates/worker       handlers, router, auth, console, Durable Object classes, sta
 crates/sdk          Rust client (reqwest), used by the CLI
 crates/cli          `pmail` (clap): setup, deploy, doctor, admin, mail
 crates/conformance  MIME corpus + RFC conformance runner (native and against workerd)
-sdks/typescript     TypeScript SDK `@pylotahq/mail`, generated from openapi.yaml, with Vitest tests
+sdks/fixtures       recorded HTTP exchanges shared by the Rust SDK and the TypeScript SDK `@pylotahq/mail`,
+                    which is built in its own repository from each release's openapi.json (ADR 0018)
 integrations/       agent skills and plugins, checked against the contract of the same commit
 xtask               build-worker, size budget, itest, fuzz, release bundling
 ```

@@ -4,7 +4,7 @@
 |---|---|
 | Product | Pylota Mail |
 | Document owner | TREFT LTD (the owner, who is the sole developer and the Cloud operator) |
-| Status | Approved for build (v1.0) |
+| Status | Approved for build (v1.0); the additions of [ADR 0017](adr/0017-agentmail-parity.md) and [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md) stay Proposed until the owner accepts those records |
 | Last reviewed | 2026-10-17 |
 | Licence | FSL-1.1-ALv2 (Fair Source; each release becomes Apache-2.0 two years after it ships) |
 | Related | [Architecture](architecture.md) · [Design](design/index.md) · [Build plan](build-plan.md) · [Edge cases](edge-cases.md) |
@@ -19,7 +19,8 @@ with one or more addresses, authenticated sending, verified inbound mail, thread
 extracted text, triage and search, plus signing keys that let it prove who it is to other services. Applications and agents use it through a REST API, an MCP server and
 a CLI. It reports what happened through signed webhooks.
 
-It is source available under the Functional Source License (FSL-1.1-ALv2), written entirely in Rust, and
+It is source available under the Functional Source License (FSL-1.1-ALv2), written entirely in Rust (the
+TypeScript SDK is a separate client built in its own repository, [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)), and
 runs as one Cloudflare Worker on the deployer's own Cloudflare account. Pylota also operates it as a hosted
 service, **Pylota Mail Cloud**, with Free, Developer and Team plans (section 13). Pylota (a platform for independent car-rental operators) is the first
 user, as a partner on Pylota Mail Cloud. Pylota gives each operator four agent identities (bookings, inquiry, compliance, maintenance), and
@@ -69,7 +70,8 @@ Pylota's own experience showed the cost of these gaps:
 4. Search that agents can rely on: keyword, semantic, hybrid and agentic (cited answers whose citations
    are verified by code).
 5. Triage on every inbound message: category, needs-reply, urgency, summary and risk flags.
-6. REST API, MCP server, CLI, Rust SDK and TypeScript SDK, all generated from or checked against one contract.
+6. REST API, MCP server, CLI and Rust SDK, all generated from or checked against one contract, and a
+   TypeScript SDK generated from the same contract (P1, FR-SDK-2).
 7. Deployable by a stranger to their own Cloudflare account in under 15 minutes of hands-on time.
 8. Privacy by design: EU jurisdiction when chosen, retention policies, erasure with receipts,
    subject-access export.
@@ -128,7 +130,7 @@ copy (README, landing page) may only claim what this table lists.
 | U2 | **One email per intent.** Idempotency is required; an unknown outcome becomes `uncertain` and is never resent; plan limits never break a retry | FR-OUT-1, FR-OUT-2, FR-BILL-6 | G1, G2, L2, W3 |
 | U3 | **Identities outlive domains.** Addresses move between domains with history and threads intact, with rollback and a clean `550 5.1.6` after retirement | FR-ADR-1–5 | A11, C3, live domain-change test |
 | U4 | **Never sends mail that fails authentication.** Two-resolver health checks, aligned fallback in the same thread, suspension when ownership changes, and, for a relay we do not control, an alignment probe before the first send and every day | FR-DOM-4–6, FR-DOM-11 | H1, H4, H7, N18 |
-| U5 | **Built for untrusted input.** Verdicts and trust flags on every message, hidden text stripped, fenced model input, quarantine release only with the human-review permission | FR-IN-4–9, FR-CON-6, FR-SCR-2, FR-SCR-3 | B10, B11, D2, D9, E1, T1, T17 |
+| U5 | **Built for untrusted input.** Verdicts and trust flags on every message, hidden text stripped, fenced model input, quarantine release only with the human-review permission | FR-IN-4–9, FR-CON-6 | B10, B11, D2, D9, E1 |
 | U6 | **Your account, your receipts.** Runs in the deployer's Cloudflare account (EU optional); erasure returns per-store counts and empty probe queries | FR-PRV-1–6 | I1–I7 |
 | U7 | **Real team seats.** Members, roles and seat limits are enforced, with an audit log of every privileged action and two-step verification that a workspace can require | FR-CON-2–5, FR-CON-10 | W8–W10, W27 |
 | U8 | **Tested against the edge cases.** A public edge-case register where every row the service owns names its test, a MIME conformance corpus, and quality gates in CI | Release criteria §9 | the register itself |
@@ -140,7 +142,9 @@ copy (README, landing page) may only claim what this table lists.
 Researched on 2026-10-09 from each product's public documentation and repository. The AgentMail cells
 from "Authentication verdicts" down were researched again on 2026-10-17
 ([ADR 0017](adr/0017-agentmail-parity.md), [gap register § 6](agentmail-gap-analysis.md#6-corrections-to-the-prds-competitive-table));
-goshen-email was not re-read then, so its cells in the rows added on that date say "not compared".
+goshen-email was not re-read then, so its cells in the rows added on that date say "not compared". On
+2026-10-18 the AgentMail search cell was corrected from AgentMail's OpenAPI document, whose search
+operations are "Full-text search", and the plugin cell from its integration pages.
 Re-check before quoting externally. "–" means the capability is not offered or not documented.
 
 | Capability | AgentMail (hosted) | goshen-email (FSL, self-host or hosted) | Pylota Mail |
@@ -148,23 +152,23 @@ Re-check before quoting externally. "–" means the capability is not offered or
 | Identity separate from address; domain change with rollback | – (the address is the inbox) | – | Yes (U3) |
 | Required idempotency; uncertain sends never resent | Optional keys | Yes | Yes, plus reconciliation (U2) |
 | Keyword search | Yes | Yes (full-text) | Yes, with exact references |
-| Semantic and hybrid search | Semantic | – | Yes, with reranking |
+| Semantic and hybrid search | – (full-text search only) | – | Yes, with reranking |
 | Agentic search with verified citations | – | – | Yes (U1) |
 | Domain health checks with aligned fallback | – | – | Yes (U4) |
 | Triage | – | Yes (metered) | Yes, with deterministic rules |
 | Plan metering | Hosted | Third-party (Autumn), fails closed when it is down | In-process atomic holds (U9) |
 | Language | – | TypeScript | Rust |
-| Authentication verdicts and quarantine before an agent reads | `authentication_results`; unauthenticated and spam mail hidden by label; DMARC-failing mail dropped under an enforcing policy | At the gateway | Per-message verdicts; failing mail quarantined with a reason, never dropped (U5) |
-| Prompt-injection screening | Agent Armor (Labs, US only): advisory verdict; Hold mode withholds a notification but still lists the mail | not compared | Screening hold that hides the mail until a verdict, fail-closed by default, release by a person ([Screening](design/screening.md)) |
-| Drafts and scheduled send | Yes; approval works only by withholding send permissions | not compared | Yes, with approval bound to the content and person-only approval on Cloud ([Drafts](design/drafts.md)) |
-| Event delivery | Webhooks (8 attempts in ~27.5 h, auto-disabled after 5 days without notice), polling queue, WebSocket (key in the URL) | not compared | Webhooks (72 h, dead letters, replay), ordered pull feed, durable consumers, resumable stream ([Event feed](design/event-feed.md)) |
+| Authentication verdicts and quarantine before an agent reads | `authentication_results`; unauthenticated and spam mail hidden by label; DMARC-failing mail dropped under an enforcing policy | At the gateway | Per-message verdicts. Mail that Cloudflare Email Routing rejects for failing authentication never reaches the Worker; failing mail the Worker receives is quarantined with a reason. Nothing is accepted and then dropped silently (U5) |
+| Prompt-injection screening | Agent Armor (Labs, US only): advisory verdict; Hold mode withholds a notification but still lists the mail | not compared | Opt-in screening hold (`screening.mode: hold`; the default `monitor` only records verdicts) that hides mail until a verdict; once held, it fails closed by default; release by a person ([Screening](design/screening.md)) |
+| Drafts and scheduled send | Yes; approval works only by withholding send permissions | not compared | Yes, with approval bound to the content; on Cloud only a person approves, unless the partner opts its tenants in to key approval (`drafts.key_approval`) ([Drafts](design/drafts.md)) |
+| Event delivery | Webhooks (8 attempts in ~27.5 h, auto-disabled after 5 days without notice), polling queue, WebSocket (key in the URL) | not compared | Webhooks (72 h, dead letters, replay; an endpoint is disabled after 100 consecutive failures over at least 24 h, and `webhook.disabled` reaches platform and partner endpoints, never the tenant's own), ordered pull feed, durable consumers, resumable stream ([Event feed](design/event-feed.md)) |
 | Calendar | Per-inbox calendar store (Labs, US only) | not compared | Verified iMIP in and out; the consumer's calendar keeps state ([Calendar invitations](design/calendar-invitations.md)) |
 | Team seats | 2 / 2 / 10 by plan | Listed; one member per account today | Enforced, with roles (U7) |
-| Erasure with receipts | Delete per message, thread and inbox; optional 24 h expiry | Per inbox | Message, thread, counterparty, identity, tenant, with receipts; per-mailbox retention (U6) |
-| Runs in your own cloud | "BYO cloud deployment" on Enterprise | Yes | Runs in your own Cloudflare account (U9) |
+| Erasure with receipts | Delete per message, thread and inbox; optional 24 h expiry | Per inbox | Message, thread, counterparty, identity, tenant, with receipts (U6); per-mailbox retention (FR-PRV-7, P1) |
+| Runs in your own cloud | "BYO cloud deployment" on Enterprise | Yes | Runs in your own Cloudflare account (U6) |
 | SDKs | Python, TypeScript | not compared | Rust, TypeScript ([SDKs and skills](design/sdk-and-skills.md)) |
 | Agent self-sign-up | Yes; the human is optional | not compared | Yes, behind a flag; the accountable human is required (FR-IDN-2) |
-| Agent skills and plugins checked against the contract | Skills repository | not compared | Yes (FR-SDK-10) |
+| Agent skills and plugins checked against the contract | Skills repository; plugins for Claude Code, Codex, Cursor, ChatGPT and OpenClaw | not compared | Yes (FR-SDK-10) |
 
 ## 5. Scope and priorities
 
@@ -173,20 +177,20 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 
 | Area | P0 | P1 | P2 |
 |---|---|---|---|
-| Tenancy and keys | Tenants (live and test), API keys at four levels, partner keys for integrators on a shared deployment (FR-KEY-4), workspace policy self-service within ceilings (FR-TEN-4) | – | – |
-| Identities | CRUD, idempotent create, pause, accountable human; agent signing keys and assertions (JWKS); the service sign-up ledger (FR-IDN-10) | Signed HTTP requests (Web Bot Auth, spike S13) | – |
+| Tenancy and keys | Tenants (live and test), API keys at four levels, partner keys for integrators on a shared deployment (FR-KEY-4), workspace policy self-service within ceilings (FR-TEN-4) | – | Public-key API credentials (GAP-23) |
+| Identities | CRUD, idempotent create, pause, accountable human; agent signing keys and assertions (JWKS); the service sign-up ledger (FR-IDN-10) | Signed HTTP requests (Web Bot Auth, spike S13) | An OIDC-compatible "sign in as this agent" relying-party flow (GAP-24) |
 | Addresses | Platform domain, aliases, promote, retire, rollback | – | – |
-| Domains | Platform domain; `cloudflare_zone`; `nameservers` | `dns_records` (spike S11); `send_only` (S8); `smtp_relay` (S12); `delegated_subdomain` behind `PM_CF_SUBDOMAIN_SETUP` (S10); zone-file export (FR-DOM-15) | Mailgun and SendGrid inbound sources |
-| Inbound | Parse, verdicts, quarantine, loops, attachments, extracted text; calendar objects with verification and `calendar.received` (FR-CAL-1–7, FR-CAL-12, FR-CAL-13) | Malware scanner hook; screening hold for agent-steering mail (FR-SCR-1–12); batch reads and label changes (FR-IN-13); authentication detail (FR-IN-14); trusted ARC sealers (FR-IN-15) | – |
+| Domains | Platform domain; `cloudflare_zone`; `nameservers` | `dns_records` (spike S11); `send_only` (S8); `smtp_relay` (S12); `delegated_subdomain` behind `PM_CF_SUBDOMAIN_SETUP` (S10); zone-file export (FR-DOM-15) | Mailgun and SendGrid inbound sources; a mailbox-avatar (BIMI) guide (GAP-32) |
+| Inbound | Parse, verdicts, quarantine, loops, attachments, extracted text; calendar objects with verification and `calendar.received` (FR-CAL-1–7, FR-CAL-12, FR-CAL-13) | Malware scanner hook; screening hold for agent-steering mail (FR-SCR-1–12); batch reads and label changes (FR-IN-13); authentication detail (FR-IN-14); trusted ARC sealers (FR-IN-15) | Arabic reply attribution, once a conformance sample from real clients exists (GAP-21) |
 | Outbound | Send, reply, reply-all, forward, idempotency, uncertain, suppression; drafts, approval before send and scheduled send (FR-DRF); uploads: a file staged once per identity (≤ 25 MiB, SHA-256 verified, classified and scanned) and attached by `upload_id` (FR-UPL) | Signed links for large files; iMIP sends, the stale-sequence guard and calendar replies (FR-CAL-8–11), on the Cloudflare transport once spike S1 records the raw send; identity-scope allow and block lists (FR-OUT-17) | – |
 | Delivery | All six provider event types, per-recipient status; deliverability metrics: pause windows with thresholds and headroom, and event counts per hour and day by identity, tenant and domain (FR-MET) | Uncertain-send reconciliation | – |
 | Search | Keyword, semantic, hybrid, agentic; facets; tenant scope | Contacts, find-related | – |
 | Triage | Category, needs-reply, urgency, summary, risk flags; rules | Custom categories | – |
 | Integrations | REST, OpenAPI, MCP (API key), CLI, Rust SDK, webhooks; `wait` long-poll and verification extraction (quarantine rule 5, unsolicited OTP, depends on it: E4, E5); the event feed, durable event consumers and the WebSocket event stream (FR-EVT-1–11); the calendar object on REST, MCP, the CLI and the console (FR-CAL-14) | TypeScript SDK `@pylotahq/mail` (FR-SDK-2–9); agent skills and plugins (FR-SDK-10); MCP annotations from effect classes and client hints (FR-SDK-11); per-key MCP tool allow-list (FR-SDK-12); `pmail mcp stdio` (FR-SDK-13); CLI `--schema`, `--query` and `pmail skills generate` (FR-SDK-14); framework guides (FR-SDK-15); `calendar-reply` on REST, `mail_calendar_reply` and `pmail calendar-reply` (FR-CAL-10, FR-CAL-14); opt-in label events (FR-WH-6); webhook delivery headers (FR-WH-7); documentation links in errors (FR-API-3) | MCP OAuth 2.1; Python SDK; TypeScript agent-assertion verifier |
 | Privacy | Retention, erasure with receipts, legal hold | Subject-access export; per-identity message expiry (FR-PRV-7) | – |
-| Operations | Setup, deploy, doctor, metrics, DLQ consumers, test mode | Restore drill tooling | – |
+| Operations | Setup, deploy, doctor, metrics, DLQ consumers, test mode | Restore drill tooling | A second Pylota Mail Cloud jurisdiction, an owner decision (GAP-25) |
 | Console | Sign-in, workspaces, members, roles, seats, inboxes, quarantine release, keys, domains, plan and usage; Cloud sign-up (waitlist and open); Google and GitHub sign-in; two-step verification (TOTP); the Overview; notifications; agent self-sign-up behind `PM_AGENT_SIGNUP` (Cloud, FR-ASU) | – | Passkeys; SSO (SAML/OIDC) |
-| Plans and billing | Plan catalog, metering with holds, `402 billing_limit`, usage API, Stripe checkout and portal, top-ups; usage alerts | – | Annual billing, invoicing |
+| Plans and billing | Plan catalog, metering with holds, `402 billing_limit`, usage API, Stripe checkout and portal, top-ups; usage alerts | – | Annual billing, invoicing; pay-per-call through x402 or MPP (GAP-26) |
 
 ## 6. Functional requirements
 
@@ -604,17 +608,21 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-CLI-1** The `pmail` CLI **must** cover setup, deploy, doctor, administration and mail operations,
   with `--json` output for every command.
 - **FR-SDK-1** The Rust SDK **must** cover the whole REST API.
-- **FR-SDK-2** The service **must** ship a TypeScript SDK, the npm package `@pylotahq/mail`, with exactly
-  one method per `openapi.yaml` operation not marked `x-sdk: false`, generated from that contract, with no
-  runtime dependencies. It **must** run on every Node.js line from its first release to its end of life,
-  starting with Node.js 22, on Cloudflare Workers, on Deno and on Bun, and its declarations **must**
-  type-check under `strict`, `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`
+- **FR-SDK-2** The project **must** ship a TypeScript SDK, the npm package `@pylotahq/mail`, built in its
+  own repository `PILOTAAI/pylota-mail-typescript` ([ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)), with exactly one method per
+  `openapi.yaml` operation not marked `x-sdk: false`, generated from the `openapi.json` a release
+  publishes, with no runtime dependencies. It **must** run on every Node.js line from its first release to
+  its end of life, starting with Node.js 22, on Cloudflare Workers, on Deno and on Bun, and its
+  declarations **must** type-check under `strict`, `exactOptionalPropertyTypes` and
+  `noUncheckedIndexedAccess`
   ([SDKs, skills and agent tooling §2](design/sdk-and-skills.md#2-the-typescript-sdk)).
-- **FR-SDK-3** The SDKs **must never** generate an idempotency key for send, reply, reply-all or forward,
-  and **must** send the same key and the same body bytes on every retry of one call. The TypeScript SDK
-  **must** retry only failures that the error envelope marks `retryable`, network failures and proxy
-  `502`, `503` and `504`; **must** honour `Retry-After` up to a bound and throw beyond it; and **must** end
-  a call whose outcome it could not learn with an error that carries the key.
+- **FR-SDK-3** The SDKs **must never** generate an idempotency key for an operation marked
+  `x-idempotency: required` (today send, reply, reply-all, forward, calendar reply and draft send), and
+  **must** send the same key and the same body bytes on every retry of one call. The TypeScript SDK
+  **must** retry only failures that the error envelope marks `retryable`, and network failures and proxy
+  `502`, `503` and `504` only for a `GET` or a request that carries an idempotency key; **must** honour
+  `Retry-After` up to a bound and throw beyond it; and **must** end a call whose outcome it could not learn
+  with an error that carries the key.
 - **FR-SDK-4** The SDK **must** give an `uncertain` message a typed outcome that no SDK code path resends,
   and **must** treat a status it does not know as neither terminal nor safe to resend.
 - **FR-SDK-5** The SDK **must** verify Standard Webhooks signatures over the raw request bytes only, in
@@ -632,9 +640,10 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-SDK-8** The SDK **must never** expose the API key in errors, logs or serialised objects, **must**
   refuse to run in a browser or against a base URL that is not `https` (localhost excepted), and **must**
   follow no redirect.
-- **FR-SDK-9** The TypeScript SDK's version **must** be the release version and its major version the
-  API's path version. It **must** be published only by the release workflow through npm trusted
-  publishing with provenance, from a tarball listed in the signed `SHA256SUMS`, and a pre-release
+- **FR-SDK-9** The TypeScript SDK's major version **must** be the API's path version, and each SDK
+  release **must** name the Pylota Mail release whose contract it was generated from. It **must** be
+  published only by the SDK repository's release workflow through npm trusted publishing with
+  provenance, from a tarball listed in that repository's owner-signed `SHA256SUMS`, and a pre-release
   **must not** be published.
 - **FR-SDK-10** Each release **must** include agent skills in the Agent Skills format, with plugins for
   Claude Code, Codex and Cursor, that teach safe sending, mail as untrusted data, verification codes

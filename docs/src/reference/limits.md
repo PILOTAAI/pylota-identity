@@ -322,6 +322,7 @@ A plan or top-up increase counts from the moment its invoice is paid.
 | TypeScript SDK attempt timeout | 30 s (1–120 s); `waitForMessage`: its `timeout` + 15 s | Pylota Mail |
 | TypeScript SDK retries | 3 (0–10), backoff 0.5 s, 1 s, 2 s + up to 250 ms; `Retry-After` slept up to 60 s (1–300 s); `request_in_progress` 5 more attempts | Pylota Mail |
 | TypeScript SDK `collect` | 10,000 items by default | Pylota Mail |
+| TypeScript SDK deduplication lease | 60 s by default (15–3,600 s) | Pylota Mail |
 | Webhook timestamp tolerance (SDK and `pmail webhooks verify`) | 300 s by default, at most 600 s | Pylota Mail |
 | MCP result-size hint | `_meta["anthropic/maxResultSizeChars"]` = 100,000 on tools under the 96 KB cap | Claude Code persists larger text results above 50,000 characters ([MCP output limits](https://code.claude.com/docs/en/mcp), read 2026-10-17) |
 | MCP tool descriptions and server instructions | 4,096 characters | Claude Code cuts longer ones (same page) |

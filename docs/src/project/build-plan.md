@@ -1821,57 +1821,68 @@ behaviour change except the pinned windows and the thresholds argument; the M9 d
 service's safety guarantees on the client side, so no integration hand-writes retries, keys, webhook
 verification or stream resume.
 
-**Files:** `sdks/typescript/**`, `sdks/fixtures/**`, `integrations/**`, `.claude-plugin/marketplace.json`,
-`.agents/plugins/marketplace.json`, `.cursor-plugin/marketplace.json`, `xtask/src/{gen_ts_sdk.rs,
-gen_skills.rs, skills_check.rs}`, `crates/cli/src/{schema.rs, query.rs, commands/skills.rs,
-commands/mcp_stdio.rs}`, `docs/examples/`, the new guides. Hooks in other milestones' files, each
-reviewed by that file's owner:
+**Files:** in this repository, `sdks/fixtures/**`, `sdks/typescript-tests.json`, `integrations/**`,
+`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `.cursor-plugin/marketplace.json`,
+`xtask/src/{gen_skills.rs, skills_check.rs}`, `crates/cli/src/{schema.rs, query.rs, commands/skills.rs,
+commands/mcp_stdio.rs}`, the new guides. In the SDK repository `PILOTAAI/pylota-mail-typescript`
+([ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)): the package, its generator, tests, compiled guide examples and
+release workflows ([SDKs, skills and agent tooling § 2.1](design/sdk-and-skills.md#21-package-and-layout)). Hooks in other
+milestones' files, each reviewed by that file's owner:
 
 | File | Hook |
 |---|---|
 | `migrations/d1/0001_init.sql` (M5) | `api_keys.mcp_tools_json` |
 | `crates/worker/src/auth.rs`, `handlers/keys.rs` (M5) | `Scope.mcp_tools`; minting validation, audit, `GET /v1/me` |
 | `crates/worker/src/mcp/{tools.rs, schemas.rs}` (M15) | Effect classes, computed annotations, `_meta`, the allow-list filter, description budgets |
-| `crates/sdk` (M16) | `Unknown(String)` for response enums and `ErrorCode`; fixtures written to `sdks/fixtures/` |
+| `crates/sdk` (M16) | `Unknown(String)` for response enums and `ErrorCode`; fixtures and their canonical decodings written to `sdks/fixtures/` |
 | `crates/cli/src/commands/mcp.rs` (M16) | `mcp config --client codex\|claude-desktop\|agent-sdk` |
 | `console/pages/keys.rs`, `console/pages/connect.rs` (M21) | The MCP tools fieldset; the new snippets |
-| `.github/workflows/{ci.yml, release.yml, release-publish.yml}` (M19) | Jobs `ts-sdk` and `skills`; `npm pack` in `package`; `npm publish` in `publish` |
+| `.github/workflows/ci.yml` (M19) | Job `skills` |
+| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json` and `sdk-fixtures-{version}.tar.gz` as release assets listed in `SHA256SUMS`; `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
 
 **Tasks.**
 
-1. `cargo xtask gen-ts-sdk`, the generated layer and the hand-written layer of §2.4–§2.9 and §2.13–§2.14,
-   with the shared fixtures.
+1. In this repository: the shared fixtures, the two release assets, `itest --serve` and the `trace`
+   inventory. In the SDK repository: the generator, the generated layer and the hand-written layer of
+   §2.4–§2.9 and §2.13–§2.14.
 2. Webhook verification and the handler (§2.10).
 3. `mcp_tools` end to end: column, minting rules, filter, `GET /v1/me`, console fieldset.
 4. Effect classes, `_meta` hints and description budgets in the MCP server.
 5. `pmail mcp stdio`, `mcp config` clients, `--schema`, `--query`, `skills generate`.
 6. The skills, the rule registry, `gen-skills`, the checks and the three marketplaces.
-7. The release path: `npm pack` in `release.yml`, trusted publishing in `release-publish.yml`, the version
-   checks, the npm trusted-publisher configuration (a human step on npmjs.com).
+7. The SDK repository's release path: `npm pack` and the owner's signature in its `release.yml`, trusted
+   publishing in its `release-publish.yml`, the contract and version checks, the npm trusted-publisher
+   configuration (a human step on npmjs.com).
 8. After M30: the event helpers of §2.11. After M29 and M33: the draft and upload helpers of §2.12.
 9. The guides of §7.
 
-**Human prerequisites.** Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com,
-configure the trusted publisher for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail`, workflow
-`release-publish.yml`, environment `release`) and turn on "Require two-factor authentication and disallow
-tokens" after the first publish. Pin Deno and Bun versions for CI.
+**Human prerequisites.** Create the public repository `PILOTAAI/pylota-mail-typescript` (FSL-1.1-ALv2).
+Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com, configure the trusted publisher
+for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail-typescript`, workflow `release-publish.yml`,
+environment `release`) and turn on "Require two-factor authentication and disallow tokens" after the first
+publish. Give the SDK repository a staging test key for `live::sdk::ts_round_trip`. Pin Deno and Bun
+versions for the SDK repository's CI.
 
 **Acceptance:**
 
-- Edge rows Y20–Y71 with the tests named in the register; the helpers of rows Y32–Y37 accept on M30, Y47
-  on M29 and Y46 on M33, and are `pending` in `cargo xtask trace` until those land.
-- `ts::coverage::every_operation`, `xtask::ts_sdk_generated_current`, `ts::fixtures::rust_parity`,
+- Edge rows Y20–Y71 with the tests named in the register; the `ts::` tests pass in the SDK repository's
+  CI and are listed in `sdks/typescript-tests.json`; the helpers of rows Y32–Y37 accept on M30, Y47 on M29
+  and Y46 on M33, and are `pending` in `cargo xtask trace` until those land.
+- The first release after M36 carries `openapi.json` and `sdk-fixtures-{version}.tar.gz` in its signed
+  `SHA256SUMS`, and the SDK repository's `fetch-contract.mjs` verifies and uses them.
+- `ts::coverage::every_operation`, `ts::generate::output_current`, `ts::fixtures::rust_parity`,
   `ts::errors::envelope_round_trip`, `ts::package::exports_valid`, `ts::package::no_install_scripts`,
   `ts::compat::pylota_tsconfig`, `ts::compat::dts_consumers`, `ts::doctest::published_examples`,
-  `ts::runtime::node_matrix`, `ts::runtime::deno_bun_smoke` and `ts::runtime::y66_workers_smoke`.
+  `ts::runtime::node_matrix`, `ts::runtime::deno_bun_smoke`, `ts::runtime::y66_workers_smoke` and
+  `ts::retry::unsafe_request_not_repeated`.
 - `it::mcp::annotations_complete`, `it::mcp::y53_result_size_meta`, `it::mcp::y54_description_budgets`,
   and the extended `it::security::mcp_tools_follow_key`; `it::mcp::inspector_replay` still replays green.
 - `cli::skills::generate_for_key` and `cli::mcp::y59_client_snippets`; the `skills` job green with
   `skills-ref validate` (and `claude plugin validate --strict` if it runs without signing in).
-- The first release candidate after M36 produces `pylotahq-mail-{version}.tgz` in the draft release,
-  listed in the signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
+- The SDK repository's first release candidate produces `pylotahq-mail-{version}.tgz` in its draft
+  release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
-- `xtask::guides_examples_compile` green; `eval::skills_safe_send` has a recorded first pass rate.
+- `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
 - M20 gains `live::sdk::ts_round_trip`.
 
 ---

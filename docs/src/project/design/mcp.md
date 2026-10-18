@@ -47,6 +47,10 @@ HTTP+SSE transport) are not served.
 read 2026-10-17); the server exposes no resources. An events primitive is the work of the MCP Triggers and
 Events Working Group, chartered on 2026-03-24, whose SEP is at "Ideating"
 ([charter](https://modelcontextprotocol.io/community/working-groups/triggers-events), read 2026-10-17).
+AgentMail's hosted server already implements "the webhook delivery mode of the MCP Events extension" as
+ChatGPT uses it, advertising `events` in `server/discover` to 2026-07-28 clients
+([AgentMail MCP Events](https://docs.agentmail.to/integrations/mcp-events), read 2026-10-18); that extension
+is not part of a released MCP revision.
 Pylota Mail adds MCP event subscriptions once an events SEP is accepted; until then an agent polls
 `mail_events` between turns ([§4.3](#mail_events)), and a host that can run code uses the WebSocket stream
 ([Event feed § 15.1](event-feed.md#151-mcp-mail_events)).
