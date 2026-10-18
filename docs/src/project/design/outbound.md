@@ -56,7 +56,8 @@ pm-delivery-events ─▶ delivery consumer ─▶ ApplyDeliveryEvent ─▶ per
    the tenant (`status`, `mode`, `policy_json`, `timezone`, `created_at`, `ramp_lifted_at`,
    `sending_paused_at`, `partner_id`) with its `billing_accounts` `mode`, `plan_id` and `dispute_open_at` and
    its partner's `ramp_exempt` (for the send ramp and the stops of step 18), the `platform_state` row
-   `send_breaker` and the `ops_switches` row `free_sending` (each cached for 60 seconds per isolate), all of
+   `send_breaker` and the `ops_switches` rows `free_sending` and `agent_signup` (each cached for 60
+   seconds per isolate), all of
    the identity's addresses
    with their domains (`state`, `kind`, `transport`, `reply_token`, `sending`, `sending_paused_at`), the
    platform domain, suppressions for every requested recipient (`address_hash IN (SELECT value FROM
@@ -164,7 +165,7 @@ alarm; an expired key behaves as new.
 | 5 | Target: for reply, reply-all and forward the message exists in this mailbox and is visible to the key (`hidden` and `throttled` never; `quarantined` and `screening` only with `quarantine:review`, [Screening hold §9](screening.md#9-visibility-the-hold-is-real)); for `send` with `thread_id`, the thread exists | `404 message_not_found` / `404 thread_not_found` |
 | 6 | Recipients ([Recipients](#recipients)): each is a valid RFC 5321 address with an ASCII local part; duplicates removed case-insensitively; at least one | `400 address_invalid`; `400 address_unsupported` for a non-ASCII (SMTPUTF8) local part ([A3](../edge-cases.md)); `400 invalid_request` when there is no recipient |
 | 7 | Count across `to`, `cc`, `bcc` ≤ `policy.max_recipients` (default 10, at most 49: Cloudflare's limit is 50 and strategy B's journal copy takes one, so the limit is 49 on every transport) ([E3](../edge-cases.md)) | `400 too_many_recipients` |
-| 7a | Provisional agent sign-up: every recipient equals the sign-up's human address, and that address has not hard-bounced ([Agent self-sign-up §4.3](agent-signup.md#43-sending-only-to-the-human)) | `403 policy_denied`, `details.reason` = `signup_unverified` or `signup_human_unreachable` |
+| 7a | Provisional agent sign-up: the `agent_signup` switch is not `off`, every recipient equals the sign-up's human address, and that address has not hard-bounced ([Agent self-sign-up §4.3](agent-signup.md#43-sending-only-to-the-human)) | `403 policy_denied`, `details.reason` = `signup_paused`, `signup_unverified` or `signup_human_unreachable` |
 | 8 | Test tenant: every recipient is `*@simulator.invalid` or an `active`/`retiring` address on this deployment of an identity in **this tenant, or in another test tenant (`mode = 'test'`) with the same non-null `partner_id`** (FR-OUT-12, [L1](../edge-cases.md), [L3](../edge-cases.md)). Loopback skips authentication and spam scoring, so it never reaches a live workspace: on Cloud every operator workspace has Pylota's partner, so the partner alone is not a customer boundary | `403 test_mode_recipient` |
 | 9 | `kind: marketing` has `unsubscribe.url` (HTTPS) and `consent` ([G9](../edge-cases.md), FR-OUT-8). Its transport is checked at step 15, once step 13 has resolved the sending address | `400 marketing_requirements_missing` |
 | 10 | `kind: auto_reply` only for reply or reply-all, to a message whose `kind` is `normal` or `calendar`, with `policy.auto_reply.allowed`, identity `send_policy.auto_reply` not `"denied"` (the default is `"allowed"`), and under the exchange cap ([D6](../edge-cases.md), FR-OUT-7) | `409 auto_reply_not_allowed` |
@@ -250,9 +251,9 @@ Each recipient that matches one of these becomes a delivery row with status `sup
 4. for a send from a draft whose current revision carries a valid approval
    ([Drafts §3.4](drafts.md#34-approved-recipients-are-known)), every recipient of the approved revision.
    It never overrides a suppression, a send-block entry or `send_allowlist_only`;
-5. for `calendar_reply` only, it is the `ORGANIZER` of the verified invitation answered: the
-   authenticated sender, or an address of the same organisational domain named by `SENT-BY`
-   ([Calendar invitations §5.4](calendar-invitations.md#54-recipients-and-the-known-recipient-rule)).
+5. for `calendar_reply` only, it is the `ORGANIZER` of the verified invitation answered, which is that
+   invitation's authenticated sender (a `SENT-BY` never verifies,
+   [Calendar invitations §5.4](calendar-invitations.md#54-recipients-and-the-known-recipient-rule)).
 
 Mail the identity received does not make its sender known: `inbound_count` counts received and
 quarantined mail, so an attacker's own first message would otherwise unlock its address for the
@@ -492,7 +493,7 @@ VALUES (?1, ?2, 'outbound', 'queued', NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
   ?15, ?16, ?16, ?17, '[]', ?18, ?19, ?20, ?21, ?23, ?24, ?25)
 RETURNING rowid;
 -- ?23 draft_id: the draft a draft send came from, else NULL (Drafts §5.4); ?24 calendar_json and
--- ?25 calendar_uid_hash: the calendar object as sent (verified: null) and its UID hash, else NULL
+-- ?25 calendar_uid_hash: the calendar object as sent (verified: null, with its parties) and its UID hash, else NULL
 -- (Calendar invitations §5.8)
 -- status is 'suppressed' instead of 'queued' when every recipient was filtered
 -- ?13 text (the sent text cut to 512 KiB) and ?22 extracted_text (the same text cut to 256 KiB); the row

@@ -4,8 +4,8 @@ Binding for implementation. An AI agent with no key and no person signed in can 
 **provisional workspace** on Pylota Mail Cloud with one unauthenticated call, and gets one inbox on the
 platform domain and one identity key in the answer. The agent must name the person responsible for it.
 Until that person proves they control their address, by giving the agent a six-digit code or by opening
-the link in the email, the workspace can email that person only, at most 10 messages a day, holds every
-guard of the policy at its strictest, and is erased 7 days after it was created. Verification makes the
+the link in the email, the workspace can email that person only, at most 10 messages a day, holds the
+policy's guards strict, and is erased 7 days after it was created. Verification makes the
 person the accountable human of the identity (FR-IDN-2) and the owner of an ordinary Free workspace,
 which then runs the new-workspace send ramp (FR-CON-13). The feature exists for parity with AgentMail
 (gap GAP-7, [ADR 0017](../adr/0017-agentmail-parity.md)), which also allows sign-up with no person at
@@ -58,8 +58,9 @@ its person can still open the link, claim and refuse; and expiry still erases it
 already named must not lose the inbox because the operator closed the door behind them, and the
 provisional restrictions already contain it. While the **switch** is `off`, the two routes that send
 system mail (`POST /v1/agent-signup/resend` and `PUT /v1/agent-signup/human`) also answer
-`403 signup_closed` (`paused`), because the switch exists to stop sign-up mail from harming the platform
-domain ([X3](#24-edge-cases)).
+`403 signup_closed` (`paused`), and every send of a provisional workspace gets `403 policy_denied`
+(`signup_paused`, [§4.3](#43-sending-only-to-the-human)), because the switch exists to stop mail to people
+who never confirmed anything from harming the platform domain ([X3](#24-edge-cases)).
 
 **Configuration.** `PM_AGENT_SIGNUP` must be `on` or `off`, and `PM_AGENT_SIGNUP_DAILY_CAP` an integer
 from 1 to 10,000 (default 200); any other value is `config_invalid`, as for every optional variable
@@ -223,15 +224,18 @@ The first rule that fails decides the answer; nothing before step 10 writes to D
 | 5 | `human_email` rules of [§3.3](#33-the-human-email-rules), syntax and policy | `400 address_invalid`, `address_unsupported`, or `invalid_request` with `details.reason` |
 | 6 | `username` rule 4: one D1 read of `tenants` by `slug`, `address_suffix` and `suffix_fold`, and of `address_tombstones` by the address's keyed hash | `409 username_taken` |
 | 7 | The mail domain of `human_email` can receive mail ([§3.3](#33-the-human-email-rules), last rule) | `400 invalid_request` (`no_mail_domain`); `503 unavailable` (`dns_unavailable`) |
-| 8 | The refusal list: `agent_signup_refusals` has the human's base hash ([§9](#9-not-me-complaints-and-refusals)) | `429 signup_limit_reached`, `details.scope = "human_email"` |
-| 9 | Admission: the budgets of [§3.4](#34-admission-budgets), checked and counted in one `TenantQuota` transaction | `429 signup_limit_reached`, `details.scope` = `network`, `asn`, `human_email` or `deployment` |
+| 8 | Caller admission: the `network`, `asn` and `deployment` budgets of [§3.4](#34-admission-budgets), checked and counted in one `TenantQuota` transaction | `429 signup_limit_reached`, `details.scope` = `network`, `asn` or `deployment` |
+| 9 | The person: the refusal list (`agent_signup_refusals` has the human's base hash, [§9](#9-not-me-complaints-and-refusals)), then the person's budgets of [§3.4](#34-admission-budgets) and the class share, checked and counted in a second `TenantQuota` transaction | `429 signup_limit_reached`, `details.scope = "human_email"` (or `deployment` for the class share) |
 | 10 | The create batch ([§3.5](#35-the-create-batch)) | `409 username_taken` (a lost race on the name); `429 signup_limit_reached` with `human_email` (a lost race on the person) |
 | 11 | After the commit: the intents, then the verification email ([§5](#5-the-verification-email)) | none: a failed email gives `verification.email: "not_sent"` |
 
 Steps 4 to 7 come before any counting, so a malformed or refused request costs no budget. The budgets are
-spent at step 9, before the batch, as the system-mail budgets of
+spent at steps 8 and 9, before the batch, as the system-mail budgets of
 [Cloud sign-up §10.2](cloud-signup.md#102-system-mail-budgets) are: a request that then loses a race at
 step 10 has still spent its slot. That is deliberate: probing names or people by racing costs the prober.
+The caller's own budgets are counted at step 8, before anything about the person is looked at, so the five
+person-scope answers of [§3.4](#34-admission-budgets) cost a caller the same and cannot be told apart by
+what they spend.
 
 ### 3.3 The human email rules
 
@@ -247,10 +251,13 @@ then refuses, in this order:
    `PM_SIGNUP_BLOCKED_DOMAINS` (the list sign-up already uses, [W29](../edge-cases.md)).
 4. A **hosted** address, whose mail this deployment receives, so that an agent of this deployment could
    read the code ([W45](../edge-cases.md)): the domain is `PM_PLATFORM_DOMAIN` or a name under it (which
-   includes the agent's own future address `agent.{username}@`), or the address is an `addresses` row in
-   state `pending`, `active` or `retiring`. In the other direction, creating an identity or adding an
-   address equal to the human address of a **provisional** sign-up is refused with `409 address_taken`, as
-   an address equal to a console user's sign-in address already is
+   includes the agent's own future address `agent.{username}@`), or the address with everything from the
+   first `+` of its local part removed is an `addresses` row in state `pending`, `active` or `retiring`.
+   Inbound routing splits the local part at the first `+` and delivers to the base address
+   ([Inbound › Steps](inbound.md#steps), step 2), so `ops+x@corp.example` reaches the identity
+   `ops@corp.example`, which has no address row of its own. In the other direction, creating an identity or
+   adding an address whose base address (below) hashes to the `human_hash` of a **provisional** sign-up is
+   refused with `409 address_taken`, as an address equal to a console user's sign-in address already is
    ([Identities and domains › Create](identity-domains.md#create), step 4; [X44](#24-edge-cases)).
 
 Rules 2 to 4 answer `400 invalid_request` with `details.errors[0].path = "human_email"` and the one
@@ -277,18 +284,30 @@ answer never depends on whether a person has an account, so the route is no orac
 refuses to attach an address that already has a console account; Pylota Mail links it at verification by
 the verified address instead ([§7.1](#71-the-transaction)).
 
-**The base address.** Every count and every refusal is keyed by the keyed hash of the **base address**:
-the local part with everything from the first `+` removed, so `jo+agent1@example.org` and
-`jo@example.org` are one person, as the one-Free-workspace rule already treats them
-([Cloud sign-up §6.2](cloud-signup.md#62-after-launch-open-sign-up), step 3). `human_hash =
-hex(HMAC-SHA256(PM_HASH_KEY, base address))`. The email itself goes to the address as written.
+**The base address.** Every count and every refusal is keyed by the keyed hash of the **base address**,
+which `core::signup::base_address` computes from the normalised address:
+
+1. the local part with everything from the first `+` removed, so `jo+agent1@example.org` and
+   `jo@example.org` are one person, as the one-Free-workspace rule already treats them
+   ([Cloud sign-up §6.2](cloud-signup.md#62-after-launch-open-sign-up), step 3);
+2. for `gmail.com` and `googlemail.com`, every `.` of the local part removed and the domain written
+   `gmail.com`, because Google delivers every dotted form of a Gmail address to one mailbox and treats the
+   two domains as one ([Dots don't matter in Gmail addresses](https://support.google.com/mail/answer/7436150)
+   and [Getting someone else's mail](https://support.google.com/mail/answer/10313), read 2026-10-18). The
+   same pages say dots do matter for an organisation's own domain, so no other domain is changed.
+
+`human_hash = hex(HMAC-SHA256(PM_HASH_KEY, base address))`. The email itself goes to the address as
+written. The hosted check of rule 4 uses only step 1, because inbound routing removes the `+` part and
+nothing else.
 
 ### 3.4 Admission budgets
 
-Step 9 is one `QuotaRequest::SystemMail { class: Signup, keys, day }` to the default tenant's
-`TenantQuota`, which checks every budget below and counts them all in one transaction, or counts none and
-answers `Spent { scope }` ([Outbound › TenantQuota](outbound.md#tenantquota); the request already exists
-for the system-mail budgets, and this page adds the class `Signup`). Days are UTC days; keys are keyed
+Steps 8 and 9 each make one `QuotaRequest::SystemMail { class: Signup, keys, day }` to the default
+tenant's `TenantQuota`, which checks the budgets named in `keys` and counts them all in one transaction, or
+counts none and answers `Spent { scope }` ([Outbound › TenantQuota](outbound.md#tenantquota); the request
+already exists for the system-mail budgets, and this page adds the class `Signup`). Step 8 names the
+caller's budgets (`network`, `asn`, `deployment`); step 9 names the person's (`recipient`, `human`) and the
+class share. A request refused at step 9 keeps its step-8 counts. Days are UTC days; keys are keyed
 hashes, never a clear address or IP; the counters are deleted with the day like the other `sysmail` rows.
 
 | Counter `sysmail:signup:{scope}:{key}` | Counted on | Budget per UTC day | `details.scope` when spent |
@@ -305,8 +324,11 @@ hashes, never a clear address or IP; the counters are deleted with the day like 
   `request_id`, for five different causes: the person's daily sign-up budget, their daily email budget,
   their refusal ([§9](#9-not-me-complaints-and-refusals)), a live provisional sign-up that already names
   them (the unique index of [§3.5](#35-the-create-batch)), and a lost race for them
-  ([X17](#24-edge-cases)). The one bit it leaks, "this address cannot take a sign-up today", cannot be
-  avoided while a person may have only one live sign-up, and it says nothing about accounts.
+  ([X17](#24-edge-cases)). All five come after the caller's own budgets are counted (step 8), so they
+  also cost the caller the same. The one bit it leaks, "this address cannot take a sign-up today", cannot
+  be avoided while a person may have only one live sign-up, and it says nothing about accounts. A refusal
+  lasts until the person lifts it while the other causes end within 7 days, so a caller who probes one
+  address every day for more than a week can infer a refusal: that is the price of a refusal that lasts.
 - **The class share.** `invitation` (20%), `notification` (50%) and now `signup` (5%) together can use at
   most 75% of the system identity's day, so at least 25% stays for `signin` and `account` mail. With the
   default 50,000 a day, 5% is 2,500 code emails, more than the default deployment cap can produce.
@@ -403,7 +425,7 @@ from the same row.
 | `quarantine.unsolicited_otp` (guard) | `true` | |
 | `quarantine.spam_threshold` (guard) | 0.5 (default 0.8) | Stricter. Not 0, its strictest valid value: at 0 every message would be held, the person's own replies included, and with no person in the workspace nobody could release them before verification |
 | `screening.mode`, `screening.on_unavailable` (guards, [Screening](screening.md)) | `hold`, `quarantine` | Mail that could steer an unaccountable agent is held, and held when the screen cannot decide |
-| `drafts.require_approval` (guard, [Drafts](drafts.md)) | `always` | Defence in depth: the key holds no draft permission while provisional |
+| `drafts.require_approval` (guard, [Drafts](drafts.md)) | `new_recipients` | Defence in depth behind step 7a: a recipient who is neither known nor internal would need an approval that nobody can give before verification. The human is known through the send-allow entry ([§2.1](#21-what-a-sign-up-creates)), so their mail passes. `always` would refuse every send at step 16a, the human's included, and the key holds no draft permission to send through an approved draft ([Drafts §3.1](drafts.md#31-draftsrequire_approval)) |
 | `accounts.require_approval` | `true` | Verification codes from services reach no provisional agent ([Service sign-up ledger §5](service-accounts.md#5-the-verification-gate), [X24](#24-edge-cases)) |
 | `auto_reply.allowed` | `false` | |
 | `inbound.per_sender_per_hour`, `inbound.unauthenticated_per_hour`, `inbound.per_tenant_per_hour` | 20, 20, 100 | A provisional inbox is not a bulk receiver; the excess is stored `throttled` |
@@ -434,6 +456,12 @@ therefore changes in two places, and FR-IDN-2 gains the matching exception ([§2
   normalised addresses (exactly, not as base addresses). Otherwise `403 policy_denied` with
   `details.reason = "signup_unverified"`. When the sign-up's `human_status` is `bounced`, every send is
   refused with `403 policy_denied`, `details.reason = "signup_human_unreachable"` ([X38](#24-edge-cases)).
+  While the `ops_switches` row `agent_signup` is `off` ([§13.2](#132-the-automatic-switch)), every send of
+  every provisional tenant is refused with `403 policy_denied`, `details.reason = "signup_paused"`
+  ([X3](#24-edge-cases)): the switch fires when sign-up mail draws bounces or complaints, and mail from up
+  to 1,400 provisional workspaces to people who never confirmed anything is the same risk to the shared
+  domain. The handler reads the row with the `free_sending` switch, cached for 60 seconds per isolate
+  ([Outbound › Handler](outbound.md#handler), step 6), and applies it to provisional tenants only.
   Reply, reply-all and forward run the same step: a reply to a stranger who wrote to the inbox is refused,
   a forward of that mail to the person is allowed. Nothing is stored for a refused send, and a dry run
   returns the same error.
@@ -663,15 +691,20 @@ tenant and checks, in order:
 1. `state = 'provisional'` and `expires_at > now`; otherwise the state's answer.
 2. The tenant is not `suspended` (`403 tenant_suspended`), `erasing` or `erased` (the key is already
    revoked; the console pages show "This inbox no longer exists").
-3. The human address is still not hosted ([§3.3](#33-the-human-email-rules), rule 4): another tenant may
-   have created an identity at that address since ([X44](#24-edge-cases)). Otherwise
-   `409 signup_cannot_verify`, `details.reason = "human_email_hosted"`.
+3. The human address is still not hosted ([§3.3](#33-the-human-email-rules), rule 4, which compares its
+   `+`-stripped base): another tenant may have created an identity at that address since
+   ([X44](#24-edge-cases)). Otherwise `409 signup_cannot_verify`, `details.reason = "human_email_hosted"`.
 4. **One Free workspace per person** (FR-CON-18): the person, or another person whose address is the same
    base address, already owns a workspace on the catalog's default plan (the query of
    [Cloud sign-up §6.2](cloud-signup.md#62-after-launch-open-sign-up), step 3). Otherwise
    `409 signup_cannot_verify`, `details.reason = "workspace_limit"`. The code is not burned and the attempt
    is not a failure, so the agent can submit the same code again once the person has upgraded or deleted
-   the other workspace ([X45](#24-edge-cases)). AgentMail also allows one organisation per person.
+   the other workspace ([X45](#24-edge-cases)). AgentMail also allows one organisation per person. The
+   query matches `+tag` variants only: it compares `users.email`, which holds the address as each person
+   signed up, so two dotted forms of one Gmail address count as two people here, as they do in Cloud
+   sign-up's own check. Closing that needs a stored canonical form on `users`, which this page does not add
+   (the sign-up's own budgets, refusal list and live index use the Gmail rule of
+   [§3.3](#33-the-human-email-rules)).
 5. A `users` row with the human address and `status = 'disabled'`: `409 signup_cannot_verify`,
    `details.reason = "person_disabled"` ([X46](#24-edge-cases)).
 
@@ -703,7 +736,9 @@ INSERT INTO audit_log …;              -- member.join (the owner)
   person's `users.name`, else the local part of the address; `owner_email` is the address.
 - **Changed nothing.** When the first statement changed no row, the handler re-reads: verified by this
   same person is success (`200`, or the console's success page); verified by someone else, or ended, is
-  the state's answer.
+  the state's answer; still provisional with a newer `code_seq` (a resend or replacement committed after the
+  attempt was reserved) is `422 signup_code_invalid` with `details.reason = "superseded"`, which is not
+  counted as a failure ([X59](#24-edge-cases)).
 - **After the commit.** The handler sends the intent, queues the event's `Fanout`
   ([Webhooks › Platform events](webhooks.md#platform-events)), and calls
   `NotifierRequest::Account { user_id, event: agent_signup_verified }` on the `Notifier` that [Notifications § 3](notifications.md#3-how-notifications-are-produced) picks for account events:
@@ -760,10 +795,12 @@ no person attached, a claim here works only for the person the agent named: the 
 (proved at sign-in) must equal the sign-up's human address exactly. A key alone is not a proof of
 consent, because the agent itself holds it.
 
-- **Who.** Any signed-in person, with or without a workspace; the link appears in the user menu and on the
-  "No workspace yet" page. The `POST` is a sensitive action: it needs a sign-in within the last 10 minutes
-  ([Console › Re-authentication](console.md#re-authentication)), the CSRF token, and counts against
-  `RL_SIGNIN`.
+- **Who.** Any signed-in person, with or without a workspace. The link appears in the user menu and on the
+  "No workspace yet" page only while `PM_AGENT_SIGNUP = "on"`; the page itself answers at its path whatever
+  the variable, so a person named before the feature was turned off can still claim
+  ([§1](#1-when-agent-sign-up-is-on)). The `POST` is a sensitive action: it needs a sign-in within the
+  last 10 minutes ([Console › Re-authentication](console.md#re-authentication)), the CSRF token, and
+  counts against `RL_SIGNIN`.
 - **The form.** One `<input type="password" name="key" autocomplete="off">` and **Continue**. The key is
   handled in memory only: it is never logged, stored, written to an audit row or echoed back in a page
   ([Security § 12](security.md#12-logging-rules)).
@@ -803,8 +840,14 @@ again.
 
   ```text
   token   = base64url(payload || HMAC-SHA256(link key {kid}, payload)[0..16])    -- no padding, ≤ 256 characters
-  payload = "r1:{kid}:{signup_id}:{human_hash}:{expires_unix_s}"                -- expires = the sign-up's expires_at
+  payload = "r1:{kid}:{signup_id}:{human_hash}:{expires_unix_s}"                -- expires = issued + 90 days
   ```
+
+  The token outlives the sign-up: a person who finds the email after the 7 days, or after the sign-up was
+  abandoned or erased, can still stop agents naming them, so "Unsubscribe" never fails silently and turns
+  into a spam report. 90 days is the notification unsubscribe token's life
+  ([Security § 4.9](security.md#49-console-authentication-and-hosts)); like it, the token also stops working
+  7 days after its `link` key is rotated.
 
 - **`GET`** changes nothing: it shows "Stop AI agents naming {masked address} as their accountable human on
   Pylota Mail" with one **Stop** button, a form `POST` to the same URL. **`POST`** verifies the token (the
@@ -817,9 +860,10 @@ again.
   VALUES (?h, 'refused', ?now)`; and, when the sign-up is still `provisional` **and** its current
   `human_hash` equals the token's, `state = 'refused'` and the erasure of [§10](#10-expiry-abandonment-and-refusal-erasure).
   A person whom the agent has since replaced records only their own refusal; the sign-up continues with the
-  new person ([X31](#24-edge-cases)). On a sign-up that is already `verified`, only the refusal is recorded
-  and the page says "This inbox was already confirmed. If you own it, delete it in the console." A verified
-  workspace is never deleted through an email link.
+  new person ([X31](#24-edge-cases)). When the sign-up has ended or its row is gone, only the refusal is
+  recorded, from the token's `human_hash` ([X40](#24-edge-cases)). On a sign-up that is already
+  `verified`, only the refusal is recorded and the page says "This inbox was already confirmed. If you own
+  it, delete it in the console." A verified workspace is never deleted through an email link.
 - **A complaint is a refusal.** A `complained` outcome on a code email, or on any message of a provisional
   tenant, records the refusal with `reason = 'complaint'` and, when it names the current person, refuses and
   erases the sign-up ([§13.3](#133-outcomes-of-sign-up-mail), [X39](#24-edge-cases)). The system identity's
@@ -934,14 +978,14 @@ control below acts on its own; none waits for a reviewer.
 | Risk | Controls |
 |---|---|
 | Floods of sign-ups | `RL_SIGNIN` (10 a minute per network); 5 a day per network and 100 per ASN; `PM_AGENT_SIGNUP_DAILY_CAP` for the deployment; the spike and 80% alerts ([§21](#21-observability)) |
-| A person used as a target: someone names their address to flood or alarm them | One live sign-up per person; 3 sign-ups and 5 code emails a day per base address; 3 code emails an hour per sign-up; 10 emails a day from the agent, to that person only; a fixed email with no agent-written text; one-click "Not me" that also blocks every later sign-up naming them ([§9](#9-not-me-complaints-and-refusals)) |
+| A person used as a target: someone names their address to flood or alarm them | One live sign-up per person; 3 sign-ups and 5 code emails a day per base address (`+tag` and Gmail dot variants included); 3 code emails an hour per sign-up; 10 emails a day from the agent, to that person only; a fixed email with no agent-written text; one-click "Not me" that also blocks every later sign-up naming them ([§9](#9-not-me-complaints-and-refusals)) |
 | An agent verifying itself without its person, by guessing the code | 6 digits, 10 attempts per code, 30 failures per sign-up, at most 5 codes a day: at most 30 guesses in 10^6 per sign-up ([§6.2](#62-post-v1agent-signupverify)) |
 | Throwaway inboxes on a reputable domain, used to open accounts at other services | No `accounts:request`; `accounts.require_approval: true` in the overlay, so codes from services are held and `wait` refuses them; nobody can release held mail before verification ([§4](#4-while-provisional)) |
 | Squatting names, or look-alikes of brands | Reserved names, `RESERVED_SUFFIXES` and the confusable fold; the `agent.` prefix of every address; each name costs a sign-up slot ([§2.3](#23-the-address-and-the-username)) |
-| Bounces from invented or mistyped addresses on the shared domain | The mail-domain check before any mail ([§3.3](#33-the-human-email-rules)); a hard bounce marks the person unreachable and stops every further email to them; the sign-up-mail breaker ([§13.2](#132-the-automatic-switch)) |
+| Bounces from invented or mistyped addresses on the shared domain | The mail-domain check before any mail ([§3.3](#33-the-human-email-rules)); a hard bounce marks the person unreachable and stops every further email to them; the sign-up-mail breaker ([§13.2](#132-the-automatic-switch)), which also stops every provisional workspace's sends |
 | Complaints on the shared domain | One-click refusal in the headers; a complaint refuses and erases the sign-up; the breaker |
 | Free compute and storage | No triage, image text or agentic search; at most 50 screening model calls a day; low inbound caps; no uploads or signed links; Free allowances; 7-day life |
-| An agent of this deployment reading the code meant for its "person" | Hosted human addresses refused at sign-up, at replacement and at verification; identities refused at a live sign-up's human address ([§3.3](#33-the-human-email-rules)) |
+| An agent of this deployment reading the code meant for its "person" | Hosted human addresses refused at sign-up, at replacement and at verification, compared without their `+tag`, which inbound routing ignores; identities refused at a live sign-up's human base address ([§3.3](#33-the-human-email-rules)) |
 | Abuse after verification | The verified workspace is an ordinary Free workspace: the new-workspace ramp from `verified_at`, identity and tenant auto-pause (FR-DLV-3, FR-DLV-6), the shared-domain breaker and the `free_sending` switch, one Free workspace per person |
 
 ### 13.2 The automatic switch
@@ -950,7 +994,7 @@ A new containment rule joins [Observability § 5.6](observability.md#56-automati
 
 | Rule | Trigger | Action | Undone by |
 |---|---|---|---|
-| `agent_signup_off` | Over the last 24 hours of sign-up outcomes ([§13.3](#133-outcomes-of-sign-up-mail)): bounced > 5% with ≥ 50 outcomes; or complained > 0.5% with ≥ 200 outcomes; or 5 or more complaints, whatever the count | The `ops_switches` row `agent_signup` becomes `off` (`set_by = 'auto'`): new sign-ups, resends and replacements get `403 signup_closed` (`paused`). Verification by code, link and claim, refusals, abandonment and expiry continue. Audit `ops.switch`; page `containment:agent_signup_off` | `PUT /v1/platform/switches` `{"name": "agent_signup", "state": "on"}` (platform key, `platform:ops`) |
+| `agent_signup_off` | Over the last 24 hours of sign-up outcomes ([§13.3](#133-outcomes-of-sign-up-mail)): bounced > 5% with ≥ 50 outcomes; or complained > 0.5% with ≥ 200 outcomes; or 5 or more complaints, whatever the count | The `ops_switches` row `agent_signup` becomes `off` (`set_by = 'auto'`): new sign-ups, resends and replacements get `403 signup_closed` (`paused`), and every send of a provisional tenant gets `403 policy_denied` (`signup_paused`). Verification by code, link and claim, refusals, abandonment and expiry continue. Audit `ops.switch`; page `containment:agent_signup_off` | `PUT /v1/platform/switches` `{"name": "agent_signup", "state": "on"}` (platform key, `platform:ops`) |
 
 The thresholds are Pylota Mail choices. They are evaluated in the delivery consumer, where the outcomes
 are ([Observability § 5.6](observability.md#56-automatic-containment)). The bounce threshold is the
@@ -1003,9 +1047,11 @@ nothing twice.
   same path as every request, so a miss and a mismatch cost the same.
 - **What the routes reveal.**
   - Whether a username is taken: public anyway, because mail to the address is accepted or refused.
-  - About a person: one bit, "this address cannot take a sign-up today", merged from five causes
-    ([§3.4](#34-admission-budgets)). Never whether the address has an account, an invitation, a
-    workspace or a refusal.
+  - About a person: one bit, "this address cannot take a sign-up today", merged from five causes that
+    give the same body and cost the caller the same budget ([§3.4](#34-admission-budgets)). Never whether
+    the address has an account, an invitation or a workspace. A refusal is permanent while the other
+    causes end within 7 days, so a caller who probes one address daily for more than a week can infer a
+    refusal; that is the price of a refusal that lasts.
   - The claim page: only to someone who already holds the key, and only what `GET /v1/agent-signup`
     already shows that holder.
   - The verify and refuse pages: only for a valid token, which only the person's mailbox received.
@@ -1219,7 +1265,7 @@ through MCP; it signs up over REST (or with the CLI or an SDK) and then uses the
 | MCP `mail_signup_set_human` | `PUT /v1/agent-signup/human` (`human_email`) | Keys of a provisional sign-up |
 | CLI `pmail agent-signup create --username U --human-email E [--agent-name N] [--source S] --accept-terms [--profile P] [--print-key]` | `POST /v1/agent-signup` without a key. Writes the returned key into the profile (the config file's `0600` rules), printing it only with `--print-key` | – |
 | CLI `pmail agent-signup status\|verify <code>\|resend\|set-human <email>\|abandon` | The other five routes (`abandon` asks for the typed address) | – |
-| CLI `pmail agent-signups list [--state S] [--since T]` | `GET /v1/platform/agent-signups` (platform key) | – |
+| CLI `pmail agent-signups list [--state S] [--since T] [--network N]` | `GET /v1/platform/agent-signups` (platform key; `--since` is `created_after`, an RFC 3339 time or a date; `--network` the 16-hex network hash of a row) | – |
 | CLI `pmail ops switch agent_signup on\|off` | `PUT /v1/platform/switches` | – |
 
 Annotations: `mail_signup_status` is a read tool (`readOnlyHint: true`, `idempotentHint: true`,
@@ -1246,7 +1292,7 @@ agent must not be able to do that from a tool call.
 
 | Alert | Kind | Condition | Runbook step |
 |---|---|---|---|
-| `agent_signup_spike` | ticket | The state-alert evaluator counts `agent_signup.create` audit rows: the last hour has at least 20 and at least three times the hourly average of the previous 7 days | List with `pmail agent-signups list --since 1h`; look for one network or source; if it is abuse, `pmail ops switch agent_signup off` |
+| `agent_signup_spike` | ticket | The state-alert evaluator counts `agent_signup.create` audit rows: the last hour has at least 20 and at least three times the hourly average of the previous 7 days | List with `pmail agent-signups list --since <the time an hour ago, RFC 3339>`; look for one network or source, then list that network's sign-ups with `--network <hash>`; if it is abuse, `pmail ops switch agent_signup off` |
 | `agent_signup_cap_80` | ticket | Today's (UTC) `sysmail:signup:deployment` counter reaches 80% of `PM_AGENT_SIGNUP_DAILY_CAP` | Decide whether to raise the variable |
 | `containment:agent_signup_off` | page | The rule of [§13.2](#132-the-automatic-switch) fired | Read the bounce and complaint counts, look at the sign-ups of the last day, fix the cause, then switch it back on |
 
@@ -1307,13 +1353,15 @@ with the amendment of FR-IDN-2 below.
   and brand names refused), two concurrent sign-ups for one name **must** give it to exactly one, and a
   username **must never** be released or reused.
 - **FR-ASU-4** The human address **must** be refused when it is on a placeholder or disposable domain, when
-  this deployment receives its mail, or when its domain cannot receive mail, before anything is written or
+  this deployment receives its mail (also through a `+tag` that inbound routing removes), or when its domain
+  cannot receive mail, before anything is written or
   sent; and it **must not** be refused, or answered differently, because it belongs to an existing console
   user.
 - **FR-ASU-5** Sign-ups **must** be bounded by `RL_SIGNIN`, by exact daily budgets per client network, per
   ASN, per person and per deployment, and by one live provisional sign-up per person, the person counted by
-  base address (`+tag` removed); every refusal that concerns a person **must** be one indistinguishable
-  answer.
+  base address (`+tag` removed, and for Gmail every dot removed and `googlemail.com` read as `gmail.com`);
+  every refusal that concerns a person **must** be one indistinguishable answer that costs the caller the
+  same budget.
 - **FR-ASU-6** Until verified, every key of the workspace **must** act with at most `identities:read`,
   `messages:read`, `messages:send`, `messages:write`, `attachments:read`, `search:read`, `events:read` and
   the implicit `usage:read`; it **must not** mint keys, create webhooks, domains, identities, lists or
@@ -1342,15 +1390,17 @@ with the amendment of FR-IDN-2 below.
 - **FR-ASU-12** A signed-in person **must** be able to claim a provisional workspace by entering its key
   only when their sign-in address equals the named human's address; a workspace created by a partner key,
   or any key that is not a provisional agent sign-up's, **must never** be claimable.
-- **FR-ASU-13** The named person **must** be able to refuse in one click, without signing in; a refusal or
+- **FR-ASU-13** The named person **must** be able to refuse in one click, without signing in, for 90 days
+  after each code email, also once the sign-up has ended; a refusal or
   a complaint **must** end and erase the provisional workspace that names them and **must** refuse every
   later sign-up naming them, until they lift it in the console.
 - **FR-ASU-14** A provisional workspace **must** be erased by a tenant-scope erasure, with its receipt, when
   7 days pass, when its agent abandons it, or when its person refuses it; its code emails **must** be erased
   from the system identity's mailbox, and the person **must** receive no further mail about it.
 - **FR-ASU-15** Bounces and complaints of sign-up mail and of provisional workspaces **must** be counted
-  deployment-wide, and above the thresholds of [§13.2](#132-the-automatic-switch) new sign-up mail **must**
-  stop automatically and page the operator; a sign-up spike and 80% of the daily cap **must** alert.
+  deployment-wide, and above the thresholds of [§13.2](#132-the-automatic-switch) new sign-up mail and every
+  send of a provisional workspace **must** stop automatically and page the operator; a sign-up spike and 80%
+  of the daily cap **must** alert.
 - **FR-ASU-16** No log, audit row, idempotency record or event **may** hold the human's address, a code, a
   link or refuse token, or a key; every new store **must** be covered by the tenant-scope erasure or hold
   only keyed hashes.
@@ -1368,13 +1418,13 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 |---|---|---|---|---|
 | X1 | A sign-up while `PM_AGENT_SIGNUP` is `off`, `PM_SIGNUP` is `waitlist` or `closed`, billing is off or not started, or the console is off; `PM_AGENT_SIGNUP` set to a value other than `on` or `off` | `403 signup_closed` (`disabled`), nothing written and no budget spent; a malformed variable is `config_invalid` | S | `it::signup::x1_feature_gates`, `platform::config::startup_rules` |
 | X2 | `PM_AGENT_SIGNUP` turned `off`, or `PM_SIGNUP` changed from `open`, while provisional sign-ups exist | New sign-ups `403 signup_closed`; existing ones still verify (code, link, claim), resend, replace, refuse, abandon and expire on time | S | `it::signup::x2_off_with_live_signups` |
-| X3 | The `agent_signup` switch is `off` (automatically or by hand) | New sign-ups, resends and replacements `403 signup_closed` (`paused`); verification, claim, refusal, abandonment and expiry continue | S | `it::signup::x2_off_with_live_signups` |
+| X3 | The `agent_signup` switch is `off` (automatically or by hand) | New sign-ups, resends and replacements `403 signup_closed` (`paused`); every send of a provisional workspace, to its human included, `403 policy_denied` (`signup_paused`); verification, claim, refusal, abandonment and expiry continue | S | `it::signup::x2_off_with_live_signups`, `core::policy::x21_provisional_send_steps` |
 | X4 | Two sign-ups race for one username, or for `acme` and `acrne` | Exactly one `201`; the other `409 username_taken`; both spent their admission slot | S | `it::signup::x4_username_race` |
 | X5 | A username that is reserved, confusable with a reserved name, a brand of `RESERVED_SUFFIXES`, prefixed `pm-`, non-ASCII, malformed, or equal to an existing tenant's slug (a Pylota operator's included) | `400 address_reserved`, `address_unsupported` or `address_invalid`, or `409 username_taken`; nothing written | S | `core::signup::x5_username_rules`, `it::signup::x4_username_race` |
 | X6 | The username of a sign-up that expired, was abandoned or refused, or of any erased workspace | `409 username_taken` for ever; the address stays tombstoned and gets `550 5.1.1` | S | `it::signup::x4_username_race` |
 | X7 | A human address on `example.com`, `example.net`, `example.org`, under `.test`, `.example`, `.invalid` or `.localhost`, or `simulator.invalid` | `400 invalid_request` (`human_email_not_allowed`) before anything is written or sent | S | `core::signup::x7_human_email_rules` |
 | X8 | A human address on a disposable domain or in `PM_SIGNUP_BLOCKED_DOMAINS` | As X7 | S | `core::signup::x7_human_email_rules`, `it::signup::create_and_answer` |
-| X9 | A human address this deployment receives: on the platform domain (the agent's own future address included), or an identity's `pending`, `active` or `retiring` address on a custom domain | As X7, with the same reason, so the answer does not say which | S | `core::signup::x7_human_email_rules`, `it::signup::x44_hosted_race` |
+| X9 | A human address this deployment receives: on the platform domain (the agent's own future address included), or an identity's `pending`, `active` or `retiring` address on a custom domain, also written with a `+tag` (`ops+x@corp.example` for the identity `ops@corp.example`) | As X7, with the same reason, so the answer does not say which | S | `core::signup::x7_human_email_rules`, `it::signup::x44_hosted_race` |
 | X10 | The human address's domain does not exist, publishes only a null MX, or has neither MX nor address records; a domain with no MX but an A record | `400 invalid_request` (`no_mail_domain`) for the first three; the implicit MX (RFC 5321 §5.1) is accepted | S | `it::signup::x10_mail_domain` |
 | X11 | Both DoH resolvers fail or time out | `503 unavailable` (`dns_unavailable`, `Retry-After: 30`); nothing written or counted | S | `it::signup::x10_mail_domain` |
 | X12 | Malformed JSON; a body over 4,096 bytes; an unknown field; `accept_terms` missing or `false`; an SMTPUTF8 or over-long human address; an `agent_name` with CR or LF or over 78 characters; a `source` with `@` or over 64 characters | `400 invalid_request`, `400 address_unsupported`, `400 address_invalid` or `413 payload_too_large`; nothing written or counted | S | `core::signup::x7_human_email_rules`, `it::signup::create_and_answer` |
@@ -1382,7 +1432,7 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 | X14 | A sixth sign-up from one IPv4 address, or one IPv6 /64 with rotating addresses, in a UTC day | `429 signup_limit_reached` (`network`, `resets_at` at 00:00 UTC) | S | `it::signup::x13_admission_budgets` |
 | X15 | The 101st sign-up of the day from one ASN; the deployment's daily cap reached | `429 signup_limit_reached` (`asn`, or `deployment`); `agent_signup_cap_80` fired at 80% | S | `it::signup::x13_admission_budgets` |
 | X16 | The `signup` class has used 5% of the system identity's day | Sign-ups, resends and replacements `429 signup_limit_reached` (`deployment`); sign-in mail still goes out | S | `it::signup::x13_admission_budgets` |
-| X17 | A sign-up naming a person who already has a live sign-up (also by a `+tag` variant), who refused, or who was named 3 times or emailed 5 times today | `429 signup_limit_reached` (`human_email`), byte-identical in all five cases apart from `request_id`; no email sent | S | `it::signup::x17_human_scope_identical` |
+| X17 | A sign-up naming a person who already has a live sign-up (also by a `+tag` variant, or a dotted or `googlemail.com` form of a Gmail address), who refused, or who was named 3 times or emailed 5 times today | `429 signup_limit_reached` (`human_email`), byte-identical in all five cases apart from `request_id`, each having spent the caller's network, ASN and deployment budgets alike; no email sent | S | `it::signup::x17_human_scope_identical` |
 | X18 | Two sign-ups naming one person race | One commits; the other `429 signup_limit_reached` (`human_email`) | S | `it::signup::x17_human_scope_identical` |
 | X19 | The human address belongs to an existing console user, a workspace owner or a pending invitee | The sign-up is accepted exactly as for an unknown address; verification adds the existing person as owner, by the verified address | S | `it::signup::x19_existing_person` |
 | X20 | The agent loses the `201` answer and retries the same request | No replay (`x-idempotency: none`): the retry gets `409 username_taken` or `429` (`human_email`); the person can still confirm by the link, then mint a key in the console; otherwise the sign-up expires after 7 days | S | `it::signup::x20_lost_answer` |
@@ -1396,7 +1446,7 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 | X28 | The right code submitted twice, or at the same time; the agent's next request after success | One verification; the other `200` with `already_verified`; the next request already has the verified permissions and policy (no cache) | S | `it::signup::x28_verify_effects` |
 | X29 | A code more than 24 hours old | `422 signup_code_invalid` (`expired`); a resend issues a new code | S | `it::signup::x26_code_limits` |
 | X30 | A fourth code email within an hour for one sign-up; a sixth code email to one person in a UTC day | `429 signup_limit_reached` (`resend`, with `Retry-After`; or `human_email`); no email | S | `it::signup::x30_resend_and_replace` |
-| X31 | After a replacement: the agent submits the old person's code; the old person opens their link; the old person clicks "Not me" | `422 signup_code_invalid` (`superseded`); "This link has expired or was already used"; only the old person's refusal row is written and the sign-up continues | S | `it::signup::x30_resend_and_replace` |
+| X31 | After a replacement: the agent submits the old person's code; the old person opens their link; the old person clicks "Not me" | `422 signup_code_invalid` (`wrong`, counted as a failure, as any code that is not the current one); "This link has expired or was already used"; only the old person's refusal row is written and the sign-up continues | S | `it::signup::x30_resend_and_replace` |
 | X32 | A third replacement; a replacement with the current address; a replacement after verification; two replacements at once; the expiry after replacements | `422 signup_replace_limit`; treated as a resend; `409 signup_not_pending`; one wins; `expires_at` unchanged | S | `it::signup::x30_resend_and_replace` |
 | X33 | The right code arrives as the 7 days end and the expiry cron runs | Exactly one of verification and expiry commits; after an expiry the agent gets `409 signup_not_pending` (`expiring`), then `401 key_revoked` | S | `it::signup::x33_verify_races_expiry` |
 | X34 | A claim races the link or the code; a claim by a person whose address is not the named one | One verification; the same person sees success; a lost race to an end shows "changed while you were claiming"; a mismatch shows the masked hint and changes nothing | S | `it::signup::x34_claim` |
@@ -1405,11 +1455,11 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 | X37 | A mail scanner opens the link; the `POST` is sent twice; a browser has another person's session; the terms box is not ticked | `GET` changes nothing; the second `POST` shows "expired or already used"; whose session it is, and sign-out, with nothing confirmed; the page again, marked | S | `it::signup::x36_link_flow` |
 | X38 | The human address hard-bounces | `human_status = 'bounced'`; sends to it `403 policy_denied` (`signup_human_unreachable`); resends `409 signup_human_unreachable`; a replacement is allowed; otherwise expiry | S | `it::signup::x38_outcomes` |
 | X39 | The person reports a code email, or the agent's mail, as spam | Refusal recorded (`complaint`); the sign-up ends `refused` and is erased; later sign-ups naming them `429` (`human_email`) | S | `it::signup::x38_outcomes` |
-| X40 | The person clicks "Not me": `GET`, the confirming `POST`, a mail provider's one-click `POST` without cookies or `Origin`; on a sign-up already verified; while a verification races it | Erased and refused; the one-click `POST` works with no session and never redirects; on a verified sign-up only the refusal is recorded; a lost race still records the refusal | S | `it::signup::x40_refusal`, `live::signup::x40_refuse_one_click_headers` |
+| X40 | The person clicks "Not me": `GET`, the confirming `POST`, a mail provider's one-click `POST` without cookies or `Origin`; on a sign-up already verified; while a verification races it; from an email whose sign-up expired, was abandoned or was erased, within 90 days | Erased and refused; the one-click `POST` works with no session and never redirects; on a verified sign-up only the refusal is recorded; a lost race still records the refusal; after the sign-up ended only the refusal is recorded | S | `it::signup::x40_refusal`, `live::signup::x40_refuse_one_click_headers` |
 | X41 | A refused person later wants an agent to name them | **Allow again** in `/console/settings` after sign-in (Google or GitHub when the system identity suppressed their address); the next sign-up is accepted | S | `it::signup::x40_refusal` |
 | X42 | The agent abandons (`DELETE /v1/agent-signup`) | `202`; the tenant is erased; the key gets `401 key_revoked`; the username stays taken; budgets are not refunded; the person gets nothing | S | `it::signup::x42_end_and_erasure` |
 | X43 | The provisional agent calls `DELETE /v1/identities/{its own}` | `403 permission_denied` (`signup_unverified`): it holds neither `identities:write` nor `erasure:manage`; abandoning is the route | S | `it::signup::x23_permission_overlay` |
-| X44 | Another tenant creates an identity, or adds an address, equal to a live sign-up's human address; or did so before the verification | `409 address_taken` while the sign-up is live; a verification after such a create gets `409 signup_cannot_verify` (`human_email_hosted`) | S | `it::signup::x44_hosted_race` |
+| X44 | Another tenant creates an identity, or adds an address, equal to a live sign-up's human address or to its base without the `+tag`; or did so before the verification | `409 address_taken` while the sign-up is live; a verification after such a create gets `409 signup_cannot_verify` (`human_email_hosted`) | S | `it::signup::x44_hosted_race` |
 | X45 | The person already owns a Free workspace, also under a `+tag` variant | `409 signup_cannot_verify` (`workspace_limit`) on the code path, the matching console page; the code is not burned; after an upgrade or deletion the same code verifies | S | `it::signup::x19_existing_person` |
 | X46 | The human address is a `users` row with `status = 'disabled'` | `409 signup_cannot_verify` (`person_disabled`); nothing changes | S | `it::signup::x19_existing_person` |
 | X47 | The operator suspends a provisional workspace | Inbound gets a temporary failure, sends `403 tenant_suspended`, verification, link and claim refused; the expiry erases it on time | S | `it::signup::x47_suspended_and_erased` |
@@ -1435,32 +1485,32 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 | Test | Proves | Covers |
 |---|---|---|
 | `core::signup::x5_username_rules` | Lower-casing and the pattern; the non-ASCII, confusable, reserved, `RESERVED_SUFFIXES` and `pm-` refusals with their codes; the fold used for uniqueness (`acrne` folds to `acme`); the address `agent.{username}@` stays within 40 characters for a 32-character username | X5, FR-ASU-3 |
-| `core::signup::x7_human_email_rules` | Normalisation (case, IDNA); syntax and SMTPUTF8 refusals; every RFC 2606 placeholder name and `simulator.invalid`; the disposable list and `PM_SIGNUP_BLOCKED_DOMAINS`; hosted addresses (platform domain and names under it, address rows by state); one reason for the three classes; the base address (`jo+x@` → `jo@`) and its keyed hash | X7–X9, X12, FR-ASU-4 |
-| `core::signup::overlay_sets` | The provisional and verified permission sets exactly as [§4.1](#41-permissions); `overlay_permissions` is an intersection; the policy overlay takes the stricter value per field and class (numbers lower, switches strict, enums ordered) and never loosens a stricter deployment value | X23, X56, FR-ASU-6, FR-ASU-7 |
-| `core::signup::tokens_and_codes` | Codes uniform over 000000–999999 by rejection sampling from fixed RNG bytes; the code-hash input `asu:{id}:{seq}:{code}`; the refuse token round-trips, and a changed field, another kid, an expired time or a notification token are refused | X40, FR-ASU-8, FR-ASU-9 |
-| `core::policy::x21_provisional_send_steps` | Step 4 passes for a provisional identity without owner; step 7a refuses any recipient but the human (to, cc, bcc, reply target, forward) with `signup_unverified`, refuses everything when `human_status = 'bounced'`, and does nothing for other tenants; the overlay caps give `daily_cap_reached` and `too_many_recipients` | X21, X22, FR-ASU-7 |
+| `core::signup::x7_human_email_rules` | Normalisation (case, IDNA); syntax and SMTPUTF8 refusals; every RFC 2606 placeholder name and `simulator.invalid`; the disposable list and `PM_SIGNUP_BLOCKED_DOMAINS`; hosted addresses (platform domain and names under it, address rows by state, an address row written with a `+tag`); one reason for the three classes; the base address (`jo+x@` → `jo@`, `J.O+x@googlemail.com` → `jo@gmail.com`, dots kept on every other domain) and its keyed hash | X7–X9, X12, FR-ASU-4, FR-ASU-5 |
+| `core::signup::overlay_sets` | The provisional and verified permission sets exactly as [§4.1](#41-permissions); `overlay_permissions` is an intersection; the policy overlay takes the stricter value per field and class (numbers lower, switches strict, enums ordered) and never loosens a stricter deployment value; `drafts.require_approval` is `new_recipients`, so step 16a lets a send to the human through | X23, X56, FR-ASU-6, FR-ASU-7 |
+| `core::signup::tokens_and_codes` | Codes uniform over 000000–999999 by rejection sampling from fixed RNG bytes; the code-hash input `asu:{id}:{seq}:{code}`; the refuse token round-trips and expires 90 days after issue, and a changed field, another kid, an expired time or a notification token are refused | X40, FR-ASU-8, FR-ASU-9, FR-ASU-13 |
+| `core::policy::x21_provisional_send_steps` | Step 4 passes for a provisional identity without owner; step 7a refuses any recipient but the human (to, cc, bcc, reply target, forward) with `signup_unverified`, refuses everything when `human_status = 'bounced'` and, with `signup_paused`, while the `agent_signup` switch is `off`, and does nothing for other tenants; the overlay caps give `daily_cap_reached` and `too_many_recipients` | X21, X22, FR-ASU-7 |
 | `it::signup::x1_feature_gates` | Each condition of [§1](#1-when-agent-sign-up-is-on) alone gives `403 signup_closed` with its reason and writes nothing; all of them together create | X1, FR-ASU-1 |
-| `it::signup::x2_off_with_live_signups` | A sign-up created while on, then the variable turned off (and, separately, `PM_SIGNUP` set to `waitlist`, and the switch set `off`): verify, link, claim, refuse, abandon and expiry work; new sign-ups refused; with the switch off, resend and replace refused too | X2, X3, FR-ASU-1 |
+| `it::signup::x2_off_with_live_signups` | A sign-up created while on, then the variable turned off (and, separately, `PM_SIGNUP` set to `waitlist`, and the switch set `off`): verify, link, claim, refuse, abandon and expiry work; new sign-ups refused; with the switch off, resend and replace refused too, and every provisional send refused with `signup_paused` | X2, X3, FR-ASU-1, FR-ASU-15 |
 | `it::signup::create_and_answer` | The `201` body; the rows of [§2.1](#21-what-a-sign-up-creates) in one batch with their audit rows (`agent_signup.create` with `tenant_id = NULL`); the key works and is `pmk_live_`; no stored record holds the secret; the email submitted through the system identity with its idempotency key and metadata; malformed and oversized bodies refused before counting; `Idempotency-Key` ignored | X8, X12, X55, FR-ASU-2 |
 | `it::signup::x4_username_race` | Two concurrent sign-ups for one name, and for `acme` and `acrne`: one `201`; the name of an erased sign-up and of a Pylota operator's slug stay `409 username_taken`; the erased address answers `550 5.1.1` | X4–X6, FR-ASU-3 |
 | `it::signup::x10_mail_domain` | With the DoH fake: MX present, null MX, implicit MX by A record, NXDOMAIN, neither record; the first resolver failing and the second answering; both failing gives `503` and spends nothing | X10, X11, FR-ASU-4 |
 | `it::signup::x13_admission_budgets` | `RL_SIGNIN`'s 11th request; the sixth sign-up of a network, also by rotating addresses in one IPv6 /64; the 101st of an ASN; the deployment cap and the 80% alert; the class share stopping sign-up mail while sign-in mail is sent; `resets_at` at 00:00 UTC | X13–X16, FR-ASU-5 |
-| `it::signup::x17_human_scope_identical` | The five person-scope causes give byte-identical bodies apart from `request_id`; a `+tag` variant counts as the same person; two racing sign-ups for one person give one `201` | X17, X18, FR-ASU-5 |
+| `it::signup::x17_human_scope_identical` | The five person-scope causes give byte-identical bodies apart from `request_id` and each spend the caller's network, ASN and deployment budgets once; a `+tag` variant and a dotted or `googlemail.com` form of a Gmail address count as the same person; two racing sign-ups for one person give one `201` | X17, X18, FR-ASU-5 |
 | `it::signup::x19_existing_person` | A sign-up naming an existing user is answered as for an unknown address; verification adds them as owner and creates no second `users` row; an owner of a Free workspace (also by `+tag`) gets `workspace_limit` without burning the code, and the same code verifies after an upgrade; a disabled user gets `person_disabled` | X19, X45, X46, FR-ASU-10 |
 | `it::signup::x20_lost_answer` | A retried sign-up after a dropped answer gets `409 username_taken`; the person confirms by the link, signs in, mints a key and the agent works with it | X20 |
-| `it::signup::x21_send_only_to_human` | Sends to the human pass up to 10 a day; every other recipient form is refused with nothing stored; the `free_sending` switch, the breaker and a sending pause refuse as for a Free workspace | X21, X22, X51, FR-ASU-7 |
+| `it::signup::x21_send_only_to_human` | Sends to the human pass up to 10 a day, step 16a included; every other recipient form is refused with nothing stored; the `free_sending` switch, the breaker and a sending pause refuse as for a Free workspace | X21, X22, X51, FR-ASU-7 |
 | `it::signup::x23_permission_overlay` | A table test over every route and MCP tool: with the provisional key each route outside the provisional set answers `permission_denied` (`signup_unverified`), the upload routes included; after verification the verified set is allowed; `DELETE /v1/identities/{own}` refused; platform, partner, other-tenant and no-sign-up keys on the six routes get `403 scope_denied` or `404 signup_not_found` | X23, X43, X63, FR-ASU-6 |
 | `it::signup::x24_service_codes_held` | A code from a service is held `account_unapproved` and hidden; `wait(kind=verification)` refused; the inbound caps of the overlay throttle; no triage job runs; the 51st screening model call of the day is refused and its message quarantined `screening_unavailable` | X24, X25, FR-ASU-7 |
 | `it::signup::x26_code_limits` | Ten wrong codes burn the code; 30 across resends lock the code path while the link works; 20 concurrent wrong codes make at most 10 comparisons; a code past 24 hours is `expired` | X26, X27, X29, FR-ASU-9 |
 | `it::signup::x28_verify_effects` | After the right code: the owner membership, the `users` row, the identity's owner, `provisional_until` cleared, `signup.verified` in `event_index` and the feed, the `account` email, the audit rows; the next request has the verified permissions and policy; a second correct code answers `already_verified`; the ramp counts from `verified_at` | X28, X58, FR-ASU-10 |
-| `it::signup::x30_resend_and_replace` | Resend limits per hour and per person; a new code invalidates the old; replacement limits, same-address resend, refusal after verification, two concurrent replacements, `expires_at` unchanged; the old person's code, link and refusal after a replacement; a resend or replacement between reserve and verify leaves the older code `superseded` | X30–X32, X59, FR-ASU-11 |
+| `it::signup::x30_resend_and_replace` | Resend limits per hour and per person; a new code invalidates the old; replacement limits, same-address resend, refusal after verification, two concurrent replacements, `expires_at` unchanged; the old person's code (`wrong`, a failure), link and refusal after a replacement; a resend or replacement between reserve and verify leaves the older code `superseded` | X30–X32, X59, FR-ASU-11 |
 | `it::signup::x33_verify_races_expiry` | With the fake clock at the 7-day boundary and the cron and a verification in parallel, exactly one commits, many times over; with the cron stopped, verification after the boundary is refused | X33, X57, FR-ASU-14 |
 | `it::signup::x34_claim` | Every row of the claim table of [§8](#8-claiming-in-the-console), including a Pylota partner tenant's key and the partner key; re-authentication required; a race with the link; the success page's revoke advice; the pasted key absent from logs, audit rows and the page | X34–X36, X50, FR-ASU-12 |
 | `it::signup::x36_link_flow` | The link `GET` changes nothing; the `POST` without the box changes nothing; another person's session confirms nothing; a two-factor person gets a pending step that confirms only on success; a second `POST` gets the expired page; terms recorded on the person | X36, X37, FR-ASU-10 |
 | `it::signup::x38_outcomes` | Delivery fixtures on the system identity's code emails and the provisional tenant's mail: `delivered` and hard `bounced` set `human_status`; a complaint refuses and erases; `CountSignupOutcome` is idempotent by event ID; crossing each threshold of [§13.2](#132-the-automatic-switch) sets the switch, writes the audit row and pages | X38, X39, X54, FR-ASU-15 |
-| `it::signup::x40_refusal` | The refuse `GET` and `POST`; a one-click `POST` with no cookie, CSRF token or `Origin`, never redirected; on a verified sign-up only the row; a refusal racing a verification; **Allow again** in settings | X40, X41, FR-ASU-13 |
+| `it::signup::x40_refusal` | The refuse `GET` and `POST`; a refusal from the email of an expired and erased sign-up records only the refusal; a one-click `POST` with no cookie, CSRF token or `Origin`, never redirected; on a verified sign-up only the row; a refusal racing a verification; **Allow again** in settings | X40, X41, FR-ASU-13 |
 | `it::signup::x42_end_and_erasure` | Abandonment, refusal and expiry each run the end batch: the tenant-scope erasure with its receipt and probes (`agent_signups` at zero), the message-scope erasures of the code emails, no email to the person; with a platform hold the erasure ends `completed_with_holds` | X42, X49, FR-ASU-14 |
-| `it::signup::x44_hosted_race` | An identity or address at a live sign-up's human address gets `409 address_taken`; one created before verification makes verification `human_email_hosted`; a hosted human address at sign-up is refused | X9, X44, FR-ASU-4 |
+| `it::signup::x44_hosted_race` | An identity or address at a live sign-up's human address, or at its base without the `+tag`, gets `409 address_taken`; one created before verification makes verification `human_email_hosted`; a hosted human address at sign-up is refused | X9, X44, FR-ASU-4 |
 | `it::signup::x47_suspended_and_erased` | A suspended provisional tenant: inbound temporary failure, sends and verification refused, expiry on time; an erasing or erased tenant: `401 key_revoked` and the generic pages | X47, X48 |
 | `it::signup::x52_mail_unavailable` | Platform domain `failing`: nothing submitted, `not_sent`, a later resend sends; the system identity paused or at its cap: `not_sent` and `system_mail_blocked`; a revoked `link` key makes the code `expired` and a resend works | X52, X53 |
 | `it::signup::x56_policy_view` | A platform key's policy write on a provisional tenant is stored but not effective; the view shows the overlay; after verification the stored value applies | X56 |
@@ -1553,7 +1603,7 @@ M30 (`events:read`, and the feed through which the agent learns of verification)
 | Placeholder and some provider domains refused | RFC 2606 names, disposable lists, hosted addresses and domains that cannot receive mail refused, before anything is sent | Exceed |
 | An address with a console account cannot be attached (409) | Accepted like any address and linked at verification by the verified address | Exceed: no account oracle |
 | Username becomes `username@agentmail.to`; a lost org keeps its username | Username becomes the workspace's suffix, address `agent.{username}@pylotamail.com`; never released | Match (never released); different address form, because the shared domain gives every workspace its own suffix |
-| Unverified: 1 inbox, 10 emails a day, only to the human, no domains, no key creation, no list or pod writes | One inbox, 10 a day to the human only with one recipient, no keys, webhooks, domains, identities, lists, drafts, uploads, service accounts, signing or agentic search; every guard at its strictest | Exceed |
+| Unverified: 1 inbox, 10 emails a day, only to the human, no domains, no key creation, no list or pod writes | One inbox, 10 a day to the human only with one recipient, no keys, webhooks, domains, identities, lists, drafts, uploads, service accounts, signing or agentic search; every guard strict | Exceed |
 | Unverified agents may receive codes from other services | Held by the ledger gate; `wait` refuses them | Exceed |
 | 6-digit code, 24 h, 10 attempts; while valid, a re-attach returns the same code | 6 digits, 24 h, 10 attempts per code, 30 failures per sign-up, constant-time compare, concurrent guesses bounded; a resend issues a new code (3 an hour, 5 a day per person) | Exceed |
 | Replace the human at most twice | At most twice, before verification, without extending the 7 days | Match |

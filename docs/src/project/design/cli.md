@@ -1852,7 +1852,7 @@ have no command: they are set only in the console ([Notifications §2](notificat
 | `waitlist invite` | `POST /v1/platform/waitlist/invite` (platform key, `platform:ops`) |
 | `agent-signup create` | `POST /v1/agent-signup` (no key; [Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli)) |
 | `agent-signup status\|verify\|resend\|set-human\|abandon` | `GET /v1/agent-signup`; `POST /v1/agent-signup/verify`; `POST /v1/agent-signup/resend`; `PUT /v1/agent-signup/human`; `DELETE /v1/agent-signup` (the sign-up's own key) |
-| `agent-signups list` | `GET /v1/platform/agent-signups` (platform key) |
+| `agent-signups list` | `GET /v1/platform/agent-signups` (platform key; `--state`, `--since` as `created_after`, `--network`) |
 | `metrics rates` | `GET /v1/metrics/rates` (`metrics:read`; [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)) |
 | `metrics events` | `GET /v1/metrics/events` (`metrics:read`) |
 | `ops status\|switch\|freeze\|unfreeze\|restore` | [§20](#20-ops) |

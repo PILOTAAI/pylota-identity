@@ -1244,14 +1244,17 @@ transaction that stores it):
    [Quarantine decision](#quarantine-decision), rule 6a included.
 8. **Insert the thread** if new ([Threading](threading.md#34-effects-on-the-thread-row)).
 
-   **`organized_here`**, before step 9, only for a calendar object: one indexed query sets the field in the
-   object ([Calendar invitations §4.2](calendar-invitations.md#42-ingest)):
+   **`organized_here`**, before step 9, only for a verified `reply`, `refresh` or `counter` (`false` for
+   every other object): one indexed query sets the field in the object, with `?2` its organizer and `?3`
+   the replier's party hash ([Calendar invitations §4.2](calendar-invitations.md#42-ingest)):
 
    ```sql
    SELECT 1 FROM messages
    WHERE calendar_uid_hash = ?1 AND direction = 'outbound'
      AND status NOT IN ('canceled','rejected','failed','suppressed')
      AND json_extract(calendar_json, '$.method') IN ('request','add','publish')
+     AND json_extract(calendar_json, '$.organizer.address') = ?2
+     AND EXISTS (SELECT 1 FROM json_each(calendar_json, '$.parties') p WHERE p.value = ?3)
    LIMIT 1;
    ```
 

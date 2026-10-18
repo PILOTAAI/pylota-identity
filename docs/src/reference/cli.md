@@ -2606,10 +2606,16 @@ Platform keys with `platform:ops`. Lists agent sign-ups, newest first, without a
 
 ```text
 pmail agent-signups list [--state provisional|verified|expired|abandoned|refused] [--since <time>]
+                         [--network <hash>]
 ```
+
+`--since` is the earliest creation time, RFC 3339 or a date
+([Naming identities and tenants](#naming-identities-and-tenants)); `--network` takes the 16-hex network
+hash shown in a row and lists only that network's sign-ups.
 
 ```bash
 pmail agent-signups list --state provisional --since 2026-10-16
+pmail agent-signups list --since 2026-10-17T09:00:00Z --network 3f9a0c1d2e4b5a69
 ```
 
 ---

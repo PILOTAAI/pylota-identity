@@ -136,9 +136,9 @@ exceptions per series or 100 attendees (`packages/kairos/src/sync.ts`, read 2026
 |---|---|---|
 | Decoded part size | 1 MiB (1,048,576 bytes) | Not parsed: `object_status: "too_large"` |
 | Content lines per object | 20,000 | `object_status: "too_complex"` |
-| One unfolded content line | 64 KiB | `too_complex` |
+| One unfolded content line | 64 KiB, except the value of an `ATTACH` or `IMAGE` property (inline bytes, RFC 7986 §5.10), which the reader skips without keeping it, up to the part size, and counts in `removed` | `too_complex` |
 | Parameters per property; one parameter value | 50; 1,024 bytes | `too_complex` |
-| Components of any kind per object | 500 | `too_complex` |
+| Components directly inside the `VCALENDAR`, of any kind | 1,100 (one primary, 1,000 overrides, 20 `VTIMEZONE`s and others); sub-components (`VALARM`, `STANDARD`, `DAYLIGHT`) are bounded by the rows below and the line count | `too_complex` |
 | `VEVENT`s with the primary's `UID` | 1 primary and 1,000 overrides parsed; 100 overrides kept in the object | Beyond 1,000: `too_complex`; beyond 100: `overrides_truncated`, `overrides_total` counts all |
 | `ATTENDEE` properties per component | 1,000 parsed; 100 kept | Beyond 1,000: `too_complex`; beyond 100: `attendees_truncated` ([§2.7](#27-parties)) |
 | `VTIMEZONE`s; observances per `VTIMEZONE`; `RDATE` values per observance | 20; 50; 100 | That `VTIMEZONE` is unusable: warning `vtimezone_unsupported` ([§2.5](#25-times-and-time-zones)) |
@@ -179,20 +179,26 @@ parameter is not an iMIP body part under RFC 6047 §2.4 (Note 2); it is still re
 **Components.** `VEVENT`s are read. `VTIMEZONE`s are read for time zones only. `VTODO`, `VJOURNAL` and
 `VFREEBUSY` are not read: their names are listed in `ignored_components`, and an object with no `VEVENT`
 is `unsupported`, with `reason: "no_vevent"` (V9). Unknown components (`X-…` or IANA tokens) are skipped
-whole and counted in `ignored_components` as `other`.
+whole and counted in `ignored_components` as `other`. An ignored component that carries an `ORGANIZER` or
+`ATTENDEE` makes the object unverified (`reason: "uid_mismatch"`, [§3.3](#33-reasons)): the consumer that
+reads the stored attachment would see scheduling data the verification did not cover.
 
-**Removed from what agents see** (V12). `VALARM` sub-components and `ATTACH` properties are dropped from
-the `calendar` object and counted in `removed.alarms` and `removed.attachments`: alarms are instructions to
-the recipient's own client (an `EMAIL` alarm sends mail to the addresses it lists, RFC 5545 §3.6.6, read
-2026-10-17), and an `ATTACH` is a URL or inline bytes from the sender. Both stay in the stored attachment.
-Every `X-` property is dropped from the object too (`X-ALT-DESC`, `X-MICROSOFT-CDO-*` and the rest); the
-object carries only the properties this page names.
+**Removed from what agents see** (V12). `VALARM` sub-components and `ATTACH` and `IMAGE` properties are
+dropped from the `calendar` object and counted in `removed.alarms`, `removed.attachments` and
+`removed.images`: alarms are instructions to the recipient's own client (an `EMAIL` alarm sends mail to the
+addresses it lists, RFC 5545 §3.6.6, read 2026-10-17), and an `ATTACH` or an `IMAGE` (RFC 7986 §5.10, read
+2026-10-18) is a URL or inline bytes from the sender. All stay in the stored attachment. Every `X-` property
+is dropped from the object too (`X-ALT-DESC`, `X-MICROSOFT-CDO-*` and the rest); the object carries only the
+properties this page names, `CONFERENCE` among them ([§2.9](#29-the-calendar-object)).
 
 ### 2.4 Primary component and overrides
 
-All `VEVENT`s of one object should share one `UID` (RFC 5546 §3.2.2 for `REQUEST`). The reader keeps the
-`VEVENT`s whose `UID` equals the first `VEVENT`'s and ignores the others with the warning `uid_mismatch`.
-Among the kept ones:
+All `VEVENT`s of one iTIP message must share one `UID`: the `REQUEST`, `REPLY`, `CANCEL` and
+`DECLINECOUNTER` tables of RFC 5546 §3.2 say so, and `ADD`, `REFRESH` and `COUNTER` carry exactly one
+`VEVENT` (read 2026-10-18). The reader keeps the `VEVENT`s whose `UID` equals the first `VEVENT`'s and
+ignores the others with the warning `uid_mismatch`; an object with such a `VEVENT`, or a part with a second
+`VCALENDAR`, is not verified (`reason: "uid_mismatch"`), because the stored attachment that a consumer may
+parse would carry components the verification did not cover. Among the kept ones:
 
 - the **primary component** is the one without `RECURRENCE-ID`, or, when every kept component has one (a
   `CANCEL` or `REQUEST` for single instances, V6), the one with the earliest `RECURRENCE-ID`;
@@ -222,9 +228,9 @@ returned as a **time value**:
 | `tz_resolution` | When | `utc` | `tz` |
 |---|---|---|---|
 | `utc` | The value ends in `Z` | the value | `null` |
-| `iana` | The `TZID` is an IANA zone name known to `chrono-tz` 0.10.4 (compared case-insensitively) | computed | the zone |
-| `windows` | The `TZID`, trimmed and with runs of spaces collapsed, is a Windows zone name in the CLDR table below | computed | the mapped zone |
-| `prefixed` | The `TZID` starts with `/` (a globally unique identifier, RFC 5545 §3.2.19) and its longest `/`-separated suffix is an IANA name, as in `/mozilla.org/20050126_1/Europe/London` or `/citadel.org/20190914_1/Europe/Paris` | computed | the zone |
+| `iana` | The `TZID` is an IANA zone name known to `chrono-tz` 0.10.4 (compared case-insensitively) | computed (from the object's definition when it has a usable one, below) | the zone |
+| `windows` | The `TZID`, trimmed and with runs of spaces collapsed, is a Windows zone name in the CLDR table below | computed, as for `iana` | the mapped zone |
+| `prefixed` | The `TZID` starts with `/` (a globally unique identifier, RFC 5545 §3.2.19) and its longest `/`-separated suffix is an IANA name, as in `/mozilla.org/20050126_1/Europe/London` or `/citadel.org/20190914_1/Europe/Paris` | computed, as for `iana` | the zone |
 | `vtimezone` | None of the above, and the object defines that `TZID` in a usable `VTIMEZONE` | computed from the definition | `null` |
 | `unknown` | None of the above (warning `unknown_tzid`) | `null` | `null` |
 | `floating` | No `TZID` and no `Z` | `null`; `floating: true` on the object | `null` |
@@ -243,10 +249,14 @@ test `core::ical::windows_zones_table` fails when any mapped value does not pars
 `chrono_tz::Tz::from_str`; the generator then resolves it through the tzdb `backward` file. AgentMail does
 not import invitations whose time zones are Windows names ([§20](#20-compared-with-agentmail-read-2026-10-17)).
 
-**IANA wins over a definition.** A `TZID` that resolves by name (`iana`, `windows`, `prefixed`) uses the
-tzdb rules even when the object also defines it in a `VTIMEZONE`, because the current tzdb is the better
-source for future dates. When the definition's offset at the primary `DTSTART` differs from the tzdb
-offset, the warning `tz_definition_mismatch` is recorded (V4).
+**The object's definition wins over the name** (V4). The `TZID` parameter names the `VTIMEZONE` to use
+when the time is evaluated (RFC 5545 §3.2.19, read 2026-10-18), so the instant the organizer meant is the
+one its definition gives. A `TZID` that
+resolves by name (`iana`, `windows`, `prefixed`) and that the object also defines in a usable `VTIMEZONE`
+has its `utc` computed from the definition; `tz` still names the zone. When the tzdb offset at the primary
+`DTSTART` differs from the definition's, the warning `tz_definition_mismatch` is recorded, so a consumer
+that prefers the current tzdb rules can recompute from `local` and `tz`. An unusable definition
+(`vtimezone_unsupported`) falls back to the tzdb rules.
 
 **`VTIMEZONE` evaluation** (V3). For a `TZID` known only from its definition, `core::ical::vtimezone`
 computes the offset in force at a local time as RFC 5545 §3.6.5 defines it: the observance (`STANDARD` or
@@ -283,9 +293,10 @@ RFC 5545 §3.3.10 (read 2026-10-17): `FREQ` present once with one of its seven v
 not both; `UNTIL` of the `DTSTART` value type, in UTC when `DTSTART` is UTC or has a `TZID`; every `BY…`
 value inside its range; `BYSECOND`, `BYMINUTE` and `BYHOUR` absent when `DTSTART` is a date; `BYMONTHDAY`
 not with `WEEKLY`; `BYYEARDAY` not with `DAILY`, `WEEKLY` or `MONTHLY`; `BYWEEKNO` only with `YEARLY`;
-`BYSETPOS` only with another `BY…` part; no unknown part names. As Pylota Mail choices, `INTERVAL` must be
-1–1,000, `COUNT` 1–100,000 and each `BY…` list at most 366 values, so that a consumer that expands a valid
-rule is not handed a rule designed to exhaust it. `FREQ=SECONDLY`, `MINUTELY` and `HOURLY` are valid but add
+a numeric `BYDAY` value (`1MO`, `-1FR`) only with `MONTHLY` or `YEARLY`, and not with `YEARLY` when
+`BYWEEKNO` is present (read 2026-10-18); `BYSETPOS` only with another `BY…` part; no unknown part names.
+As Pylota Mail choices, `INTERVAL` must be 1–1,000, `COUNT` 1–100,000 and each `BY…` list at most 366
+values, so that a consumer that expands a valid rule is not handed a rule designed to exhaust it. `FREQ=SECONDLY`, `MINUTELY` and `HOURLY` are valid but add
 the warning `rrule_high_frequency`. A second `RRULE` (which RFC 5545 §3.6.1 says should not occur) is
 ignored with the warning `multiple_rrule`. An invalid rule changes nothing else: the object stays `parsed`
 and `rrule.valid` is `false` (V7).
@@ -356,6 +367,7 @@ The `calendar` field of the Message object (`null` when the message has no calen
   "summary": "MOT and service – AB12 CDE", "summary_truncated": false,
   "description": "Please leave the V5C in the glovebox…", "description_truncated": false,
   "location": "Brightwell Leeds, Unit 4",
+  "conference": [],
   "start": { "utc": "2026-10-20T08:00:00Z", "local": "2026-10-20T09:00:00", "date": null,
              "tzid": "GMT Standard Time", "tz": "Europe/London", "tz_resolution": "windows" },
   "end":   { "utc": "2026-10-20T09:30:00Z", "local": "2026-10-20T10:30:00", "date": null,
@@ -376,7 +388,7 @@ The `calendar` field of the Message object (`null` when the message has no calen
   "attachment_id": "att_01JA9B2C3D4EW7X2M5N6P8R0T1",
   "other_objects": 0,
   "ignored_components": [],
-  "removed": { "alarms": 1, "attachments": 0, "x_properties": 3 },
+  "removed": { "alarms": 1, "attachments": 0, "images": 0, "x_properties": 3, "conference": 0 },
   "warnings": [],
   "parser_version": 1
 }
@@ -386,8 +398,10 @@ The `calendar` field of the Message object (`null` when the message has no calen
 |---|---|
 | `verified`, `verified_by`, `reason`, `authenticated_sender` | [§3](#3-authenticity). `verified` is `null` on outbound messages |
 | `uid`, `sequence`, `dtstamp`, `recurrence_id` | Of the primary component. `sequence` defaults to 0 (RFC 5545 §3.8.7.4); `dtstamp` is UTC (§3.8.7.2) or `null` when missing (warning `dtstamp_missing`); `recurrence_id` is a time value or `null` |
+| `conference[]` | The primary's `CONFERENCE` properties (RFC 7986 §5.11, read 2026-10-18), at most 5, each `{ "uri", "label" }`: `uri` at most 2,048 bytes (a longer one is left out and counted in `removed.conference`), `label` at most 256 characters or `null`. Untrusted and never fetched |
 | `overrides[]` | `{ "recurrence_id", "this_and_future", "sequence", "status", "start", "end", "summary", "location", "self" }`: `summary` and `location` only when they differ from the primary's (each at most 256 characters), and `self` the receiving identity's own attendee entry in that override, if any |
-| `organized_here` | The identity has sent a `REQUEST`, `ADD` or `PUBLISH` with this `UID` that is not `canceled`, `rejected`, `failed` or `suppressed` ([§4.2](#42-ingest)): an answer or counter-proposal to an invitation this identity sent |
+| `organized_here` | `true` only for a verified `reply`, `refresh` or `counter` that answers an invitation this identity sent: an outbound `REQUEST`, `ADD` or `PUBLISH` with the same `UID` and the same `ORGANIZER`, not `canceled`, `rejected`, `failed` or `suppressed`, whose parties include the attendee who answers ([§4.2](#42-ingest)); `false` for every other object |
+| `removed` | Counts of what the object leaves out: `alarms`, `attachments`, `images`, `x_properties` and `conference` (the `CONFERENCE` properties beyond 5 or with a longer URI) |
 | `warnings[]` | Any of `parts_skipped`, `other_objects`, `invalid_utf8`, `method_param_missing`, `uid_mismatch`, `override_type_mismatch`, `duplicate_override`, `overrides_truncated`, `attendees_truncated`, `unknown_tzid`, `tz_definition_mismatch`, `vtimezone_unsupported`, `end_before_start`, `dtstamp_missing`, `multiple_rrule`, `rrule_high_frequency`, `rrule_text_truncated`, `mailto_hfields`, `hidden_text`. New values may be added within `/v1` |
 | `parser_version` | `core::ical::PARSER_VERSION`; a re-parse after a reader fix re-emits the event when the object changed ([§4.4](#44-the-calendarreceived-event)) |
 
@@ -445,18 +459,26 @@ authenticated sender, and the rule of its method holds:
 
 | `method` | `verified: true` when the authenticated sender equals | `verified_by` |
 |---|---|---|
-| `publish`, `request`, `add`, `cancel`, `declinecounter`, `none` | the `ORGANIZER` address; or the organizer's `SENT-BY` address when that address has the same organisational domain as the organizer | `organizer`, or `sent_by` |
-| `reply`, `refresh` | the address of the single `ATTENDEE` (an object with zero or several gets `reason: "attendee_count"`); or that attendee's `SENT-BY` under the same domain rule | `attendee`, or `sent_by` |
-| `counter` | the address of one of the `ATTENDEE`s (RFC 5546 §3.2.7 lets a counter-proposal list proposed attendees too); or such an attendee's `SENT-BY` under the same domain rule | `attendee`, or `sent_by` |
+| `publish`, `request`, `add`, `cancel`, `declinecounter`, `none` | the `ORGANIZER` address | `organizer` |
+| `reply`, `refresh` | the address of the single `ATTENDEE` (an object with zero or several gets `reason: "attendee_count"`) | `attendee` |
+| `counter` | the address of one of the `ATTENDEE`s (RFC 5546 §3.2.7 lets a counter-proposal list proposed attendees too; one with no `ATTENDEE` gets `attendee_count`) | `attendee` |
 | `unknown` | never | – |
 
-**`SENT-BY`** (V19). RFC 6047 §2.2.1 and §3 say there is no mechanism to verify that one calendar user may
-act for another, and leave the decision to implementations (read 2026-10-17). A `SENT-BY` parameter is
-written by the sender, so on its own it proves nothing: `attacker@evil.example` could sign its own mail and
-name itself as sending for `ceo@victim.example`. A `SENT-BY` is therefore accepted only when its
-organisational domain equals that of the address it acts for, so the domain that authenticated the message
-speaks for both mailboxes (an assistant at `corp.example` sending for a manager at `corp.example`). Any
-other `SENT-BY` match gives `reason: "sent_by_unverifiable"`.
+The rule also needs the whole object to be covered: no `VEVENT` with another `UID`, no second `VCALENDAR`
+in the part, and no ignored component with an `ORGANIZER` or `ATTENDEE` (`uid_mismatch`,
+[§2.4](#24-primary-component-and-overrides)).
+
+**`SENT-BY`** (V19). RFC 6047 §2.2.1 says that nothing verifies whether a calendar user has authorised
+someone to act for them, and leaves it to implementations to give calendar users the means to decide (read
+2026-10-18). A `SENT-BY` parameter is written by the sender, and no domain rule can
+stand in for that decision: the organisational domain of `gmail.com` or `outlook.com` covers millions of
+unrelated mailboxes, so `attacker@gmail.com` could name itself as sending for `garage@gmail.com`, and inside
+one company the domain proves only that its mail system authenticated the assistant, not that the manager
+delegated. A `SENT-BY` match therefore never verifies: when the authenticated sender equals the organizer's
+`SENT-BY` (organizer methods) or the answering attendee's (attendee methods) but not the organizer or the
+attendee itself, the object is `verified: false` with `reason: "sent_by_unverifiable"`. `organizer.sent_by`,
+the attendees' `sent_by` and `authenticated_sender` are returned, so a consumer that keeps its own list of
+trusted delegates decides for itself.
 
 **Delegates and forwards** (V20, V21). A `REPLY` from a delegate (its `ATTENDEE` has `DELEGATED-FROM`) is
 verified as the delegate speaking for itself; whether a delegate is acceptable is the organizer's decision,
@@ -476,7 +498,8 @@ organizer; it is not verified, with `reason: "sender_is_delegator"` when the sen
 | `method_unknown` | `METHOD` is not one of the eight methods |
 | `method_mismatch` | The part's `method` parameter differs from `METHOD` |
 | `organizer_missing`, `organizer_not_mailto`, `organizer_inconsistent` | No usable `ORGANIZER`, or the kept components name different organizers (V23) |
-| `attendee_count` | A `reply` or `refresh` without exactly one `ATTENDEE` |
+| `uid_mismatch` | A `VEVENT` with another `UID`, a second `VCALENDAR` in the part, or an ignored component with an `ORGANIZER` or `ATTENDEE`: the attachment holds scheduling data the verification would not cover ([§2.4](#24-primary-component-and-overrides), V6) |
+| `attendee_count` | A `reply` or `refresh` without exactly one `ATTENDEE`, or a `counter` without any |
 | `sender_not_authenticated` | No authenticated sender ([§3.1](#31-the-authenticated-sender)) |
 | `sender_is_delegator`, `sent_by_unverifiable`, `sender_not_organizer`, `sender_not_attendee` | The authenticated sender is not entitled to send this method ([§3.2](#32-rules-by-method)) |
 
@@ -504,11 +527,12 @@ CREATE INDEX IF NOT EXISTS messages_calendar_uid ON messages(calendar_uid_hash)
   WHERE calendar_uid_hash IS NOT NULL;
 ```
 
-`automated_json` no longer carries `calendar`; its cap stays 64 KiB. `messages` grows from 45 to 47 columns
-(the limit is 100, [Data model › Mailbox notes](data-model.md#mailbox-notes)), and the message insert of
-[Inbound › IdentityMailbox.ingest](inbound.md#identitymailboxingest) from 37 to 39 bound parameters (the
-limit is 100). No new store exists: the object lives in the message's row, the raw bytes in the message's
-attachment, and both go wherever the message goes.
+`automated_json` no longer carries `calendar`; its cap stays 64 KiB. `messages` gains these two columns, for
+49 in all with the other parity additions (the limit is 100,
+[Data model › Mailbox notes](data-model.md#mailbox-notes)), and the message insert of
+[Inbound › IdentityMailbox.ingest](inbound.md#identitymailboxingest) binds two more parameters, 40 in all
+(the limit is 100). No new store exists: the object lives in the message's row, the raw bytes in the
+message's attachment, and both go wherever the message goes.
 
 **Cap and shrink order** (a Pylota Mail choice). `calendar_json` is at most 262,144 bytes (256 KiB) of
 UTF-8 JSON. The bounds of [§2.2](#22-the-bounded-reader) keep ordinary objects far below it (a Google or
@@ -553,23 +577,36 @@ pub struct CalendarInput {
     pub uid_hash: Option<String>,     // hex SHA-256 of the primary UID; None unless parsed
     pub method: CalendarMethod,
     pub verified: bool,
+    pub organizer: Option<String>,    // the normalised ORGANIZER address; None when it is not a mailto address
+    pub replier_party: Option<String>,// reply, refresh, counter: the parties hash (§10) of the attendee that
+                                      // matched the authenticated sender; None otherwise
     pub summary_for_event: CalendarEventSummary,   // method, uid, sequence, recurrence_id, verified, reason
 }
 ```
 
 **Inside `IdentityMailbox.ingest`** (one transaction, [Inbound › IdentityMailbox.ingest](inbound.md#identitymailboxingest)):
 
-- step 6, **Thread**: `resolve_inbound` receives the calendar UID hash only when `verified` is true
-  ([§4.3](#43-threading-by-uid));
-- before step 9, **`organized_here`**: one indexed query sets the field in `object_json`:
+- step 6, **Thread**: `resolve_inbound` receives the calendar UID hash, the organizer and the replier's
+  party hash only when `verified` is true ([§4.3](#43-threading-by-uid));
+- before step 9, **`organized_here`**, only for a verified `reply`, `refresh` or `counter` (it is `false` for
+  every other object): one indexed query sets the field in `object_json`, with `?2` the object's organizer
+  and `?3` its `replier_party`:
 
   ```sql
   SELECT 1 FROM messages
   WHERE calendar_uid_hash = ?1 AND direction = 'outbound'
     AND status NOT IN ('canceled','rejected','failed','suppressed')
     AND json_extract(calendar_json, '$.method') IN ('request','add','publish')
+    AND json_extract(calendar_json, '$.organizer.address') = ?2
+    AND EXISTS (SELECT 1 FROM json_each(calendar_json, '$.parties') p WHERE p.value = ?3)
   LIMIT 1;
   ```
+
+  A `UID` alone proves nothing: any sender can write any `UID` into its own object and be verified as
+  the organizer or attendee that object names. RFC 6047 §2.2.1 lets only the organizer change an event
+  and only an attendee answer for itself, so an answer counts as organized here only when it names this
+  identity's invitation (the same `UID` and `ORGANIZER`) and comes from someone that invitation names (its
+  `parties`, written on outbound rows too, [§5.8](#58-threading-of-outbound-calendar-mail)).
 
 - step 9, **Insert**: `calendar_json` and `calendar_uid_hash` are written with the message;
 - step 16, **Outbox**: when the stored status is `received` and the mailbox is not the system identity's,
@@ -587,27 +624,39 @@ thread token and often without `In-Reply-To`, so they would start new threads. [
 gains one step after `References`:
 
 > 3b. **Calendar UID.** If the message carries a **verified** calendar object, look up
-> `db.thread_of_calendar_uid(uid_hash)`; on a hit, join that thread (`via: CalendarUid`).
+> `db.thread_of_calendar_uid(uid_hash, organizer, replier_party)`; on a hit, join that thread
+> (`via: CalendarUid`).
 
 ```sql
 -- ThreadLookup::thread_of_calendar_uid
+-- ?2: the object's normalised organizer; ?3: for reply, refresh and counter the replier's party hash
+-- (§4.2), NULL for organizer methods
 SELECT thread_seq FROM messages
 WHERE calendar_uid_hash = ?1 AND status NOT IN ('hidden','throttled')
+  AND json_extract(calendar_json, '$.organizer.address') = ?2
   AND (direction = 'outbound' OR json_extract(calendar_json, '$.verified') = 1)
+  AND (?3 IS NULL OR (direction = 'outbound'
+       AND status NOT IN ('canceled','rejected','failed','suppressed')
+       AND json_extract(calendar_json, '$.method') IN ('request','add','publish')
+       AND EXISTS (SELECT 1 FROM json_each(calendar_json, '$.parties') p WHERE p.value = ?3)))
 ORDER BY rowid DESC LIMIT 1;
 ```
 
-- Only a verified object joins by `UID`, and only threads that hold an outbound calendar message or a
-  verified inbound one with that `UID`. A stranger who learned a `UID` (it is in every copy of the
-  invitation) and sends an object with it is not verified, so it never joins by `UID`; it threads by
-  headers or starts a new thread (V29).
+- Only a verified object joins by `UID`, and only a thread that holds a calendar message with the same
+  `UID` **and** the same `ORGANIZER`: an outbound one or a verified inbound one. An attendee's answer
+  (`reply`, `refresh`, `counter`) joins only the thread of an invitation this identity sent that names the
+  attendee, the condition of `organized_here` ([§4.2](#42-ingest)). A stranger who learned a `UID` (it is in
+  every copy of the invitation) never joins by `UID`: its unverified object is not looked up; its own
+  verified `REQUEST` or `CANCEL` names another organizer; its `REPLY` naming the identity as organizer comes
+  from no attendee of the invitation. It threads by headers or starts a new thread (V29).
 - The `join_unverified` rule for header joins applies: a sender who is not a participant of the thread
   joins with `thread_join_unverified` in `trust.flags` ([C9](../edge-cases.md)). A verified `REPLY` from an
   attendee the identity invited is a participant, because the invitation's recipients are.
 - The subject is still never consulted, and a thread token or a header match still decides first (V28).
 
-`FR-THR-1` becomes: token; `In-Reply-To` or `References`; the `UID` of a verified calendar object matching
-a calendar message of the mailbox; otherwise a new thread. The subject alone never joins a thread.
+`FR-THR-1` becomes: token; `In-Reply-To` or `References`; the `UID` and `ORGANIZER` of a verified calendar
+object matching a calendar message of the mailbox; otherwise a new thread. The subject alone never joins a
+thread.
 
 ### 4.4 The `calendar.received` event
 
@@ -687,7 +736,7 @@ Edge rows: V30–V42.
   "text": "Your handover for booking BK-42 is on Friday 29 March at 09:00 at our Leeds branch.",
   "kind": "transactional",
   "calendar": {
-    "ics": "BEGIN:VCALENDAR\r\nPRODID:-//Kairos Project//Agent Calendar//EN\r\nVERSION:2.0\r\nCALSCALE:GREGORIAN\r\nMETHOD:REQUEST\r\nX-WR-TIMEZONE:Europe/London\r\nBEGIN:VEVENT\r\nUID:handover-BK-42@bookings.acme.example.com\r\nDTSTAMP:20270320T120000Z\r\n…\r\nEND:VCALENDAR\r\n",
+    "ics": "BEGIN:VCALENDAR\r\nPRODID:-//Kairos Project//Agent Calendar//EN\r\nVERSION:2.0\r\nCALSCALE:GREGORIAN\r\nMETHOD:REQUEST\r\nX-WR-TIMEZONE:Europe/London\r\nBEGIN:VEVENT\r\nUID:7d1e6c52-3f0a-4b8e-9a64-2c5f81e0b937\r\nDTSTAMP:20270320T120000Z\r\n…\r\nEND:VCALENDAR\r\n",
     "attach_copy": true
   }
 }
@@ -717,8 +766,10 @@ check.
 2. The operation must be `send` or `reply` (above).
 3. `ics` at most 262,144 bytes: `413 calendar_too_large`, `details.limit`.
 4. Read it with `core::ical` under the bounds of [§2.2](#22-the-bounded-reader) (the 1 MiB part bound is
-   replaced by the 256 KiB above). Any reading failure is `400 calendar_invalid` with `details.reason =
-   "parse_error"` and `details.line`, the 1-based content line where it failed.
+   replaced by the 256 KiB above, and an `ATTACH` or `IMAGE` line over 64 KiB is a reading failure rather
+   than skipped, because the writer could not send a value the reader did not keep). Any reading failure
+   is `400 calendar_invalid` with `details.reason = "parse_error"` and `details.line`, the 1-based content
+   line where it failed.
 5. Structure, each failure `400 calendar_invalid` with the `details.reason` shown (and `details.property`
    where it names one):
 
@@ -728,14 +779,17 @@ check.
    | Exactly one `METHOD` (RFC 5545 §3.6: it must not occur more than once), one of the eight methods (iMIP needs one; `none` cannot be sent) | `method_missing`, `multiple_methods`, `method_unknown` |
    | Components: `VEVENT`s and `VTIMEZONE`s only | `component_not_supported` |
    | At least one `VEVENT`; every `VEVENT` has the same `UID`, of at most 1,024 bytes (RFC 5546 §3.2.2) | `uid_missing`, `uid_mismatch`, `uid_too_long` |
+   | `add`, `refresh`, `counter`: exactly one `VEVENT` (RFC 5546 §3.2.4, §3.2.6, §3.2.7, read 2026-10-18) | `vevent_count` |
    | Every `VEVENT` has a UTC `DTSTAMP` (RFC 5546 tables; RFC 5545 §3.8.7.2) | `dtstamp_missing` |
    | `SEQUENCE`, when present, is an integer from 0 to 2,147,483,647 | `sequence_invalid` |
    | Every `VEVENT` has exactly one `ORGANIZER` with a `mailto:` address, the same in every component | `organizer_missing`, `organizer_inconsistent` |
    | `publish`: no `ATTENDEE` (RFC 5546 §3.2.1) | `attendee_not_allowed` |
    | `request`: at least one `ATTENDEE`, a `DTSTART` and a `SUMMARY` (which may be empty) in each component (RFC 5546 §3.2.2) | `attendee_missing`, `dtstart_missing`, `summary_missing` |
-   | `add`: `SEQUENCE` greater than 0 (§3.2.4) | `sequence_invalid` |
-   | `cancel`: `SEQUENCE` present (§3.2.5) | `sequence_invalid` |
-   | `reply`, `refresh`: exactly one `ATTENDEE` (§3.2.3, §3.2.6); `counter`: at least one (§3.2.7) | `attendee_count` |
+   | `add`: `SEQUENCE` greater than 0, a `DTSTART`, a `SUMMARY` (which may be empty), at least one `ATTENDEE`, and no `RECURRENCE-ID`, `RRULE`, `RDATE` or `EXDATE` (§3.2.4). RFC 5546 allows an `ADD` without `ATTENDEE`; the recipient rule of step 13a admits only attendees, so Pylota Mail requires one | `sequence_invalid`, `dtstart_missing`, `summary_missing`, `attendee_missing`, `property_not_allowed` |
+   | `cancel`: `SEQUENCE` present and at least one `ATTENDEE`, the attendees removed or, for the whole event, some or all of them (§3.2.5) | `sequence_invalid`, `attendee_missing` |
+   | `declinecounter`: `SEQUENCE` present and at least one `ATTENDEE` (§3.2.8) | `sequence_invalid`, `attendee_missing` |
+   | `reply`, `refresh`: exactly one `ATTENDEE` (§3.2.3, §3.2.6). `counter`: at least one, a Pylota Mail rule: RFC 5546 §3.2.7 allows none, but the attendee who proposes is named only by its `ATTENDEE`, which step 13a binds to the `From` | `attendee_count` |
+   | `refresh`: none of the properties RFC 5546 §3.2.6 marks 0, among them `SEQUENCE`, `DTSTART`, `DTEND`, `DURATION`, `SUMMARY`, `DESCRIPTION`, `LOCATION`, `STATUS`, `RRULE`, `RDATE`, `EXDATE` and `ATTACH` | `property_not_allowed` (`details.property`) |
    | No `VALARM` in `cancel`, `refresh`, `declinecounter` or `reply` (RFC 5546 tables: 0 for these methods) | `property_not_allowed` (`details.property = "VALARM"`) |
    | `RRULE` valid ([§2.6](#26-recurrence)), at most one per component | `rrule_invalid` |
    | Every `TZID` used is defined by a `VTIMEZONE` of the object, or resolves by name ([§5.3](#53-normalisation)) | `unknown_tzid` (`details.tzid`) |
@@ -813,9 +867,8 @@ accepted (V39); a dry run reports it. The integrator gives first contact explici
 entry or by turning the setting off for a backend identity ([E2](../edge-cases.md)). One rule is added for
 the reply route only (rule 5; rule 4 is the approved-draft rule of [Drafts](drafts.md)) ([§6](#6-the-calendar-reply-route)):
 
-> 5. for `calendar_reply` only, it is the `ORGANIZER` of the verified invitation answered: the
->    authenticated sender, or an address of the same organisational domain named by `SENT-BY`
->    ([§3.2](#32-rules-by-method)).
+> 5. for `calendar_reply` only, it is the `ORGANIZER` of the verified invitation answered, which is that
+>    invitation's authenticated sender ([§3.2](#32-rules-by-method); a `SENT-BY` never verifies).
 
 ### 5.5 MIME composition
 
@@ -889,8 +942,10 @@ its own.
 Outbound calendar mail threads as any send ([Threading § 4](threading.md#4-outbound-threading)): a send
 without `thread_id` starts a thread, a send with `thread_id` or a reply continues one. Kairos sends an
 update or a cancellation for a booking in the thread of its first invitation by passing `thread_id`. The
-stored outbound row gets `calendar_json` (the object as sent, `verified: null`) and `calendar_uid_hash`,
-so the `UID` join of [§4.3](#43-threading-by-uid) files the attendees' replies into that thread.
+stored outbound row gets `calendar_json` (the object as sent, `verified: null`, with its internal `parties`
+list computed by the submit path with `PM_HASH_KEY` as step 12 computes it inbound, [§10](#10-privacy)) and
+`calendar_uid_hash`, so the `UID` join of [§4.3](#43-threading-by-uid) files the attendees' replies into
+that thread and counterparty erasure finds every address an outbound invitation names.
 
 ### 5.9 The stale-sequence guard
 
@@ -974,7 +1029,7 @@ supported as on sends.
 |---|---|
 | `partstat` | `accepted`, `declined` or `tentative`. Required |
 | `comment` | Optional, at most 1,000 characters; LF allowed (written as `\n`), CR removed, other control characters `400 invalid_request` (`details.errors[0].path = "comment"`) |
-| `recurrence_id` | Optional. Answers one instance: an RFC 3339 instant when the invitation's `DTSTART` is a date-time, or `YYYY-MM-DD` when it is a date (else `400 invalid_request`, path `recurrence_id`). Not checked against the `RRULE`, which is never expanded; the organizer decides what an answer to an instance means |
+| `recurrence_id` | Optional. Answers one instance, given in the form of the invitation's primary `DTSTART`: an RFC 3339 instant when it is a UTC date-time or a zoned one whose zone resolves (`tz_resolution` `utc`, `iana`, `windows`, `prefixed` or `vtimezone`); a local `YYYY-MM-DDTHH:MM:SS` without offset when it is floating; `YYYY-MM-DD` when it is a date. Another form is `400 invalid_request` (path `recurrence_id`). When the zone is `unknown`, no instant can be written as a local time in it, so the route answers `400 invalid_request` with `details.reason = "instance_zone_unknown"`; the whole series can still be answered. Not checked against the `RRULE`, which is never expanded; the organizer decides what an answer to an instance means |
 
 `202` with the Message object (`direction: "outbound"`, `status: "queued"`, `operation: "reply"`, the
 `calendar` object of the `REPLY`) and `"deduplicated": false`, or the stored response with
@@ -987,24 +1042,27 @@ the original response whatever has changed), the policy pipeline runs steps 1–
 deleted, tenant suspended, identity paused, tenant sending paused, no accountable human). Step 5 (target) is
 then, for this operation:
 
-1. The message exists in this mailbox and is visible to the key, as for a reply: `404 message_not_found`
-   for a missing, `hidden` or `throttled` one, or a `quarantined` one without `quarantine:review`.
+1. The message exists in this mailbox and is visible to the key, as for a reply
+   ([Outbound › Policy pipeline](outbound.md#policy-pipeline), step 5): `404 message_not_found` for a
+   missing, `hidden` or `throttled` one, or a `quarantined` or `screening` one without `quarantine:review`.
 2. It is inbound, has a calendar object with `object_status: "parsed"` and `method: "request"`: otherwise
    `409 calendar_not_invitation`, with `details.method` and `details.object_status` (`null` when there is
    no object).
-3. It is not `quarantined`: `409 calendar_not_verified` with `details.reason = "message_quarantined"`;
-   release it first (a release by a person, [FR-CON-6](../prd.md)).
+3. It is not held: `409 calendar_not_verified` with `details.reason = "message_quarantined"` for a
+   `quarantined` one (release it first, a release by a person, [FR-CON-6](../prd.md)) or
+   `"message_screening"` for one in `screening` (wait for its verdict, [Screening](screening.md)).
 4. Its object is verified: `409 calendar_not_verified` with `details.reason` = the object's `reason`.
 5. One of its `ATTENDEE`s is the identity (`is_self`; when several are, the one equal to `delivered_to`,
    else the first): `409 calendar_not_attendee`.
 6. `recurrence_id`, when given, is not one of the invitation's `EXDATE` values: `400 invalid_request` with
    `details.reason = "instance_excluded"`.
 7. Not cancelled: the primary (or the override for `recurrence_id`) has `STATUS:CANCELLED`, or the mailbox
-   holds a later verified `CANCEL` with the same `UID` whose `SEQUENCE` is at least the invitation's and
-   whose scope covers the answer (no `RECURRENCE-ID`, the same `RECURRENCE-ID`, or a `RANGE=THISANDFUTURE`
-   at or before it): `409 calendar_cancelled` with `details.cancel_message_id` when a `CANCEL` decided it.
-8. Not superseded: the mailbox holds a verified `REQUEST` with the same `UID` and scope and a higher
-   `SEQUENCE`, or the same `SEQUENCE` and a later `DTSTAMP` (RFC 5546 §2.1.5): `409 calendar_superseded`
+   holds a later verified `CANCEL` with the same `UID` and `ORGANIZER` whose `SEQUENCE` is at least the
+   invitation's and whose scope covers the answer (no `RECURRENCE-ID`, the same `RECURRENCE-ID`, or a
+   `RANGE=THISANDFUTURE` at or before it): `409 calendar_cancelled` with `details.cancel_message_id` when a
+   `CANCEL` decided it.
+8. Not superseded: the mailbox holds a verified `REQUEST` with the same `UID`, `ORGANIZER` and scope and a
+   higher `SEQUENCE`, or the same `SEQUENCE` and a later `DTSTAMP` (RFC 5546 §2.1.5): `409 calendar_superseded`
    with `details.latest_message_id` and `details.latest_sequence`. Answer the latest version instead.
 9. Not past: `ends_at` of the invitation, or for `recurrence_id` that instance's start plus the primary's
    duration, is before now: `409 calendar_event_past` with `details.ended_at`. An open-ended recurrence
@@ -1021,12 +1079,15 @@ Steps 7 and 8 read only this mailbox, in the same transaction:
 SELECT id, calendar_json FROM messages
 WHERE calendar_uid_hash = ?1 AND direction = 'inbound' AND status = 'received' AND rowid <> ?2
   AND json_extract(calendar_json, '$.verified') = 1
+  AND json_extract(calendar_json, '$.organizer.address') = ?3   -- the invitation's organizer
   AND json_extract(calendar_json, '$.method') IN ('request','cancel');
 ```
 
 They are not a calendar: they compare the invitation with the other verified messages the identity
-received about the same `UID`, and refuse an answer that the organizer would ignore anyway. The consumer
-keeps the authoritative state.
+received about the same `UID` from the same organizer, and refuse an answer that the organizer would ignore
+anyway. A verified object that reuses the `UID` under another organizer is ignored: anyone can write any
+`UID` into its own object, so it is neither a cancellation nor a newer version of this invitation, and the
+route never points the agent at it (V46). The consumer keeps the authoritative state.
 
 The remaining policy steps then run as for a reply, with `to` = the `ORGANIZER` (never `From` or
 `Reply-To`: responses go to the organizer, RFC 6047 §2 and RFC 5546 §3.2.2.5, read 2026-10-17),
@@ -1048,10 +1109,10 @@ METHOD:REPLY
 BEGIN:VEVENT
 UID:<the invitation's UID>
 DTSTAMP:<dtstamp, UTC>
-SEQUENCE:<the invitation's SEQUENCE; omitted when it is 0>
+SEQUENCE:<the SEQUENCE of the instance answered; omitted when it is 0>
 RECURRENCE-ID[;TZID=…|;VALUE=DATE]:<recurrence_id, in the primary DTSTART's form; only when given>
-ORGANIZER[;CN=<the invitation's CN>]:mailto:<organizer address>
-ATTENDEE;PARTSTAT=ACCEPTED[;CN=<the identity's display name>]:mailto:<attendee address>
+ORGANIZER[;CN=<the invitation's CN>]:<the invitation's ORGANIZER value>
+ATTENDEE;PARTSTAT=ACCEPTED[;CN=<the identity's display name>]:<the invitation's value for this attendee>
 COMMENT:<comment, escaped; only when given>
 END:VEVENT
 [the invitation's VTIMEZONE for that TZID, only when RECURRENCE-ID needs it]
@@ -1062,6 +1123,17 @@ These are the properties RFC 5546 §3.2.3 requires for a `VEVENT` `REPLY` (read 
 `ATTENDEE` with the replier's address, `DTSTAMP`, `ORGANIZER` and the invitation's `UID`, plus `SEQUENCE`,
 which must equal the invitation's when non-zero, and the optional `RECURRENCE-ID` and `COMMENT`. Optional
 properties that a reply carries must not differ from the request's (§3.2.3), and none is copied.
+
+- **`SEQUENCE`** is the primary's, or, when `recurrence_id` names an override of the invitation, that
+  override's: RFC 5546 §2.1.5 keys an instance on `UID` and `RECURRENCE-ID` and orders its versions by
+  their own `SEQUENCE` (read 2026-10-18), so a reply must echo the version of the instance it answers.
+- **`RECURRENCE-ID`** is written in the primary `DTSTART`'s form ([§6.1](#61-request-and-response)): in UTC
+  for a UTC `DTSTART`; as the local time of the instant in that zone, with the invitation's `TZID`, for a
+  zoned one; unchanged and without `TZID` for a floating one; with `VALUE=DATE` for a date.
+- **`ORGANIZER` and `ATTENDEE`** carry the invitation's own values for the organizer and for this
+  attendee, as written (the `mailto:` scheme and the letter case included, a `?…` query removed), so the
+  organizer's client matches the answer to its own attendee entry without depending on how it compares
+  addresses. Their normalised forms are the recipient and the `From` that step 13a checks.
 
 - **`DTSTAMP`** is the submit time, in whole seconds, and strictly later than every earlier `REPLY` this
   identity sent with the same `UID`: `max(now, latest + 1 s)`, read from the mailbox's outbound rows. When
@@ -1129,7 +1201,10 @@ as one.
   ([§4.4](#44-the-calendarreceived-event)).
 - **Spoofing.** A forged organizer, cancellation or reply is reported as `verified: false` with its reason
   and can never be answered through the reply route ([§3](#3-authenticity)), never joins a thread by `UID`
-  ([§4.3](#43-threading-by-uid)), and Pylota's handler never imports it ([§15](#15-pylota-agentic-os)).
+  ([§4.3](#43-threading-by-uid)), and Pylota's handler never imports it ([§15](#15-pylota-agentic-os)). A
+  sender verified for its own object that reuses another event's `UID` matches nothing of that event: the
+  `UID` join, `organized_here` and the reply route's checks 7 and 8 all require the same `ORGANIZER`
+  ([§4.2](#42-ingest), [§6.2](#62-rules-in-order)).
   Flooding an identity with invitations (RFC 5546 §6.1.5) is bounded by the inbound volume caps of
   [D13](../edge-cases.md), and a service that never adds invitations to a calendar cannot have its free time
   blocked by them.
@@ -1157,7 +1232,8 @@ as one.
 
 `parties` is an internal field of `calendar_json`, never returned by the API, MCP or exports: the
 truncated HMAC of every distinct normalised address of the object (at most 1,000, [§2.2](#22-the-bounded-reader)),
-written by the consumer at step 12 with `PM_HASH_KEY`. It makes counterparty matching one `json_each` over a
+written with `PM_HASH_KEY` by the consumer at step 12 for inbound mail and by the submit path for outbound
+mail ([§5.8](#58-threading-of-outbound-calendar-mail)). It makes counterparty matching one `json_each` over a
 bounded array, holds no clear address, and covers attendees that the shrink order of
 [§4.1](#41-columns-and-caps) removed from the visible list.
 
@@ -1174,8 +1250,9 @@ costs nothing and is never refused for a plan (FR-BILL-8). No plan has a calenda
 |---|---|---|
 | Calendar parts read per message | 10 | More is never seen in practice; later parts stay attachments |
 | Decoded calendar part read | 1 MiB | Real invitations are 2–30 KiB; AgentMail imports at most 1 MB; Kairos accepts up to 2,000,000 bytes |
-| Content lines; one unfolded line | 20,000; 64 KiB | Linear work, bounded memory |
-| Components per object | 500 | Kairos reads up to 2,000 `VEVENT`s |
+| Content lines; one unfolded line | 20,000; 64 KiB (an inbound `ATTACH` or `IMAGE` value is skipped instead) | Linear work, bounded memory; an inline file or image must not make a real invitation unreadable |
+| Components directly inside the `VCALENDAR` | 1,100 | One primary and 1,000 overrides must fit; Kairos reads up to 2,000 `VEVENT`s |
+| `CONFERENCE` entries kept; URI | 5; 2,048 bytes | |
 | Overrides read; kept in the object | 1,000; 100 | Kairos keeps 1,000 exceptions per series |
 | Attendees read per component; kept | 1,000; 100 | Kairos and AgentMail both cap events at 100 attendees |
 | `VTIMEZONE`s; observances; `RDATE`s per observance | 20; 50; 100 | Real definitions have 1–4 observances |
@@ -1285,10 +1362,14 @@ processes it in the `mail-webhook-event` job:
    {reason in words}".
 2. `verified: true`: fetch the message (`GET …/messages/{message_id}`) for its `calendar` object and the
    `.ics` (`GET …/attachments/{attachment_id}`), and hand both to the Kairos iTIP adapter, keyed by
-   `(identity_id, uid, recurrence_id)`:
-   - `reply` with `organized_here: true`: update that attendee's participation status on the Kairos event
-     whose `UID` it is, under Kairos's expected-revision rule; Kairos ignores a reply whose `SEQUENCE` is
-     older than its event's (RFC 5546 §2.1.5, its own rule). `organized_here: false`: mail only.
+   `(identity_id, organizer, uid, recurrence_id)`, never by `UID` alone. The adapter parses only the
+   `VEVENT`s whose `UID` is `calendar.uid` and whose `ORGANIZER` is `calendar.organizer.address`: a verified
+   object's part holds nothing else ([§2.4](#24-primary-component-and-overrides)), and the filter keeps the
+   adapter to what was verified if that ever changes.
+   - `reply` with `organized_here: true`: update the participation status of that attendee, who must
+     already be an attendee of the Kairos event with that `UID` and organizer (never add one), under
+     Kairos's expected-revision rule; Kairos ignores a reply whose `SEQUENCE` is older than its event's
+     (RFC 5546 §2.1.5, its own rule). `organized_here: false`: mail only.
    - `request`, `add`, `cancel` from an external organizer: an untrusted busy-time input for the resource
      the operator maps the sender to, through Kairos's provider boundary (`parseICalendarChanges`, which
      keeps no summaries, parties or notes), or a pending item for the operator; never a trusted Kairos
@@ -1319,6 +1400,16 @@ Idempotency-Key: pm:v1:kairos-itip:{tenantRef}:{externalRef}:{revision}:{method}
 - Kairos's `organizer.email` must be the `bookings` identity's primary address, read from
   `mail_identities.address`, or the send gets `400 calendar_organizer_mismatch` (the error names the
   address Pylota Mail will use).
+- **What Pylota Mail requires of the caller's `UID`s.** Kairos's `emitITipCalendar` writes the `UID` its
+  caller gives it (`packages/kairos/src/sync.ts`, `input.uid`, read 2026-10-18), and an example such as
+  `handover-BK-42@bookings.acme.example.com` can be guessed by anyone who knows the booking reference. Each
+  Kairos event sent as an invitation must have a random UUID as its `UID` (version 4, hex), as RFC 7986
+  §5.3 recommends; that section also says a `UID` must not carry data that identifies a user, host or
+  domain (read 2026-10-18). Pylota Mail does not rely on the secrecy of a `UID`: its matches need the same
+  `ORGANIZER` and, for an answer, an attendee the invitation names ([§4.2](#42-ingest),
+  [§4.3](#43-threading-by-uid), [§6.2](#62-rules-in-order)), and Kairos must match the same way, by
+  `(organizer, UID)`, never by `UID` alone. A random `UID` keeps a stranger from aiming a message at an event
+  it has never seen.
 - The key uses durable IDs only: Kairos's `(tenantRef, externalRef)` and its strictly increasing revision
   (the key rules of integration spec §7.3), so a redrive of the same revision never sends
   twice and a new revision is a new message. Kairos's revision should be the iCalendar `SEQUENCE`, so the
@@ -1359,12 +1450,14 @@ Kairos.
 1. `calendar.received` in the partner endpoint's explicit event list (§8.1); K1 already holds
    `messages:read`.
 2. The Kairos iTIP adapter and its mapping rules (step 2 above), as a task with tests: verified only;
-   `reply` only for `organized_here`; external `request`/`add`/`cancel` as untrusted busy time or an
-   operator decision; instance-only objects from Pylota Mail's object; all-day time zone from the resource.
+   matched by `(organizer, UID)`, never by `UID` alone; only the verified `UID`'s components parsed;
+   `reply` only for `organized_here`, and only for an attendee already on the event; external
+   `request`/`add`/`cancel` as untrusted busy time or an operator decision; instance-only objects from
+   Pylota Mail's object; all-day time zone from the resource.
 3. The Kairos invitation sender: row in §7.3 (sender `kairos-itip`, identity `bookings`, kind
    `transactional`, key `pm:v1:kairos-itip:{tenantRef}:{externalRef}:{revision}:{method}`), the organizer
-   address rule, the send-allow entry from the booking record (§7.7, reason `booking_on_file`), and the
-   transport rule above.
+   address rule, a random UUID `UID` for every event it sends, the send-allow entry from the booking record
+   (§7.7, reason `booking_on_file`), and the transport rule above.
 4. That Kairos is the owner of `SEQUENCE` ordering and conflicts: its revision is the `SEQUENCE`, it
    applies RFC 5546 §2.1.5 to replies, and it never relies on Pylota Mail to order versions.
 5. The `calendar_reply` capability route and its tool-risk registry entry, with the idempotency key above,
@@ -1393,9 +1486,9 @@ To add to [PRD § 6](../prd.md#6-functional-requirements) as a new subsection, "
   `VTODO`, `VJOURNAL` and `VFREEBUSY` **must** be listed as ignored; `VALARM`, `ATTACH` and extension
   properties **must not** appear in the object agents read.
 - **FR-CAL-5** Each object **must** say whether it is verified, by which rule, and otherwise why not. An
-  organizer method is verified only when the message's authenticated sender is the organizer (or its
-  `SENT-BY` within the organizer's organisational domain); an attendee method only when it is the replying
-  attendee (or its `SENT-BY` within that domain).
+  organizer method is verified only when the message's authenticated sender is the organizer, an attendee
+  method only when it is the replying attendee, and only when the part holds no component of another
+  `UID` or organizer; a `SENT-BY` **must never** verify an object.
 - **FR-CAL-6** A `calendar.received` event **must** be emitted when a message with a calendar object first
   becomes visible as `received`, and never while it is quarantined, in screening, hidden or throttled. It
   **must** be thin, and an endpoint that receives it **must** be created only by a key with
@@ -1416,11 +1509,14 @@ To add to [PRD § 6](../prd.md#6-functional-requirements) as a new subsection, "
 - **FR-CAL-10** An identity **must** be able to answer a verified invitation it is an attendee of with
   `accepted`, `declined` or `tentative` and an optional comment, through one idempotent route that sends an
   iTIP `REPLY` to the organizer from the attendee address in the invitation's thread, and refuses
-  unverified, quarantined, cancelled, superseded, past and non-attendee cases with defined errors.
+  unverified, held (quarantined or in screening), cancelled, superseded, past and non-attendee cases with
+  defined errors; only verified messages from the invitation's own organizer may make it cancelled or
+  superseded.
 - **FR-CAL-11** An identity **must not** be able to send, for one `UID`, an organizer method with a lower
   `SEQUENCE` than one it already sent, also when two sends race.
 - **FR-CAL-12** A verified calendar message without thread headers **must** join the thread that holds a
-  calendar message with the same `UID`; an unverified one **must never** join by `UID`.
+  calendar message with the same `UID` and `ORGANIZER` (for an attendee's answer, an invitation this
+  identity sent that names that attendee); an unverified one **must never** join by `UID`.
 - **FR-CAL-13** Pylota Mail **must not** keep calendar state beyond the message's own row and attachment.
   Calendar data **must** be retained, erased (including by counterparty erasure of any address the object
   names), held and exported with its message.
@@ -1429,29 +1525,29 @@ To add to [PRD § 6](../prd.md#6-functional-requirements) as a new subsection, "
 
 ## 17. Edge cases
 
-Section U of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator acts on the result).
+Section V of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator acts on the result).
 
 | # | Case | Required behaviour | Owner | Test |
 |---|---|---|---|---|
 | V1 | One invitation carried twice: an inline `text/calendar; method=REQUEST` part and an `invite.ics` (`application/ics`) attachment with the same object (Google's form) | One object; `other_objects` 0; `attachment_id` is the inline iMIP part's; the copy stays an attachment | S | `conf::calendar::v1_duplicate_parts`, `core::calendar::select_parts`, `live::calendar::inbound_real_invitations` |
 | V2 | Outlook invitation whose `TZID` is a Windows name (`GMT Standard Time`, `W. Europe Standard Time`) | Mapped through CLDR's `territory="001"` table to the IANA zone; UTC instants computed; `tz_resolution: "windows"`. Every one of the table's names maps to a zone `chrono-tz` parses | S | `conf::calendar::v2_outlook_windows_tz`, `core::ical::windows_zones_table`, `core::ical::tz_resolution_order`, `live::calendar::inbound_real_invitations` |
 | V3 | `TZID` that is `/`-prefixed (`/mozilla.org/…/Europe/London`), known only from the object's `VTIMEZONE`, defined with a rule outside the supported subset, or unknown with no definition | Prefixed: the IANA suffix (`prefixed`). Definition only: the offset from the definition (`vtimezone`). Unsupported definition or none: `utc: null`, warning `vtimezone_unsupported` or `unknown_tzid`, local time kept; verification and the event are unaffected | S | `conf::calendar::v3_tzid_forms`, `core::ical::tz_resolution_order`, `core::ical::vtimezone_subset` |
-| V4 | A named zone whose `VTIMEZONE` disagrees with the tzdb; a local time in a daylight-saving gap or overlap | The tzdb wins, warning `tz_definition_mismatch`. An overlapped time is the first occurrence; a gap time uses the offset before the gap (RFC 5545 §3.3.5) | S | `conf::calendar::v4_tz_mismatch_and_dst`, `core::ical::dst_gap_overlap` |
+| V4 | A named zone whose `VTIMEZONE` disagrees with the tzdb; a local time in a daylight-saving gap or overlap | The definition wins (RFC 5545 §3.2.19), warning `tz_definition_mismatch`; an unusable definition falls back to the tzdb. An overlapped time is the first occurrence; a gap time uses the offset before the gap (RFC 5545 §3.3.5) | S | `conf::calendar::v4_tz_mismatch_and_dst`, `core::ical::dst_gap_overlap` |
 | V5 | All-day event; floating time; no `DTEND` and no `DURATION`; `DTEND` before `DTSTART` | All-day: `date` values, exclusive end, `all_day: true`. Floating: `utc: null`, `floating: true`. Missing end: one day for a date, the start instant for a date-time (`source: "default"`). End before start: end = start, warning `end_before_start`. `ends_at` read in the tenant's time zone (`ends_at_basis: "tenant_timezone"`) for dates, floating and unknown zones | S | `conf::calendar::v5_all_day_floating`, `core::calendar::times_and_ends` |
-| V6 | An object of overrides only (a `CANCEL` of one occurrence); two components with one `RECURRENCE-ID`; an override whose `RECURRENCE-ID` type differs from `DTSTART`; components with different `UID`s | Primary = the earliest `RECURRENCE-ID`; duplicates keep the higher `SEQUENCE`, then later `DTSTAMP` (`duplicate_override`); a mistyped override is dropped (`override_type_mismatch`); other `UID`s are ignored (`uid_mismatch`) | S | `conf::calendar::v6_instance_only_cancel`, `core::calendar::primary_and_overrides` |
+| V6 | An object of overrides only (a `CANCEL` of one occurrence); two components with one `RECURRENCE-ID`; an override whose `RECURRENCE-ID` type differs from `DTSTART`; components with different `UID`s; a second `VCALENDAR` in the part; a `VTODO` with an `ORGANIZER` | Primary = the earliest `RECURRENCE-ID`; duplicates keep the higher `SEQUENCE`, then later `DTSTAMP` (`duplicate_override`); a mistyped override is dropped (`override_type_mismatch`); other `UID`s are ignored (warning `uid_mismatch`) and, like the second `VCALENDAR` and the `VTODO`, make the object unverified (`reason: "uid_mismatch"`) | S | `conf::calendar::v6_instance_only_cancel`, `core::calendar::primary_and_overrides`, `core::calendar::verify_matrix` |
 | V7 | `RRULE` with unknown parts, `COUNT` and `UNTIL` together, out-of-range values, `INTERVAL` 5,000, `FREQ=SECONDLY`, two `RRULE`s, 600 bytes of text | `rrule.valid: false` for the invalid ones (the object stays `parsed`); `rrule_high_frequency`; the second rule ignored (`multiple_rrule`); text cut (`rrule_text_truncated`). Never expanded | S | `conf::calendar::v7_rrule_cases`, `core::ical::rrule_validation` |
 | V8 | Google recurring invitation with edited instances (master plus `RECURRENCE-ID` overrides); 150 overrides; 1,200 overrides | Read whole: master at the top level, overrides sorted. 150: the first 100 kept, `overrides_truncated`, `overrides_total: 150`. 1,200: `too_complex`. AgentMail imports none of these | S | `conf::calendar::v8_override_bundle`, `core::calendar::primary_and_overrides`, `core::ical::bounds`, `live::calendar::inbound_real_invitations` |
 | V9 | Object with only `VTODO`, `VJOURNAL` or `VFREEBUSY` (a free/busy request) | `object_status: "unsupported"`, `ignored_components` lists them, `verified: false`, `reason: "no_vevent"`; the event is still emitted | S | `conf::calendar::v9_no_vevent`, `core::calendar::methods_and_components` |
 | V10 | Malformed object: no `END:VCALENDAR`, a bad date, invalid UTF-8, two `METHOD` lines, a missing `UID`; a part that makes the reader panic | `object_status: "invalid"` (invalid UTF-8 alone is a warning), `reason: "object_invalid"`; the message is stored and delivered as usual. A panic: degraded parsing from the third attempt skips step 10a and stores the message without its object; never dropped. The fuzz target finds no panic | S | `conf::calendar::v10_malformed`, `core::ical::content_lines`, `it::calendar::degraded_parse_keeps_message`, fuzz `ical_parse` |
-| V11 | A 3 MiB calendar part; 25,000 content lines; a 100 KiB line; 600 components; 1,200 distinct party addresses | Over 1 MiB: `too_large` (`object_too_large`); the others `too_complex` (`object_too_complex`); work stays linear; the message is stored; the event is emitted with `verified: false` | S | `conf::calendar::v11_oversize`, `core::ical::bounds` |
-| V12 | `VALARM` (an `EMAIL` alarm listing addresses), `ATTACH` (a URL and inline base64), `X-ALT-DESC` and other `X-` properties; tag characters, bidirectional overrides and zero-width characters in `SUMMARY`, `DESCRIPTION` and `CN` | Alarms, attachments and extension properties are absent from the object and counted in `removed`; hidden characters removed, flag `hidden_text`; strings returned as untrusted; nothing is fetched | S | `conf::calendar::v12_removed_and_hidden`, `core::calendar::text_cleaning`, `core::calendar::methods_and_components` |
+| V11 | A 3 MiB calendar part; 25,000 content lines; a 100 KiB `DESCRIPTION` line; a 100 KiB inline `ATTACH` or `IMAGE`; 1,200 components directly inside the `VCALENDAR`; 1,200 distinct party addresses | Over 1 MiB: `too_large` (`object_too_large`); the inline `ATTACH` or `IMAGE` is skipped and counted in `removed`, and the object stays `parsed`; the others `too_complex` (`object_too_complex`); work stays linear; the message is stored; the event is emitted, with `verified: false` for the refused objects | S | `conf::calendar::v11_oversize`, `core::ical::bounds` |
+| V12 | `VALARM` (an `EMAIL` alarm listing addresses), `ATTACH` (a URL and inline base64), `IMAGE`, `CONFERENCE` (seven of them, one with a 3,000-byte URI), `X-ALT-DESC` and other `X-` properties; tag characters, bidirectional overrides and zero-width characters in `SUMMARY`, `DESCRIPTION` and `CN` | Alarms, attachments, images and extension properties are absent from the object and counted in `removed`; the first 5 usable `CONFERENCE` entries are in `conference`, the rest counted in `removed.conference`; hidden characters removed, flag `hidden_text`; strings returned as untrusted; nothing is fetched | S | `conf::calendar::v12_removed_and_hidden`, `core::calendar::text_cleaning`, `core::calendar::methods_and_components` |
 | V13 | Two distinct objects in one message; 12 calendar parts; a `winmail.dat` carrying an `.ics`; a TNEF meeting written as MAPI properties only | First by the order of §2.1, `other_objects` counts the rest; parts after the 10th skipped (`parts_skipped`); the TNEF `.ics` is read; the MAPI-only meeting has no object and the flag `tnef_meeting_not_converted` | S | `conf::calendar::v13_parts_and_tnef`, `core::calendar::select_parts` |
 | V14 | A forwarded invitation inside a nested `message/rfc822`; a DSN returning one of our invitations | Never read: the outer message has no object unless it has its own calendar part; a DSN or MDN is never read | S | `conf::calendar::v14_nested_and_dsn`, `core::calendar::select_parts` |
 | V15 | `text/calendar` part's `method` differs from `METHOD`; no `method` parameter; no `METHOD` at all (an exported `.ics`); `METHOD:X-FOO` | `method_mismatch` (not verified); warning `method_param_missing`; `method: "none"`, verified as `publish`; `method: "unknown"` (`method_unknown`) | S | `conf::calendar::v15_method_cases`, `core::calendar::methods_and_components`, `core::calendar::verify_matrix` |
 | V16 | 300 attendees; attendees with `urn:uuid:` or `invalid:nomail` addresses; `MAILTO:Jo%40Example.NET?subject=x`; the identity named under an old, retired address | The identity's own entries first, then the rest up to 100 (`attendees_truncated`, `attendees_total: 300`); non-`mailto` addresses `null` with `uri_scheme`, never matching; the `mailto` normalised (warning `mailto_hfields`); `is_self` true for any status of the identity's addresses | S | `conf::calendar::v16_attendees_and_addresses`, `core::calendar::parties`, `core::calendar::shrink_order` |
 | V17 | Forged organizer: `attacker@evil.example` passes DMARC for its own domain and sends a `REQUEST` or `CANCEL` whose `ORGANIZER` is `ceo@victim.example` | `verified: false`, `reason: "sender_not_organizer"`; never answered, never imported by Pylota, never joins by `UID` | S+I | `core::calendar::verify_matrix`, `it::calendar::verification_end_to_end` |
 | V18 | The organizer's address in `From` but authentication `fail`, `unverified`, `softfail` or `unaligned`, or several `From` addresses | No authenticated sender: `sender_not_authenticated` (and the message is usually quarantined, so no event until release) | S | `core::calendar::verify_matrix`, `it::calendar::verification_end_to_end` |
-| V19 | `SENT-BY`: an assistant at the organizer's domain; a sender at another domain naming itself as `SENT-BY` | Same organisational domain: verified, `verified_by: "sent_by"`. Other domain: `sent_by_unverifiable` | S | `core::calendar::verify_matrix` |
+| V19 | `SENT-BY`: an assistant at the organizer's domain; a sender on a shared provider (`attacker@gmail.com`) naming itself as `SENT-BY` for another user there (`garage@gmail.com`), in a `REQUEST`, a `CANCEL` or a `REPLY`; a sender at another domain naming itself as `SENT-BY` | Never verified: `sent_by_unverifiable` in every case, with `organizer.sent_by` (or the attendee's `sent_by`) and `authenticated_sender` returned; never answered through the reply route, never joined by `UID`, never a known recipient by rule 5 | S | `core::calendar::verify_matrix` |
 | V20 | `REPLY` from the attendee it names; a `REPLY` with two `ATTENDEE`s; a `REPLY` sent by someone else; a delegate's `REPLY` (`DELEGATED-FROM`); a `COUNTER` from one of its attendees; a `REFRESH` | Attendee's own: verified (`attendee`). Two attendees: `attendee_count`. Someone else: `sender_not_attendee`. Delegate: verified as itself, `delegated_from` returned. `COUNTER` and `REFRESH` by the same rules | S+I | `core::calendar::verify_matrix` |
 | V21 | An attendee forwards the organizer's `REQUEST` to the identity (RFC 5546 §3.2.2.6); a delegator sends one with `DELEGATED-TO` naming the identity | Not verified: `sender_not_organizer`, or `sender_is_delegator` for the delegation | S | `core::calendar::verify_matrix` |
 | V22 | A domain with no DMARC record but an aligned DKIM signature; another workspace's identity on the shared platform domain; a test tenant's loopback delivery | Aligned without a record: authenticated (verdict `none`, `aligned_by: "dkim"`). Platform domain: verified when the identity is the organizer. Loopback: verified (`verdict: pass`) | S | `core::calendar::verify_matrix`, `it::calendar::verification_end_to_end`, `it::calendar::loopback_round_trip` |
@@ -1461,10 +1557,10 @@ Section U of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator 
 | V26 | The same raw invitation delivered twice; one invitation to two identities of a tenant | One row and one event per mailbox; each copy has its own `is_self` and event; `is_primary_recipient` on one | S+I | `it::calendar::two_identities_and_redelivery` |
 | V27 | An endpoint subscribing to `calendar.received` created by a key without `messages:read`; the system identity receiving an invitation; a partner endpoint | `403 permission_denied` (`details.required`); the system identity's mailbox emits none; partner and tenant endpoints with an identity filter receive it like any mailbox event | S | `it::calendar::webhook_permission_and_routing` |
 | V28 | An attendee's `REPLY` that has no thread token, `In-Reply-To` or `References` | Joins the thread holding the invitation by `UID` (verified only), after token and header steps; `thread_join_unverified` when the sender is not a participant | S | `it::calendar::uid_thread_join`, `core::thread::calendar_uid_step` |
-| V29 | A stranger reuses a known `UID` in an unverified object | Never joins by `UID`: headers or a new thread | S | `it::calendar::uid_thread_join`, `core::thread::calendar_uid_step` |
+| V29 | A stranger reuses a known `UID`: in an unverified object; in its own verified `REQUEST` or `CANCEL` (it is the organizer it names); in a verified `REPLY` that names the identity as organizer although the stranger is not an attendee of the identity's invitation | Never joins by `UID`: headers or a new thread; `organized_here: false`; the reply route's checks ignore it (V46) | S | `it::calendar::uid_thread_join`, `core::thread::calendar_uid_step` |
 | V30 | `ORGANIZER` differs from the resolved `From`: another identity's address, an explicit `from_address`, a fallback-pinned thread (platform address), a `retiring` address not on the thread; a `REPLY` whose attendee is not the `From`; an identity trying to delegate with a `REQUEST` | `400 calendar_organizer_mismatch` or `400 calendar_attendee_mismatch` with `details.from_address`; nothing stored or reserved | S | `core::calendar::outbound_parties`, `it::calendar::organizer_binding` |
 | V31 | The sending domain fails, is suspended, or has `delivery_events: manual` after a calendar message was accepted | `failed`, `domain_failing_no_fallback`, never sent from the platform address; the `sends` hold settled with nothing consumed. A held domain holds it as usual | S | `it::calendar::never_falls_back` |
-| V32 | Payloads with no `METHOD`, two, `X-FOO`; a `VTODO`; no `UID`; differing `UID`s; no `DTSTAMP`; `SEQUENCE` −1; `PUBLISH` with attendees; `REQUEST` without attendees or `DTSTART`; `REPLY` with two attendees; `VALARM` in `CANCEL`; `ADD` with `SEQUENCE:0`; no `PRODID`; a syntax error | `400 calendar_invalid` with the `details.reason` of §5.2 (and `details.line` for a syntax error); nothing stored | S | `core::calendar::outbound_validation`, `it::calendar::send_validation_errors` |
+| V32 | Payloads with no `METHOD`, two, `X-FOO`; a `VTODO`; no `UID`; differing `UID`s; no `DTSTAMP`; `SEQUENCE` −1; `PUBLISH` with attendees; `REQUEST` without attendees or `DTSTART`; `REPLY` with two attendees; `VALARM` in `CANCEL`; `ADD` with `SEQUENCE:0`, without attendees or with an `RRULE`; `CANCEL` or `DECLINECOUNTER` without attendees or `SEQUENCE`; `COUNTER` without attendees; `REFRESH` with `SEQUENCE` or `SUMMARY`; two `VEVENT`s in an `ADD`, `REFRESH` or `COUNTER`; `RRULE:FREQ=WEEKLY;BYDAY=1MO`; no `PRODID`; a syntax error | `400 calendar_invalid` with the `details.reason` of §5.2 (and `details.line` for a syntax error); nothing stored | S | `core::calendar::outbound_validation`, `it::calendar::send_validation_errors` |
 | V33 | `calendar.ics` of 300 KiB; a 250 KiB object with large attachments that pass 5 MiB composed | `413 calendar_too_large` (`details.limit`); `413 message_too_large` counting both copies | S | `core::calendar::outbound_validation`, `it::calendar::send_request_mime` |
 | V34 | A `TZID` used without a `VTIMEZONE`: `Europe/London` (Kairos's output), `GMT Standard Time`, `Mars/Olympus` | IANA and Windows names: a `VTIMEZONE` generated (reported in `added_vtimezones`) that gives the tzdb offsets for the covered years; unknown: `400 calendar_invalid` (`unknown_tzid`) | S | `core::ical::vtimezone_generate`, `core::calendar::normalise_outbound`, `it::calendar::vtimezone_completion`, `live::calendar::client_matrix` |
 | V35 | Payload with LF line ends, 300-character lines, non-ASCII text, `X-KAIROS-REF` and `X-PYLOTA-…` properties, and `X-WR-TIMEZONE` | Re-serialised with CRLF and 75-octet folding (no UTF-8 sequence split), `charset=UTF-8`, `7bit` or `base64`; extension properties removed and listed in `removed`, `X-WR-TIMEZONE` kept; the `method` parameter equals `METHOD` | S | `core::ical::write_round_trip`, `core::calendar::normalise_outbound`, `core::compose::calendar_mime`, `it::calendar::send_request_mime` |
@@ -1475,11 +1571,11 @@ Section U of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator 
 | V40 | Calendar send from a `cloudflare`-transport domain (the platform domain included) before S1 records the raw path; after S1, with two recipients when raw takes one | `422 transport_unavailable`, `calendar_needs_raw_mime`; afterwards, if one recipient per raw send: `400 too_many_recipients` (`calendar_single_recipient`). `ses` and `smtp` domains send normally | S | `it::calendar::cloudflare_raw_path` |
 | V41 | A calendar send retried with the same key and body; with the same key and another `ics`; a transport timeout | Replay with `deduplicated: true`; `409 idempotency_conflict`; `uncertain`, never resent | S | `it::calendar::send_idempotency_and_uncertain` |
 | V42 | Forwarding a message that carries an invitation | The calendar part is re-attached as `application/ics` without `method`; the forward is not an iMIP message | S | `core::compose::calendar_mime`, `it::calendar::forward_attaches_plain_ics` |
-| V43 | Calendar reply to a verified `REQUEST` the identity is invited to | `202`; one `REPLY` to the `ORGANIZER` only, from the attendee address, in the invitation's thread with `In-Reply-To`; `SEQUENCE` echoed when non-zero; `PARTSTAT` set; `COMMENT` escaped; subject `Accepted: …`; the organizer applies it | S | `core::calendar::reply_builder`, `it::calendar::reply_route_sends_reply`, `live::calendar::reply_applied` |
+| V43 | Calendar reply to a verified `REQUEST` the identity is invited to; to one instance that has an override with its own `SEQUENCE`; to an invitation whose `ATTENDEE` is written `MAILTO:Fleet@Acme.example` | `202`; one `REPLY` to the `ORGANIZER` only, from the attendee address, in the invitation's thread with `In-Reply-To`; `SEQUENCE` echoed when non-zero, the override's for that instance; `ORGANIZER` and `ATTENDEE` written as the invitation wrote them; `PARTSTAT` set; `COMMENT` escaped; subject `Accepted: …`; the organizer applies it | S | `core::calendar::reply_builder`, `it::calendar::reply_route_sends_reply`, `live::calendar::reply_applied` |
 | V44 | Calendar reply to a message with no object, an `invalid` object, a `REPLY`, `CANCEL` or `PUBLISH`, or an outbound message | `409 calendar_not_invitation` (`details.method`, `details.object_status`) | S | `it::calendar::reply_route_refusals` |
-| V45 | Calendar reply to an unverified invitation; to a quarantined one with `quarantine:review`; to a quarantined one without it; to a hidden or throttled one | `409 calendar_not_verified` with the object's reason; `409 calendar_not_verified` (`message_quarantined`); `404 message_not_found` for the last two | S | `it::calendar::reply_route_refusals` |
-| V46 | The invitation is `STATUS:CANCELLED`; a later verified `CANCEL` for the whole event, or for the instance answered, has arrived; a later verified `REQUEST` with a higher `SEQUENCE`, or the same `SEQUENCE` and a later `DTSTAMP`, has arrived | `409 calendar_cancelled` (`details.cancel_message_id`); `409 calendar_superseded` (`details.latest_message_id`); an unverified later `CANCEL` changes nothing | S | `it::calendar::reply_route_refusals` |
-| V47 | The event ended; an answered instance ended; a recurrence with `UNTIL` in the past; an open-ended recurrence; `recurrence_id` of the wrong type or in `EXDATE` | `409 calendar_event_past` (`details.ended_at`) for the first three; the open-ended one is accepted; `400 invalid_request` (path `recurrence_id`, or `instance_excluded`) | S | `core::calendar::times_and_ends`, `it::calendar::reply_route_refusals` |
+| V45 | Calendar reply to an unverified invitation; to a quarantined one with `quarantine:review`; to one in `screening` with `quarantine:review`; to a quarantined or screening one without it; to a hidden or throttled one | `409 calendar_not_verified` with the object's reason; `409 calendar_not_verified` (`message_quarantined`); `409 calendar_not_verified` (`message_screening`); `404 message_not_found` for the last two | S | `it::calendar::reply_route_refusals` |
+| V46 | The invitation is `STATUS:CANCELLED`; a later verified `CANCEL` for the whole event, or for the instance answered, has arrived; a later verified `REQUEST` with a higher `SEQUENCE`, or the same `SEQUENCE` and a later `DTSTAMP`, has arrived; a verified `CANCEL` or a higher-`SEQUENCE` `REQUEST` with the same `UID` from another organizer has arrived | `409 calendar_cancelled` (`details.cancel_message_id`); `409 calendar_superseded` (`details.latest_message_id`); an unverified later `CANCEL`, and any object of another organizer, change nothing | S | `it::calendar::reply_route_refusals` |
+| V47 | The event ended; an answered instance ended; a recurrence with `UNTIL` in the past; an open-ended recurrence; `recurrence_id` of the wrong type or in `EXDATE`; an instance of a floating invitation; an instance of one whose zone is unknown | `409 calendar_event_past` (`details.ended_at`) for the first three; the open-ended one is accepted; `400 invalid_request` (path `recurrence_id`, or `instance_excluded`); the floating instance is written as its local time without `TZID`; `400 invalid_request` (`instance_zone_unknown`) for the unknown zone | S | `core::calendar::times_and_ends`, `core::calendar::reply_builder`, `it::calendar::reply_route_refusals` |
 | V48 | The identity is not an attendee; its attendee address is retired, pending, or the thread is fallback-pinned to the platform address | `409 calendar_not_attendee`; `409 calendar_attendee_address_unavailable` (`details.reason`) | S | `it::calendar::reply_route_refusals` |
 | V49 | Accept, then decline within the same second with a new key; the same key twice; no key | Two `REPLY`s, the second with a strictly later `DTSTAMP`; a replay with `deduplicated: true` and nothing sent; `400 idempotency_key_required` | S | `core::calendar::reply_builder`, `it::calendar::reply_dtstamp_and_keys` |
 | V50 | Calendar reply from a paused identity, a suspended tenant, a sending-paused tenant, an identity without an owner; over the plan's `sends`, a daily cap, the hop limit, `RL_SEND`, a busy thread; with a key without `messages:send`; for another identity's or tenant's message | The standard send errors in the standard order (`403 tenant_suspended` before `409 identity_paused`, `402 billing_limit`, `429 daily_cap_reached`, `409 loop_detected`, `429 rate_limited`, `409 thread_busy`); `403 permission_denied`; `404` exactly as for a missing message | S | `it::calendar::reply_route_standard_refusals`, `it::security::cross_tenant_matrix` |
@@ -1494,9 +1590,9 @@ Section U of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator 
 | Test | Proves | Covers |
 |---|---|---|
 | `core::ical::content_lines` | Unfolding of CRLF and bare LF followed by a space or tab, including a fold inside a multi-octet UTF-8 sequence; quoted parameter values with `:`, `;` and `,`; text unescaping of `\\`, `\;`, `\,`, `\n`, `\N` and an unknown escape; invalid UTF-8 replaced with the warning; case-insensitive names | §2.2, V10 |
-| `core::ical::bounds` | Every row of the bounds table gives its status at the bound and one past it (1 MiB, 20,000 lines, 64 KiB line, 50 parameters, 1,024-byte value, 500 components, 1,000 overrides, 1,000 attendees, 20 `VTIMEZONE`s, 10,000 `EXDATE`s, 3 levels, 1,024-byte `UID`, 1,000 parties); a 1 MiB object parses within 1 s native | §2.2, V8, V11 |
-| `core::ical::rrule_validation` | Each rule of §2.6: valid rules; every invalid shape; the `INTERVAL`, `COUNT` and `BY…` list bounds; high-frequency warning; a second `RRULE` ignored; text cut at 512 bytes | §2.6, V7 |
-| `core::ical::tz_resolution_order` | `Z`, IANA (any case), Windows (with collapsed spaces), `/`-prefixed, definition-only and unknown `TZID`s resolve in the order of §2.5; a named zone with a definition uses the tzdb | §2.5, V2, V3 |
+| `core::ical::bounds` | Every row of the bounds table gives its status at the bound and one past it (1 MiB, 20,000 lines, 64 KiB line, 50 parameters, 1,024-byte value, 1,100 components inside the `VCALENDAR`, 1,000 overrides, 1,000 attendees, 20 `VTIMEZONE`s, 10,000 `EXDATE`s, 3 levels, 1,024-byte `UID`, 1,000 parties); an inline `ATTACH` or `IMAGE` of 900 KiB is skipped, counted in `removed` and leaves the object `parsed` inbound and a reading failure outbound; a 1 MiB object parses within 1 s native | §2.2, V8, V11 |
+| `core::ical::rrule_validation` | Each rule of §2.6: valid rules; every invalid shape, a numeric `BYDAY` with `WEEKLY` or with `YEARLY` and `BYWEEKNO` included; the `INTERVAL`, `COUNT` and `BY…` list bounds; high-frequency warning; a second `RRULE` ignored; text cut at 512 bytes | §2.6, V7 |
+| `core::ical::tz_resolution_order` | `Z`, IANA (any case), Windows (with collapsed spaces), `/`-prefixed, definition-only and unknown `TZID`s resolve in the order of §2.5; a named zone with a usable definition takes its instant from the definition and records `tz_definition_mismatch` when the tzdb differs; with an unusable one it uses the tzdb | §2.5, V2, V3, V4 |
 | `core::ical::windows_zones_table` | The generated table has the 142 `territory="001"` names of the pinned CLDR file, each value parses with `chrono_tz::Tz::from_str`, and the five spot values of §2.5 are exact | §2.5, V2 |
 | `core::ical::vtimezone_subset` | Offsets from definitions with yearly `BYMONTH`/`BYDAY` and `BYMONTHDAY` rules, `UNTIL`, `COUNT` and `RDATE`s, across both transitions; any other rule is `vtimezone_unsupported` | §2.5, V3 |
 | `core::ical::dst_gap_overlap` | `TZID=Europe/London:20270328T013000` (a gap) reads with the offset before the gap; `20271031T013000` (an overlap) is the first occurrence; the same for a definition-only zone | §2.5, V4 |
@@ -1505,17 +1601,17 @@ Section U of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator 
 | `core::calendar::select_parts` | The selection order of §2.1; identical objects counted once; distinct ones in `other_objects`; the 10-part limit; TNEF files; nested messages, DSNs and MDNs never read; the MAPI-only TNEF flag | §2.1, V1, V13, V14 |
 | `core::calendar::primary_and_overrides` | Primary selection with and without a master; override sorting, the 100 kept; duplicate, mistyped and other-`UID` components | §2.4, V6, V8 |
 | `core::calendar::times_and_ends` | Time values for every form; end derivation (`dtend`, `duration`, `default`); end before start; `ends_at` for one-off, `UNTIL`, `RDATE`-only, `COUNT` and unbounded events, in UTC and in the tenant's time zone; the past check for an instance | §2.5, V5, V47 |
-| `core::calendar::methods_and_components` | Every row of the methods table; the `method` parameter rules; ignored components; `unsupported`; removed alarms, attachments and extension properties | §2.3, V9, V12, V15 |
+| `core::calendar::methods_and_components` | Every row of the methods table; the `method` parameter rules; ignored components; `unsupported`; removed alarms, attachments, images and extension properties; `conference` kept up to 5 with the URI bound | §2.3, V9, V12, V15 |
 | `core::calendar::parties` | `mailto` normalisation (case, percent-encoding, query); non-`mailto` values; roles, statuses, types and defaults; `is_self` for every address status; attendee truncation order; `parties` HMACs | §2.7, V16 |
 | `core::calendar::text_cleaning` | Bounds and truncation flags of every text field; control and hidden characters removed; the `hidden_text` flag rule | §2.8, V12 |
-| `core::calendar::verify_matrix` | Every row of §3.2 and every reason of §3.3 in precedence order, with authentication `pass`, `none` with and without alignment, `unaligned`, `softfail`, `unverified`, `fail`, loopback and several `From` addresses; `SENT-BY` within and across organisational domains; delegates, delegators and forwards | §3, V15, V17–V23 |
+| `core::calendar::verify_matrix` | Every row of §3.2 and every reason of §3.3 in precedence order, with authentication `pass`, `none` with and without alignment, `unaligned`, `softfail`, `unverified`, `fail`, loopback and several `From` addresses; a `SENT-BY` on a shared provider, inside one domain and across domains, never verifying (`sent_by_unverifiable`); `uid_mismatch` for a `VEVENT` of another `UID`, a second `VCALENDAR` and an ignored component with an `ORGANIZER`; a `counter` without `ATTENDEE`; delegates, delegators and forwards | §3, V6, V15, V17–V23 |
 | `core::calendar::shrink_order` | An object over 262,144 bytes is cut in the order of §4.1 and never loses its identifying fields or `parties` | §4.1, V16 |
 | `core::calendar::outbound_validation` | Every row of step 9a's structure table, the size limit, the `kind` and operation rules, and the recipient rules of step 13a | §5.2, V32, V33, V36, V38 |
 | `core::calendar::outbound_parties` | Organizer and attendee binding against the resolved `From`, case-insensitively, with the error details | §5.2, V30 |
 | `core::calendar::normalise_outbound` | Extension properties and parameters removed except `X-WR-TIMEZONE`, at most 20 names reported; definitions added for IANA and Windows names; everything else unchanged; deterministic bytes for the same input | §5.3, V34, V35 |
-| `core::calendar::reply_builder` | The `REPLY` of §6.3 for each `partstat`, with and without `SEQUENCE`, `RECURRENCE-ID` (date and date-time, with its `VTIMEZONE`) and `COMMENT`; `DTSTAMP` = max(now, latest + 1 s); the subject and text; the output passes `outbound_validation` | §6.3, V43, V49 |
+| `core::calendar::reply_builder` | The `REPLY` of §6.3 for each `partstat`, with and without `SEQUENCE`, `RECURRENCE-ID` (date, UTC, zoned with its `VTIMEZONE`, and floating) and `COMMENT`; the override's `SEQUENCE` for an instance that has one; `ORGANIZER` and `ATTENDEE` as the invitation wrote them, query removed; `instance_zone_unknown` for an unknown zone; `DTSTAMP` = max(now, latest + 1 s); the subject and text; the output passes `outbound_validation` | §6.3, V43, V49 |
 | `core::compose::calendar_mime` | The MIME tree of §5.5 with and without HTML, attachments and the copy; `method` parameter equals `METHOD`; `component=VEVENT`; encodings; the forward form (`application/ics`, no `method`) | §5.5, §5.11, V35, V42 |
-| `core::thread::calendar_uid_step` | `resolve_inbound` joins by `UID` only for a verified object, after token and headers, and sets `join_unverified` for a non-participant | §4.3, V28, V29 |
+| `core::thread::calendar_uid_step` | `resolve_inbound` joins by `UID` only for a verified object, after token and headers, only into a thread with the same `UID` and `ORGANIZER`, and for an attendee's answer only into an invitation whose parties hold the attendee; it sets `join_unverified` for a non-participant | §4.3, V28, V29 |
 | `conf::calendar::v*` | One corpus case per inbound row V1–V16 under `crates/conformance/corpus/calendar/` (authored or derived from RFC examples, addresses under RFC 2606 names), each with its expected object; also run through workerd by `it::conformance::corpus_via_workerd` | V1–V16 |
 | fuzz `ical_parse` | No panic; every output string is valid UTF-8; status is one of the five; time per input under 1 s; `write(parse(x))` re-parses to the same object | V10 |
 | `it::calendar::degraded_parse_keeps_message` | A calendar part that panics the reader (a fault hook) leaves the message stored without its object at the third attempt, with `parse_degraded` | V10 |
@@ -1524,7 +1620,7 @@ Section U of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator 
 | `it::calendar::reparse_reemits_when_changed` | A re-parse with a changed reader emits `reprocessed: true` once; an unchanged object emits nothing; the thread is unchanged | V25 |
 | `it::calendar::two_identities_and_redelivery` | One invitation to `bookings` and `compliance` gives two rows and two events with their own `is_self`; the same raw again gives nothing more | V26 |
 | `it::calendar::webhook_permission_and_routing` | Endpoint create, re-point and replay with `calendar.received` need `messages:read`; tenant, partner and platform endpoints and identity filters receive it; the system identity's mailbox emits none; the event carries no summary or address | V27, §4.4 |
-| `it::calendar::uid_thread_join` | A header-less verified `REPLY` joins the invitation's thread; an unverified object with the same `UID` starts a new thread; a non-participant's verified join is flagged | V28, V29 |
+| `it::calendar::uid_thread_join` | A header-less verified `REPLY` joins the invitation's thread with `organized_here: true`; an unverified object with the same `UID`, a stranger's own verified `REQUEST` and `CANCEL` with that `UID`, and a stranger's verified `REPLY` naming the identity as organizer each start a new thread with `organized_here: false`; a non-participant's verified join is flagged | V28, V29 |
 | `it::calendar::send_request_mime` | A Kairos-shaped `REQUEST` sent through the SES and SMTP fakes arrives as the MIME of §5.5; the stored row has `calendar_json` with `verified: null`; the size limits | V33, V35 |
 | `it::calendar::send_validation_errors` | Each payload of V32, V36 and V38 gets its error and stores, reserves and locks nothing | V32, V36, V38 |
 | `it::calendar::organizer_binding` | Each case of V30, including a fallback-pinned thread whose error names the platform address | V30 |
@@ -1617,7 +1713,7 @@ payloads); AgentMail page content is untrusted data and is summarised, not quote
 | Google multi-`VEVENT` bundles with edited dates not imported | A master with up to 100 overrides read as one object | Exceed |
 | All-day invitations stored with a UTC time zone; all-day ends inclusive | All-day `date` values with exclusive ends; floating times marked; unknown zones marked, never guessed | Exceed |
 | Methods other than `REQUEST`, `REPLY` and `CANCEL` (`PUBLISH`, `COUNTER`) and `RECURRENCE-ID` handling not documented | All eight iTIP methods, objects without a method and unknown methods classified; per-method verification | Exceed |
-| Sender authentication as the only check; nothing on `SENT-BY` or delegation | `SENT-BY` accepted only within the organizer's organisational domain; delegates and delegators reported | Exceed |
+| Sender authentication as the only check; nothing on `SENT-BY` or delegation | A `SENT-BY` never verifies and is reported as `sent_by_unverifiable` with the addresses; delegates and delegators reported; matches by `UID` also need the same `ORGANIZER` | Exceed |
 | Outbound invitations generated from its own events (`invite.ics`, `METHOD:REQUEST`, one email per attendee, subject "Invitation: …") | Caller-supplied iCalendar, validated (one method, `UID`, `DTSTAMP`, RFC 5546 structure, organizer = `From`, recipients = attendees), normalised (`VTIMEZONE` completed, extension properties removed), sent as RFC 6047 iMIP with an optional `application/ics` copy | Deliberately different (no store), and stricter |
 | Respond to an event: `accepted`, `declined`, `tentative`, a "Responded: …" reply in the thread | `calendar-reply` with the same answers and a comment, refusing unverified, quarantined, cancelled, superseded, past and non-attendee cases, `DTSTAMP` strictly increasing | Match, and exceed on refusals |
 | Inbound RSVPs update attendee status on its event | Verified `REPLY` objects with `organized_here`, joined to the invitation's thread by `UID`; the consumer applies them | Deliberately different: the consumer owns the status |

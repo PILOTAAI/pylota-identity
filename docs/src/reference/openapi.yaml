@@ -4831,7 +4831,7 @@ paths:
         identity is not an attendee ([V43]–[V50]).
       x-required-permission: ['messages:send']
       x-key-levels: [platform, partner, tenant, identity]
-      x-permission-notes: 'The invitation must be visible to the key: a `quarantined` one needs `quarantine:review` and is then refused with `calendar_not_verified`; a `screening`, `hidden` or `throttled` one is `404 message_not_found`.'
+      x-permission-notes: 'The invitation must be visible to the key: a `quarantined` or `screening` one needs `quarantine:review` and is then refused with `calendar_not_verified` (`message_quarantined` or `message_screening`); without it, and for a `hidden` or `throttled` one, the answer is `404 message_not_found`.'
       x-rate-limit-buckets: [api, send]
       x-idempotency: required
       parameters:
@@ -12293,7 +12293,8 @@ components:
         `*@simulator.invalid` nor an identity of its own tenant or of another test tenant with the same partner ([L1], [L3]), and `policy_denied` with `details.reason = "free_sending_off"` when the
         operator's `free_sending` switch is off and the workspace is on the Free plan or still in its send
         ramp, or `details.reason = "signup_unverified"` (or `signup_human_unreachable`) when a provisional agent
-        sign-up sends to anyone but its named human. `approval_required` when the tenant's
+        sign-up sends to anyone but its named human, or `signup_paused` for any send of one while the operator's
+        `agent_signup` switch is off. `approval_required` when the tenant's
         `drafts.require_approval`, or the identity's stricter `send_policy.require_approval`, needs approval for
         these recipients (`details.reason`, `details.recipients`): nothing was stored; create the message as a
         draft and send it, and it waits for an approver.
@@ -12365,7 +12366,7 @@ components:
         The invitation cannot be answered, or the send conflicts with the idempotency record or with the
         identity, thread or domain state (as `SendConflict`). `calendar_not_invitation` (no readable
         invitation, or an outbound message; `details.method`, `details.object_status`),
-        `calendar_not_verified` (`details.reason`, `message_quarantined` for a quarantined invitation),
+        `calendar_not_verified` (`details.reason`, `message_quarantined` or `message_screening` for a held invitation),
         `calendar_not_attendee`, `calendar_cancelled` (`details.cancel_message_id`), `calendar_superseded`
         (`details.latest_message_id`, `details.latest_sequence`), `calendar_event_past` (`details.ended_at`),
         `calendar_attendee_address_unavailable` (`details.address`, `details.reason`: `retired`, `pending` or
@@ -12860,7 +12861,8 @@ components:
             tenant key, a service-account approval by an API key, a draft approval by an API key), or
             `self_approval` when a key approves a draft revision it wrote, `consumer_owner_only` on a durable
             event consumer, `signup_unverified` for a key of a provisional agent sign-up. `policy_denied` on
-            `wait`: `account_not_approved`; on a send: `signup_unverified` or `signup_human_unreachable`.
+            `wait`: `account_not_approved`; on a send: `signup_unverified`, `signup_human_unreachable` or
+            `signup_paused`.
             `invalid_request` on `requestServiceAccount`: `own_deployment`; on the event feed: `cursor_ahead`,
             `credential_in_url`, `two_credentials`, `subprotocol_required`; on `POST …/feedback`:
             `feedback_not_applicable`; on `batch-update`: `label_limit`; on a list or retention change of the
@@ -12888,7 +12890,7 @@ components:
             - type: string
               enum: [not_writable, above_ceiling, person_required, account_not_approved, own_deployment]
             - type: string
-              enum: [self_approval, consumer_owner_only, signup_unverified, signup_human_unreachable, cursor_ahead, credential_in_url, two_credentials, subprotocol_required, feedback_not_applicable, label_limit, system_identity, beyond_retention, unknown_mcp_tool, mcp_tool_not_permitted, digest, erased, not_visible, raw_expired, attachment_missing, retention, size_limit, log_reset, calendar_single_recipient, webhook_header, attachments_total, transport_limit, content_length, encoding, incomplete, expired, too_many_attempts, object_missing, infected, disabled, paused, workspace_limit, human_email_hosted, person_disabled, wrong, burned, locked, superseded, none, human_email_not_allowed, no_mail_domain]
+              enum: [self_approval, consumer_owner_only, signup_unverified, signup_human_unreachable, signup_paused, cursor_ahead, credential_in_url, two_credentials, subprotocol_required, feedback_not_applicable, label_limit, system_identity, beyond_retention, unknown_mcp_tool, mcp_tool_not_permitted, digest, erased, not_visible, raw_expired, attachment_missing, retention, size_limit, log_reset, calendar_single_recipient, webhook_header, attachments_total, transport_limit, content_length, encoding, incomplete, expired, too_many_attempts, object_missing, infected, disabled, paused, workspace_limit, human_email_hosted, person_disabled, wrong, burned, locked, superseded, none, human_email_not_allowed, no_mail_domain]
             - type: string
               description: Any other code-specific reason listed in docs › Errors.
         field:
@@ -16745,8 +16747,9 @@ components:
         An iCalendar object to send as iMIP (docs › Calendar invitations § 5). It needs exactly one `METHOD`,
         one `UID`, a `DTSTAMP` in each `VEVENT` and the structure RFC 5546 gives its method
         (`400 calendar_invalid`). For `PUBLISH`, `REQUEST`, `ADD`, `CANCEL` and `DECLINECOUNTER` the
-        `ORGANIZER` must be the address the message is sent from (`400 calendar_organizer_mismatch`) and every
-        recipient an `ATTENDEE`; for `REPLY`, `REFRESH` and `COUNTER` the replying `ATTENDEE` must be the
+        `ORGANIZER` must be the address the message is sent from (`400 calendar_organizer_mismatch`), and for
+        all of them but `PUBLISH`, which has no attendees and may go to anyone, every recipient must be an
+        `ATTENDEE`; for `REPLY`, `REFRESH` and `COUNTER` the replying `ATTENDEE` must be the
         `From` (`400 calendar_attendee_mismatch`) and the one recipient the `ORGANIZER`
         (`400 calendar_recipient_mismatch`). `kind` must be `transactional`. A lower `SEQUENCE` than one this
         identity already sent for the `UID` is `409 calendar_sequence_stale`. A calendar message never falls
@@ -16772,7 +16775,11 @@ components:
           maxLength: 1000
         recurrence_id:
           type: [string, 'null']
-          description: An RFC 3339 instant, or `YYYY-MM-DD` when the invitation's DTSTART is a date, to answer one instance.
+          description: >-
+            Answers one instance, in the form of the invitation's DTSTART: an RFC 3339 instant for a UTC or zoned
+            date-time, a local `YYYY-MM-DDTHH:MM:SS` without offset for a floating one, `YYYY-MM-DD` for a date.
+            An invitation whose zone is unknown cannot be answered per instance (`400 invalid_request`,
+            `instance_zone_unknown`).
     CalendarTime:
       type: object
       required: [utc, local, date, tzid, tz, tz_resolution]
@@ -16845,7 +16852,7 @@ components:
       type: object
       description: >-
         The message's calendar object (docs › Calendar invitations § 2.9). Every string is untrusted content.
-        Alarms, attachments and extension properties are never included. New `warnings` values and new
+        Alarms, attachments, images and extension properties are never included. New `warnings` values and new
         `reason` values may be added within /v1.
       required: [object_status, method, verified, reason, attachment_id]
       properties:
@@ -16860,10 +16867,11 @@ components:
           description: '`null` on outbound messages.'
         verified_by:
           type: [string, 'null']
-          enum: [organizer, attendee, sent_by, null]
+          enum: [organizer, attendee, null]
         reason:
           type: [string, 'null']
-          enum: [object_invalid, object_too_large, object_too_complex, no_vevent, method_unknown, method_mismatch, organizer_missing, organizer_not_mailto, organizer_inconsistent, attendee_count, sender_not_authenticated, sender_is_delegator, sent_by_unverifiable, sender_not_organizer, sender_not_attendee, null]
+          description: '`sent_by_unverifiable`: the sender is only a `SENT-BY` of the organizer or attendee, which never verifies.'
+          enum: [object_invalid, object_too_large, object_too_complex, no_vevent, method_unknown, method_mismatch, organizer_missing, organizer_not_mailto, organizer_inconsistent, uid_mismatch, attendee_count, sender_not_authenticated, sender_is_delegator, sent_by_unverifiable, sender_not_organizer, sender_not_attendee, null]
         authenticated_sender:
           type: [string, 'null']
         uid:
@@ -16894,6 +16902,20 @@ components:
         location:
           type: [string, 'null']
           maxLength: 1024
+        conference:
+          type: array
+          maxItems: 5
+          description: The primary's `CONFERENCE` properties (RFC 7986). Untrusted; never fetched.
+          items:
+            type: object
+            required: [uri, label]
+            properties:
+              uri:
+                type: string
+                maxLength: 2048
+              label:
+                type: [string, 'null']
+                maxLength: 256
         comment:
           type: [string, 'null']
           maxLength: 2000
@@ -16979,6 +17001,9 @@ components:
           type: boolean
         organized_here:
           type: boolean
+          description: >-
+            `true` only for a verified `reply`, `refresh` or `counter` answering an invitation this identity sent
+            with the same `UID` and `ORGANIZER`, from an attendee that invitation names.
         attachment_id:
           description: The attachment holding the raw `.ics`.
           oneOf:
@@ -16997,7 +17022,11 @@ components:
               type: integer
             attachments:
               type: integer
+            images:
+              type: integer
             x_properties:
+              type: integer
+            conference:
               type: integer
         warnings:
           type: array

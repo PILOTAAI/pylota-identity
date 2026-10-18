@@ -1606,8 +1606,8 @@ need `quarantine:review` for a quarantined or screening message and never accept
   `description` (an excerpt), `location`, `start` and `end` (UTC instants with the original `TZID` and
   how it was resolved), `all_day`, `floating`, `ends_at`, `rrule` (validated, never expanded),
   `exdates_count`, `organizer`, `attendees` (with `partstat`, `role`, `rsvp`, `is_self`), overrides,
-  `organized_here` and the `attachment_id` of the raw `.ics`. All its strings are untrusted content.
-  Alarms, attachments and extension properties are never included
+  `conference` (meeting links), `organized_here` and the `attachment_id` of the raw `.ics`. All its strings
+  are untrusted content. Alarms, attachments, images and extension properties are never included
   ([Calendar invitations §2.9](../project/design/calendar-invitations.md#29-the-calendar-object)).
 - `draft_id` is the draft an outbound message was sent from, or `null`.
 - `attachments[].upload_id` is the upload the attachment was copied from; `null` for inline, inbound and
@@ -1890,8 +1890,8 @@ which only a dry run returns. A `200` always has `would_send: true`; each recipi
   bytes (`413 calendar_too_large`) and needs exactly one `METHOD`, one `UID`, a `DTSTAMP` in each
   `VEVENT` and the structure RFC 5546 gives its method (`400 calendar_invalid` with
   `details.reason`). For `PUBLISH`, `REQUEST`, `ADD`, `CANCEL` and `DECLINECOUNTER` the `ORGANIZER`
-  must be the address the message is sent from (`400 calendar_organizer_mismatch`, which names it)
-  and every recipient an `ATTENDEE`; for `REPLY`, `REFRESH` and `COUNTER` the replying `ATTENDEE`
+  must be the address the message is sent from (`400 calendar_organizer_mismatch`, which names it),
+  and every recipient an `ATTENDEE` except for `PUBLISH`, which has none and may go to anyone; for `REPLY`, `REFRESH` and `COUNTER` the replying `ATTENDEE`
   must be the `From` (`400 calendar_attendee_mismatch`) and the one recipient the `ORGANIZER`
   (`400 calendar_recipient_mismatch` otherwise). `kind` must be `transactional`. Missing
   `VTIMEZONE`s are added and extension properties other than `X-WR-TIMEZONE` removed (both listed in
@@ -1945,10 +1945,11 @@ original's. `calendar` is refused (`400 invalid_request`).
 Answers a verified invitation (`method: "request"`) that names this identity as an attendee: an iTIP
 `REPLY` goes to the invitation's `ORGANIZER` only, from the attendee's address, in the invitation's
 thread. `partstat` is `accepted`, `declined` or `tentative`; `comment` at most 1,000 characters;
-`recurrence_id` (an RFC 3339 instant, or a date for an all-day invitation) answers one instance.
+`recurrence_id` (an RFC 3339 instant, a local time without offset for a floating invitation, or a date
+for an all-day one; `instance_zone_unknown` when the invitation's zone is unknown) answers one instance.
 `Idempotency-Key` is required, and `?dry_run=true` works as on sends. Returns `202` with the Message
 object. Refusals: `409 calendar_not_invitation`, `409 calendar_not_verified` (also for a quarantined
-invitation: release it first), `409 calendar_not_attendee`, `409 calendar_cancelled`,
+invitation, release it first, or one in screening), `409 calendar_not_attendee`, `409 calendar_cancelled`,
 `409 calendar_superseded`, `409 calendar_event_past`, `409 calendar_attendee_address_unavailable`,
 and every send error ([Calendar invitations §6](../project/design/calendar-invitations.md#6-the-calendar-reply-route)).
 

@@ -617,6 +617,8 @@ CREATE TABLE pending_auth (                -- a first factor passed; the next st
   oauth_subject  TEXT,
   oauth_email    TEXT,
   login_token_id TEXT REFERENCES login_tokens(id),  -- link_code: the emailed code (purpose oauth_link)
+  agent_signup_id TEXT REFERENCES agent_signups(id) ON DELETE CASCADE,  -- two_factor step of an agent
+                                                    -- sign-up link (Agent self-sign-up § 7.2)
   attempts       INTEGER NOT NULL DEFAULT 0,        -- wrong link codes; 5 uses the row up
   created_at     INTEGER NOT NULL,
   expires_at     INTEGER NOT NULL,         -- two_factor: now + 5 minutes; link_code: now + 10 minutes

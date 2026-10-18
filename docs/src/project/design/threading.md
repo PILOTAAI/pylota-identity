@@ -185,13 +185,17 @@ pub struct InboundThreadInputs<'a> {
                                               // is not null)
     pub calendar_uid_hash: Option<&'a str>,   // hex SHA-256 of the primary UID, set only for a verified
                                               // calendar object (Calendar invitations § 4.3)
+    pub calendar_organizer: Option<&'a str>,  // its normalised ORGANIZER address, set with calendar_uid_hash
+    pub calendar_replier: Option<&'a str>,    // reply, refresh, counter: the replier's party hash
+                                              // (Calendar invitations § 4.2); None for organizer methods
 }
 
 pub trait ThreadLookup {                      // implemented over the mailbox SQLite connection
     fn thread_exists(&self, seq: i64) -> bool;
     fn thread_of_message_id(&self, msg_id: &str) -> Option<i64>;
     fn is_participant(&self, seq: i64, address: &str) -> bool;
-    fn thread_of_calendar_uid(&self, uid_hash: &str) -> Option<i64>;   // step 3b, query below
+    fn thread_of_calendar_uid(&self, uid_hash: &str, organizer: &str, replier: Option<&str>)
+        -> Option<i64>;                       // step 3b, query below
 }
 
 pub enum JoinVia { Token, InReplyTo, References, CalendarUid }
@@ -218,16 +222,23 @@ pub fn resolve_inbound(inp: &InboundThreadInputs, db: &impl ThreadLookup) -> Thr
    50 lookups. The first hit is joined (`via: References`).
 
    3b. **Calendar UID.** If the message carries a **verified** calendar object (`calendar_uid_hash` is
-   set), look up `db.thread_of_calendar_uid(uid_hash)`; on a hit, join that thread (`via: CalendarUid`)
-   ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)). Only threads that hold an
-   outbound calendar message or a verified inbound one with that `UID` match, so a stranger who learned a
-   `UID` and sends an unverified object with it never joins by `UID`:
+   set), look up `db.thread_of_calendar_uid(uid_hash, organizer, replier)`; on a hit, join that thread
+   (`via: CalendarUid`) ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)). Only
+   threads that hold an outbound calendar message or a verified inbound one with the same `UID` **and**
+   `ORGANIZER` match, and an attendee's answer matches only an invitation this identity sent whose parties
+   hold that attendee, so a stranger who learned a `UID` never joins by it, whether its object is
+   unverified, names itself as organizer, or answers an invitation that does not name it:
 
    ```sql
-   -- ThreadLookup::thread_of_calendar_uid
+   -- ThreadLookup::thread_of_calendar_uid; ?3 is NULL for organizer methods
    SELECT thread_seq FROM messages
    WHERE calendar_uid_hash = ?1 AND status NOT IN ('hidden','throttled')
+     AND json_extract(calendar_json, '$.organizer.address') = ?2
      AND (direction = 'outbound' OR json_extract(calendar_json, '$.verified') = 1)
+     AND (?3 IS NULL OR (direction = 'outbound'
+          AND status NOT IN ('canceled','rejected','failed','suppressed')
+          AND json_extract(calendar_json, '$.method') IN ('request','add','publish')
+          AND EXISTS (SELECT 1 FROM json_each(calendar_json, '$.parties') p WHERE p.value = ?3)))
    ORDER BY rowid DESC LIMIT 1;
    ```
 4. **New.** Otherwise `New`. The subject is never consulted ([C1](../edge-cases.md)).
@@ -503,7 +514,7 @@ truncated at a character boundary.
 | [A2](../edge-cases.md) | Forged or unrelated sub-address tags never change the identity; a token-shaped tag that fails is ignored | 2.3 |
 | [B6](../edge-cases.md) | Forwarded `message/rfc822` parsed as nested content | 3.3 |
 | [D10](../edge-cases.md) | Failed verifications rate-limited and flagged | 2.5, 3.1 |
-| [V28](../edge-cases.md), [V29](../edge-cases.md) | A verified calendar reply joins by UID; an unverified one never does | 3.1 |
+| [V28](../edge-cases.md), [V29](../edge-cases.md) | A verified calendar reply joins by UID and organizer; an unverified one, or a stranger's object reusing the UID, never does | 3.1 |
 
 ## 9. Tests
 
@@ -523,8 +534,8 @@ truncated at a character boundary.
 | `core::thread::c9_header_join_non_participant` / `it::inbound::c9_header_join_flagged` | `resolve_inbound` sets `join_unverified` for an `In-Reply-To` or `References` join by a sender who is not a participant, and not for a participant; through `email()`, such a message joins the thread with `thread_join_unverified` in `trust.flags` and does not end a `wait` with `kind=reply` (C9) |
 | `core::thread::c10_forged_participant` / `it::inbound::c10_forged_participant_unverified` | A message whose `From` is a participant of the thread, joining by `In-Reply-To`, with no DMARC record and no aligned DKIM or SPF pass (an attacker's own envelope domain passing SPF): `join_unverified` is set, it does not satisfy `wait(kind=reply)`, `known_sender` is false and it counts in the unauthenticated and tenant inbound caps; the same message with an aligned DKIM signature is a normal join ([C10](../edge-cases.md)) |
 | `it::messages::thread_counts_visible_only` | A quarantined first message leaves the thread unlisted with `message_count = 0`; a throttled reply changes neither `last_at` nor `participants`; after release the counts, subject and participants include the released message; after a counterparty erasure the counterparty leaves `participants` |
-| `core::thread::calendar_uid_step` | `resolve_inbound` joins by `UID` only for a verified object, after token and headers, and sets `join_unverified` for a non-participant ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)) |
-| `it::calendar::uid_thread_join` | A header-less verified `REPLY` joins the invitation's thread; an unverified object with the same `UID` starts a new thread; a non-participant's verified join is flagged (V28, V29) |
+| `core::thread::calendar_uid_step` | `resolve_inbound` joins by `UID` only for a verified object, after token and headers, only into a thread with the same `UID` and `ORGANIZER`, and for an attendee's answer only into an invitation whose parties hold the attendee; it sets `join_unverified` for a non-participant ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)) |
+| `it::calendar::uid_thread_join` | A header-less verified `REPLY` joins the invitation's thread; an unverified object with the same `UID`, a stranger's own verified `REQUEST` or `CANCEL` with it, and a stranger's verified `REPLY` naming the identity as organizer each start a new thread; a non-participant's verified join is flagged (V28, V29) |
 | `core::thread::c2_trim_references` | 150 references → first + 19 most recent, order kept, duplicates removed (C2) |
 | `core::thread::c2_rfc5322_parent_rules` | Parent without References uses its In-Reply-To |
 | `it::addresses::c3_reply_from_retiring` | After a promote, replies go from the retiring address the counterparty used; after retirement, from the primary (C3) |

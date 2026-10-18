@@ -184,8 +184,9 @@ From [Calendar invitations](../project/design/calendar-invitations.md).
 |---|---|
 | Calendar parts read per message | 10 |
 | Calendar part read | 1 MiB decoded; larger: `object_status: "too_large"` |
-| Content lines; one unfolded line | 20,000; 64 KiB |
-| Components per object | 500 |
+| Content lines; one unfolded line | 20,000; 64 KiB (an inbound inline `ATTACH` or `IMAGE` value is skipped and counted in `removed` instead) |
+| Components directly inside the `VCALENDAR` | 1,100 |
+| `CONFERENCE` entries kept; URI | 5; 2,048 bytes |
 | Overrides (`RECURRENCE-ID`) read; kept in the object | 1,000; 100 |
 | Attendees read per component; kept | 1,000; 100 |
 | Distinct party addresses per object | 1,000 |
@@ -198,6 +199,7 @@ From [Calendar invitations](../project/design/calendar-invitations.md).
 | Outbound `calendar.ics` | 262,144 bytes (`413 calendar_too_large`) |
 | Generated `VTIMEZONE`s | 10 per message, 8 KiB each |
 | Calendar-reply `comment` | 1,000 characters |
+| Calendar recipients on the `cloudflare` transport | As `max_recipients`, or 1 if spike S1 shows that a raw send takes one recipient (`400 too_many_recipients`, `calendar_single_recipient`) |
 
 ## Uploads
 

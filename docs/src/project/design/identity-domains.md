@@ -132,9 +132,10 @@ normal outbound pipeline.
    `pending`. Each address is checked against `addresses_address` (`409 address_taken`), against
    `address_tombstones` ([Tombstones](#tombstones-a5)), and against `users.email`: an address that is
    a console user's sign-in address is refused with `409 address_taken` too, because every key that reads
-   the mailbox could then read that person's sign-in codes, and so is an address equal to the human address
-   of a provisional agent sign-up ([Agent self-sign-up §3.3](agent-signup.md#33-the-human-email-rules)). The same check runs when `POST …/addresses`
-   adds an address ([Cloud sign-up §10](cloud-signup.md#10-abuse-and-safety-on-cloud),
+   the mailbox could then read that person's sign-in codes, and so is an address that is the base address
+   of a provisional agent sign-up's human address, `+tag` removed, matched by `human_hash`
+   ([Agent self-sign-up §3.3](agent-signup.md#33-the-human-email-rules)). The same check runs when
+   `POST …/addresses` adds an address ([Cloud sign-up §10](cloud-signup.md#10-abuse-and-safety-on-cloud),
    [W45](../edge-cases.md)).
 5. `mailbox_do_id = objects.new_object_id(Mailbox)`.
 6. **`inboxes` hold.** `QuotaRequest::Hold { feature: Inboxes, units: 1, ref: <new idn_ ID>, gates: [StorageGb] }`

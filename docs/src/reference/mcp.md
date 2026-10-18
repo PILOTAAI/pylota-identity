@@ -612,7 +612,7 @@ organizer only, in the invitation's thread
 
 Arguments: `message_id`, `partstat` (`accepted`, `declined` or `tentative`) and `idempotency_key`
 (required); `identity`, `comment` (at most 1,000 characters), `recurrence_id` (one instance: an RFC 3339
-instant, or a date for an all-day invitation).
+instant, a local time without offset for a floating invitation, or a date for an all-day invitation).
 
 ```json
 { "identity": "maintenance.acme@agents.example", "message_id": "msg_01JA9B2C3D4EW7X2M5N6P8R0T0",

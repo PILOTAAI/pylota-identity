@@ -887,7 +887,7 @@ Title "Answer a calendar invitation". Description:
     "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[\\x20-\\x7E]{1,255}$" },
     "partstat": { "type": "string", "enum": ["accepted", "declined", "tentative"] },
     "comment": { "type": "string", "maxLength": 1000 },
-    "recurrence_id": { "type": "string", "maxLength": 64, "description": "An RFC 3339 instant, or YYYY-MM-DD for an all-day event." } } }
+    "recurrence_id": { "type": "string", "maxLength": 64, "description": "An RFC 3339 instant, a local YYYY-MM-DDTHH:MM:SS for a floating event, or YYYY-MM-DD for an all-day event." } } }
 ```
 
 The tool calls `POST …/messages/{message_id}/calendar-reply` with the arguments other than `identity` and

@@ -512,7 +512,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-THR-1** An inbound message joins a thread by, in order:
   1. a valid thread token in the recipient sub-address;
   2. `In-Reply-To` or `References` matching a stored message;
-  3. the `UID` of a verified calendar object matching a calendar message of the mailbox;
+  3. the `UID` and `ORGANIZER` of a verified calendar object matching a calendar message of the mailbox;
   4. otherwise it starts a new thread.
 
   The subject alone **must never** join a thread.
@@ -1024,9 +1024,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   `VTODO`, `VJOURNAL` and `VFREEBUSY` **must** be listed as ignored; `VALARM`, `ATTACH` and extension
   properties **must not** appear in the object agents read.
 - **FR-CAL-5** Each object **must** say whether it is verified, by which rule, and otherwise why not. An
-  organizer method is verified only when the message's authenticated sender is the organizer (or its
-  `SENT-BY` within the organizer's organisational domain); an attendee method only when it is the replying
-  attendee (or its `SENT-BY` within that domain).
+  organizer method is verified only when the message's authenticated sender is the organizer, an attendee
+  method only when it is the replying attendee, and only when the part holds no component of another
+  `UID` or organizer; a `SENT-BY` **must never** verify an object.
 - **FR-CAL-6** A `calendar.received` event **must** be emitted when a message with a calendar object first
   becomes visible as `received`, and never while it is quarantined, in screening, hidden or throttled. It
   **must** be thin, and an endpoint that receives it **must** be created only by a key with
@@ -1047,11 +1047,14 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-CAL-10** An identity **must** be able to answer a verified invitation it is an attendee of with
   `accepted`, `declined` or `tentative` and an optional comment, through one idempotent route that sends an
   iTIP `REPLY` to the organizer from the attendee address in the invitation's thread, and refuses
-  unverified, quarantined, cancelled, superseded, past and non-attendee cases with defined errors.
+  unverified, held (quarantined or in screening), cancelled, superseded, past and non-attendee cases with
+  defined errors; only verified messages from the invitation's own organizer may make it cancelled or
+  superseded.
 - **FR-CAL-11** An identity **must not** be able to send, for one `UID`, an organizer method with a lower
   `SEQUENCE` than one it already sent, also when two sends race.
 - **FR-CAL-12** A verified calendar message without thread headers **must** join the thread that holds a
-  calendar message with the same `UID`; an unverified one **must never** join by `UID`.
+  calendar message with the same `UID` and `ORGANIZER` (for an attendee's answer, an invitation this
+  identity sent that names that attendee); an unverified one **must never** join by `UID`.
 - **FR-CAL-13** Pylota Mail **must not** keep calendar state beyond the message's own row and attachment.
   Calendar data **must** be retained, erased (including by counterparty erasure of any address the object
   names), held and exported with its message.
@@ -1149,13 +1152,15 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   and brand names refused), two concurrent sign-ups for one name **must** give it to exactly one, and a
   username **must never** be released or reused.
 - **FR-ASU-4** The human address **must** be refused when it is on a placeholder or disposable domain, when
-  this deployment receives its mail, or when its domain cannot receive mail, before anything is written or
+  this deployment receives its mail (also through a `+tag` that inbound routing removes), or when its domain
+  cannot receive mail, before anything is written or
   sent; and it **must not** be refused, or answered differently, because it belongs to an existing console
   user.
 - **FR-ASU-5** Sign-ups **must** be bounded by `RL_SIGNIN`, by exact daily budgets per client network, per
   ASN, per person and per deployment, and by one live provisional sign-up per person, the person counted by
-  base address (`+tag` removed); every refusal that concerns a person **must** be one indistinguishable
-  answer.
+  base address (`+tag` removed, and for Gmail every dot removed and `googlemail.com` read as `gmail.com`);
+  every refusal that concerns a person **must** be one indistinguishable answer that costs the caller the
+  same budget.
 - **FR-ASU-6** Until verified, every key of the workspace **must** act with at most `identities:read`,
   `messages:read`, `messages:send`, `messages:write`, `attachments:read`, `search:read`, `events:read` and
   the implicit `usage:read`; it **must not** mint keys, create webhooks, domains, identities, lists or
@@ -1184,15 +1189,17 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-ASU-12** A signed-in person **must** be able to claim a provisional workspace by entering its key
   only when their sign-in address equals the named human's address; a workspace created by a partner key,
   or any key that is not a provisional agent sign-up's, **must never** be claimable.
-- **FR-ASU-13** The named person **must** be able to refuse in one click, without signing in; a refusal or
+- **FR-ASU-13** The named person **must** be able to refuse in one click, without signing in, for 90 days
+  after each code email, also once the sign-up has ended; a refusal or
   a complaint **must** end and erase the provisional workspace that names them and **must** refuse every
   later sign-up naming them, until they lift it in the console.
 - **FR-ASU-14** A provisional workspace **must** be erased by a tenant-scope erasure, with its receipt, when
   7 days pass, when its agent abandons it, or when its person refuses it; its code emails **must** be erased
   from the system identity's mailbox, and the person **must** receive no further mail about it.
 - **FR-ASU-15** Bounces and complaints of sign-up mail and of provisional workspaces **must** be counted
-  deployment-wide, and above the thresholds of [Agent self-sign-up §13.2](design/agent-signup.md#132-the-automatic-switch) new sign-up mail **must**
-  stop automatically and page the operator; a sign-up spike and 80% of the daily cap **must** alert.
+  deployment-wide, and above the thresholds of [Agent self-sign-up §13.2](design/agent-signup.md#132-the-automatic-switch) new sign-up mail
+  and every send of a provisional workspace **must** stop automatically and page the operator; a sign-up
+  spike and 80% of the daily cap **must** alert.
 - **FR-ASU-16** No log, audit row, idempotency record or event **may** hold the human's address, a code, a
   link or refuse token, or a key; every new store **must** be covered by the tenant-scope erasure or hold
   only keyed hashes.
