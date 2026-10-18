@@ -1246,7 +1246,7 @@ deduplication store `createEventDeduper` expects with two new columns, `lease_un
 
 - `claim`: `INSERT … (event_id, lease_until) VALUES ($1, now() + $2) ON CONFLICT (event_id) DO UPDATE SET
   lease_until = EXCLUDED.lease_until WHERE mail_webhook_events.completed_at IS NULL AND
-  mail_webhook_events.lease_until < now() RETURNING event_id`; a returned row is `claimed`, and otherwise
+  COALESCE(mail_webhook_events.lease_until, '-infinity') < now() RETURNING event_id`; a returned row is `claimed`, and otherwise
   a read of the row answers `completed` or `busy`;
 - `complete`: `UPDATE … SET completed_at = now(), lease_until = NULL WHERE event_id = $1`;
 - `release`: `UPDATE … SET lease_until = '-infinity' WHERE event_id = $1 AND completed_at IS NULL`, so
@@ -1277,7 +1277,9 @@ rollback happened; `EventGapError` (if Pylota adopts the event feed) → the rec
    runbook of §8.5 instead of webhook replay windows.
 7. Renovate (or the monorepo's update process) must keep `@pylotahq/mail` exactly pinned and never group
    it with other updates, so a new contract arrives in a reviewed change.
-8. A migration adding `lease_until` and `completed_at` to `mail_webhook_events`, and the three store
+8. A migration adding `lease_until` and `completed_at` to `mail_webhook_events` (rows that exist then get
+   `completed_at = received_at`, and the feed reconciliation of [Event feed § 17](event-feed.md#17-pylota-agentic-os)
+   inserts its rows completed), and the three store
    methods above, passed to `createEventDeduper`; the webhook route uses `createWebhookHandler` with that
    deduper, so a handler that throws leaves the event to be retried, never marked.
 

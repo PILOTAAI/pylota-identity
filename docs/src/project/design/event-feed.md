@@ -1503,8 +1503,9 @@ deterministic, so the job creates it idempotently on each run. `mail_webhook_eve
 2. W4.7, a job `mail-event-reconcile`, every 5 minutes per tenant: `POST /v1/event-consumers?tenant_id=…`
    with `name: "pylota-reconcile"`, the event list of §8.1 as `types` and `start: "latest"`; then, page by
    page: `GET /v1/event-consumers/{consumer_id}/events?tenant_id=…&limit=500`; insert each event into
-   `mail_webhook_events … ON CONFLICT (event_id) DO NOTHING` with `source = 'feed'`; enqueue
-   `mail-webhook-event` for the new rows; commit the page's `next_cursor` (also for an empty page); read the
+   `mail_webhook_events … ON CONFLICT (event_id) DO NOTHING` with `source = 'feed'` and
+   `completed_at = now()`, in the transaction that enqueues `mail-webhook-event` for the new rows, so a
+   later webhook delivery finds the event completed ([SDKs, skills and agent tooling § 17](sdk-and-skills.md#17-pylota-agentic-os)); commit the page's `next_cursor` (also for an empty page); read the
    next page while `has_more` is true, at most 40 pages a run (20,000 events), leaving the rest to the next
    run. A consumer read always starts at the committed position (§6.2 rule 5), so a loop that commits
    only at the end reads its first page forever.
