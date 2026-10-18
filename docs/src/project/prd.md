@@ -477,7 +477,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-OUT-16** Tenants **must** be able to manage allow and block lists for sending and receiving, by
   address or by domain, for the whole tenant or for one identity (FR-OUT-17).
 - **FR-OUT-17** Allow and block lists **must** also be settable per identity. For each direction and
-  address, the identity's entries, when any matches, **must** decide before the tenant's. No list entry **may**
+  address, an identity entry that matches **must** override the tenant's entries of the same or a coarser
+  granularity, but an identity entry for a domain **must not** override a tenant entry for the exact
+  address; among the entries left, block **must** win over allow. No list entry **may**
   override a suppression, a test-mode rule, a daily cap, a sending pause or an authentication quarantine
   ([Parity additions § 3](design/parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17)).
 

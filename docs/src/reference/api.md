@@ -90,7 +90,7 @@ See [Sending and safe retries](../guides/sending.md#safe-retries).
 | All requests | 600 per minute | per API key |
 | All requests of a tenant's keys together (binding `RL_TENANT`) | 1,800 per minute | per tenant, across all its tenant and identity keys |
 | All requests of a partner's partner keys together (binding `RL_PARTNER_API`) | 1,800 per minute | per partner, across all its partner keys |
-| Search (`keyword`, `semantic`, `hybrid`, related messages, contacts) | 120 per minute | per API key |
+| Search (`keyword`, `semantic`, `hybrid`, related messages, contacts) and event counts (`GET /v1/metrics/events`), together (binding `RL_SEARCH`) | 120 per minute | per API key |
 | Agentic search | 20 per minute | per API key, plus a daily tenant cap |
 | Send (accepted into queue) | 120 per minute | per identity, plus daily caps from policy |
 | Signing (agent assertions and HTTP signatures together, binding `RL_SIGN`) | 600 per minute | per identity |
@@ -1709,7 +1709,11 @@ When the tenant's `events.labels_changed` is `true`, a change of labels emits `m
   `unchanged`: messages found and allowed whose state already matched. `conflicts`: messages skipped by
   `require_absent`. `not_found`: as for `batch-get`. Every listed ID appears in exactly one of the four.
 - `threads_archived` and `threads_unarchived` count the threads whose flag this request changed.
-- `Idempotency-Key` is optional, as on every other `POST`.
+- `Idempotency-Key` is optional, as on every other `POST`. The record is kept in the identity's mailbox and
+  written in the same transaction as the change, scoped per identity as for sends, so a retry after a lost
+  response replays the committed result (`Idempotent-Replayed: true`) and a claim the caller already made
+  reads as `updated`, not as a conflict. A second request with the same key waits for the first and
+  replays it ([Parity additions § 2.4](../project/design/parity-additions.md#24-concurrency-idempotency-and-failures)).
 
 A batch is checked once for scope and permission. IDs the key cannot see are in `not_found`, exactly as
 missing ones. `batch-update` is one transaction: with a message that would pass 64 labels nothing changes
@@ -2490,8 +2494,9 @@ never returned, logged or exported.
   `X-HTTP-Method-Override` and `X-Method-Override`; the headers the service sets (`Content-Type`,
   `Content-Encoding`, `User-Agent` and every name starting `webhook-`); names a receiver's proxy may trust
   as the client's address (`Forwarded`, `X-Real-IP`, `True-Client-IP` and every name starting
-  `X-Forwarded-` or `CF-`); and every name starting `X-Pylota-`. `Authorization` is allowed: a static
-  bearer token is the main use.
+  `X-Forwarded-` or `CF-`, except `CF-Access-Client-Id` and `CF-Access-Client-Secret`); and every name
+  starting `X-Pylota-`. `Authorization` is allowed: a static bearer token is the main use. So are
+  `CF-Access-Client-Id` and `CF-Access-Client-Secret`, the two headers of a Cloudflare Access service token.
 - **Values**: 1–1,024 bytes of `0x20`–`0x7E`, not starting or ending with a space, otherwise
   `400 invalid_request` (path `headers.{name}` or `set.{name}`).
 - **Counts**: at most 10 headers and 4,096 bytes of values per endpoint, after the change, otherwise
@@ -2997,7 +3002,8 @@ Every rule that can pause sending, or alert the operator, is one **window**:
 Every window is relative to the UTC time it is evaluated at; thresholds are compared in parts per million,
 in integers, so the JSON a client reads and the decision cannot drift apart. Identity scope lists the two
 identity windows; tenant scope the two tenant windows and the two burst windows once for each domain that
-has outcomes in the last 24 UTC hours; domain scope all six domain windows for a tenant domain, and only the
+has outcomes in the last 24 UTC hours (for an identity key, `domain_id: null` on the burst windows of a
+domain none of its addresses use); domain scope all six domain windows for a tenant domain, and only the
 burst and alert windows for the platform domain
 ([Deliverability metrics § 3.1](../project/design/metrics.md#31-the-windows)).
 
@@ -3044,7 +3050,7 @@ otherwise), `identity_id` (identity scope; an identity key may omit it), `domain
 | `evaluated_at` | The `now` of the evaluation; every window is relative to it |
 | `exempt` | `true` only for the system identity, whose outcomes are recorded but never pause it, and which only platform keys can read. Its windows are returned with `tripped` computed and the summary "Exempt: never paused" |
 | `sending.paused` | Whether this scope itself is paused now (identity `status = "paused"`; tenant or domain `sending_paused_at` set) |
-| `sending.stops` | Every pause that stops sends from this scope now: `{ "scope", "id", "reason", "paused_at" }`. For an identity: its own pause and its tenant's; for a domain: its own and its tenant's; for a tenant: its own |
+| `sending.stops` | Every pause that stops sends from this scope now: `{ "scope", "id", "reason", "paused_at" }`. For an identity: its own pause, its tenant's, and that of each tenant domain one of its `active` or `retiring` addresses is on; for a domain: its own and its tenant's; for a tenant: its own |
 | `window.kind` | `last_outcomes` (`size`), `utc_days` (`from`, `to`: the first and last day's start, RFC 3339) or `utc_hours` (`from`, `to`: the first and last hour's start) |
 | `outcomes` | Outcomes in the window (for `last_outcomes`, rows present, at most `size`) |
 | `events` | Outcomes of the window's kind (complaints or bounces) in the window |
@@ -3052,12 +3058,19 @@ otherwise), `identity_id` (identity scope; an identity key may omit it), `domain
 | `rate` | `events / denominator`, rounded to 6 decimal places for display; `0` when the denominator is 0. Decisions use `events` and `denominator` |
 | `evaluated` | `false` while `outcomes` is below `min_outcomes`: the rule cannot trip yet |
 | `tripped` | The rule's predicate is true at `evaluated_at`. A tripped window of a scope that is not yet paused means the next counted outcome is decided against it |
-| `headroom` | The fewest further outcomes of the window's kind, recorded in a row with nothing else recorded, that would make the rule trip at `evaluated_at`; `0` when tripped; `null` when no number of them could trip it (a threshold of 1 with `gt`) |
+| `headroom` | The fewest further outcomes of the window's kind, recorded in a row with nothing else recorded, that would make the rule trip at `evaluated_at`; fewer further outcomes, of any kinds, cannot trip it at that instant; `0` when tripped; `null` when no number of them could trip it (a threshold of 1 with `gt`, or a threshold of 1 with `ge` once the window holds an outcome that is not of its kind) |
 | `summary` | One plain-English sentence built from the fields above, for a model or a person |
 
 **Headroom** is computed with the rule's own predicate over simulated outcomes (for a `last_outcomes`
-window the oldest rows drop out as new ones arrive), never with a separate formula. It is the worst case at
-one instant: delivered outcomes in between, or windows rolling past an old day, only raise it.
+window the oldest rows drop out as new ones arrive), never with a separate formula. It describes one
+instant and moves both ways between reads: a delivered outcome never lowers it on a `last_outcomes` window
+or an `evaluated` one, but below a window's minimum it counts toward the minimum and can lower it by one
+(100 tenant outcomes with no complaint give headroom 400; after 399 deliveries, 1), and an hour or day
+rolling out of a window can lower or raise it. Read the windows just before a batch. A batch of `N`
+recipients cannot trip a `last_outcomes` or `evaluated` window when `N` is smaller than its headroom; a
+window with `evaluated: false` is not bounded by its headroom (each recipient's delivery and soft bounces
+count toward the minimum), and cannot trip while `(events + N) × 1,000,000` is below
+`threshold_ppm × min_outcomes` ([Deliverability metrics § 3.2](../project/design/metrics.md#32-get-v1metricsrates)).
 
 ### `GET /v1/metrics/events` — `metrics:read`
 

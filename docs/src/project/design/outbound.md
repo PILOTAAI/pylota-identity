@@ -986,9 +986,11 @@ and sent to `pm-outbound` as `TransportEvent`, then handled by the same consumer
 ## Abuse auto-pause (FR-DLV-3)
 
 `TenantQuota.outcomes` keeps the last 1,000 outcomes per identity. For each `outcome`, the consumer calls
-`QuotaRequest::RecordOutcome { identity_id, domain_id, outcome, at, event_id, counted }`, which in one
-transaction first inserts `event_id` into `outcome_events` and, when it is already there (a retried event),
-does nothing and returns the current decision. `counted` is `false` for a first reply
+`QuotaRequest::RecordOutcome { identity_id, domain_id, outcome, at, event_id, counted, thresholds }`
+(`thresholds`: the tenant's effective abuse values,
+[Deliverability metrics § 3.3](metrics.md#33-one-source-of-truth)), which in one transaction first inserts
+`event_id` into `outcome_events` and, when it is already there (a retried event), does nothing and returns
+the current decision. `counted` is `false` for a first reply
 (`deliveries.first_reply = 1`, [First replies](#recipient-filters)): the object then records nothing else and
 answers an `OutcomeDecision` with every field false or `None`, so outcomes a stranger arranged by writing
 in never pause an identity, a tenant or a domain, and never feed the containment rules built on those
@@ -1390,9 +1392,10 @@ pub enum QuotaRequest {
                                                      // and domain pauses (G12) and the domain alerts;
                                                      // thresholds: the tenant's effective abuse values
                                                      // (Deliverability metrics § 3.3) → OutcomeDecision
-    GetRates { scope: RateScope, thresholds: AbuseThresholds, now: i64 },
+    GetRates { scope: RateScope, thresholds: AbuseThresholds },
                                                      // Deliverability metrics § 3.3: reads only; the same
-                                                     // core::abuse windows as RecordOutcome → RatesAnswer
+                                                     // core::abuse windows as RecordOutcome, at the object's
+                                                     // own clock (both variants) → RatesAnswer
     OutcomeRates { since: i64 },                     // the daily ramp evaluation (Cloud sign-up § 10.1): sums
                                                      // the tenant's outcome counters over the UTC days from
                                                      // since's day → { outcomes, bounced, complained }

@@ -115,8 +115,9 @@ The thresholds, minimums and comparisons are those of [Outbound](outbound.md#abu
 and [Observability § 5.3](observability.md#53-alert-list). Two things the existing text leaves open are
 pinned here, and the same pins apply to `RecordOutcome` ([Outbound](outbound.md)):
 
-- **Boundaries.** Every window is relative to the UTC time at which it is evaluated (`now` of
-  `TenantQuota`), not to the outcome's `at`. "The current UTC hour" is the hourly counter window whose
+- **Boundaries.** Every window is relative to the UTC time at which it is evaluated (`now`, read from
+  `TenantQuota`'s `platform::Clock` when the request runs, for `RecordOutcome` and `GetRates` alike; no
+  caller passes it), not to the outcome's `at`. "The current UTC hour" is the hourly counter window whose
   key is `now`'s hour; "the 24 UTC hours" are that window and the 23 before it; "the 7 UTC days" are
   `now`'s day and the 6 before it (for the domain, the hourly windows whose date is one of those days).
   An outcome is still counted in the window of its own `at`, as today; a late event therefore counts in
@@ -132,7 +133,9 @@ pinned here, and the same pins apply to `RecordOutcome` ([Outbound](outbound.md)
 - **Tenant scope:** `tenant_complaints_7d` and `tenant_bounces_7d`, and `burst_bounces_1h` and
   `burst_complaints_24h` once for each domain (the platform domain included) that has outcomes in the
   last 24 UTC hours of this tenant's counters, each with its `domain_id`: the burst rule pauses the
-  tenant, so a tenant view must show it.
+  tenant, so a tenant view must show it. For an identity key, the burst windows of a domain none of its
+  addresses use carry `domain_id: null`: the identity still sees how close the tenant pause is, and the
+  rates routes never name a domain they would answer `404` for at domain scope (§6).
 - **Domain scope:** for a tenant domain, all six domain windows; for the platform domain, the burst and
   alert windows only (the platform domain is never domain-paused, and its counters in this tenant's
   `TenantQuota` hold only this tenant's outcomes, so they reveal nothing about other tenants).
@@ -203,7 +206,7 @@ otherwise), `identity_id` (identity scope; an identity key may omit it), `domain
 | `evaluated_at` | The `now` of the evaluation; every window is relative to it |
 | `exempt` | `true` only for the system identity (`is_system = 1`), whose outcomes are recorded but never pause it, and which only platform keys can read. Its windows are returned with `tripped` computed and the summary "Exempt: never paused" |
 | `sending.paused` | Whether this scope itself is paused now (identity `status = 'paused'`; tenant or domain `sending_paused_at` set), read from D1 in the same request |
-| `sending.stops` | Every pause that stops sends from this scope now: `{ "scope", "id", "reason", "paused_at" }`. For an identity: its own pause and its tenant's; for a domain: its own and its tenant's; for a tenant: its own |
+| `sending.stops` | Every pause that stops sends from this scope now: `{ "scope", "id", "reason", "paused_at" }`. For an identity: its own pause, its tenant's, and that of each tenant domain one of its `active` or `retiring` addresses is on (sends from it stop at policy step 14a); for a domain: its own and its tenant's; for a tenant: its own |
 | `window.kind` | `last_outcomes` (`size`), `utc_days` (`from`, `to`: the first and last day's start, RFC 3339) or `utc_hours` (`from`, `to`: the first and last hour's start) |
 | `outcomes` | Outcomes in the window (for `last_outcomes`, rows present, at most `size`) |
 | `events` | Outcomes of the window's kind (complaints or bounces) in the window |
@@ -211,17 +214,50 @@ otherwise), `identity_id` (identity scope; an identity key may omit it), `domain
 | `rate` | `events / denominator`, rounded to 6 decimal places for display; `0` when the denominator is 0. Decisions use `events` and `denominator` (§3.1) |
 | `evaluated` | `false` while `outcomes` is below `min_outcomes`: the rule cannot trip yet |
 | `tripped` | The rule's predicate is true at `evaluated_at`. A tripped window of a scope that is not yet paused means the next counted outcome is decided against it |
-| `headroom` | The fewest further outcomes of the window's kind, recorded in a row with nothing else recorded, that would make the rule trip at `evaluated_at` (below); `0` when tripped; `null` when no number of them could trip it (a threshold of 1 with `gt`) |
+| `headroom` | The fewest further outcomes of the window's kind, recorded in a row with nothing else recorded, that would make the rule trip at `evaluated_at` (below); fewer further outcomes, of any kinds, cannot trip it at that instant; `0` when tripped; `null` when no number of them could trip it (a threshold of 1 with `gt`, or a threshold of 1 with `ge` once the window holds an outcome that is not of its kind) |
 | `summary` | One plain-English sentence built from the fields above, for a model or a person |
 
 **Headroom.** `core::abuse::headroom(window_state, rule)` returns the smallest `n ≥ 0` for which the
-rule's own predicate is true after `n` simulated outcomes of the window's kind. For a `last_outcomes`
-window the simulation drops the oldest rows as new ones arrive, exactly as `RecordOutcome` does, so a
-complaint that leaves the window lowers the count. Adding outcomes of the window's kind never lowers the
-counted share, so the predicate is monotone in `n` and a binary search over `0..=size` (or over
-`0..=max(min_outcomes, threshold-derived bound)` for the other windows) finds it with the predicate
-itself, never with a separate formula. Headroom is the worst case at one instant: delivered outcomes in
-between, or windows rolling past an old day, only raise it.
+rule's own predicate is true after `n` simulated outcomes of the window's kind, found by a binary search
+over `0..=bound` with the predicate itself, never with a separate formula. The predicate is monotone in
+`n`: for a `last_outcomes` window the simulation drops the oldest rows as new ones arrive, exactly as
+`RecordOutcome` does, so each step adds one event and removes at most one; for the other windows each step
+adds one event and one outcome, which never lowers `events × 1,000,000 − threshold_ppm × outcomes` and never
+undoes a minimum already met. The bound is:
+
+- `size` for a `last_outcomes` window;
+- for the other windows, `max(min_outcomes − outcomes, 0) + ⌊threshold_ppm × outcomes ÷ (1,000,000 −
+  threshold_ppm)⌋ + 1` when `threshold_ppm` is below 1,000,000, and `max(min_outcomes − outcomes, 0)` when
+  it is 1,000,000 (a threshold of 1); `min_outcomes` is 0 for a window without one.
+
+Below 1,000,000 the predicate always holds at the bound. When it does not hold at the bound, no number of
+outcomes can trip the rule and `headroom` is `null`: exactly a threshold of 1 with `gt`, or a threshold of
+1 with `ge` on a window that holds an outcome not of its kind.
+
+Headroom describes one instant, and at that instant it bounds any mix of outcomes: fewer than `headroom`
+further outcomes, of any kinds, cannot trip the rule, because an outcome of the window's kind raises the
+counted share at least as much as any other outcome. Between two reads it moves both ways:
+
+- a delivered outcome never lowers it on a `last_outcomes` window or on a window that is `evaluated`;
+- on a window below its minimum (`evaluated: false`), a delivered outcome counts toward the minimum and can
+  lower it by one: a tenant with 100 outcomes and no complaint has headroom 400 against `ge` 0.001 and a
+  minimum of 500, and after 399 deliveries it has headroom 1;
+- an hour or day rolling out of a window removes its outcomes and can lower or raise it: when the hour or
+  day that leaves held mostly deliveries, the same complaints become a larger share, and the 1-hour windows
+  restart at every hour.
+
+**Gating a batch.** Each recipient of a message adds at most one complaint and one hard bounce (its
+terminal status changes only from `delivered` to `bounced` or `complained`, and from `bounced` to
+`complained`, [Outbound](outbound.md#applying-an-event-to-a-message)), but it also adds other outcomes:
+its delivery, and soft bounces (`other`). So, at one instant, a batch of `N` recipients:
+
+- cannot trip a `last_outcomes` window, or a window that is `evaluated`, when `N` is smaller than its
+  headroom, because the other outcomes never raise the share;
+- is not bounded by the headroom of a window with `evaluated: false`, because the other outcomes count
+  toward its minimum; such a window cannot trip while `(events + N) × 1,000,000` is below
+  `threshold_ppm × min_outcomes` (`gt`: not above it), since a trip needs at least `min_outcomes` outcomes.
+
+Both checks describe one instant, so a client reads the windows just before each batch (§11).
 
 **Steps**, in order:
 
@@ -232,9 +268,11 @@ between, or windows rolling past an old day, only raise it.
 3. D1, one batch (5-second deadline, `503 unavailable` on failure): the tenant's `policy_json`, its
    partner's ceilings and the deployment defaults (resolved by `core::policy::effective` into
    `AbuseThresholds`), `sending_paused_at` and `sending_pause_reason`; for identity scope the identity's
-   `status`, `pause_reason`, `is_system`; for domain scope the domain's `kind`, `sending_paused_at`;
-   for tenant scope the tenant's domain IDs (to label burst windows).
-4. `QuotaRequest::GetRates { scope, thresholds, now }` on the tenant's `TenantQuota` (5-second deadline;
+   `status`, `pause_reason`, `is_system`, and the ID and `sending_paused_at` of each tenant domain its
+   `active` and `retiring` addresses are on; for domain scope the domain's `kind`, `sending_paused_at`;
+   for tenant scope the tenant's domain IDs (to label burst windows) and, for an identity key, the
+   domains of its addresses.
+4. `QuotaRequest::GetRates { scope, thresholds }` on the tenant's `TenantQuota` (5-second deadline;
    `503 unavailable` on failure). It writes nothing.
 5. Render: windows in catalogue order, `sending` from step 3.
 
@@ -244,7 +282,7 @@ between, or windows rolling past an old day, only raise it.
 
 ```rust
 // crates/worker/src/quota/mod.rs (QuotaRequest)
-GetRates { scope: RateScope, thresholds: AbuseThresholds, now: i64 },   // reads only → RatesAnswer
+GetRates { scope: RateScope, thresholds: AbuseThresholds },   // reads only → RatesAnswer; now: the object's clock
 
 // crates/core/src/abuse.rs
 pub enum RateScope { Identity { identity_id: String }, Tenant, Domain { domain_id: String, platform: bool } }
@@ -259,18 +297,20 @@ pub struct WindowEval { pub state: WindowState, pub rule: Rule, pub evaluated: b
 pub fn window_states(store: &impl OutcomeReader, scope: &RateScope, now: i64) -> Vec<WindowState>;
 pub fn evaluate(states: &[WindowState], t: &AbuseThresholds) -> Vec<WindowEval>;
 pub fn decide(evals: &[WindowEval]) -> OutcomeDecision;   // what RecordOutcome returns
-pub struct RatesAnswer { pub windows: Vec<WindowEval> }
+pub struct RatesAnswer { pub evaluated_at: i64, pub windows: Vec<WindowEval> }   // evaluated_at: the now used
 ```
 
 `RecordOutcome` becomes: record the outcome (unchanged), then
 `decide(&evaluate(&window_states(…, now), &thresholds))` over the identity scope, the tenant scope and the
 outcome's domain scope. `GetRates` is `evaluate(&window_states(…, now), &thresholds)` for the requested
 scope. Both read the same tables (`outcomes`, `counters`) through the same `OutcomeReader`, in the same
-object, with the same function. So, for any state:
+object, with the same function, and both take `now` from the object's `platform::Clock` when the request
+runs; `GetRates` returns it as `evaluated_at`. So, for any state:
 
 - a window `GetRates` shows as `tripped` is one `decide` would act on at that instant, and the reverse;
 - `headroom` complaints in a row, recorded through `RecordOutcome`, pause the scope (with no other
-  outcome in between and no window rolling over), and one fewer does not.
+  outcome in between and no window rolling over), and one fewer does not, nor does any mix of fewer
+  outcomes.
 
 Both are tested as properties of `core::abuse` and end to end ([§14](#14-tests)).
 
@@ -456,7 +496,8 @@ with today.
     scope for the platform domain and every domain one of their own addresses is on. The tenant and
     domain pauses stop the identity's own sends ([Outbound › Policy pipeline](outbound.md#policy-pipeline)
     steps 3a and 14a), so an agent must be able to see how close they are. These responses carry counts
-    and rates only, never another identity's ID or mail;
+    and rates only, never another identity's ID or mail, and at tenant scope a burst window of a domain
+    none of their addresses use carries `domain_id: null` (§3.1);
   - event counts at identity scope for their own identity only. Tenant or domain scope gets
     `403 scope_denied` ([Security § 5.2](security.md#52-order-of-checks) step 3);
   - another identity's ID, or a domain none of their addresses use, answers `404 identity_not_found` or
@@ -541,7 +582,9 @@ pmail metrics events [--identity ID | --domain ID] [--tenant ID] [--bucket hour|
 `rates` prints one line per window (rule, threshold, now, headroom) with tripped windows first and exits
 with status 16 (a new exit code; 3 means a configuration error) when any window is tripped or any `stops` entry exists, so a script can gate a bulk send on
 it. `events` prints a table, one row per bucket, and a `partial` warning on stderr when the response is
-partial.
+partial. `--identity` and `--domain` send `scope=identity` and `scope=domain`; without either, the CLI sends
+no `scope`, so the server's default applies (§3.2): an identity key reads its own identity, every other key
+its tenant.
 
 ## 10. Observability
 
@@ -584,8 +627,11 @@ send for every operator, so one operator's complaints can pause them for all.
 - **Agents.** The operator coordinator gets a read-only tool, `email_health`, answering "why did my email
   stop?" from the stored answer (or a live `rates` read with K2), with the pause rule and the resume path.
   The fleet-acquisition specialist (seller outreach, § 7.3 row 42) checks `rates` for its identity with
-  K3 before a batch; when any window's headroom is below the batch size, it sends nothing and asks for an
-  operator's approval through the approval gate. The public-webchat coordinator never reads metrics.
+  K3 just before each batch; when the batch fails the batch check of [§3.2](#32-get-v1metricsrates) for
+  either identity window (its headroom is not larger than the batch's recipient count: a batch of exactly
+  `headroom` complaints would pause it), it sends nothing and asks for an operator's approval through the
+  approval gate. It never gates on a stored answer, because headroom can fall between reads. The
+  public-webchat coordinator never reads metrics.
 - **Failures.** `503` or `partial: true` keep the previous stored answer and mark it stale after
   15 minutes; a `403 permission_denied` (a key minted before `metrics:read`) pages once and is fixed by
   re-minting the key.
@@ -602,7 +648,7 @@ send for every operator, so one operator's complaints can pause them for all.
 4. § 4.6: the `mail_tenant_health` table (no mail content) and its retention (latest answer only).
 5. § 7.3 row 42: the acquisition headroom check and its approval-gate fallback.
 6. Tests: a tripped window pages; a stale answer is marked stale; the acquisition batch defers when
-   headroom is below the batch size.
+   headroom is not larger than the batch size, from a live read.
 
 ## 12. Functional requirements
 
@@ -649,7 +695,7 @@ Section Y of the [edge-case register](../edge-cases.md), rows Y1–Y19 (Y20 onwa
 | # | Case | Required behaviour | Owner | Test |
 |---|---|---|---|---|
 | Y1 | A young identity with fewer than 1,000 (or 200) recorded outcomes | The identity windows use the fixed denominators 1,000 and 200: one complaint in 40 outcomes is a rate of 0.1%, not 2.5%; `outcomes` shows the rows present; `headroom` is computed against the fixed denominator, and that many complaints through `RecordOutcome` pause the identity | S | `core::abuse::y_rates_match_decision`, `it::metrics::rates_identity_windows` |
-| Y2 | A tenant or domain window below 500 outcomes (1,000 or 200 or 50 for the burst and alert windows) | `evaluated: false`, `tripped: false`; `headroom` counts the outcomes still needed, each simulated complaint or bounce also being an outcome | S | `core::abuse::y_rates_match_decision`, `it::metrics::rates_tenant_and_domain` |
+| Y2 | A tenant or domain window below 500 outcomes (1,000 or 200 or 50 for the burst and alert windows) | `evaluated: false`, `tripped: false`; `headroom` counts the outcomes still needed, each simulated complaint or bounce also being an outcome, so a delivered outcome can lower it by one; fewer than `headroom` further outcomes, of any kinds, do not trip the rule | S | `core::abuse::y_rates_match_decision`, `core::abuse::headroom_properties`, `it::metrics::rates_tenant_and_domain` |
 | Y3 | A rate exactly at a threshold: 1 complaint in 1,000 tenant outcomes (`ge` 0.001), 3 complaints in the identity's 1,000 (`gt` 0.003) | The tenant window is tripped and the identity window is not, in `GetRates` and in `RecordOutcome` alike, by integer comparison in parts per million | S | `core::abuse::y_rates_match_decision` |
 | Y4 | The tenant's abuse policy is lowered (or raised within its ceiling) | The next rates read shows the new threshold and source; a window can read `tripped: true` while the scope is not paused; the next counted outcome is decided against the new value (after at most the consumer's 60-second policy cache) | S | `it::metrics::rates_policy_change` |
 | Y5 | A scope is paused, then its windows fall back under the threshold (days roll out, or a platform key resumes it) | Paused and below: `sending.paused: true`, `tripped: false` (only a platform key resumes). Resumed and still above: `paused: false`, `tripped: true`, and the next counted outcome pauses it again | S | `it::metrics::rates_policy_change` |
@@ -660,7 +706,7 @@ Section Y of the [edge-case register](../edge-cases.md), rows Y1–Y19 (Y20 onwa
 | Y10 | A range wider than 168 hourly or 92 daily buckets, older than 192 hours or 92 days, with `from ≥ to`, unaligned times, or an unknown `type` | `400 query_range_too_wide` with `max_buckets`, `requested_buckets` and `earliest`; `from ≥ to` and unknown types `400 invalid_request`; unaligned times rounded to the bucket and echoed in `from` and `to` | S | `core::metrics::range_validation`, `it::metrics::y10_ranges` |
 | Y11 | Tenant or domain scope over more than 100 identities without `identity_ids`, more than 100 IDs, or a foreign ID in `identity_ids` | `422 scope_too_large` with `details.identities`; a foreign or system-identity ID `404 identity_not_found`, as a missing one | S | `it::metrics::y11_fanout` |
 | Y12 | A mailbox errors or misses the 2,000 ms deadline during the fan-out; every mailbox fails | `200`, that identity in `failed_identities`, `partial: true`, its late answer discarded; all failed: zero counts with `partial: true` | S | `it::metrics::y11_fanout` |
-| Y13 | Identity keys: rates at identity, tenant and domain scope; events at tenant or domain scope; another identity; a domain none of its addresses use | Own identity, own tenant, the platform domain and its addresses' domains: `200`. Events at tenant or domain scope: `403 scope_denied`. Another identity or domain: `404`, as missing | S | `it::metrics::scope_matrix` |
+| Y13 | Identity keys: rates at identity, tenant and domain scope; events at tenant or domain scope; another identity; a domain none of its addresses use | Own identity, own tenant, the platform domain and its addresses' domains: `200`; at tenant scope, the burst windows of a domain none of its addresses use carry `domain_id: null`; at identity scope, `sending.stops` lists a pause of any domain its addresses are on. Events at tenant or domain scope: `403 scope_denied`. Another identity or domain: `404`, as missing | S | `it::metrics::scope_matrix` |
 | Y14 | A key without `metrics:read`; a platform or partner key without `tenant_id`; a partner key naming another partner's tenant; a removed domain | `403 permission_denied` (`details.required: ["metrics:read"]`); `400 invalid_request`; `404 tenant_not_found`; `404 domain_not_found` | S | `it::metrics::scope_matrix` |
 | Y15 | A read near an hour or day boundary; an outcome whose event arrives after its hour ended | Windows are relative to `evaluated_at`: at 10:00:00 UTC the current hour is the 10:00 window and the 1-hour windows restart; the late outcome counts in its own `at` hour, in rates and event counts alike, never in a later bucket | S | `core::abuse::window_boundaries`, `it::metrics::y15_boundaries` |
 | Y16 | An identity is erased or deleted | Its identity windows and its event counts are gone (`404 identity_not_found`); tenant and domain rate windows keep its outcomes; tenant event totals no longer include it | S | `it::metrics::y16_erasure` |
@@ -673,6 +719,7 @@ Section Y of the [edge-case register](../edge-cases.md), rows Y1–Y19 (Y20 onwa
 | Test | Proves | Covers |
 |---|---|---|
 | `core::abuse::y_rates_match_decision` | Property test over random outcome histories and thresholds: for every window, `tripped` from `evaluate` equals the predicate `decide` acts on; after `headroom` simulated outcomes of the window's kind through the same `RecordOutcome` code path the rule trips, and after `headroom − 1` it does not; integer comparison at the exact boundaries of Y3; fixed denominators of Y1; minimums of Y2 | [Y1](../edge-cases.md)–[Y3](../edge-cases.md), FR-MET-2 |
+| `core::abuse::headroom_properties` | Property test over random window states, thresholds from 0 to 1 and both comparisons: the predicate holds at the §3.2 bound unless `headroom` is `null`, and `null` occurs exactly for a threshold of 1 with `gt`, or with `ge` on a window holding an outcome not of its kind; every mix of fewer than `headroom` further outcomes leaves the rule untripped; one delivered outcome never lowers headroom on a `last_outcomes` or `evaluated` window and lowers it by at most one below the minimum; a batch of `N` recipients, each adding up to one complaint, one hard bounce and any number of other outcomes, never trips a window that passes the batch check of §3.2; the worked example of §3.2 (100 outcomes, 399 deliveries, headroom 400 then 1) | [Y2](../edge-cases.md), FR-MET-2 |
 | `core::abuse::window_boundaries` | The pinned windows: current hour, 24 hours, 7 UTC days, relative to `now`; a late outcome in an earlier window; the catalogue is the single list both callers iterate | [Y15](../edge-cases.md), FR-MET-3 |
 | `core::metrics::range_validation` | Rounding of `from` and `to`, the bucket counts, the earliest allowed bucket, the defaults, `query_range_too_wide` details | [Y10](../edge-cases.md) |
 | `it::metrics::rates_identity_windows` | Through the delivery consumer: three complaints in an identity's outcomes read `rate` 0.003, `tripped: false`, `headroom` 1; one more complaint pauses the identity and the next read shows `tripped: true`, `sending.paused: true` with `reason: "abuse_threshold"`; the system identity reads `exempt: true` with a platform key and is not paused | [Y1](../edge-cases.md), [Y8](../edge-cases.md) |
@@ -691,7 +738,7 @@ Section Y of the [edge-case register](../edge-cases.md), rows Y1–Y19 (Y20 onwa
 | `it::metrics::record_outcome_thresholds` | `RecordOutcome` receives `thresholds` resolved from the effective policy (tenant value, partner ceiling, deployment default), and a policy change applies to the next outcome after the cache window | FR-MET-3 |
 | `it::console::deliverability_page` | All roles see the screen; pauses first, tripped rows first, headroom sentences; works with no script; the inbox and domain pages show their windows | §9 |
 | `it::mcp::metrics_tools` | `mail_get_rates` and `mail_get_event_counts` are listed only for keys with `metrics:read`, map to their routes and return the same errors; an identity key asking for tenant-scope counts gets `scope_denied` | §9 |
-| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial | §9 |
+| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | §9 |
 | `live::metrics::bounce_moves_rates` | On staging: a bounce to a non-existent mailbox adds 1 to `bounced` in event counts and to `identity_bounces.events`, and the headroom drops by 1 | FR-MET-1, FR-MET-5 |
 
 ## 15. Milestone
@@ -726,7 +773,8 @@ behaviour change except the pinned windows and the thresholds argument; the M9 d
 **Acceptance:**
 
 - Edge rows Y1–Y19 with the tests named in the register, all passing.
-- `core::abuse::y_rates_match_decision` with at least 10,000 generated cases per run.
+- `core::abuse::y_rates_match_decision` and `core::abuse::headroom_properties`, each with at least 10,000
+  generated cases per run.
 - `it::metrics::events_counts_match_outbox`, `it::metrics::record_outcome_thresholds`.
 - `it::metrics::scope_matrix`; the routes join `it::security::cross_tenant_matrix`.
 - `it::console::deliverability_page`; the page joins `browser::console::no_js` and `browser::console::axe_scan`.

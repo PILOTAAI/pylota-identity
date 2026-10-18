@@ -1421,7 +1421,9 @@ answered · confidence 0.86 · 3 steps · 2.8 s
 - **`metrics rates`** prints one line per window (rule, threshold, now, headroom), tripped windows first,
   and exits 16 when any window is tripped or any pause is in effect, so a script can gate a bulk send on it;
   **`metrics events`** prints one row per bucket and a `partial` warning on stderr when the answer is
-  partial ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)).
+  partial ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)). Without `--identity` or
+  `--domain` both send no `scope`, so the server's default applies (the key's own identity for an identity
+  key, the tenant otherwise).
 - **`agent-signup create --username U --human-email E --accept-terms`** calls `POST /v1/agent-signup`
   without a key and writes the returned key into the profile named by `--profile` (else `default`), with
   the config file's `0600` rules ([§2.1](#21-the-config-file)); it prints the key only with `--print-key`.
@@ -2059,7 +2061,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::screening::commands` | `messages feedback`, `messages feedback-list`, the screening filters of `messages list` and `screening summary` against recorded API fakes | [Screening hold § 21](screening.md#21-console-mcp-and-cli) |
 | `cli::calendar::reply_and_send_flags` | `pmail calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli) |
 | `cli::uploads::create_and_attach` | Against recorded fakes: `pmail uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `pmail send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | [Uploads § 13](uploads.md#13-mcp-and-cli) |
-| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial | [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli) |
+| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli) |
 | `cli::agent_signup::create_writes_profile` | `pmail agent-signup create` writes the key into the named profile with mode `0600` and prints it only with `--print-key`; the other subcommands map to their routes | [Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli) |
 | `cli::mcp_stdio::y55_no_tools_call_retry` | A dropped connection during `tools/call` gives one `isError` result with `cli_outcome_unknown` and no second request; `tools/list` is retried once | [Y55](../edge-cases.md), FR-SDK-13 |
 | `cli::mcp_stdio::y56_tools_flag_narrows` | `--tools` removes tools from `tools/list` and answers `-32602` for them locally; a name the key cannot see stays hidden | [Y56](../edge-cases.md), FR-SDK-13 |

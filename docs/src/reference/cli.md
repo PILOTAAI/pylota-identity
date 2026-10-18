@@ -2546,8 +2546,10 @@ pmail metrics events [--identity <identity> | --domain <domain>] [--tenant <tena
                      [--from <time>] [--to <time>] [--types sent,delivered,…] [--identity-ids <id,…>] [--json]
 ```
 
-Without `--identity` or `--domain` both read the tenant's scope (`--tenant` names the tenant as everywhere
-else). `rates` prints one line per window (rule, threshold, now, headroom) with tripped windows first, and exits 16
+`--identity` sends `scope=identity` and `--domain` sends `scope=domain`. Without either, the command sends
+no `scope` and the server's default applies: the key's own identity for an identity key, the tenant for
+every other key (`--tenant` names the tenant as everywhere else).
+`rates` prints one line per window (rule, threshold, now, headroom) with tripped windows first, and exits 16
 when a window is tripped or a pause is in effect, so a script can gate a bulk send on it. `events` prints a
 table, one row per bucket, and a `partial` warning on stderr when the response is partial.
 

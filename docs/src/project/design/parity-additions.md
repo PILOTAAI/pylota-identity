@@ -14,7 +14,7 @@ the error envelope of [Errors](../../reference/errors.md).
 | Requirements | FR-IN-13, FR-IN-14, FR-IN-15, FR-OUT-17, FR-WH-6, FR-WH-7, FR-PRV-7, FR-DOM-15, FR-API-3 (this page, [§13](#13-functional-requirements)); they extend FR-IN-4, FR-IN-5, FR-IN-10, FR-IN-11, FR-OUT-4, FR-OUT-13, FR-OUT-16, FR-WH-1, FR-WH-2, FR-WH-4, FR-PRV-2, FR-PRV-3, FR-PRV-4, FR-DOM-3, FR-API-2, FR-SRCH-13 |
 | Edge cases | [Z1](../edge-cases.md)–[Z80](../edge-cases.md) ([§14](#14-edge-cases)) |
 | Code | Batch: `crates/api-types/src/messages/batch.rs`, `crates/worker/src/handlers/messages_batch.rs`, `mailbox/read.rs` (`BatchGet`, `BatchUpdate`). Lists: `crates/core/src/lists.rs` (precedence, pure), `handlers/lists.rs`, `consumers/inbound.rs` (step 12), `handlers/send.rs` (step 6), `consumers/outbound.rs` (composition step 1). Label events: `webhooks/payloads.rs` (`labels_changed`), `mailbox/read.rs`, `consumers/webhooks.rs` (opt-in filter). Authentication detail and ARC: `crates/core/src/auth.rs` (`arc_rescue`, `trust_detail`), `crates/core/src/trust.rs`, `consumers/inbound.rs` (steps 7 and 12), `mailbox/ingest.rs`. Retention: `handlers/identities.rs`, `mailbox/expiry.rs` (new), `mailbox/erase.rs`, `mailbox/idempotency.rs`, `crons/intents.rs`. Webhook headers: `handlers/webhooks.rs`, `webhooks/{client.rs, headers.rs}` (new), `crates/core/src/webhook_headers.rs` (name and value rules, pure), `crates/core/src/sealed.rs`. Zone export: `crates/core/src/zonefile.rs` (pure), `handlers/domains.rs`. Docs link: `crates/api-types/src/errors.rs`, `crates/worker/src/errors.rs`, `xtask/src/docs_check.rs`. Console: `console/pages/{inboxes.rs, threads.rs, webhooks.rs, domains.rs}`. MCP: `mcp/tools.rs`. CLI: `crates/cli/src/commands/{messages.rs, lists.rs, identities.rs, webhooks.rs, domains.rs}` |
-| Tables | D1: `sender_lists` gains `identity_id` (in the primary key); `identities` gains `message_hours`; `webhook_endpoints` gains `headers_sealed`, `header_names_json`, `headers_version`; `rpc_intents.op` gains `set_retention`. Mailbox: `messages.verdict` gains `arc_rescued`; new `meta` keys `retention_message_hours`, `retention_version`, `alarm:expiry`, `expiry_backoff`, `expiry:{YYYY-MM-DD}`; `auth_json` gains `spf.aligned` and `arc.{sealer, sealer_trusted, aar, rescue}`; `idempotency` rows of expired messages become stubs ([Data model](data-model.md)) |
+| Tables | D1: `sender_lists` gains `identity_id` (in the primary key); `identities` gains `message_hours`; `webhook_endpoints` gains `headers_sealed`, `header_names_json`, `headers_version`; `rpc_intents.op` gains `set_retention`. Mailbox: `messages.verdict` gains `arc_rescued`; new `meta` keys `retention_message_hours`, `retention_version`, `alarm:expiry`, `expiry_backoff`, `expiry:{YYYY-MM-DD}`; `auth_json` gains `spf.aligned` and `arc.{sealer, sealer_trusted, aar, rescue}`; `idempotency` rows of expired messages become stubs, and `idempotency.operation` gains `batch_update` ([Data model](data-model.md)) |
 | Contracts | Routes `POST …/messages/batch-get` (`messages:read`), `POST …/messages/batch-update` (`messages:write`), `GET\|PUT\|DELETE /v1/identities/{identity_id}/lists/{direction}/{kind}[/{entry}]` (`suppressions:manage`), `PATCH /v1/webhooks/{webhook_id}/headers` (`webhooks:manage`), `GET /v1/domains/{domain_id}/records?format=bind` (`domains:read`); identity field `retention.message_hours`; webhook fields `headers` (write-only) and `header_names`; message `trust` fields `spf_domain`, `spf_aligned`, `dkim_domains`, `dmarc_domain`, `dmarc_policy`, `dmarc_aligned_by`, `arc_sealer`; verdict value `arc_rescued`; error field `docs`; event `message.labels_changed` (opt-in); policy fields `inbound.trusted_arc_sealers` (platform-only) and `events.labels_changed` (free); variable `PM_DOCS_URL`; error codes `422 list_limit_reached`, `422 webhook_header_limit_reached`, `410 message_expired`, and new `details.reason` values of `400 invalid_request` and `400 header_not_allowed`; audit actions `message.batch_update`, `identity.retention_update`, `retention.expire`, `webhook.headers_update` |
 | Limits | [§2.6](#26-limits), [§3.7](#37-limits), [§4.5](#45-limits-and-cost), [§7.11](#711-limits), [§8.4](#84-limits) |
 | Built in | [M37](#16-milestone) (to be added to the [build plan](../build-plan.md), §18.10) |
@@ -140,7 +140,8 @@ Every key level. `Idempotency-Key` optional, as on every other `POST`.
    goes to `not_found`.
 4. **`batch-get`** reads the found rows, their attachments, labels and refs in one read, builds the
    objects in request order and applies the byte budget of [§2.1](#21-post-v1identitiesidentity_idmessagesbatch-get--messagesread).
-5. **`batch-update`** runs in **one** `transaction_sync`:
+5. **`batch-update`** runs in **one** `transaction_sync`, after the idempotency lookup of
+   [§2.4](#24-concurrency-idempotency-and-failures) in the same synchronous step:
    1. for each found message, in request order: when it carries a label of `require_absent`, it goes to
       `conflicts` and nothing else happens to it;
    2. for each other found message, its label set after the change is
@@ -155,7 +156,9 @@ Every key level. `Idempotency-Key` optional, as on every other `POST`.
    5. `archived`: the distinct threads of those messages get `threads.archived = ?`; a thread already in
       that state is not counted;
    6. the outbox gets `message.labels_changed` when the handler passed `emit_label_events`
-      ([§4](#4-label-change-events-fr-wh-6)) and at least one visible message's labels changed.
+      ([§4](#4-label-change-events-fr-wh-6)) and at least one visible message's labels changed;
+   7. with an `Idempotency-Key`, the `idempotency` row holding the response
+      ([§2.4](#24-concurrency-idempotency-and-failures)).
 6. **Audit.** After the commit, a `batch-update` that updated at least one message writes one audit row,
    `message.batch_update` (`target_type: "identity"`, `details`: `requested`, `updated`, `unchanged`,
    `conflicts`, `not_found` as counts, `labels_add`, `labels_remove`, `read`, `archived`), the way the
@@ -173,20 +176,31 @@ Single-message `PATCH …/messages/{message_id}` and `PATCH …/threads/{thread_
 - **Concurrency.** A mailbox runs one transaction at a time, and `require_absent` is evaluated inside the
   transaction, so two concurrent claims of one message give one `updated` and one `conflicts`, never two
   owners. A batch never sees half of another batch.
-- **Idempotency.** With an `Idempotency-Key`, the response (IDs and counts only, never mail content) is
-  recorded in `idempotency_records` and replayed with `Idempotent-Replayed: true`; a replay writes no
-  label, no event and no audit row. The same key with another body gets `409 idempotency_conflict`; while
-  the first is running, `409 request_in_progress`. Without a key, a retry after a lost response applies the
-  same set operation again and changes nothing more, but a caller's own earlier claim then shows as a
-  conflict; agents that claim should send a key.
+- **Idempotency.** With an `Idempotency-Key`, the record lives in the mailbox's own `idempotency` table, as
+  for sends and the draft routes ([Outbound › Reservation](outbound.md#reservation-inside-the-mailbox-fr-out-1-g1)),
+  scoped per identity like every mail route, and is written by the same `transaction_sync` that applies
+  the change: `key_hash`, operation `batch_update`, a fingerprint over the operation, the identity, the
+  canonical body and the `review` flag, and `response_json` = the response (IDs and counts only, never
+  mail content), kept 30 days. The lookup runs first, in the same synchronous step as the transaction:
+  the same fingerprint replays `response_json` with `Idempotent-Replayed: true` and writes no label, no
+  event and no audit row; another fingerprint (another body, another operation, or a key without the
+  `review` the first had) is `409 idempotency_conflict`; a key held in `in_flight` by a send or draft
+  operation still running is `409 request_in_progress`. Two batches with the same key never run together:
+  the mailbox runs the second after the first commits, and it replays. A request refused before or inside
+  the transaction (`400`, including `label_limit`) records nothing. D1 `idempotency_records` holds no
+  `batch-update` record. Without a key, a retry after a lost response applies the same set operation again
+  and changes nothing more, but a caller's own earlier claim then shows as a conflict; agents that claim
+  should send a key.
 - **Failures.** The mailbox unavailable or the deadline passed before the transaction: `503 unavailable` or
-  `504 timeout`, and nothing changed. A crash after the commit loses only the response; the retry above
-  applies. A failed audit write after the commit is logged (`audit_write_failed`) and the response is still
-  `200`, as for `quarantine.release`.
+  `504 timeout`, and nothing changed. A crash after the commit loses only the response: the record
+  committed with the change, so a retry with the same key replays it and the caller's own claim reads as
+  `updated`, never as a conflict. A failed audit write after the commit is logged (`audit_write_failed`)
+  and the response is still `200`, as for `quarantine.release`.
 
 ### 2.5 Storage
 
-No schema change. `ReadRequest` ([Inbound › Read path and release](inbound.md#read-path-and-release))
+No schema change except the value `batch_update` of the mailbox `idempotency.operation`
+([Data model](data-model.md)). `ReadRequest` ([Inbound › Read path and release](inbound.md#read-path-and-release))
 gains two variants:
 
 ```rust
@@ -194,8 +208,10 @@ gains two variants:
 BatchGet    { message_ids: Vec<String>, extracted_text_bytes: u32, review: bool },
 BatchUpdate { message_ids: Vec<String>, labels_add: Vec<String>, labels_remove: Vec<String>,
               read: Option<bool>, archived: Option<bool>, require_absent: Vec<String>, review: bool,
-              label_events: Option<LabelEventContext> },   // None when events.labels_changed is off
+              label_events: Option<LabelEventContext>,     // None when events.labels_changed is off
+              idem: Option<BatchIdem> },                   // None without an Idempotency-Key
 pub struct LabelEventContext { pub actor: Actor, pub request_id: String, pub source: LabelSource }
+pub struct BatchIdem { pub key_hash: String, pub fingerprint: String }   // §2.4
 ```
 
 ### 2.6 Limits
@@ -221,7 +237,7 @@ pub struct LabelEventContext { pub actor: Actor, pub request_id: String, pub sou
   `pmail messages get <message-id>…` calls `batch-get` for more than one ID.
 - **Console.** No change.
 - **Privacy.** No new store. A `batch-get` response carries the same mail as the single `GET`; an
-  idempotency record of `batch-update` holds IDs and counts only.
+  idempotency record of `batch-update` (in the mailbox, deleted with it) holds IDs and counts only.
 
 ## 3. Identity-scope allow and block lists (FR-OUT-17)
 
@@ -241,10 +257,13 @@ An entry belongs to the **tenant** scope (as today) or to one **identity** of th
 identity `I` in tenant `T`, the decision for one direction and one address is:
 
 ```text
- identity entries of I that match the address or its @domain ── any ──▶ block if any is block, else allow   (scope identity)
-        │ none
+ entries that match the address or its @domain: I's (identity scope) and T's (tenant scope)
+        │
+        ▼ drop every tenant entry that an identity entry overrides: an identity entry for the address
+        │ drops T's entries for the address and for its @domain; an identity @domain entry drops T's
+        │ @domain entries only (never T's entry for the exact address)
         ▼
- tenant entries of T that match the address or its @domain ──── any ──▶ block if any is block, else allow   (scope tenant)
+ any entry left ── yes ──▶ block if any left is block, else allow   (scope: that of the deciding entry)
         │ none
         ▼
  no entry
@@ -253,11 +272,17 @@ identity `I` in tenant `T`, the decision for one direction and one address is:
 `core::lists::decide(rows: &[ListRow]) -> Option<ListDecision { kind, scope, entry }>` (pure) implements
 it:
 
-1. **The most specific scope wins.** Any identity-scope match decides, and tenant entries are then not
-   read for that decision. An identity allow therefore overrides a tenant block of the same address or
-   domain, and an identity block overrides a tenant allow.
-2. **Inside one scope, block wins over allow**, for address and domain entries alike, as tenant lists do
-   today (consumer step 12: "block wins over allow").
+1. **The more specific scope wins, at the same or a finer granularity.** An identity entry overrides the
+   tenant's entries for the same address or domain, and an identity entry for an address also overrides
+   the tenant's entries for its `@domain`. An identity allow therefore overrides a tenant block of the same
+   address or domain, and an identity block overrides a tenant allow. An identity `@domain` entry never
+   overrides a tenant entry for one exact address: a tenant block of `jo@example.net` still hides Jo from
+   an identity that allows `@example.net` (no exemption from rules 4a and 6) and still suppresses its
+   sends to Jo, because the tenant named Jo and the identity named only the domain.
+2. **Among the entries left, block wins over allow**, for address and domain entries and for both scopes
+   alike, as tenant lists do today (consumer step 12: "block wins over allow"). The decision's `scope` and
+   `entry` are those of the deciding entry: for a block, an identity block when one is left, else the
+   tenant's; for an allow, the same.
 3. **Matching** is the existing matching of tenant lists, unchanged and shared by both scopes
    (`core::lists::candidates(address)`: the address itself and `@` followed by its domain as the existing
    inbound and outbound queries form it).
@@ -616,7 +641,10 @@ customer's own mailbox (FR-DOM-10), and for SES-receiving domains behind a maili
   `mx.microsoft.com`, and an AMS that signs `From`, `Date`, `Subject` and `Message-ID` but not `To`, with
   `smtp.rcpttodomain` in the AAR (headers quoted in a
   [Microsoft Q&A thread, 2025-02-27](https://learn.microsoft.com/en-us/answers/questions/4727823/exchange-arc-validation-failure-when-forwarding-to),
-  read 2026-10-17); `arcselector9901._domainkey.microsoft.com` and `arcselector10001._domainkey.microsoft.com`
+  read 2026-10-17; re-read 2026-10-18: in that sample `smtp.rcpttodomain` is the domain the message was
+  addressed to when it reached the forwarding tenant, not the domain it was forwarded to, and only that one
+  sample was found, so the rule below must not depend on which of the two a sealer records);
+  `arcselector9901._domainkey.microsoft.com` and `arcselector10001._domainkey.microsoft.com`
   publish keys (DNS over HTTPS, 2026-10-17). Microsoft's own feature trusts a sealer by the `d=` of its
   `ARC-Seal`, and "ARC overrides DMARC only, not spam filtering"
   ([Configure trusted ARC sealers](https://learn.microsoft.com/en-us/defender-office-365/email-authentication-arc-configure),
@@ -665,7 +693,7 @@ must hold; the first that fails is recorded in `auth_json.arc.rescue = { "result
 | 4 | The newest AMS's `h=` includes `from`, so the `From` header is the one the sealer signed | `from_unsigned` |
 | 5 | The newest AAR has a `dmarc` result of exactly `pass` whose `header.from` equals the message's `From` domain (`bestguesspass`, `none` and every other value fail) | `no_dmarc_pass` |
 | 6 | **Freshness.** The newest seal's `t=`, else the newest AMS's `t=`, is within [`received_at` − 72 hours, `received_at` + 15 minutes]; when neither has `t=`, the `Date` header, if the newest AMS signs it, is in that window; otherwise the condition fails | `stale` |
-| 7 | **Recipient binding.** An `active` or `retiring` address of the receiving identity (its `send_only` addresses included) is in `To` when `to` is in the newest AMS's `h=`, or in `Cc` when `cc` is, or the newest AAR's `smtp.rcpttodomain`, when present, is the domain of such an address | `no_binding` |
+| 7 | **Recipient binding.** An `active` or `retiring` address of the receiving identity (its `send_only` addresses included) is in `To` when `to` is in the newest AMS's `h=`, or in `Cc` when `cc` is, or the newest AAR's `smtp.rcpttodomain`, when present, is the domain of such an address **and that domain belongs to the receiving tenant** (`domains.tenant_id` is the tenant). The platform domain (`tenant_id` NULL), which every tenant's identities share, never binds through `smtp.rcpttodomain`: a domain binding names no identity, so on a shared domain it would let mail sealed for one tenant be replayed to any other | `no_binding` |
 
 All seven hold → verdict `arc_rescued` and `auth_json.arc.rescue = { "result": "rescued" }`. The verdict
 table of step 7 gains one row, second:
@@ -678,7 +706,8 @@ table of step 7 gains one row, second:
 | … the existing rows, unchanged | … |
 
 Conditions 1–6 run in step 7. Condition 7 needs the identity's addresses: when 1–6 hold, step 12 adds
-`SELECT address FROM addresses WHERE identity_id = ?1 AND status IN ('active','retiring')` to its facts batch
+`SELECT a.address, d.tenant_id IS NOT NULL AS own_domain FROM addresses a JOIN domains d ON d.id = a.domain_id
+WHERE a.identity_id = ?1 AND a.status IN ('active','retiring')` to its facts batch
 (only for such candidates, so ordinary mail reads nothing more), and the verdict is finished before
 `MailboxRequest::Ingest`. 72 hours and 15 minutes are Pylota Mail choices: a forward normally arrives within
 minutes, and a message older than three days that needs rescuing can still be released by a person.
@@ -690,8 +719,14 @@ passed DMARC for its `From` domain, and has not been changed since that sealer s
 sealer itself changed (RFC 8617 § 9). It does not prove that the sealer judged correctly, that the body is
 the one the original sender wrote (the sealer, or its customer's rules, may have added a footer), or anything
 about earlier hops the sealer did not vouch for. A forged chain fails condition 2, a seal from anyone else
-fails 3, a replay of someone else's sealed mail fails 7, an old capture fails 6, and an exact replay of a
-rescued message is deduplicated by hash or Message-ID ([B3](../edge-cases.md), [B14](../edge-cases.md)).
+fails 3, a replay of mail sealed for an address of another tenant or for the platform domain fails 7, an
+old capture fails 6, and an exact replay of a rescued message is deduplicated by hash or Message-ID
+([B3](../edge-cases.md), [B14](../edge-cases.md)). A binding through `smtp.rcpttodomain` (Microsoft's form,
+`To` unsigned) names a domain, not an identity: a message sealed for one identity of a tenant domain can be
+replayed to another identity of the same tenant with an address on that domain. Only someone who already
+holds that tenant's sealed mail can do it, and it moves mail inside one workspace only. ARC itself does
+not stop such a replay: RFC 8617 § 9.5 describes resending an intact, passing chain to other recipients
+(re-read 2026-10-18).
 
 ### 6.5 How each rule treats `arc_rescued`
 
@@ -994,10 +1029,16 @@ replay, log, export, audit row or idempotency record ever holds one.
    - the headers the service sets: `Content-Type`, `Content-Encoding`, `User-Agent` and every name starting
      `webhook-` (Standard Webhooks);
    - names a receiver's proxy may trust as the client's address: `Forwarded`, `X-Real-IP`, `True-Client-IP`
-     and every name starting `X-Forwarded-` or `CF-`;
+     and every name starting `X-Forwarded-` or `CF-`, except `CF-Access-Client-Id` and
+     `CF-Access-Client-Secret` (below);
    - every name starting `X-Pylota-`, reserved as on sends.
 
-   `Authorization` is allowed: a static bearer token is the main use.
+   `Authorization` is allowed: a static bearer token is the main use. `CF-Access-Client-Id` and
+   `CF-Access-Client-Secret` are allowed: they carry a Cloudflare Access service token, the usual gate for a
+   receiver behind Cloudflare, and say nothing about the client's address
+   ([Service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/),
+   read 2026-10-18: "add the following to the headers of any HTTP request" names exactly these two; the
+   single-header alternative must be configured per application).
 3. **Values**: 1–1,024 bytes of `0x20`–`0x7E`, not starting or ending with a space (so no CR, LF or
    non-ASCII byte can split a header), otherwise `400 invalid_request` (path `headers.{name}` or
    `set.{name}`).
@@ -1311,13 +1352,13 @@ service (`S`) except where marked.
 | Z5 | `batch-update` where one message would pass 64 labels; or where every message already matches | The first: `400 invalid_request`, `details.reason = "label_limit"`, `details.message_ids`; no message changes, no event, no audit row. The second: `200` with every ID in `unchanged`, no event, no audit row | S | `it::messages::z5_batch_update_atomic` |
 | Z6 | Two agents claim the same message at once with `require_absent: ["claimed"]` and `labels_add: ["claimed"]`; a third claims it later | Exactly one gets it in `updated`, the other in `conflicts`; the third gets `conflicts`; the message never carries two claims from one race | S+I | `it::messages::z6_batch_claim_race` |
 | Z7 | `batch-update` with `archived` and `read` over messages of three threads, one already archived | Two threads change and are counted; the third is not counted; `unread_count` is recomputed for each thread; a later visible inbound message unarchives its thread as usual | S | `it::messages::z7_batch_archive_and_read` |
-| Z8 | `batch-update` repeated with the same `Idempotency-Key`; with another body; while the first is running | The stored body with `Idempotent-Replayed: true` and no second event or audit row; `409 idempotency_conflict`; `409 request_in_progress` | S | `it::messages::z8_batch_idempotency` |
+| Z8 | `batch-update` repeated with the same `Idempotency-Key`; with another body; while a send with the same key is running; twice at once with the same key; a claim retried with its key after the worker died between the mailbox commit and the response | The stored body with `Idempotent-Replayed: true` and no second event or audit row; `409 idempotency_conflict`; `409 request_in_progress`; the second waits and replays the first; the retry replays the committed result, so the claimed message is in `updated`, not `conflicts` | S | `it::messages::z8_batch_idempotency` |
 | Z9 | `batch-get` by a platform or partner key; the audit write fails | One `mail.read` row for the request (`target_type: "identity"`, `details.messages`); a failed write gives `503 unavailable` and no mail. Tenant and identity keys write no row | S | `it::audit::z9_batch_mail_read_row` |
 | Z10 | A batch on a `deleting` identity, the system identity (non-platform key), a tenant being erased, a suspended partner, the `read_only` switch, a frozen deployment | As the single-message routes: `404 identity_not_found` for the first three, `403 partner_suspended`; under `read_only`, `503 unavailable` (`details.reason = "read_only"`) for both routes from non-platform keys, because both are `POST` (as search is); `503 unavailable` for both while frozen | S | `it::messages::z10_batch_states` |
 | Z11 | MCP `mail_update_labels` with `message_ids`: also with `message_id` or `thread_id`; with `require_absent` and no `message_ids`; with 101 IDs | Two or none of the three → `invalid_request` naming the path; `require_absent` alone → `invalid_request`; 101 → `invalid_request`; a valid call returns the `batch-update` response object | S | `it::mcp::z11_update_labels_batch` |
 | Z12 | `pmail messages label` with 250 IDs | Three requests of 100, 100 and 50, and a notice that the change is atomic per request only; exit code 0 only when all three succeed | S | `cli::messages::z12_label_many_chunks` |
 | Z13 | Identity receive-block and tenant receive-allow for the same sender (and the reverse) | Identity block: the identity's copy is stored `hidden` (`blocked_sender`) while another identity of the tenant receives it. Identity allow over a tenant block: the identity's copy is not hidden, skips rules 4a and 6, and is still quarantined when authentication fails (rule 3) | S | `core::lists::z13_precedence`, `it::lists::z13_receive_scope` |
-| Z14 | One scope holds an allow for `jo@example.net` and a block for `@example.net` | Block wins inside the scope, for both directions | S | `core::lists::z13_precedence` |
+| Z14 | One scope holds an allow for `jo@example.net` and a block for `@example.net`; the tenant blocks `jo@example.net` while the identity allows `@example.net`; the identity allows `jo@example.net` while the tenant blocks `@example.net` | Block wins inside the scope, for both directions. The tenant's address block is not overridden by the identity's domain allow: Jo's mail to the identity is `hidden` (`blocked_sender`) and its sends to Jo are `suppressed` (`policy: send_block`). The identity's address allow overrides the tenant's domain block for Jo only | S | `core::lists::z13_precedence` |
 | Z15 | An identity-scope send-allow entry for an address the identity has never written to; another identity of the tenant sends to it too | The first identity's send is delivered (the address is known to it); the second's delivery is `suppressed` with `policy: unknown_recipient` | S+I | `it::lists::z15_send_allow_per_identity` |
 | Z16 | An identity-scope send-block for an address that is a known contact, the authenticated sender being answered, and on the tenant's send-allow list; with `policy.send_allowlist_only` | `suppressed` with `policy: send_block (identity)` in each case; a dry run reports `reason: "send_block"` with `scope: "identity"`; with `send_allowlist_only`, an identity allow passes and a tenant allow overridden by an identity block does not | S | `it::lists::z16_send_block_scope` |
 | Z17 | An allow entry, of either scope, for a suppressed address, a non-simulator address in a test tenant, an identity over its daily cap, a paused tenant, or a sender whose DMARC fails | The suppression, `403 test_mode_recipient`, `429 daily_cap_reached`, `409 sending_paused` and quarantine rule 3 apply exactly as without the entry | S | `it::lists::z17_allow_never_overrides` |
@@ -1342,7 +1383,7 @@ service (`S`) except where marked.
 | Z36 | The newest AAR has `dmarc=pass` for another domain, `dmarc=bestguesspass`, `dmarc=none`, or no `dmarc` result | No rescue (`no_dmarc_pass`) | S | `core::auth::z33_arc_rescue_rules` |
 | Z37 | The newest AMS does not sign `From` | No rescue (`from_unsigned`) | S | `core::auth::z33_arc_rescue_rules` |
 | Z38 | The newest seal's `t=` is 73 hours before receipt, or 20 minutes after; no `t=` and an unsigned `Date`; no `t=` and a `Date` 5 minutes old that the newest AMS signs | No rescue (`stale`) in the first three; rescue in the last | S | `core::auth::z33_arc_rescue_rules` |
-| Z39 | Someone else's Gmail-sealed message replayed to the identity (`To`, signed, names another address); a Microsoft-sealed message (`To` unsigned) whose AAR `smtp.rcpttodomain` is the identity's `send_only` domain; one whose `smtp.rcpttodomain` is unrelated; an exact replay of a rescued message | No rescue (`no_binding`); rescue; no rescue (`no_binding`); the replay is deduplicated (B3, B14) | S | `core::auth::z33_arc_rescue_rules`, `it::inbound::z39_replay_not_rescued` |
+| Z39 | Someone else's Gmail-sealed message replayed to the identity (`To`, signed, names another address); a Microsoft-sealed message (`To` unsigned) whose AAR `smtp.rcpttodomain` is the identity's `send_only` domain; one whose `smtp.rcpttodomain` is unrelated; one whose `smtp.rcpttodomain` is the platform domain, on which the identity has an address; an exact replay of a rescued message | No rescue (`no_binding`); rescue; no rescue (`no_binding`); no rescue (`no_binding`: the platform domain never binds); the replay is deduplicated (B3, B14) | S | `core::auth::z33_arc_rescue_rules`, `it::inbound::z39_replay_not_rescued` |
 | Z40 | `inbound.trusted_arc_sealers` set to `[]`; written by a partner key or a workspace writer; containing `co.uk`, an IP literal or 21 entries | No rescue (`off`); `403 scope_denied` (`details.field`, and `not_writable` for a workspace writer); `400 invalid_request` | S | `it::policy::z40_trusted_sealers_field` |
 | Z41 | A rescued message that carries a verification code, with and without `accounts.require_approval`, and a `wait(kind=verification)` for its domain | No `verifications` row and no `verification.received`; with the ledger gate it is held `account_unapproved`; `wait` returns the message with `verification: null` | S | `it::inbound::z41_rescued_codes_withheld` |
 | Z42 | A reply to the sender of a rescued message under `require_known_recipient`; a rescued message from the tenant's own domain; the inbound volume caps | The reply is delivered (rule 3); `known_sender` is not set by the own-domain rule; the per-sender cap is keyed by the `From` address and the unauthenticated bucket is not charged; the spam score has +0.05 | S | `it::inbound::z42_rescued_consumers`, `core::trust::z42_rescued_known_sender` |
@@ -1369,7 +1410,7 @@ service (`S`) except where marked.
 | Z63 | Storage after expiry; expiry on a paused identity and a suspended tenant | Stored bytes fall at the next hourly roll-up; expiry continues in both states | S | `it::retention::z63_storage_and_states` |
 | Z64 | Creating a webhook with `headers`; reading, listing and replaying the create; the audit row and logs | `header_names` only; no response, idempotency record, audit row or log line holds a value; the create's fingerprint uses `HMAC-SHA256(PM_HASH_KEY, value)` | S | `it::webhooks::z64_headers_write_only` |
 | Z65 | `PATCH …/headers` with `set` and `remove`; a name in both in different casings; a name twice in `set`; an empty body; removing a name that is not set; two concurrent `PATCH`es | Applied together; `400 invalid_request`; `400`; `400`; `200` with nothing changed; both apply one after the other through the compare-and-swap, and after 3 lost attempts `409 request_in_progress` | S | `it::webhooks::z65_headers_patch` |
-| Z66 | Header names `Content-Type`, `Host`, `webhook-signature`, `Proxy-Authorization`, `Sec-Fetch-Mode`, `Cookie`, `X-Forwarded-For`, `CF-Connecting-IP`, `X-Pylota-Trace`, `X-HTTP-Method-Override`, `Bad Name`; and `Authorization` | `400 header_not_allowed` (`details.reason = "webhook_header"`, `details.name`) for each; `Authorization` is accepted | S | `core::webhook_headers::z66_name_rules` |
+| Z66 | Header names `Content-Type`, `Host`, `webhook-signature`, `Proxy-Authorization`, `Sec-Fetch-Mode`, `Cookie`, `X-Forwarded-For`, `CF-Connecting-IP`, `X-Pylota-Trace`, `X-HTTP-Method-Override`, `Bad Name`; and `Authorization`, `CF-Access-Client-Id`, `cf-access-client-secret` | `400 header_not_allowed` (`details.reason = "webhook_header"`, `details.name`) for each; `Authorization` and the two Cloudflare Access names, in any casing, are accepted | S | `core::webhook_headers::z66_name_rules` |
 | Z67 | A value with CR or LF, a non-ASCII byte, a leading space, 1,025 bytes; values totalling 4,097 bytes; an 11th header | `400 invalid_request` for the first four; `422 webhook_header_limit_reached` with `reason` `bytes` and `count` | S | `core::webhook_headers::z66_name_rules`, `it::webhooks::z65_headers_patch` |
 | Z68 | Deliveries of an endpoint with headers: first attempt, retry, replay, a delivery released after a partner suspension, `POST …/test` | Every attempt carries the headers; `Content-Type`, `User-Agent` and the `webhook-*` headers are the service's; the signature is computed as before | S | `it::webhooks::z68_headers_on_every_attempt` |
 | Z69 | `PATCH /v1/webhooks/{id}` changes the URL to another host; to another path on the same host | The headers are removed in the same update, and the audit row lists them; the path change keeps them | S | `it::webhooks::z69_host_change_clears_headers` |
@@ -1395,12 +1436,12 @@ service (`S`) except where marked.
 | `it::messages::z5_batch_update_atomic` | The 64-label refusal changes nothing (rows, events, audit); a no-op batch is all `unchanged` with no event and no audit row; one transaction per batch | §2.3, Z5 |
 | `it::messages::z6_batch_claim_race` | Concurrent claims give one `updated` and one `conflicts`; a later claim conflicts | §2.2, §2.4, Z6 |
 | `it::messages::z7_batch_archive_and_read` | Thread archiving by message, the counts, `unread_count`, unarchiving by new mail | §2.3, Z7, FR-IN-10 |
-| `it::messages::z8_batch_idempotency` | Replay, conflict and in-progress answers; a replay writes nothing | §2.4, Z8 |
+| `it::messages::z8_batch_idempotency` | Replay, conflict and in-progress answers; a replay writes nothing; the record is in the mailbox `idempotency` table and commits with the change (fault injection after the commit: the retry replays and the claim reads `updated`); two concurrent requests with one key change once | §2.4, Z8 |
 | `it::audit::z9_batch_mail_read_row` | One `mail.read` row per platform or partner `batch-get`; `503` when it cannot be written; none for tenant and identity keys; one `message.batch_update` row per changing `batch-update` | §2.3, Z9 |
 | `it::messages::z10_batch_states` | The batch routes in each tenant, partner, identity and deployment state answer as the single routes do; both routes join `it::security::cross_tenant_matrix` | §1, Z10 |
 | `it::mcp::z11_update_labels_batch` | `mail_update_labels` with `message_ids`: the exactly-one rule, `require_absent` only with `message_ids`, the 100 limit, the response object; the input schema is still a plain object (`it::mcp::input_schemas_plain_objects`) | §2.7, Z11 |
 | `cli::messages::z12_label_many_chunks` | Chunking into requests of 100, the notice, the exit code | §2.7, Z12 |
-| `core::lists::z13_precedence` | `decide`: identity scope before tenant scope, block over allow inside a scope, address and domain candidates as today | §3.1, Z13, Z14 |
+| `core::lists::z13_precedence` | `decide`: an identity entry overrides tenant entries of the same or a coarser granularity and never a tenant entry for the exact address; block over allow among the entries left, in each direction; the deciding entry's scope; address and domain candidates as today | §3.1, Z13, Z14 |
 | `it::lists::z13_receive_scope` | Identity receive-block and receive-allow against tenant entries, for two identities of one tenant; rule 3 still applies | §3.2, Z13 |
 | `it::lists::z15_send_allow_per_identity` | An identity send-allow makes an address known to that identity only | §3.2, Z15, FR-OUT-13 |
 | `it::lists::z16_send_block_scope` | Identity send-block over contacts, the reply rule and a tenant allow; the scope in `smtp_response` and in the dry run; `send_allowlist_only` with both scopes | §3.2, Z16 |
@@ -1423,7 +1464,7 @@ service (`S`) except where marked.
 | `core::auth::z33_arc_rescue_rules` | Every condition of the rule and its `reason`, with recorded Gmail and Exchange Online header sets (the `d=`, `s=`, `h=` and AAR forms of § 6.1) and synthetic chains; multiple `From`, `p=none` and `unverified` | §6.3, Z33–Z39, Z44 |
 | `conf::arc::z35_chain_corpus` | ARC chains that RFC 8617 § 5.2 fails (cv, gaps, 51 sets, broken AMS, missing key) all fail through `mail-auth` 0.13.3 and the prefetch cache | §6.3, Z35 |
 | `it::ses::z33_forward_rescued` | A DMARC-failing, `google.com`-sealed forward through the SES source is stored `received` with `arc_rescued` and evented | §6.3, Z33 |
-| `it::inbound::z39_replay_not_rescued` | A replayed sealed message without binding is quarantined; an exact replay of a rescued message is deduplicated | §6.4, Z39 |
+| `it::inbound::z39_replay_not_rescued` | A replayed sealed message without binding is quarantined; a Microsoft-form message (`To` unsigned) whose `smtp.rcpttodomain` is the platform domain is quarantined with `no_binding` although the identity has a platform-domain address; an exact replay of a rescued message is deduplicated | §6.3, §6.4, Z39 |
 | `it::policy::z40_trusted_sealers_field` | The field's class, validation and `[]` | §6.2, Z40 |
 | `it::inbound::z41_rescued_codes_withheld` | No verification row, event or release for rescued code mail; the ledger gate holds it | §6.5, Z41 |
 | `it::inbound::z42_rescued_consumers` | The reply rule, the volume caps and the spam weight for `arc_rescued` | §6.5, Z42 |
@@ -1451,7 +1492,7 @@ service (`S`) except where marked.
 | `it::retention::z63_storage_and_states` | Storage roll-up after expiry; expiry while paused or suspended | §7.10, Z63 |
 | `it::webhooks::z64_headers_write_only` | Values never leave the seal; the keyed fingerprint | §8.1, §8.3, Z64 |
 | `it::webhooks::z65_headers_patch` | `PATCH …/headers` rules, the compare-and-swap, the limits | §8.2, §8.3, Z65, Z67 |
-| `core::webhook_headers::z66_name_rules` | Name and value rules, the full refused list, `Authorization` allowed | §8.2, Z66, Z67 |
+| `core::webhook_headers::z66_name_rules` | Name and value rules, the full refused list, `Authorization`, `CF-Access-Client-Id` and `CF-Access-Client-Secret` allowed while every other `CF-` name is refused | §8.2, Z66, Z67 |
 | `it::webhooks::z68_headers_on_every_attempt` | Headers on every kind of attempt, service headers last, signature unchanged | §8.3, Z68 |
 | `it::webhooks::z69_host_change_clears_headers` | Host change removes headers; path change keeps them | §8.2, Z69 |
 | `it::webhooks::z70_headers_sealed` | Envelope and associated data of `headers_sealed`; unseal failure handling | §8.3, Z70 |

@@ -87,6 +87,7 @@ pipeline; this page adds what they must contain.
 | `core::keys::format_round_trip` | Generated keys match the key regex; parsing rejects every other shape |
 | `core::mime::b2_caps` (property part) | Random nesting and part counts never exceed depth 32 or 500 parts in the parsed tree and never panic ([B2](../edge-cases.md)) |
 | `core::abuse::y_rates_match_decision` | For random outcome histories and thresholds, every window's `tripped` equals the predicate the pause decision acts on, and `headroom` further outcomes of its kind trip it while one fewer does not; at least 10,000 cases on every run, CI included ([Deliverability metrics](metrics.md#14-tests), [Y1](../edge-cases.md)–[Y3](../edge-cases.md)) |
+| `core::abuse::headroom_properties` | For random window states and thresholds from 0 to 1: the predicate holds at the search bound unless `headroom` is `null`, and `null` occurs only for a threshold of 1; no mix of fewer than `headroom` further outcomes trips the rule; a delivered outcome lowers headroom only below a window's minimum, and by at most one; a batch that passes the batch check of [Deliverability metrics § 3.2](metrics.md#32-get-v1metricsrates) never trips the window; at least 10,000 cases on every run ([Deliverability metrics](metrics.md#14-tests), [Y2](../edge-cases.md)) |
 
 ## 5. MIME conformance corpus (`conf::`)
 

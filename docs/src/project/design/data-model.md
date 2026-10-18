@@ -1504,7 +1504,9 @@ CREATE TABLE IF NOT EXISTS idempotency (
   key_hash      TEXT PRIMARY KEY,                          -- hex SHA-256 of the Idempotency-Key header
   fingerprint   TEXT NOT NULL,                             -- sha256(operation, target, canonical body)
   operation     TEXT NOT NULL,                             -- send, reply, reply_all, forward; and draft_create,
-                                                           -- draft_send, draft_approve, draft_reject (Drafts § 9.1)
+                                                           -- draft_send, draft_approve, draft_reject (Drafts § 9.1);
+                                                           -- batch_update, written in the transaction of the change,
+                                                           -- response_json: IDs and counts (Parity additions § 2.4)
   message_id    TEXT,
   draft_id      TEXT,                                      -- the draft a draft route's record, or a draft send's
                                                            -- ledger row, belongs to; erasure deletes by it (Drafts § 13.2)

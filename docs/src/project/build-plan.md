@@ -1804,7 +1804,8 @@ behaviour change except the pinned windows and the thresholds argument; the M9 d
 **Acceptance:**
 
 - Edge rows Y1–Y19 with the tests named in the register, all passing.
-- `core::abuse::y_rates_match_decision` with at least 10,000 generated cases per run.
+- `core::abuse::y_rates_match_decision` and `core::abuse::headroom_properties`, each with at least 10,000
+  generated cases per run.
 - `it::metrics::events_counts_match_outbox`, `it::metrics::record_outcome_thresholds`.
 - `it::metrics::scope_matrix`; the routes join `it::security::cross_tenant_matrix`.
 - `it::console::deliverability_page`; the page joins `browser::console::no_js` and `browser::console::axe_scan`.
