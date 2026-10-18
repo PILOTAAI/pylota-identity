@@ -1784,7 +1784,7 @@ decides.
 **Files:** `crates/core/src/abuse.rs` (the window catalogue, `evaluate`, `decide`, `headroom`, parts per
 million; pure), `crates/core/src/metrics.rs`, `crates/worker/src/metrics/{mod.rs, rates.rs, events.rs}`,
 `handlers/metrics.rs`, `quota/rates.rs`, `mailbox/metric_counts.rs`, `console/pages/deliverability.rs`,
-`crates/cli/src/commands/metrics.rs`. Mailbox schema: `metric_counts` (the next mailbox schema version).
+`crates/cli/src/commands/metrics.rs`. Mailbox schema: `metric_counts`, in mailbox schema v1 while nothing is built.
 Hooks in other milestones' files, each reviewed by that file's owner:
 
 | File | Hook |

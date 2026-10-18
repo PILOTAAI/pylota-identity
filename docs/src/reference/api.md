@@ -572,7 +572,7 @@ tenant's caps: with the default `tenant_daily_send_cap` of 5,000, at most 125,00
 - `retention.message_hours` (optional, `null` or 1–8,760): each message of the identity, with its
   attachments, index rows and drafts, is erased that many hours after it is stored, except under a legal
   hold ([Parity additions § 7](../project/design/parity-additions.md#7-per-identity-message-retention-fr-prv-7)).
-  A number needs `erasure:manage` as well (`403 permission_denied`, `details.required: "erasure:manage"`).
+  A number needs `erasure:manage` as well (`403 permission_denied`, `details.required: ["erasure:manage"]`).
 
 - `username`: stored lower case as `^[a-z0-9][a-z0-9._-]{0,23}$`. The request value is checked by the
   username rules, not by a schema pattern, so each failure has its own code: a reserved or confusable name
@@ -2689,7 +2689,7 @@ tenant's. List entries carry `scope` (`tenant` or `identity`) and `identity_id`.
 removes one, all with `suppressions:manage`. `direction`, `kind`, `entry` and the bodies are those of the
 tenant routes. Platform, partner and tenant keys only: identity keys cannot hold `suppressions:manage`, so an
 agent can never change its own lists, and an identity key gets `403 permission_denied`
-(`details.required: "suppressions:manage"`).
+(`details.required: ["suppressions:manage"]`).
 
 - `PUT` adds the entry, or updates its `note` when it exists, and answers `200` with it. `DELETE` answers
   `204`, or `404 list_entry_not_found` for an entry that does not exist.

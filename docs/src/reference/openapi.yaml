@@ -969,7 +969,7 @@ paths:
         A `send_policy.daily_cap` above the tenant's effective `identity_daily_send_cap` needs a platform
         key (`403 scope_denied`, `details.field = "send_policy.daily_cap"`). A number in
         `retention.message_hours` needs `erasure:manage` as well (`403 permission_denied`,
-        `details.required: "erasure:manage"`).
+        `details.required: ["erasure:manage"]`).
       x-rate-limit-buckets: [api]
       x-idempotency: optional
       parameters:
@@ -12313,7 +12313,7 @@ components:
               docs: https://pylotamail.com/docs/reference/errors#code-permission_denied
               request_id: req_01J9Z4K8V4QW7X2M5N6P8R0T1Y
               details:
-                required: 'messages:send'
+                required: ['messages:send']
     KeyManageForbidden:
       description: >-
         As `Forbidden`, plus `key_scope_exceeded` when the target key is wider than the caller: a higher
@@ -12863,13 +12863,13 @@ components:
       description: Optional, code-specific details. Known keys are listed; other keys can appear.
       properties:
         required:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/Permission'}
           description: >-
-            `permission_denied`: the permission the key lacks; on a route that takes any one of several
-            permissions (the upload routes), the list of them, with `any_of: true`.
-          anyOf:
-            - $ref: '#/components/schemas/Permission'
-            - type: array
-              items: {$ref: '#/components/schemas/Permission'}
+            `permission_denied`: always an array: every permission the key lacks (one element when it
+            lacks one); on a route that takes any one of several permissions (the upload routes), all of
+            them, with `any_of: true`.
         any_of:
           type: boolean
           description: '`permission_denied`: `true` when the key needs any one of the permissions in `required`.'
@@ -14973,7 +14973,7 @@ components:
             Each message of the identity, with its attachments, extracted text, index rows, vectors and drafts,
             is erased this many hours after it is stored, except in a thread under a legal hold. `null`: the
             tenant's retention policy alone applies. Setting a number where there was `null`, or lowering it,
-            needs `erasure:manage` as well (`403 permission_denied`, `details.required: "erasure:manage"`);
+            needs `erasure:manage` as well (`403 permission_denied`, `details.required: ["erasure:manage"]`);
             raising it or setting `null` needs `identities:write` only and brings nothing back.
     Identity:
       type: object

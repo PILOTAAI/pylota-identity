@@ -386,13 +386,21 @@ refused with `410 cursor_expired`, with `details.reason` (`retention`, `size_lim
 `details.oldest_cursor` ([Event feed §1.3, §3](event-feed.md#3-cursors)).
 
 - `mail.events.iterate({ after, types, identityId })` pages the feed and yields events in log order with
-  the cursor after each; `mail.events.consumer(consumerId)` reads and commits a durable consumer.
+  the cursor after each; `mail.events.consumer(consumerId)` reads a durable consumer one page at a time,
+  yields the page's events, and commits the page's `next_cursor` before it reads the next, empty pages
+  with `has_more: true` included, so a backlog larger than one page reaches the head
+  ([Event feed § 6.2](event-feed.md#62-rules), [R69](../edge-cases.md)).
 - `mail.events.stream({ after, types, signal })` is an async iterator over the live stream. Each
   connection attempt mints a fresh stream token with `POST /v1/events/stream-tokens` and presents it as
   `event-feed.md` specifies; the API key is never put in a URL ([Y37](../edge-cases.md)). On a
   disconnect it reconnects from the cursor of the last event it yielded, with the backoff of §2.6 and any
   `Retry-After`. After a long sleep it resumes from that cursor the same way, and the server's
   no-gap guarantee fills the gap ([Y35](../edge-cases.md)).
+- Close codes follow [Event feed § 7.10](event-feed.md#710-resuming-without-loss): `1001`, `1006`,
+  `1011`, `1012`, `1013`, `4408` and a code this version does not know reconnect as above; `4429` retries
+  after 30 seconds; `4409` (another connection replaced this one), `4400`, `1008` and `1009` end the
+  iterator with `EventStreamClosedError { code, reason }` and never reconnect, so two clients on one
+  consumer never replace each other in a loop ([R68](../edge-cases.md)); `4410` is the gap below.
 - `410 cursor_expired` throws `EventGapError { cursor, reason, oldestCursor }`. The SDK never continues
   from `oldest_cursor`, `earliest` or `latest` on its own: the events in between would be lost silently.
   The caller decides; the documented recovery is to reconcile with the list APIs from the gap's start, as
@@ -1442,6 +1450,7 @@ pull request copies to `sdks/typescript-tests.json` here, where `cargo xtask tra
 | `ts::events::y34_feed_gap_surfaced` | `410 cursor_expired` for each `reason` throws `EventGapError` with `oldestCursor`; no request is made with another cursor afterwards | Y34, FR-SDK-6 |
 | `ts::events::y35_resume_after_sleep` | After a simulated disconnect and a long pause the stream reconnects with the last cursor and yields the following events in order | Y35, FR-SDK-6 |
 | `ts::it::events::y35_resume_no_gap` | Against workerd: events appended while the client was disconnected are all received after reconnecting | Y35 |
+| `ts::events::stream_close_rules` | The stream resumes on `1001`, `1006`, `1011`, `1012`, `1013`, `4408` and an unknown code, retries `4429` after 30 seconds, and ends with `EventStreamClosedError` on `4400`, `4409`, `1008` and `1009` without reconnecting; `consumer()` commits each page's `next_cursor`, empty pages included, before the next read | R68, R69, FR-SDK-6 |
 | `ts::events::y36_revoked_key_stops` | `401` and `403` at token mint, at reconnect and as the close reason end the iterator with that error and stop all requests | Y36, FR-SDK-6 |
 | `ts::it::events::y36_revoke_mid_stream` | Revoking the key while streaming ends the iterator with `key_revoked` | Y36 |
 | `ts::events::y37_reconnect_backoff_and_token` | Reconnect delays follow the backoff with jitter and `Retry-After`; each attempt mints a new token; no URL contains the key | Y37 |
