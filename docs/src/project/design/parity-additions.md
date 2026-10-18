@@ -1399,7 +1399,9 @@ in brackets (links rewritten relative to `prd.md` when pasted: `(#2-…)` become
   with that verdict **must never** release a verification code
   ([§ 6](#6-trusted-arc-sealers-fr-in-15)).
 - **FR-OUT-17** (§ 6.5) Allow and block lists **must** also be settable per identity. For each direction and
-  address, the identity's entries, when any matches, **must** decide before the tenant's. No list entry **may**
+  address, an identity entry that matches **must** override the tenant's entries of the same or a coarser
+  granularity, but an identity entry for a domain **must not** override a tenant entry for the exact
+  address; among the entries left, block **must** win over allow. No list entry **may**
   override a suppression, a test-mode rule, a daily cap, a sending pause or an authentication quarantine
   ([§ 3](#3-identity-scope-allow-and-block-lists-fr-out-17)).
 - **FR-WH-6** (§ 6.10) A tenant **may** opt in to `message.labels_changed`. The event **must** be delivered only
@@ -1679,7 +1681,7 @@ rows Z1–Z81.
 | An allow list with one entry blocks every other address of its direction | Allow-only stays the explicit `send_allowlist_only` switch; adding an entry never silently blocks everyone else | Deliberately different |
 | Inbox events feed: `label.added` and `label.removed`, including system labels such as `received` | `message.labels_changed`, opt-in, one event per request with the actor, never for system effects, never naming invisible mail, in the same feed and webhooks as every event | Exceed |
 | `authentication_results`: spf, dkim, dmarc and one domain each, `arc_sealer` | The same, with every DKIM signature (domain, selector, result, alignment), SPF alignment, the DMARC policy in force and which method aligned | Exceed |
-| DMARC failures under `quarantine` or `reject` are dropped without a bounce or an event, unless a trusted ARC seal from google.com, microsoft.com, outlook.com or icloud.com vouches for them | Never dropped: quarantined and releasable. A rescue needs a valid chain, a trusted newest sealer, a signed `From`, the sealer's `dmarc=pass` for that domain, a recent seal and a recipient binding; the default list holds only the two sealers verified this run; rescued mail never releases codes | Exceed (and deliberately narrower list) |
+| DMARC failures under `quarantine` or `reject` are dropped without a bounce or an event, unless a trusted ARC seal from google.com, microsoft.com, outlook.com or icloud.com vouches for them | Not dropped once it reaches the Worker: quarantined and releasable (Cloudflare Email Routing may reject DMARC failures before that, [§ 6.1](#61-sources-read-on-2026-10-17)). A rescue needs a valid chain, a trusted newest sealer, a signed `From`, the sealer's `dmarc=pass` for that domain, a recent seal and a recipient binding; the default list holds only the two sealers verified this run; rescued mail never releases codes | Exceed (and deliberately narrower list) |
 | Optional org-wide message expiry 24 hours after creation; access ends, copies already made remain | Per identity, 1 to 8,760 hours; the message, its objects, index rows, vectors and drafts are erased, legal holds respected, a daily audit receipt, and a retried send still never sends twice; copies already delivered remain, and say so | Exceed |
 | Write-only custom delivery headers; names readable; set and remove in one update | The same, with a deny list, limits, sealing under the master key, an audit row, and removal when the endpoint's host changes | Exceed |
 | BIND zone-file export of a domain's records | `?format=bind` from the same provider-read records, with each record's purpose, requirement and DNS status, and NS records placed by method | Exceed |

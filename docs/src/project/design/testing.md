@@ -219,10 +219,11 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    (`tokio-tungstenite` `=0.30.0`, the SDK's `stream` feature) for the event stream tests
    ([Event feed](event-feed.md)). The `it` test target declares
    `required-features = ["itest-hooks"]`, so `cargo test --workspace` never builds it.
-7. From M21, run the browser suite (section 6.8) while wrangler and the fake server are still up. From
-   M36, `--serve` stops here instead and keeps wrangler and the fake server running, writing
-   `target/itest/serve.json` (URL, CA path, platform key), so the TypeScript SDK repository's CI can run its
-   `ts::it::` tests against this Worker; it stops both when that job ends.
+7. From M21, run the browser suite (section 6.8) while wrangler and the fake server are still up.
+   With `--serve` (from M36), steps 6 and 7 are skipped: once step 5 has seeded the deployment, it keeps
+   wrangler and the fake server running and writes `target/itest/serve.json` (URL, CA path, platform key),
+   so the TypeScript SDK repository's CI can run its `ts::it::` tests against this Worker; it stops both
+   when that job ends.
 8. Stop wrangler and the fake server; delete `target/itest/state` unless `--keep` was passed.
 
 ### 6.2 Test hooks
@@ -636,7 +637,7 @@ The live tests of the AgentMail-parity milestones (M20 step 16) are defined on t
 `live::drafts::scheduled_send`, `live::events::stream_through_deploy`, `live::screening::t1_hold_round_trip`,
 `live::calendar::*`, `live::uploads::large_attachment_link`, `live::signup::end_to_end`,
 `live::signup::x40_refuse_one_click_headers`, `live::metrics::bounce_moves_rates` and
-`live::sdk::ts_round_trip`. The last runs in the TypeScript SDK's own repository, against the same staging
+`ts::live::round_trip`. The last runs in the TypeScript SDK's own repository, against the same staging
 deployment, with a staging test key ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)).
 
 **Manual tests.** Rows marked **Manual** need a person in a browser (a Google consent screen, a Stripe
@@ -703,10 +704,16 @@ lines from the source tree (including generated `conf::` names), and fails when:
 - a `Covers:` line names an unknown row or requirement.
 
 It also collects every test named in a design page's Tests table, and every test named in a milestone's
-acceptance. `ts::` tests live in the TypeScript SDK's own repository: `trace` reads their names and
-`Covers:` lines from `sdks/typescript-tests.json`, the inventory that SDK release produces and a pull
-request copies here, and a `ts::` name the register uses but the inventory lacks fails like any other
-missing test.
+acceptance. `ts::` tests live in the TypeScript SDK's own repository, which builds only from a product
+release's signed contract, so each repository gates its own side and neither waits for the other. Here,
+`trace` reads the `ts::` names and `Covers:` lines from `sdks/typescript-tests.json`, the inventory an SDK
+release produces and a pull request copies here: a listed name whose `Covers:` line names an unknown row
+or requirement fails, and a `ts::` name the register or a design table uses that the inventory lacks is
+printed `pending (SDK)` and does not fail, in `release.yml` too, because the SDK release that defines it
+comes after this one. Every product release attaches `ts-tests-required.json` (each such `ts::` name with
+its rows), listed in the signed `SHA256SUMS`, and the SDK repository's release refuses to adopt a
+contract whose required names it does not all define: a missing TypeScript test blocks the SDK release,
+never the product release.
 
 **Landed milestones.** A file `MILESTONES` at the repository root lists the milestones that have landed,
 one ID per line; each milestone's pull request adds its own line. Until `M20` is listed, `trace` checks

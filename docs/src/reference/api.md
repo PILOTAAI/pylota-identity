@@ -2677,8 +2677,10 @@ suppression needs `"confirm_complaint_removal": true` in the body and is audit-l
 - **Send-allow**: with `policy.send_allowlist_only`, only listed recipients are sent to; the others are
   `suppressed` with `policy: not_on_allowlist`.
 
-Entries can also belong to one identity; for that identity's mail its own entries decide before the
-tenant's. List entries carry `scope` (`tenant` or `identity`) and `identity_id`. Each scope holds at most
+Entries can also belong to one identity; for that identity's mail its own entries override the tenant's of
+the same or a coarser granularity (an identity `@domain` entry never overrides a tenant entry for the exact
+address), and among the entries left block wins over allow
+([Parity additions § 3.1](../project/design/parity-additions.md#31-scopes-and-precedence)). List entries carry `scope` (`tenant` or `identity`) and `identity_id`. Each scope holds at most
 10,000 entries and a tenant 50,000 (`422 list_limit_reached`). A dry run's suppressed recipient carries
 `scope` beside `reason: "send_block"`.
 

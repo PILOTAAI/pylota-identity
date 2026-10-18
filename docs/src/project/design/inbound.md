@@ -491,8 +491,8 @@ last. A message is therefore retried with its batch-mates only when they are ret
     - receive lists, both scopes in one statement ([Parity additions § 3.5](parity-additions.md#35-storage)):
       `SELECT identity_id, kind, entry FROM sender_lists WHERE tenant_id = ?1 AND direction = 'receive' AND identity_id IN ('', ?2) AND entry IN (SELECT value FROM json_each(?3))`
       with `?2` = the identity and `?3` = the sender address and `@` + sender domain as one JSON array;
-      `core::lists::decide` gives the effective receive decision (an identity entry decides before a tenant
-      entry; inside one scope block wins over allow);
+      `core::lists::decide` gives the effective receive decision ([Parity additions § 3.1](parity-additions.md#31-scopes-and-precedence): an identity
+      entry overrides the tenant's of the same or a coarser granularity; among the entries left, block wins);
     - tenant domains: `SELECT name, kind FROM domains WHERE (tenant_id = ?1 OR kind = 'platform') AND state <> 'removed'`. Every row feeds the look-alike checks; only rows with `kind <> 'platform'` (the tenant's own domains) can make a sender `known_sender` ([Trust signals](#trust-signals));
     - co-recipient identities ([A9](#multiple-identities-in-one-tenant-a9));
     - only when the effective policy has `accounts.require_approval: true` and step 11 found a

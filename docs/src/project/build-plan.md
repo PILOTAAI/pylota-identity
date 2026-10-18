@@ -1841,7 +1841,7 @@ milestones' files, each reviewed by that file's owner:
 | `crates/cli/src/commands/mcp.rs` (M16) | `mcp config --client codex\|claude-desktop\|agent-sdk` |
 | `console/pages/keys.rs`, `console/pages/connect.rs` (M21) | The MCP tools fieldset; the new snippets |
 | `.github/workflows/ci.yml` (M19) | Job `skills` |
-| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json` and `sdk-fixtures-{version}.tar.gz` as release assets listed in `SHA256SUMS`; `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
+| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-mail-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
 
 **Tasks.**
 
@@ -1863,7 +1863,7 @@ milestones' files, each reviewed by that file's owner:
 Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com, configure the trusted publisher
 for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail-typescript`, workflow `release-publish.yml`,
 environment `release`) and turn on "Require two-factor authentication and disallow tokens" after the first
-publish. Give the SDK repository a staging test key for `live::sdk::ts_round_trip`. Pin Deno and Bun
+publish. Give the SDK repository a staging test key for `ts::live::round_trip`. Pin Deno and Bun
 versions for the SDK repository's CI.
 
 **Acceptance:**
@@ -1886,7 +1886,7 @@ versions for the SDK repository's CI.
   release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
-- M20 gains `live::sdk::ts_round_trip`.
+- M20 gains `ts::live::round_trip`.
 
 ---
 
@@ -2033,7 +2033,7 @@ the ones marked manual there need a person in a browser and run with `cargo xtas
     (`live::uploads::large_attachment_link`, M33); agent self-sign-up end to end and its one-click refusal
     headers (`live::signup::end_to_end`, `live::signup::x40_refuse_one_click_headers`, M34); a bounce that
     moves the rates (`live::metrics::bounce_moves_rates`, M35); a TypeScript SDK round trip
-    (`live::sdk::ts_round_trip`, M36); and an ARC-sealed forward through Cloudflare and a `docs` link that
+    (`ts::live::round_trip`, M36); and an ARC-sealed forward through Cloudflare and a `docs` link that
     resolves (`live::arc::cloudflare_forward_behaviour`, `live::docs::z78_anchor_resolves`, M37). Each is
     defined on its milestone's design page.
 

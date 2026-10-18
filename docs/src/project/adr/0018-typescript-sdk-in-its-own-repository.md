@@ -42,11 +42,14 @@ Facts the decision rests on:
    FR-SDK-2 – FR-SDK-9, the SDK's edge-case rows and its `ts::` test names remain binding in this
    repository and are the specification the SDK repository implements. A change to the SDK's behaviour is
    written here first, as for any other design.
-4. **This repository publishes what the SDK consumes.** Every release attaches two assets, listed in the
+4. **This repository publishes what the SDK consumes.** Every release attaches three assets, listed in the
    signed `SHA256SUMS`:
    - `openapi.json`, the contract of that release;
    - `sdk-fixtures-{version}.tar.gz`, the recorded HTTP exchanges and error envelopes of `sdks/fixtures/`
-     with the Rust SDK's canonical decoding of each. They are JSON data, not code.
+     with the Rust SDK's canonical decoding of each;
+   - `ts-tests-required.json`, every `ts::` test name the register and the design tables use, with its rows.
+
+   They are JSON data, not code.
 
    The SDK repository downloads both for one release tag and refuses them unless `SHA256SUMS.sig`
    verifies against the release public keys and every checksum matches.
@@ -58,6 +61,10 @@ Facts the decision rests on:
 6. **Traceability across the two repositories.** `cargo xtask trace` checks the `ts::` names of the
    edge-case register against `sdks/typescript-tests.json`, a data file the SDK repository's release
    produces (every test title with its `Covers:` line and the SDK version) and a pull request copies here.
+   A name the inventory lacks is `pending (SDK)` here, never a failure, so a product release never waits
+   for an SDK release; each product release instead attaches `ts-tests-required.json`, and the SDK
+   repository refuses to release on a contract whose required `ts::` tests it does not all define
+   ([Testing § 11.2](../design/testing.md#112-cargo-xtask-trace)).
    `cargo xtask itest --serve` starts the workerd harness and leaves it running, so the SDK repository's CI
    can run `ts::it::` against the Worker of the contract's tag.
 
@@ -75,7 +82,7 @@ Facts the decision rests on:
   adopted half way.
 - Human prerequisites, before M36: create `PILOTAAI/pylota-mail-typescript`; configure npm trusted
   publishing for that repository's release workflow; give that repository a staging test key for
-  `live::sdk::ts_round_trip`.
+  `ts::live::round_trip`.
 - Follow-up outside this record: the browser suite's Playwright specs (Testing § 2) are TypeScript inside
   this repository and are not covered by the `AGENTS.md` exception either. They predate ADR 0017, and the
   owner settles them separately.

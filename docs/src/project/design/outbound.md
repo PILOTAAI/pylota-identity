@@ -234,8 +234,9 @@ Each recipient that matches one of these becomes a delivery row with status `sup
 
 - an unexpired row in `suppressions` for `HMAC-SHA256(PM_HASH_KEY, address)` (FR-OUT-4);
 - the effective send decision ([Parity additions § 3](parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17))
-  for the address or `@domain` is `block`: an identity entry decides before a tenant entry, and inside one
-  scope block wins over allow;
+  for the address or `@domain` is `block`: an identity entry overrides the tenant's of the same or a coarser
+  granularity (never a tenant entry for the exact address by a domain entry), and among the entries left
+  block wins over allow;
 - `policy.send_allowlist_only` and the effective send decision for the address or `@domain` is not `allow`;
 - identity `send_policy.require_known_recipient` (default `true` for every identity except the system
   identity, which setup creates with `false`) and the recipient is not **known** ([E2](../edge-cases.md)).
@@ -245,8 +246,8 @@ Each recipient that matches one of these becomes a delivery row with status `sup
 1. the identity has written to it before: its `contacts` row has `outbound_count > 0`. Only a
    recipient whose delivery was not `suppressed` increments `outbound_count` (the contacts upsert of
    [Storage](#storage-of-an-accepted-send)), so a refused attempt never makes the next one pass;
-2. the effective send decision for this identity is `allow` (an identity-scope send-allow entry, or a
-   tenant one with no identity entry deciding, for the address or its `@domain`);
+2. the effective send decision for this identity is `allow` (`core::lists::decide`,
+   [Parity additions § 3.1](parity-additions.md#31-scopes-and-precedence), for the address or its `@domain`);
 3. for `reply` and `reply_all` only, it is the reply target of the message replied to
    ([Recipients](#recipients)), and that message is `received` with verdict `pass` or `arc_rescued`
    ([Parity additions § 6.5](parity-additions.md#65-how-each-rule-treats-arc_rescued)): answering the

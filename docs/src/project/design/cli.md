@@ -1439,7 +1439,8 @@ answered · confidence 0.86 · 3 steps · 2.8 s
   with more than one ID calls `batch-update` in requests of 100, each atomic, and says so when it splits,
   because the command as a whole is not atomic; it exits 0 only when every request succeeds ([Parity additions § 2.7](parity-additions.md#27-interfaces-and-privacy)).
 - **`lists list|add|remove`** take `--identity <identity>` for identity-scope entries
-  (`…/identities/{id}/lists/…`), which decide before the tenant's entries for that identity's mail;
+  (`…/identities/{id}/lists/…`), which override the tenant's entries for that identity's mail as
+  [Parity additions § 3.1](parity-additions.md#31-scopes-and-precedence) defines;
   `--tenant` keeps the tenant scope.
 - **`identities create` and `identities update`** take `--message-hours <1-8760>` (erase each message that
   many hours after it is stored; needs `erasure:manage`) or `--keep-messages` (sets `retention.message_hours`

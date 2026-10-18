@@ -105,13 +105,16 @@ upgrade path; elsewhere it uses the global `WebSocket` ([§2.11](#211-event-feed
 
 ### 2.3 Generation
 
-**What this repository publishes.** `cargo xtask release` attaches two more files to every release, both
+**What this repository publishes.** `cargo xtask release` attaches three more files to every release, all
 listed in `SHA256SUMS` and so covered by the owner's signature ([Rust workspace § 9](rust-workspace.md#9-xtask)):
 
 - `openapi.json`: `docs/src/reference/openapi.yaml` converted to JSON (the YAML is the contract;
   `xtask openapi` already proves the Worker's `/openapi.json` equals it);
 - `sdk-fixtures-{version}.tar.gz`: the `sdks/fixtures/` directory, with the Rust SDK's canonical decoding
-  of each exchange ([§2.15](#215-contract-tests-fixtures-and-ci)).
+  of each exchange ([§2.15](#215-contract-tests-fixtures-and-ci));
+- `ts-tests-required.json`: every `ts::` test name the register and this page's tables use, with its rows.
+  The SDK repository's release refuses to adopt the contract unless it defines all of them
+  ([Testing § 11.2](testing.md#112-cargo-xtask-trace)).
 
 **In the SDK repository**, `npm run generate` is the one command that changes `src/generated/`:
 
@@ -398,8 +401,8 @@ refused with `410 cursor_expired`, with `details.reason` (`retention`, `size_lim
   no-gap guarantee fills the gap ([Y35](../edge-cases.md)).
 - Close codes follow [Event feed § 7.10](event-feed.md#710-resuming-without-loss): `1001`, `1006`,
   `1011`, `1012`, `1013`, `4408` and a code this version does not know reconnect as above; `4429` retries
-  after 30 seconds; `4409` (another connection replaced this one), `4400`, `1008` and `1009` end the
-  iterator with `EventStreamClosedError { code, reason }` and never reconnect, so two clients on one
+  after 30 seconds; `4404` (the consumer is gone), `4409` (another connection replaced this one), `4400`,
+  `1008` and `1009` end the iterator with `EventStreamClosedError { code, reason }` and never reconnect, so two clients on one
   consumer never replace each other in a loop ([R68](../edge-cases.md)); `4410` is the gap below.
 - `410 cursor_expired` throws `EventGapError { cursor, reason, oldestCursor }`. The SDK never continues
   from `oldest_cursor`, `earliest` or `latest` on its own: the events in between would be lost silently.
@@ -544,10 +547,11 @@ repository's release pipeline ([Rust workspace § 10](rust-workspace.md#10-ci-pi
 - **Built and signed like a product release.** The SDK repository's `release.yml`, on a `v*` tag, runs the
   full CI gate, refuses a tag that differs from `package.json` `version` or an `openapi.json` that is not
   the named release's asset, runs `npm pack`, attests `pylotahq-mail-{version}.tgz` and lists it in an
-  unsigned `SHA256SUMS` on a draft GitHub Release. The owner verifies the checksum and the attestation and
-  signs `SHA256SUMS` offline with the same minisign key as product releases
-  ([Security §11](security.md#11-supply-chain)), with the trusted comment `pylota-mail-typescript
-  v{version}`, so a product signature can never pass for an SDK one.
+  unsigned `SHA256SUMS` on a draft GitHub Release. The owner signs it offline with the same minisign key as
+  product releases ([Security §11](security.md#11-supply-chain)), through the same tool:
+  `cargo xtask release sign <tag> --repo PILOTAAI/pylota-mail-typescript` checks the checksum and the
+  attestation (provenance naming that repository's `release.yml` on that tag) and signs with the trusted
+  comment `pylota-mail-typescript v{version}`, so a product signature can never pass for an SDK one.
 - **Published by trusted publishing.** The SDK repository's `release-publish.yml` (environment `release`,
   started by `workflow_dispatch` on the tag) verifies that signature, then runs `npm publish` on that
   tarball with GitHub OIDC trusted publishing: no npm token exists in any workflow, provenance is
@@ -1450,7 +1454,7 @@ pull request copies to `sdks/typescript-tests.json` here, where `cargo xtask tra
 | `ts::events::y34_feed_gap_surfaced` | `410 cursor_expired` for each `reason` throws `EventGapError` with `oldestCursor`; no request is made with another cursor afterwards | Y34, FR-SDK-6 |
 | `ts::events::y35_resume_after_sleep` | After a simulated disconnect and a long pause the stream reconnects with the last cursor and yields the following events in order | Y35, FR-SDK-6 |
 | `ts::it::events::y35_resume_no_gap` | Against workerd: events appended while the client was disconnected are all received after reconnecting | Y35 |
-| `ts::events::stream_close_rules` | The stream resumes on `1001`, `1006`, `1011`, `1012`, `1013`, `4408` and an unknown code, retries `4429` after 30 seconds, and ends with `EventStreamClosedError` on `4400`, `4409`, `1008` and `1009` without reconnecting; `consumer()` commits each page's `next_cursor`, empty pages included, before the next read | R68, R69, FR-SDK-6 |
+| `ts::events::stream_close_rules` | The stream resumes on `1001`, `1006`, `1011`, `1012`, `1013`, `4408` and an unknown code, retries `4429` after 30 seconds, and ends with `EventStreamClosedError` on `4400`, `4404`, `4409`, `1008` and `1009` without reconnecting; `consumer()` commits each page's `next_cursor`, empty pages included, before the next read | R68, R69, FR-SDK-6 |
 | `ts::events::y36_revoked_key_stops` | `401` and `403` at token mint, at reconnect and as the close reason end the iterator with that error and stop all requests | Y36, FR-SDK-6 |
 | `ts::it::events::y36_revoke_mid_stream` | Revoking the key while streaming ends the iterator with `key_revoked` | Y36 |
 | `ts::events::y37_reconnect_backoff_and_token` | Reconnect delays follow the backoff with jitter and `Retry-After`; each attempt mints a new token; no URL contains the key | Y37 |
@@ -1495,7 +1499,7 @@ pull request copies to `sdks/typescript-tests.json` here, where `cargo xtask tra
 | `xtask::y68_versions_match_tag` | `release --check-version` fails when a plugin manifest, a skill's `metadata` or a marketplace `ref` differs from the tag | Y68, FR-SDK-10 |
 | `ts::doctest::framework_guides` | In the SDK repository, the TypeScript blocks of this repository's framework guides, at the contract's tag, type-check against the pinned framework versions in `examples/` | FR-SDK-15 |
 | `eval::skills_safe_send` (report-only, nightly) | Records the pass rate of an agent with the skills on scripted faults: key reuse, no resend after `uncertain`, no instruction-following | FR-SDK-10 |
-| `live::sdk::ts_round_trip` (M20) | On staging, run by the SDK repository with a staging test key: the TypeScript SDK sends with a key, receives the webhook through `createWebhookHandler`, verifies it, and reads the event from the stream | FR-SDK-2, FR-SDK-5, FR-SDK-6 |
+| `ts::live::round_trip` (M20) | On staging, run by the SDK repository with a staging test key: the TypeScript SDK sends with a key, receives the webhook through `createWebhookHandler`, verifies it, and reads the event from the stream | FR-SDK-2, FR-SDK-5, FR-SDK-6 |
 
 ## Milestone
 
@@ -1523,7 +1527,7 @@ milestones' files, each reviewed by that file's owner:
 | `crates/cli/src/commands/mcp.rs` (M16) | `mcp config --client codex\|claude-desktop\|agent-sdk` |
 | `console/pages/keys.rs`, `console/pages/connect.rs` (M21) | The MCP tools fieldset; the new snippets |
 | `.github/workflows/ci.yml` (M19) | Job `skills` |
-| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json` and `sdk-fixtures-{version}.tar.gz` as release assets listed in `SHA256SUMS`; `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
+| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-mail-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` and prints a name it lacks as `pending (SDK)` |
 
 **Tasks.**
 
@@ -1545,7 +1549,7 @@ milestones' files, each reviewed by that file's owner:
 Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com, configure the trusted publisher
 for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail-typescript`, workflow `release-publish.yml`,
 environment `release`) and turn on "Require two-factor authentication and disallow tokens" after the first
-publish. Give the SDK repository a staging test key for `live::sdk::ts_round_trip`. Pin Deno and Bun
+publish. Give the SDK repository a staging test key for `ts::live::round_trip`. Pin Deno and Bun
 versions for the SDK repository's CI.
 
 **Acceptance:**
@@ -1568,7 +1572,7 @@ versions for the SDK repository's CI.
   release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
-- M20 gains `live::sdk::ts_round_trip`.
+- M20 gains `ts::live::round_trip`.
 
 ## Compared with AgentMail (read 2026-10-17)
 

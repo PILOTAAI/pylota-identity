@@ -2331,7 +2331,8 @@ pmail suppressions remove jo@example.net --tenant acme
 
 Allow and block lists for receiving and sending. `<direction>` is `receive` or `send`; `<kind>` is
 `allow` or `block`; an entry is `user@example.com` or `@example.com`. With `--identity` the entry belongs to
-that identity and decides before the tenant's entries for its mail.
+that identity and overrides the tenant's entries for its mail as
+[Parity additions § 3.1](../project/design/parity-additions.md#31-scopes-and-precedence) defines.
 
 ```text
 pmail lists list <direction> <kind> [--tenant <tenant>] [--identity <identity>]
