@@ -413,19 +413,28 @@ less than `T_MIN = 12` seconds left before `deadline_at`; attachment waiting sto
 6. **Time check.** With less than `T_MIN` left, commit `unavailable` with the reason of the last failure
    (`model_unavailable`, `ai_rate_limited`, `invalid_output`), or `deadline_exceeded` when no attempt was
    made, and ack.
-7. **Daily model cap.** `QuotaRequest::CountScreenModel { tz, cap, sender, r#ref }` with
-   `cap = policy.triage.daily_model_cap`, `sender` = the sender key and `ref` = the message ID, counted once
+7. **Daily model cap.** `QuotaRequest::CountScreenModel { tz, cap, sender, known, r#ref }` with
+   `cap = policy.triage.daily_model_cap`, `sender` = the sender key, `known` = whether the sender is a known
+   correspondent of the identity and `ref` = the message ID, counted once
    per day per `ref` (meta `sm:{ref}`), on its own counter `screen_model`, separate from triage's
    `triage_model`, and on the sender's counter `screen_sender:{h}` for the same day. `CapReached` comes back
-   when the tenant's count has reached `cap`, or the sender's has reached `ceil(cap / 10)`; it commits
+   when the tenant's count has reached `cap`, or the sender's has reached `ceil(cap / 10)`, or, for a sender
+   that is not `known`, the tenant's count has reached `cap − ceil(cap / 5)`; it commits
    `unavailable` with reason `model_cap` (T9), which is held whatever `on_unavailable` says (§7, T60).
    `TenantQuota` unavailable: re-enqueue with `deferrals + 1` and a 5-second delay while time allows, else
-   step 6. **The sender key** is the organisational domain (as DMARC alignment computes it) of the `From`
-   domain when the authentication verdict is `pass` or `arc_rescued`, and `unauthenticated` for every other
-   message; `h` is `HMAC-SHA256(PM_HASH_KEY, sender key)` truncated to 16 hex characters. So one domain, or
-   every unauthenticated sender together, can use at most a tenth of the cap: a sender that floods a tenant
-   with innocuous mail holds only its own later mail, and draining the whole cap takes ten domains that pass
-   DMARC, inside the inbound volume caps ([Limits › Mail](../../reference/limits.md#mail)). The answer
+   step 6. **The sender key** is keyed like the inbound per-sender cap
+   ([Inbound › Inbound volume caps](inbound.md#inbound-volume-caps-d5-d13)): the lower-case `From` address when the
+   authentication verdict is `pass` or `arc_rescued`, and `unauthenticated` for every other message (one
+   key, as the inbound unauthenticated bucket is one); `h` is `HMAC-SHA256(PM_HASH_KEY, sender key)`
+   truncated to 16 hex characters. A shared provider's domain (`gmail.com`) is therefore never one key: an
+   attacker there spends only the tenths of the addresses it controls. **Known** is rule 1 or 2 of
+   [Outbound › Known recipient](outbound.md#recipient-filters) for the `From` address of an authenticated
+   sender (the identity wrote to it, or a send-allow entry names it or its `@domain`); unauthenticated mail
+   is never known. The last fifth of the cap is spent only on known correspondents: strangers, however many
+   addresses they use, can exhaust at most `cap − ceil(cap / 5)` calls, so they can hold strangers' later
+   mail (as `screening_unavailable`, releasable by a person) but never a known correspondent's, and one
+   address holds at most its own later mail, inside the inbound volume caps
+   ([Limits › Mail](../../reference/limits.md#mail)). The answer
    carries `used`; when it passes 80% of `cap`, and again at `cap`, the consumer reports the
    `screening_model_cap` condition (§22).
 8. **Rate limit.** Ask `RL_AI` under the key `screen:{tenant_id}`, not the tenant ID that triage and agentic
@@ -701,8 +710,8 @@ cap with innocuous mail from a few domains, or write text that breaks the output
 mail. So both are held as `screening_unavailable` whatever `on_unavailable` says, and `deliver` applies only
 to the reasons that come from the service: the model failing or timing out (`model_unavailable`),
 `RL_AI` refusing (`ai_rate_limited`) and no job deciding in time (`deadline_exceeded`), which is what
-an operator chooses availability for. The sender sub-cap of §5.2 step 7 keeps one flooding domain from
-holding everyone else's mail. A tenant key that lowers `triage.daily_model_cap` (lower-only) can therefore
+an operator chooses availability for. The sender sub-cap and the known-correspondent share of §5.2 step 7
+keep a flood from strangers from holding a known correspondent's mail. A tenant key that lowers `triage.daily_model_cap` (lower-only) can therefore
 only hold more mail, never deliver unscreened mail, so it stays outside the guard-field rules.
 
 ### 7.1 Reason codes
@@ -718,7 +727,7 @@ only hold more mail, never deliver unscreened mail, so it stays outside the guar
 | `unavailable` | `model_unavailable` | Model errors or timeouts until no attempt could fit before the deadline |
 | `unavailable` | `invalid_output` | The output was invalid twice, or cut off by `max_tokens` (always held, §7) |
 | `unavailable` | `ai_rate_limited` | `RL_AI` kept refusing until no attempt could fit |
-| `unavailable` | `model_cap` | The tenant's daily model cap, or its sender's tenth of it, was reached (always held, §7) |
+| `unavailable` | `model_cap` | The tenant's daily model cap, its sender's tenth of it, or for a stranger the four fifths strangers may spend, was reached (always held, §7) |
 | any | `test_forced` | A test tenant's loopback mail forced the verdict ([§23](#23-test-tenants)) |
 
 ### 7.2 Late model verdicts
@@ -1193,7 +1202,8 @@ allowance with steering mail and then, with the fail-closed default, turn every 
 `screening_unavailable` quarantine; the default `monitor` would halve every plan's triage capacity overnight;
 and FR-BILL-7 promises that quarantined mail is charged only when released, which a charged `suspect` verdict
 would break. The daily model cap can be drained the same way, so it carries a sender sub-cap (§5.2 step 7):
-one domain, or all unauthenticated mail together, uses at most a tenth of it, and the cap's `model_cap`
+one authenticated `From` address, or all unauthenticated mail together, uses at most a tenth of it,
+strangers together at most four fifths, and the cap's `model_cap`
 holds never deliver (§7). Model spend stays bounded: by `triage.daily_model_cap`, counted for screening on
 its own counter (`screen_model`), so a tenant makes at most twice that many model calls a day across triage
 and screening; by `RL_AI`, under screening's own key; and by the inbound volume caps, since throttled mail
@@ -1207,7 +1217,7 @@ as for triage. Billing modes `exempt` and `disabled` change nothing here.
 | Model input | 6,000 estimated tokens: body 3,700 + 800, HTML text 1,000, 3 attachment excerpts of 1,000 characters, 10 filenames | Pylota Mail |
 | Deterministic scan input | Subject, display names, `text` (≤ 512 KiB stored), HTML-derived text (≤ 1 MiB), removed hidden content (≤ 64 KiB), filenames; attachment text ≤ 256 KiB each, ≤ 10 attachments | Pylota Mail |
 | Attachment wait | Until `deadline_at − 25 s`, in 5 s steps | Pylota Mail |
-| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage; at most a tenth of it (`ceil(cap / 10)`) per sender key; `screening_model_cap` at 80% | Policy / Pylota Mail |
+| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage; at most a tenth of it (`ceil(cap / 10)`) per sender key (an authenticated `From` address, or all unauthenticated mail); strangers together at most `cap − ceil(cap / 5)`; `screening_model_cap` at 80% | Policy / Pylota Mail |
 | Model output | `max_tokens` 2,048 (the verdict is under 60 tokens; the rest covers reasoning, §5.3) | Pylota Mail |
 | Text-generation rate | `RL_AI` under the key `screen:{tenant_id}`: 60 a minute per tenant for screening, apart from the 60 that triage and agentic search share; the account limit is 300 requests a minute for text generation ([Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/), last updated 2026-09-17, read 2026-10-18) | Cloudflare / Pylota Mail |
 | Signals per record | 32 | Pylota Mail |
@@ -1490,7 +1500,8 @@ Rows to add to [PRD §6.4 Inbound](../prd.md#64-inbound) as a new subsection "Sc
   erasure scope, and erasure receipts **must** count them.
 - **FR-SCR-11** Screening **must never** be charged to a plan allowance. Its model calls **must** be bounded by the
   tenant's daily model cap and `RL_AI`; a reached cap **must** give `unavailable` unless the deterministic scan is
-  decisive. One sender domain **must not** be able to spend more than a tenth of the cap, and triage and agentic
+  decisive. One sender **must not** be able to spend more than a tenth of the cap, senders that are not known
+  correspondents **must not** together be able to spend its last fifth, and triage and agentic
   search **must not** be able to spend screening's share of `RL_AI`.
 - **FR-SCR-12** The service **must** record verdict counts by reason, unavailable rates, deadline misses and
   latency, and **must** alert the operator when a tenant's held mail becomes unavailable at volume, when model
@@ -1559,7 +1570,7 @@ Rows to add to [PRD §6.4 Inbound](../prd.md#64-inbound) as a new subsection "Sc
 | T57 | Cross-tenant access to the four new routes | A key of another tenant or partner gets the same `404` as for a missing ID; the routes join the cross-tenant matrix | S | `it::screening::t57_scope_matrix` |
 | T58 | Agentic search over a monitor-mode or released `suspect` message | The evidence item is `steering_suspected`; the verifier removes every answer sentence that cites it | S | `it::agentic::t58_screening_suspect_evidence` |
 | T59 | After a `PM_FREEZE`, the backstop job, a re-queued screen job or the daily maintenance reaches a held message before the `screen` alarm's first run | Whichever comes first applies the deadline extension; `ScreenExpire` changes nothing before `deadline_at + 30 s` of the extended deadline (`NotDue`) and reports no `screening_stuck`; an `unavailable` that a job computed against the old deadline answers `Extended`; no message is expired for the freeze | S | `it::screening::t59_freeze_race` |
-| T60 | In `hold` mode, a sender floods a tenant with innocuous mail to drain the model cap, or sends text that makes the classifier answer badly twice, with `on_unavailable` set to `deliver` | One sender key (organisational domain with DMARC `pass`, or all unauthenticated mail) spends at most `ceil(cap / 10)` model calls a day; `model_cap` and `invalid_output` are held as `screening_unavailable` whatever `on_unavailable` says; other senders' mail keeps its model verdicts; `screening_model_cap` is reported at 80%; triage and agentic search cannot spend screening's `RL_AI` share | S | `it::screening::t60_forced_unavailable` |
+| T60 | In `hold` mode, a sender floods a tenant with innocuous mail to drain the model cap, or sends text that makes the classifier answer badly twice, with `on_unavailable` set to `deliver` | One sender key (an authenticated `From` address, or all unauthenticated mail) spends at most `ceil(cap / 10)` model calls a day; strangers together at most `cap − ceil(cap / 5)`, so a known correspondent's mail keeps its model verdicts however many stranger addresses flood; `model_cap` and `invalid_output` are held as `screening_unavailable` whatever `on_unavailable` says; other senders below their tenth keep their model verdicts until strangers reach their share; `screening_model_cap` is reported at 80%; triage and agentic search cannot spend screening's `RL_AI` share | S | `it::screening::t60_forced_unavailable` |
 | T61 | A message whose attachment text was not scanned: an image with `inbound.extract_image_text` off, a PDF whose conversion failed, text still pending at the verdict, an 11th attachment | The verdict comes from the rest of the message, and the message carries the trust flag `attachments_unscreened` in either mode; it is not held for that alone; the late scan removes the flag once every such attachment's text is scanned without a decisive signal | S | `it::screening::t61_unscreened_attachments` |
 
 ## Tests
@@ -1635,7 +1646,7 @@ Rows to add to [PRD §6.4 Inbound](../prd.md#64-inbound) as a new subsection "Sc
 | `it::screening::t57_scope_matrix` | The four routes in `it::security::cross_tenant_matrix` | T57 |
 | `it::agentic::t58_screening_suspect_evidence` | Evidence marking and verifier removal | T58 |
 | `it::screening::t59_freeze_race` | With the fake clock and `PM_FREEZE`, each of the backstop job, a re-queued screen job and the maintenance pass runs first after the freeze: the extension applies once, `ScreenExpire` answers `NotDue`, `ScreenCommit` answers `Extended` for a stale `unavailable`, no `screening_stuck` | T59 |
-| `it::screening::t60_forced_unavailable` | `daily_model_cap: 20`: a sender domain's third message gets `model_cap` and is held under `deliver`; another domain still gets model verdicts; a scripted invalid answer twice is held under `deliver`; `screening_model_cap` at 16; triage jobs at `RL_AI`'s limit leave screening's key untouched | T60, FR-SCR-11 |
+| `it::screening::t60_forced_unavailable` | `daily_model_cap: 20`: an authenticated address's third message gets `model_cap` and is held under `deliver`; another address on the same `gmail.com` domain still gets model verdicts; strangers stop at 16 calls while a known correspondent's mail still gets verdicts up to 20; a scripted invalid answer twice is held under `deliver`; `screening_model_cap` at 16; triage jobs at `RL_AI`'s limit leave screening's key untouched | T60, FR-SCR-11 |
 | `it::screening::t61_unscreened_attachments` | An image with extraction off, a conversion failure, pending text at the verdict and an 11th attachment each give `attachments_unscreened` in hold and monitor mode without a hold; late text that scans clean removes the flag | T61, FR-SCR-3 |
 | `cli::screening::commands` | The four CLI commands against recorded API fakes | §21 |
 | `live::screening::t1_hold_round_trip` | On staging with the real model: a clean message clears and a steering message is held within 30 seconds; the deadline alarm fires on a forced `deadline` message within 30 seconds of its time | T1, T6 |

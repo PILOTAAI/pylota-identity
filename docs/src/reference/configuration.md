@@ -284,7 +284,7 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
 | `quarantine.key_release` | `true` lets a platform key or the partner key of the tenant's own partner (never a tenant or identity key) release this tenant's quarantined mail even when `PM_QUARANTINE_KEY_RELEASE` is `off`, and take the other decisions reserved for people (loosening a guard field, approving a service account other than one it requested; [Workspace policy §3](../project/design/workspace-policy.md#3-decisions-reserved-for-people)). `false` by default. Only a platform key, or the partner key of the tenant's own partner, can set it (a tenant key cannot call `PATCH /v1/tenants/{tenant_id}`: `403 permission_denied`; with `policy:write` it gets `403 scope_denied` on `PATCH …/policy`). With `PM_QUARANTINE_KEY_RELEASE=on` it changes nothing. On Pylota Mail Cloud, Pylota's partner key sets it to `true` on each operator's tenant ([J14](../project/edge-cases.md), [J16](../project/edge-cases.md)) |
 | `retention.message_days` | `null` keeps parsed messages indefinitely. A number deletes messages, attachments, index rows and vectors after that age, except held threads |
 | `retention.events_days` | 1–365, default 30. Webhook delivery rows, the event index and the event payloads kept for replay are deleted after this many days. Webhook replay reaches back 30 days from an event's `occurred_at`, or this many days if fewer ([Privacy design › Retention](../project/design/privacy.md#52-steps-of-a-tenant-retention-job)). The tenant's event log keeps events this many days after they were appended, within its size budget ([Event feed § 2.5](../project/design/event-feed.md#25-retention-and-the-size-budget)) |
-| `triage.daily_model_cap` | Model-backed triage runs per day in the tenant's time zone; past it, triage is rules-only until local midnight. It applies whatever the billing mode, so an `exempt` workspace still has a ceiling on model spend ([Triage § 12](../project/design/triage.md#12-cost-controls)). Screening's classifier counts against the same number on its own counter, at most a tenth of it per sender domain; past it a held message is quarantined as `screening_unavailable` whatever `screening.on_unavailable` says ([Screening hold § 5.2](../project/design/screening.md#52-steps)) |
+| `triage.daily_model_cap` | Model-backed triage runs per day in the tenant's time zone; past it, triage is rules-only until local midnight. It applies whatever the billing mode, so an `exempt` workspace still has a ceiling on model spend ([Triage § 12](../project/design/triage.md#12-cost-controls)). Screening's classifier counts against the same number on its own counter, at most a tenth of it per authenticated sender address (all unauthenticated mail is one sender) and at most four fifths for senders that are not known correspondents; past it a held message is quarantined as `screening_unavailable` whatever `screening.on_unavailable` says ([Screening hold § 5.2](../project/design/screening.md#52-steps)) |
 | `triage.categories` | `null` uses the built-in list. Otherwise an array of up to 20 `{ "name": "pcn", "description": "Penalty charge notices from councils" }`, which replaces it |
 | `triage.rules` | Deterministic rules. See [Triage](../guides/triage.md#rules) |
 | `search.refs_packs` | `core` (amounts, phones, emails, domains, dates, invoice and order numbers) and optional `uk_vehicle` (plates, PCNs). There is no built-in pack for booking references: add them with `custom_refs` |
@@ -306,10 +306,12 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
 applies a fixed overlay after the stored policy, taking the stricter value of each field: both daily send
 caps 10, `max_recipients` 1, `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.unsolicited_otp`
 and `accounts.require_approval` `true`, `quarantine.spam_threshold` 0.5, `screening.mode` `hold` with
-`screening.on_unavailable` `quarantine`, `drafts.require_approval` `always`, `auto_reply.allowed`,
+`screening.on_unavailable` `quarantine`, `auto_reply.allowed`,
 `inbound.extract_image_text`, `triage.enabled` and `search.agentic_enabled` `false`,
 `triage.daily_model_cap` 50, inbound caps 20, 20 and 100, `large_attachments` `refuse`. It is not stored and
 ends with verification ([Agent self-sign-up §4.2](../project/design/agent-signup.md#42-policy-overlay)).
+`drafts.require_approval` is not in it: step 16a of a send does not apply to a provisional tenant, whose sends
+reach only its human.
 
 ### Who may change a field
 

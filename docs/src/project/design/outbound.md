@@ -89,7 +89,8 @@ normalisation, so a client must resend the same body (key order and whitespace d
 
 ### Reservation inside the mailbox (FR-OUT-1, [G1](../edge-cases.md))
 
-The mailbox keeps an in-memory set `in_flight: HashSet<String>` of keys being processed. A Durable Object
+The mailbox keeps an in-memory set `in_flight: HashSet<String>` of the `key_hash` values being processed, so a
+client key can never collide with a draft's internal key ([Drafts §5.1](drafts.md#51-senddraft)). A Durable Object
 has exactly one live instance, and its in-memory state is lost only when the instance is, together with
 every request it was running, so the set cannot hold a stale key.
 
@@ -122,7 +123,9 @@ every request it was running, so the set cannot hold a stale key.
    embedded uploads, and a draft send's embedded stored attachments ([Drafts §5.1](drafts.md#51-senddraft)),
    are read from R2 (`BLOBS.get`) for the composition; a missing object (only possible
    after a restore) sets the upload `expired` (`object_missing`), releases the reservations and returns
-   `410 upload_expired` ([Uploads §4.4](uploads.md#44-steps-6-and-7-of-the-reservation)).
+   `410 upload_expired` ([Uploads §4.4](uploads.md#44-steps-6-and-7-of-the-reservation)); for a draft's
+   stored attachment it releases the reservations and the draft fails `source_unavailable` with
+   `details.reason = "attachment_missing"`, as [Drafts §7](drafts.md#7-attachments) does at the fire.
 5. **Lock and marker.** One small transaction takes the thread lock (below; a new thread needs none) and
    writes `meta['compose:{msg}'] = now`. A lock that cannot be taken within 10 seconds releases both
    reservations and returns `409 thread_busy`, with nothing written to R2.
@@ -184,7 +187,7 @@ alarm; an expired key behaves as new.
 | 14a | Sending domain paused (`domains.sending_paused_at` set, [Tenant and domain auto-pause](#tenant-and-domain-auto-pause-g12)). A paused domain never falls back to the platform domain | `409 sending_paused`, `details.scope = "domain"`, `details.domain_id` |
 | 15 | Transport: `ses` configured (the SES secrets and region); and for `kind: marketing`, the domain of the From address resolved at step 13 has `transport` `ses` or `smtp`, because Cloudflare Email Service is for transactional mail only (FR-OUT-15, [Cloudflare Email Service FAQ](https://developers.cloudflare.com/email-service/reference/faq/), read 2026-10-10). The platform domain and every `cloudflare`-transport domain fail this. `BeginTransport` checks it again with the transport actually chosen ([The outbound consumer](#the-outbound-consumer)); and a calendar message on the `cloudflare` transport before the raw send is available (spike S1, [Calendar invitations §5.6](calendar-invitations.md#56-transports)) | `422 transport_unavailable`, `details.reason = "ses_not_configured"`, `"marketing_needs_ses"` or `"calendar_needs_raw_mime"` |
 | 16 | Per recipient: suppression, send-block, `send_allowlist_only`, `require_known_recipient` (on by default, [Recipient filters](#recipient-filters)) | not an error: the recipient's delivery is `suppressed` (FR-OUT-4, [G4](../edge-cases.md), [E2](../edge-cases.md)) |
-| 16a | Approval ([Drafts §3](drafts.md#3-approval-policy)): the effective `drafts.require_approval` (the stricter of the tenant's and the identity's `send_policy.require_approval`) needs approval for these recipients, a recipient counting as known by rules 1–3 and 5 of [Known recipient](#recipient-filters), and the send is not from a draft whose current revision carries a valid approval. The system identity is exempt | `403 approval_required`, `details.reason`, `details.recipients` |
+| 16a | Approval ([Drafts §3](drafts.md#3-approval-policy)): the effective `drafts.require_approval` (the stricter of the tenant's and the identity's `send_policy.require_approval`) needs approval for these recipients, a recipient counting as known by rules 1–3 and 5 of [Known recipient](#recipient-filters), and the send is not from a draft whose current revision carries a valid approval. The system identity is exempt, and so is a send while the tenant is a provisional agent sign-up, which step 7a has already confined to the human ([Agent self-sign-up §4.3](agent-signup.md#43-sending-only-to-the-human)) | `403 approval_required`, `details.reason`, `details.recipients` |
 | 17 | Size after composition ([Attachments and size](#attachments-and-size)) | `413 message_too_large`, unless `large_attachments: "link"` |
 | 17a | The `free_sending` switch is `off` ([Observability › Automatic containment](observability.md#56-automatic-containment)) and the workspace is **Free or ramped**: it is still in the new-workspace send ramp as step 18 defines it, or it has no partner, `PM_BILLING=stripe` and is `metered` on the catalog's `default_plan`. Never the system identity | `403 policy_denied`, `details.reason = "free_sending_off"` |
 | 18 | Plan allowance and daily caps, in one `TenantQuota` request and one transaction ([TenantQuota](#tenantquota)). First the **`sends` hold** (FR-BILL-4, FR-BILL-5): `units` = recipients left after step 16, `ref` = the new `msg_` ID, gate `storage_gb` when the message has attachments; a send whose recipients are all suppressed takes no hold. Then the **daily-cap reserve** (identity cap: `send_policy.daily_cap`, else `policy.identity_daily_send_cap`; tenant cap: `policy.tenant_daily_send_cap`), counted per accepted message in the tenant's time zone ([E3](../edge-cases.md)). The tenant cap is min(`policy.tenant_daily_send_cap`, 50) while the **new-workspace send ramp** applies: `tenants.ramp_lifted_at IS NULL` and either the tenant has a partner whose `ramp_exempt` is `0` (whatever `PM_BILLING` and its billing mode), or it has no partner, `PM_BILLING=stripe` and the workspace is `metered` on the catalog's `default_plan` ([Cloud sign-up › New-workspace send ramp](cloud-signup.md#101-new-workspace-send-ramp), [W30](../edge-cases.md)). The **system identity** (`is_system = 1`) is exempt from the tenant cap: its reserve passes `tenant_cap: None`, so the tenant `sends` counter is neither checked nor incremented, and only its own `send_policy.daily_cap` (50,000) applies ([Identities and domains › The system identity](identity-domains.md#the-system-identity)). Two **stops** refuse a send before any counter moves, and never the system identity's: a workspace whose `billing_accounts.dispute_open_at` is set ([Billing › Disputes and refunds](billing.md#disputes-and-refunds)), and the shared-domain breaker, at stage 1 for a ramped workspace or one `metered` on the catalog's `default_plan`, and at stage 2 for every tenant ([Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker)). If either check fails, neither is kept. Then, with `PM_DAILY_SEND_QUOTA` set and a Cloudflare transport, `DeploymentReserve` on the default tenant's `TenantQuota` counts the recipients against the deployment's day; `Spent` releases the reservation and the hold and refuses with `shared_domain` (no lag: [Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker)) | `402 billing_limit` (`details.feature` = `sends` or `storage_gb`); `429 daily_cap_reached` with `details.cap` (`identity`, `tenant`, `shared_domain` or `billing_dispute`) and `details.resets_at` (`null` for `billing_dispute`) |
@@ -1416,11 +1419,12 @@ pub enum QuotaRequest {
                                                      // Triage § 1.1 step 6: one model-backed triage for the
                                                      // tenant's day, counted once per ref (message ID)
                                                      // → Ok | CapReached (triage runs rules-only)
-    CountScreenModel { tz: String, cap: u32, sender: String, r#ref: String },
+    CountScreenModel { tz: String, cap: u32, sender: String, known: bool, r#ref: String },
                                                      // Screening § 5.2 step 7: one model-backed screening for the
                                                      // tenant's day, counted once per ref (message ID) on screen_model
-                                                     // and on screen_sender:{h}, the sender's tenth of the cap
-                                                     // → Ok { used } | CapReached { scope: Tenant | Sender }
+                                                     // and on screen_sender:{h}, the sender's tenth of the cap;
+                                                     // a sender that is not known stops at cap − ceil(cap / 5)
+                                                     // → Ok { used } | CapReached { scope: Tenant | Sender | Strangers }
                                                      //   (the verdict becomes unavailable, model_cap, always held)
     CountScreenFailure { at: i64 },                  // default tenant only: one screening verdict unavailable for
                                                      // model_unavailable or invalid_output, per UTC hour

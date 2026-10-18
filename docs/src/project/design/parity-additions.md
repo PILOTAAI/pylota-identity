@@ -1019,11 +1019,14 @@ receipt covers what was left, and the pending day's counts are lost with the mai
 is retried for 900 seconds and then acked as orphaned, and the consumer's suppression (step 5) and
 `RecordOutcome` (step 6) use only what the mailbox answers. Hard bounces arrive within minutes, but late
 bounces and complaints arrive hours or days after the send. Without more, a 1-hour `message_hours` (which any
-key holding `erasure:manage` may set) would turn them into orphans: complainers and hard-bounced addresses
+key holding `erasure:manage` may set), or a 1-day tenant `retention.message_days` (which any key holding
+`policy:write` may set), would turn them into orphans: complainers and hard-bounced addresses
 never suppressed, the identity, tenant, domain and burst pauses ([Outbound › Abuse auto-pause](outbound.md#abuse-auto-pause-fr-dlv-3))
 blind to them, and `metric_counts` short. On Cloud that harms the shared Cloudflare account.
 
-**The stub.** In `mode: Expiry`, `EraseRows` turns each delivery of an outbound message that has a
+**The stub.** In `mode: Expiry` and `mode: Retention` (tenant retention,
+[Privacy § 5.2](privacy.md#52-steps-of-a-tenant-retention-job) step 3), `EraseRows` turns each delivery of an
+outbound message that has a
 `provider_message_id` into one `delivery_stubs` row, in the same transaction, before the message row goes:
 
 ```sql
@@ -1511,7 +1514,7 @@ service (`S`) except where marked.
 | Z78 | An `ErrorCode` without an anchor in `errors.md`; an anchor for no code; the built page | `cargo xtask docs-check` fails for the first two; every anchor is an element `id` in the built `errors.html` | S | `core::errors::z78_every_code_has_anchor`, `live::docs::z78_anchor_resolves` |
 | Z79 | `PM_DOCS_URL` set to `http://…`, to a URL with a query, or with a trailing slash | `pmail setup` and `pmail deploy` refuse the first two; the Worker uses the default and logs `docs_url_invalid` once per isolate; a trailing slash is removed | S | `cli::setup::z79_docs_url_validated`, `it::errors::z77_docs_in_every_envelope` |
 | Z80 | A message erased (any scope) or expired while a `message.labels_changed` outbox row lists it with two other messages; and while a row lists only it | The first row keeps the two other entries and is delivered without the erased one; the second row is deleted and counted in `events_deleted`; nothing of the erased message is delivered afterwards | S | `it::label_events::z80_erasure_trims_events` |
-| Z81 | A complaint arrives 2 hours after a send from an identity with `message_hours: 1`, after the message expired; a hard bounce the same way; the same event again; an outbound message that expired without a provider message ID; an event 31 days after the send; a counterparty erasure of the recipient | `ApplyDeliveryEvent` answers from the delivery stub: the address is suppressed (`complaint`, `hard_bounce`), `RecordOutcome` counts the outcome (not for a first reply) and `metric_counts` counts it, with no `message.*` event; the repeat is `Duplicate`; with no provider ID, or after 30 days, there is no stub and the event is orphaned as before; the erasure deletes the stub | S | `it::retention::z81_late_delivery_events` |
+| Z81 | A complaint arrives 2 hours after a send from an identity with `message_hours: 1`, after the message expired, and 2 days after a send from a tenant with `retention.message_days: 1`, after tenant retention removed it; a hard bounce the same way; the same event again; an outbound message that expired without a provider message ID; an event 31 days after the send; a counterparty erasure of the recipient | `ApplyDeliveryEvent` answers from the delivery stub: the address is suppressed (`complaint`, `hard_bounce`), `RecordOutcome` counts the outcome (not for a first reply) and `metric_counts` counts it, with no `message.*` event; the repeat is `Duplicate`; with no provider ID, or after 30 days, there is no stub and the event is orphaned as before; the erasure deletes the stub | S | `it::retention::z81_late_delivery_events` |
 
 ## 15. Tests
 
@@ -1577,7 +1580,7 @@ service (`S`) except where marked.
 | `it::drafts::z61_drafts_expire` | Draft expiry and the `beyond_retention` refusal (runs once M29 has landed) | §7.10, Z61 |
 | `it::retention::z62_reply_to_expired_thread` | Threading after expiry | §7.10, Z62 |
 | `it::retention::z63_storage_and_states` | Storage roll-up after expiry; expiry while paused or suspended | §7.10, Z63 |
-| `it::retention::z81_late_delivery_events` | On a 1-hour identity, a complaint and a hard bounce 2 hours after the send suppress the address, reach `RecordOutcome` (an abuse pause fires at its threshold) and `metric_counts`, and emit no `message.*` event; a repeat is `Duplicate`; no stub without a provider ID or after 30 days; the stub holds no clear address or content; counterparty erasure removes it | §7.13, Z81, FR-PRV-7 |
+| `it::retention::z81_late_delivery_events` | On a 1-hour identity, and after a 1-day tenant retention run, a complaint and a hard bounce after the message is gone suppress the address, reach `RecordOutcome` (an abuse pause fires at its threshold) and `metric_counts`, and emit no `message.*` event; a repeat is `Duplicate`; no stub without a provider ID or after 30 days; the stub holds no clear address or content; counterparty erasure removes it | §7.13, Z81, FR-PRV-7 |
 | `it::webhooks::z64_headers_write_only` | Values never leave the seal; the keyed fingerprint | §8.1, §8.3, Z64 |
 | `it::webhooks::z65_headers_patch` | `PATCH …/headers` rules, the compare-and-swap, the limits | §8.2, §8.3, Z65, Z67 |
 | `core::webhook_headers::z66_name_rules` | Name and value rules, the full refused list, `Authorization`, `CF-Access-Client-Id` and `CF-Access-Client-Secret` allowed while every other `CF-` name is refused | §8.2, Z66, Z67 |
@@ -1641,7 +1644,7 @@ reviewed by that file's owner:
 | `webhooks/payloads.rs`, `consumers/webhooks.rs`, `handlers/webhooks.rs`, `webhooks/client.rs` (M8) | The `labels_changed` builder, `OPT_IN_EVENT_TYPES`, headers on delivery, `PATCH …/headers`, host-change clearing |
 | `search/citations.rs` (M11), `triage/rules.rs` (M12) | The `Rescued` evidence state; rule 13 |
 | `handlers/domains.rs` (M13, M23) | `format=bind` |
-| `mailbox/erase.rs`, `jobs/erasure.rs` (M14) | `EraseRows { mode: Expiry }`; `list_entries_deleted`; the identity-scope list rows of identity erasure |
+| `mailbox/erase.rs`, `jobs/erasure.rs` (M14) | `EraseRows { mode: Expiry }` and `{ mode: Retention }` (delivery stubs only); `list_entries_deleted`; the identity-scope list rows of identity erasure |
 | `handlers/identities.rs`, `crons/intents.rs` (M6) | `retention`, the `set_retention` intent |
 | `crates/api-types/src/errors.rs` (M3), `crates/worker/src/errors.rs` (M5) | `docs`, `ErrorCode::anchor()`, `PM_DOCS_URL` |
 | `mcp/tools.rs` (M15) | `mail_update_labels` with `message_ids` and `require_absent` |

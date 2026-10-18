@@ -273,7 +273,7 @@ pub enum RpcResult<T> { Ok(T), Err(ApiErrorBody) }
   public handler has already checked scope against D1 before calling, so a mismatch is always a bug.
 - An object that has no owner yet accepts only `Init`. An object marked `erased = '1'` refuses
   everything with `identity_not_found`.
-- The caller's default deadline is 10 seconds (`Ingest` and `Submit`: 30 seconds). The object checks
+- The caller's default deadline is 10 seconds (`Ingest`, `Submit`, `CreateDraft` and `UpdateDraft`: 30 seconds). The object checks
   `deadline_ms` before starting a transaction and returns `timeout` if it has passed.
 
 ### 6. Transactional outbox

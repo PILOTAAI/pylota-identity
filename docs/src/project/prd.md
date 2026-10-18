@@ -869,7 +869,8 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   **must** decide when a send needs approval, with `new_recipients` meaning a recipient that is neither
   known (FR-OUT-13 rules 1–3 and 5) nor internal to the workspace and `external` meaning a recipient that
   is not internal, and an identity's `send_policy.require_approval` **may** only make it stricter. It
-  **must** apply to every send of the tenant's identities except the system identity's: an ordinary send,
+  **must** apply to every send of the tenant's identities except the system identity's and a provisional
+  agent sign-up's (whose sends reach only its human): an ordinary send,
   reply, reply-all or forward that needs approval **must** be refused with `403 approval_required` before
   anything is stored. It is a guard field (FR-TEN-4). Whatever the level, a send of a draft whose writer
   requested approval, or whose current content was written by a key without `messages:send`, **must**
@@ -1008,7 +1009,8 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   erasure scope, and erasure receipts **must** count them.
 - **FR-SCR-11** Screening **must never** be charged to a plan allowance. Its model calls **must** be bounded by the
   tenant's daily model cap and `RL_AI`; a reached cap **must** give `unavailable` unless the deterministic scan is
-  decisive. One sender domain **must not** be able to spend more than a tenth of the cap, and triage and agentic
+  decisive. One sender **must not** be able to spend more than a tenth of the cap, senders that are not known
+  correspondents **must not** together be able to spend its last fifth, and triage and agentic
   search **must not** be able to spend screening's share of `RL_AI`.
 - **FR-SCR-12** The service **must** record verdict counts by reason, unavailable rates, deadline misses and
   latency, and **must** alert the operator when a tenant's held mail becomes unavailable at volume, when model

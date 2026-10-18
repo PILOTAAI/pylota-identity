@@ -58,7 +58,7 @@ row can only show something that is no longer waiting; it can never make anythin
 | `draft_kind` | `new`, `reply`, `reply_all` or `forward`, fixed at creation from `in_reply_to`, `reply_all` and `forward_of` ([§2.2](#22-kinds-and-the-fields-each-takes)) |
 | `kind` | The send kind, as on `POST …/messages`: `transactional` (default), `marketing` (new drafts only) or `auto_reply` (reply drafts only) |
 | `status` | [§2.3](#23-states-and-who-moves-them) |
-| `revision` | Starts at 1 and increases by one on every successful `PATCH` |
+| `revision` | Starts at 1 and increases by one on every successful `PATCH` and on every re-resolution that changes the recipients ([§2.4](#24-revision-etag-and-digest)) |
 | `etag` | The HTTP entity tag of the current revision ([§2.4](#24-revision-etag-and-digest)) |
 | `digest` | The content digest of the current revision, 64 hex characters ([§2.4](#24-revision-etag-and-digest)); `null` once the content is cleared |
 | `in_reply_to`, `forward_of` | The source message (`msg_`) of a reply or forward draft |
@@ -223,7 +223,8 @@ continues on the new revision: an approve that named the old revision or digest 
 ### 3.1 `drafts.require_approval`
 
 A tenant policy field, `never` (default), `new_recipients`, `external` or `always`, applied to **every
-send of the tenant's identities** except the system identity's: a draft send, and an ordinary send, reply,
+send of the tenant's identities** except the system identity's and a provisional agent sign-up's (whose sends
+step 7a confines to the human, [Agent self-sign-up §4.3](agent-signup.md#43-sending-only-to-the-human)): a draft send, and an ordinary send, reply,
 reply-all or forward ([§3.3](#33-ordinary-sends-under-the-policy)). For each recipient of the send (`to`,
 `cc` and `bcc`, after the reply recipients are resolved), two facts are computed:
 
@@ -529,7 +530,7 @@ Rules, in order; the first failure answers and nothing is stored:
 `DELETE /v1/identities/{identity_id}/drafts/{draft_id}` cancels the draft: from any status except
 `sending` and `sent` it becomes `canceled` (T16) in one transaction that clears its content (recipients,
 subject, bodies, headers, attachments, labels, metadata), its approval and send request, removes it from
-the index and re-arms the alarm; the R2 objects of its inline attachments are deleted after commit. A
+the index and re-arms the alarm; the R2 objects of its attachments (inline parts and upload copies) are deleted after commit. A
 scheduled draft is therefore never sent once `DELETE` has answered. Answers `200` with the cleared draft;
 on a `canceled` draft, `200` again with no change. `sending` → `409 draft_not_editable`
 (`retryable: true`); `sent` → `409 draft_not_editable` (the record expires after 30 days, and message
@@ -848,7 +849,7 @@ alarms occur ([Q12](../edge-cases.md), [Q32](../edge-cases.md), [Q36](../edge-ca
    between `.await`s, and alarms may run concurrently with requests
    ([Durable Objects › State › abort](https://developers.cloudflare.com/durable-objects/api/state/), read
    2026-10-17), so the claim, not the caller, decides.
-2. **The in-flight set.** `submit`'s in-memory `in_flight` set holds the draft's internal key while the
+2. **The in-flight set.** `submit`'s in-memory `in_flight` set holds the draft's internal `key_hash` while the
    send runs, as for any send ([Outbound › Reservation](outbound.md#reservation-inside-the-mailbox-fr-out-1-g1)).
 3. **The accept transaction.** `submit`'s step 7 transaction (message, deliveries, idempotency row, lock)
    gains the draft arm: it re-reads the draft, checks that it is `sending` with this `claim.token` and this
@@ -1405,7 +1406,7 @@ draft without `thread_id` belongs to no thread, so no legal hold covers it.
 
 ### 13.2 Erasure
 
-Every scope deletes drafts, with the counts in the receipt (`drafts_deleted`, and their inline objects in
+Every scope deletes drafts, with the counts in the receipt (`drafts_deleted`, and their attachment objects in
 `r2_objects_deleted` and their outbox events in `events_deleted`), and skips drafts in a held thread
 ([Q46](../edge-cases.md), [Q47](../edge-cases.md)):
 
@@ -1419,7 +1420,7 @@ Every scope deletes drafts, with the counts in the receipt (`drafts_deleted`, an
 
 `EraseRows` gains, per erased draft, in the same transaction as the messages: delete the draft row, its
 `draft_sync` row (and write a `delete` one, so the index row goes even if the scrub step races), its
-`idempotency` rows (`draft_id`), and its outbox rows (`data.draft.id`); its inline R2 objects are listed in
+`idempotency` rows (`draft_id`), and its outbox rows (`data.draft.id`); its attachment R2 objects (inline parts and upload copies) are listed in
 the plan and deleted before `EraseRows`, like message objects. The `scrub_control_plane` step of message,
 thread and counterparty scope also deletes `draft_index` rows for the erased draft IDs. The keyword probe
 is unchanged (drafts are not in the FTS index); the object probe lists each erased draft's `drafts/{id}/`
@@ -1749,7 +1750,8 @@ send":
   **must** decide when a send needs approval, with `new_recipients` meaning a recipient that is neither
   known (FR-OUT-13 rules 1–3 and 5) nor internal to the workspace and `external` meaning a recipient that
   is not internal, and an identity's `send_policy.require_approval` **may** only make it stricter. It
-  **must** apply to every send of the tenant's identities except the system identity's: an ordinary send,
+  **must** apply to every send of the tenant's identities except the system identity's and a provisional
+  agent sign-up's (whose sends reach only its human): an ordinary send,
   reply, reply-all or forward that needs approval **must** be refused with `403 approval_required` before
   anything is stored. It is a guard field (FR-TEN-4). Whatever the level, a send of a draft whose writer
   requested approval, or whose current content was written by a key without `messages:send`, **must**
@@ -1858,7 +1860,7 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 | Q43 | A forward draft whose source was erased (a race), whose source has `body_truncated` and its raw MIME expired, or whose re-attached attachment object is missing; a source with a complete body and expired raw MIME | `409 source_unavailable` (`erased`, `raw_expired`, `attachment_missing`) on send or approve, `failed` with `source_unavailable` at a fire; the complete source forwards normally | S | `it::drafts::q43_source_at_send` |
 | Q44 | A reply draft to a quarantined message is sent or approved by a key without `quarantine:review`; a scheduled reply draft whose recorded authority lacks `quarantine:review` at the fire | `404 draft_not_found`, as for a `GET`; with `quarantine:review` it sends; the fire fails with `source_unavailable` (`not_visible`) | S | `it::drafts::q43_source_at_send` |
 | Q45 | A draft names a `screening` message as its source | As for `quarantined`: only with `quarantine:review`; at send the authority needs it while the message is still `screening` | S | `it::drafts::q3_source_visibility` |
-| Q46 | Message-scope erasure of a message that drafts reply to or forward, and of a message that was sent from a draft | Those drafts and the record of the sent one are deleted with their inline objects, outbox events and index rows; the receipt counts `drafts_deleted`; the probes find nothing | S | `it::drafts::q46_erasure_scopes` |
+| Q46 | Message-scope erasure of a message that drafts reply to or forward, and of a message that was sent from a draft | Those drafts and the record of the sent one are deleted with their attachment objects, outbox events and index rows; the receipt counts `drafts_deleted`; the probes find nothing | S | `it::drafts::q46_erasure_scopes` |
 | Q47 | Thread, counterparty, identity and tenant erasure with drafts; a draft in a thread under a legal hold; a `new` draft without a thread | Every draft of the scope is deleted and counted (counterparty: the address in `to`, `cc`, `bcc` or the resolved reply recipients); a held thread's drafts are kept and the thread listed in `receipt.held`; a threadless draft has no hold | S | `it::drafts::q46_erasure_scopes` |
 | Q48 | Retention: an `editing` draft untouched for 30 days, a `rejected` one, a `sent` record, a `scheduled` draft 60 days ahead, a tenant with `retention.message_days: 7`, a draft in a held thread; with `message_days: 7`, a schedule 8 days ahead, and a draft scheduled 60 days ahead before `message_days` was set | Deleted after 30 days (7 with the tenant's setting) with `drafts_deleted` in the audit row; the scheduled draft is kept until its fire; the held one is kept; the 8-day schedule is refused with `400 invalid_request` (`beyond_retention`); the earlier schedule is kept until its fire and deleted at the first run after it | S | `it::drafts::q48_retention` |
 | Q49 | A scheduled send meets `402 billing_limit`; the workspace upgrades and the writer reschedules it | `failed` with `billing_limit`, no hold kept, no idempotency record; the explicit reschedule sends once with the same internal key | S | `it::drafts::q49_billing_at_send` |
@@ -1874,7 +1876,7 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 | Q59 | What `draft_index` holds | IDs, status, kind, counts, times, key IDs and codes only; no subject, address, body, filename or note | S | `it::drafts::q58_index_lag` |
 | Q60 | MCP: a key without `drafts:write` lists tools; `mail_send_draft` without `idempotency_key`; any approve tool | Only the tools its permissions allow; `idempotency_key_required`; no approve or reject tool exists | S | `it::mcp::drafts_tools` |
 | Q61 | A revision saved with an upload reference, then the upload is deleted or expires before the draft is sent or its scheduled send fires; a stored copy is missing at send | The revision's own copy is sent and the attachment's `upload_id` records the provenance; a missing or changed copy (a storage fault) fails the send with `source_unavailable` (`attachment_missing`) | S | `it::drafts::q6_upload_references` |
-| Q62 | `DELETE` of a scheduled draft, a second `DELETE`, and `DELETE` of a `sent` draft | `canceled`, content and inline objects deleted, never sent; `200` again with no change; `409 draft_not_editable` | S | `it::drafts::q62_cancel` |
+| Q62 | `DELETE` of a scheduled draft, a second `DELETE`, and `DELETE` of a `sent` draft | `canceled`, content and attachment objects deleted, never sent; `200` again with no change; `409 draft_not_editable` | S | `it::drafts::q62_cancel` |
 | Q63 | A rejected draft: send it, approve it, request approval again without a change, then edit it | `409 draft_not_sendable`, `409 draft_not_pending`, `409 draft_not_sendable`; the edit makes a new revision in `editing` (or `pending_approval` with `request_approval`) | S | `it::drafts::q22_decision_states` |
 | Q64 | Message-scope erasure leaves a thread empty while a `new` draft continues that thread | The thread is deleted and the draft with it, counted in `drafts_deleted` | S | `it::drafts::q46_erasure_scopes` |
 | Q109 | A draft whose thread, source message or sent message is under an active legal hold: a `PATCH` of its text, of its labels, and of only its `send_at`; a `DELETE` of it while it is scheduled; then the hold ends | `423 legal_hold` and nothing changed for the text and the labels; the `send_at` change applies; the `DELETE` makes it `canceled`, takes it off the schedule so it is never sent, and keeps its content and attachment objects; the first `Hygiene` run after the hold ends clears them | S | `it::drafts::q109_legal_hold` |

@@ -1931,7 +1931,7 @@ reviewed by that file's owner:
 | `webhooks/payloads.rs`, `consumers/webhooks.rs`, `handlers/webhooks.rs`, `webhooks/client.rs` (M8) | The `labels_changed` builder, `OPT_IN_EVENT_TYPES`, headers on delivery, `PATCH …/headers`, host-change clearing |
 | `search/citations.rs` (M11), `triage/rules.rs` (M12) | The `Rescued` evidence state; rule 13 |
 | `handlers/domains.rs` (M13, M23) | `format=bind` |
-| `mailbox/erase.rs`, `jobs/erasure.rs` (M14) | `EraseRows { mode: Expiry }`; `list_entries_deleted`; the identity-scope list rows of identity erasure |
+| `mailbox/erase.rs`, `jobs/erasure.rs` (M14) | `EraseRows { mode: Expiry }` and `{ mode: Retention }` (delivery stubs only); `list_entries_deleted`; the identity-scope list rows of identity erasure |
 | `handlers/identities.rs`, `crons/intents.rs` (M6) | `retention`, the `set_retention` intent |
 | `crates/api-types/src/errors.rs` (M3), `crates/worker/src/errors.rs` (M5) | `docs`, `ErrorCode::anchor()`, `PM_DOCS_URL` |
 | `mcp/tools.rs` (M15) | `mail_update_labels` with `message_ids` and `require_absent` |

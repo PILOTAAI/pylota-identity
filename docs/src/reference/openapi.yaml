@@ -5403,7 +5403,7 @@ paths:
       x-idempotency: none
       responses:
         '200':
-          description: The draft, `canceled`, without content.
+          description: The draft, `canceled`, without content (a draft under a legal hold keeps its content until the hold ends).
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
             RateLimit-Limit: {$ref: '#/components/headers/RateLimit-Limit'}
@@ -13774,7 +13774,8 @@ components:
                 Model-backed triage runs per day in the tenant's time zone. Past it, triage is rules-only
                 (`model: "rules"`) until the next local midnight. It applies whatever the billing mode, so an
                 `exempt` workspace still has a ceiling on model spend ([D13]). Screening counts its own calls
-                against the same number on a separate counter, at most a tenth of it per sender domain; a
+                against the same number on a separate counter, at most a tenth of it per authenticated sender
+                address and four fifths for senders that are not known correspondents; a
                 screening verdict past it is `unavailable` with reason `model_cap` and always held.
             categories:
               type: [array, 'null']

@@ -171,7 +171,7 @@ never meet directly.
 | Limit | Value |
 |---|---|
 | Deadline | 30–900 seconds, default 120 (`screening.deadline_seconds`) |
-| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage; one sender key (an authenticated organisational domain, or all unauthenticated mail) at most a tenth of it. A reached cap holds the message as `screening_unavailable` whatever `screening.on_unavailable` says |
+| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage; one sender key (an authenticated `From` address, or all unauthenticated mail) at most a tenth of it, and senders that are not known correspondents together at most four fifths. A reached cap holds the message as `screening_unavailable` whatever `screening.on_unavailable` says |
 | Model call | 10-second timeout; no call starts with under 12 seconds left before the deadline; one immediate retry for invalid output; `max_tokens` 2,048 |
 | Text-generation rate | `RL_AI` under `screen:{tenant_id}`: 60 a minute per tenant, apart from triage and agentic search |
 | Classifier input | 6,000 estimated tokens; the deterministic scan covers the whole stored text, so size never makes a verdict unavailable |
