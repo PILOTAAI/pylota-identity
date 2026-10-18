@@ -438,7 +438,7 @@ a valid body). The enumeration includes the identity-key routes (`…/keys`, `�
 `…/keys/{kid}/revoke` with A's kid), `POST …/assertions` and `POST …/http-signatures` on A's
 identities; the scope check answers before any signing rule, so they give the same
 `404 identity_not_found` as a missing identity. It also covers the routes of the AgentMail-parity
-milestones: the nine draft routes (M29); the ten event routes, where a foreign `consumer_id` gets
+milestones: the ten draft routes (M29); the ten event routes, where a foreign `consumer_id` gets
 `404 event_consumer_not_found`, the stream handshake with a foreign `tenant_id`, and a foreign stream token,
 which closes the stream with `4401` (M30); the four screening routes (M31); `POST …/calendar-reply` (M32);
 the four upload routes and `PUT /v1/links/{token}` (M33); the seven agent sign-up routes (M34); the two

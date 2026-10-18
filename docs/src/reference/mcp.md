@@ -269,7 +269,7 @@ recipient's delivery ends `suppressed`, as for a suppressed, send-blocked or not
 | `mail_sign_http_request` | Returns Web Bot Auth headers for an HTTP request the agent makes itself | `identities:sign` (tenant and identity keys) | `POST /v1/identities/{id}/http-signatures` |
 | `mail_request_account` | Asks the operator to approve an account the agent wants to create at a third-party service | `accounts:request` | `POST /v1/identities/{id}/accounts` |
 | `mail_list_accounts` | Lists the identity's service sign-up requests and their decisions | `accounts:request` | `GET /v1/identities/{id}/accounts` |
-| `mail_create_draft` | Writes an email as a draft without sending it | `drafts:write` | `POST /v1/identities/{id}/drafts` |
+| `mail_create_draft` | Writes an email as a draft without sending it | `drafts:write` (and `messages:read` with `in_reply_to` or `forward_of`) | `POST /v1/identities/{id}/drafts` |
 | `mail_update_draft` | Changes a draft, guarded by its `etag` | `drafts:write` | `PATCH …/drafts/{draft_id}` |
 | `mail_list_drafts` | Lists the mailbox's drafts, newest first | `drafts:read` | `GET /v1/identities/{id}/drafts` |
 | `mail_get_draft` | Reads one draft with its body, approval and schedule | `drafts:read` | `GET …/drafts/{draft_id}` |

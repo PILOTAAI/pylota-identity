@@ -4984,12 +4984,14 @@ paths:
         `in_reply_to` (with `reply_all`) or `forward_of` with the fields of a reply or forward, plus `send_at`,
         `client_id` and `request_approval`; the kind (`draft_kind`) is fixed at creation and a field the kind
         does not take is `400 invalid_request`. An attachment is inline (`content_base64`) or
-        `{ "upload_id": "…" }`, whose bytes are copied when the revision is saved. `client_id` makes the create
-        idempotent (`200` with the existing draft for the same body, `409 client_id_conflict` for another).
+        `{ "upload_id": "…" }`, whose bytes are copied when the revision is saved; attachments are checked as a
+        send checks them (upload states, the final filename, inline classification, 26,214,400 bytes in
+        total). `client_id` makes the create idempotent (`200` with the existing draft for the same body,
+        `409 client_id_conflict` for another); an `Idempotency-Key` replay answers `201` again.
         A draft may be incomplete while it is edited; completeness is checked when it is sent or scheduled.
       x-required-permission: ['drafts:write']
       x-key-levels: [platform, partner, tenant, identity]
-      x-permission-notes: An identity key creates drafts only for its own identity. A reply or forward draft needs its source to be visible to the key (a `quarantined` or `screening` source needs `quarantine:review`).
+      x-permission-notes: An identity key creates drafts only for its own identity. A reply or forward draft (`in_reply_to` or `forward_of`) also needs `messages:read`, checked once the body is parsed (`403 permission_denied`), and its source must be visible to the key (a `quarantined` or `screening` source needs `quarantine:review`).
       x-rate-limit-buckets: [api]
       x-idempotency: optional
       parameters:
@@ -5014,7 +5016,7 @@ paths:
               request_approval: true
       responses:
         '200':
-          description: A `client_id` replay, or an idempotent replay with the same `Idempotency-Key`.
+          description: A `client_id` replay (the existing draft for the same body).
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
             RateLimit-Limit: {$ref: '#/components/headers/RateLimit-Limit'}
@@ -5024,10 +5026,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Draft'}
         '201':
-          description: The draft.
+          description: 'The draft; also an idempotent replay with the same `Idempotency-Key` (`Idempotent-Replayed: true`).'
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
             RateLimit-Limit: {$ref: '#/components/headers/RateLimit-Limit'}
+            Idempotent-Replayed: {$ref: '#/components/headers/Idempotent-Replayed'}
             ETag: {$ref: '#/components/headers/ETag'}
           content:
             application/json:
@@ -5074,9 +5077,10 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '413':
           description: >-
-            The request body exceeds 7 MiB (`payload_too_large`), the draft's own parts exceed the composed
-            limit with `large_attachments: refuse` (`message_too_large`), or `calendar.ics` exceeds 262,144
-            bytes (`calendar_too_large`).
+            The request body exceeds 7 MiB (`payload_too_large`), the attachments exceed 26,214,400 decoded
+            bytes in total (`message_too_large`, `details.reason = "attachments_total"`), the draft's own parts
+            exceed the composed limit with `large_attachments: refuse` (`message_too_large`), or
+            `calendar.ics` exceeds 262,144 bytes (`calendar_too_large`).
           x-error-codes: [payload_too_large, message_too_large, calendar_too_large]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
@@ -5084,8 +5088,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '422':
-          description: The identity already has 1,000 drafts that are not `sent` or `canceled` (`details.limit`).
-          x-error-codes: [draft_limit_reached]
+          description: >-
+            The identity already has 1,000 drafts that are not `sent` or `canceled` (`draft_limit_reached`,
+            `details.limit`), or an attachment is risky: an inline part with a quarantining risk, a `rejected`
+            upload or a risky final filename (`attachment_risky`, `details.index`, `details.risk`).
+          x-error-codes: [draft_limit_reached, attachment_risky]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
           content:
@@ -5176,7 +5183,7 @@ paths:
       operationId: getDraft
       tags: [Drafts]
       summary: Get a draft
-      description: The whole draft, with its `ETag`. Every text field was written by an agent and is untrusted content.
+      description: The whole draft, with its `ETag`. Every text field was written by an agent and is untrusted content. A reply draft whose resolved recipients changed since its revision was saved is first stored as a new revision with a new digest (docs › Drafts § 2.4).
       x-required-permission: ['drafts:read']
       x-key-levels: [platform, partner, tenant, identity]
       x-permission-notes: A reply or forward draft whose source is `quarantined` or `screening` needs `quarantine:review` as well; without it the draft is `404 draft_not_found`.
@@ -5240,6 +5247,7 @@ paths:
                   requested_at: '2026-10-17T09:12:00Z'
                   requested_by_key_id: key_01J9Z3K8V4QW7X2M5N6P8R0T1Y
                   approved_revision: null
+                  approved_digest: null
                   approved_at: null
                   approved_by_key_id: null
                   approved_by_user_id: null
@@ -5259,6 +5267,7 @@ paths:
                 sent_at: null
                 created_by_key_id: key_01J9Z3K8V4QW7X2M5N6P8R0T1Y
                 updated_by_key_id: key_01J9Z3K8V4QW7X2M5N6P8R0T1Y
+                content_by_key_id: key_01J9Z3K8V4QW7X2M5N6P8R0T1Y
                 created_at: '2026-10-17T09:05:00Z'
                 updated_at: '2026-10-17T09:12:00Z'
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -5345,10 +5354,32 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '413':
           description: >-
-            The request body exceeds 7 MiB (`payload_too_large`), the draft's own parts exceed the composed
-            limit with `large_attachments: refuse` (`message_too_large`), or `calendar.ics` exceeds 262,144
-            bytes (`calendar_too_large`).
+            The request body exceeds 7 MiB (`payload_too_large`), the attachments exceed 26,214,400 decoded
+            bytes in total (`message_too_large`, `details.reason = "attachments_total"`), the draft's own parts
+            exceed the composed limit with `large_attachments: refuse` (`message_too_large`), or
+            `calendar.ics` exceeds 262,144 bytes (`calendar_too_large`).
           x-error-codes: [payload_too_large, message_too_large, calendar_too_large]
+          headers:
+            Request-Id: {$ref: '#/components/headers/Request-Id'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: >-
+            An added attachment is risky: an inline part with a quarantining risk, a `rejected` upload or a
+            risky final filename (`attachment_risky`, `details.index`, `details.risk`).
+          x-error-codes: [attachment_risky]
+          headers:
+            Request-Id: {$ref: '#/components/headers/Request-Id'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '423':
+          description: >-
+            The draft is under a legal hold (its thread, source message or sent message is in a held thread)
+            and the patch changes its content, `labels` or `metadata`; nothing changed. A patch of only
+            `send_at` or `request_approval` is allowed.
+          x-error-codes: [legal_hold]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
           content:
@@ -5363,7 +5394,9 @@ paths:
       summary: Cancel a draft
       description: >-
         Cancels the draft (`status: "canceled"`) and deletes its content; a scheduled draft is never sent
-        afterwards. Refused while it is being sent or once sent.
+        afterwards. A `canceled` draft answers `200` again with no change. A draft under a legal hold is
+        canceled and never sent, but its content is kept until the hold ends. Refused while it is being sent
+        or once sent.
       x-required-permission: ['drafts:write']
       x-key-levels: [platform, partner, tenant, identity]
       x-rate-limit-buckets: [api]
@@ -5381,7 +5414,7 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409':
-          description: 'The draft is being sent (`retryable: true`), or is already `sent` or `canceled` (`details.status`).'
+          description: 'The draft is being sent (`retryable: true`), or is already `sent` (`details.status`).'
           x-error-codes: [draft_not_editable]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
@@ -5524,9 +5557,11 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '422':
           description: >-
-            The sending domain's transport is not configured (`transport_unavailable`); on a dry run only,
-            `all_recipients_suppressed` and `recipient_blocked`, as `SendUnprocessable`.
-          x-error-codes: [transport_unavailable, all_recipients_suppressed, recipient_blocked]
+            The sending domain's transport is not configured (`transport_unavailable`); an attachment that this
+            release's classification rules find risky though they passed it when the revision was saved
+            (`attachment_risky`); on a dry run only, `all_recipients_suppressed` and `recipient_blocked`, as
+            `SendUnprocessable`.
+          x-error-codes: [transport_unavailable, attachment_risky, all_recipients_suppressed, recipient_blocked]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
           content:
@@ -5546,20 +5581,23 @@ paths:
       tags: [Drafts]
       summary: Approve a draft
       description: >-
-        Approves the given `revision` (and `digest`, when sent) of a `pending_approval` draft. `send: true`
+        Approves the given `revision` (and `digest`, when sent) of an `editing`, `pending_approval`,
+        `approved`, `scheduled` or `failed` draft; a `scheduled` draft stays scheduled, and a repeated approval
+        of the same revision changes nothing. A reply draft whose resolved recipients changed is first stored
+        as a new revision, so an approval of the old one gets `409 draft_revision_mismatch`. `send: true`
         also sends it now, or at a future `send_at`; a send refused by the pipeline then shows
         `status: "failed"` and `failure` on the returned draft (and in `draft.failed`). A decision reserved for
         people: an API key may approve only when `PM_QUARANTINE_KEY_RELEASE` is `on` or `PM_CONSOLE` is `off`,
         or when the tenant's `drafts.key_approval` is `true` and the key is a platform key or the tenant's own
-        partner key; a tenant key never approves where people decide. A key never approves a revision it
-        wrote (`self_approval`). `on_behalf_of` records the caller's own user ID. Emits `draft.approved`;
-        audit `draft.approve`.
+        partner key; a tenant key never approves where people decide. A key never approves content it wrote
+        (`self_approval`, the draft's `content_by_key_id`). `on_behalf_of` records the caller's own user ID.
+        Emits `draft.approved`; audit `draft.approve`.
       x-required-permission: ['drafts:approve']
       x-key-levels: [platform, partner, tenant]
       x-permission-notes: >-
         `send: true` also needs `messages:send`. Otherwise `403 permission_denied` with
         `details.reason = "person_required"`: a signed-in person approves in the console; or
-        `details.reason = "self_approval"` for the key that wrote the revision. Identity keys can never hold
+        `details.reason = "self_approval"` for the key that wrote the content. Identity keys can never hold
         `drafts:approve`.
       x-rate-limit-buckets: [api]
       x-idempotency: optional
@@ -5592,7 +5630,7 @@ paths:
           description: >-
             The key lacks `drafts:approve` (or `messages:send` with `send: true`), API keys may not take decisions
             reserved for people on this tenant (`permission_denied`, `details.reason = "person_required"`), the
-            key wrote the revision (`details.reason = "self_approval"`), or the tenant or the key's partner is
+            key wrote the content (`details.reason = "self_approval"`), or the tenant or the key's partner is
             suspended.
           x-error-codes: [permission_denied, scope_denied, tenant_suspended, partner_suspended]
           headers:
@@ -5626,8 +5664,9 @@ paths:
       tags: [Drafts]
       summary: Reject a draft
       description: >-
-        Rejects a `pending_approval` draft (`status: "rejected"`, `rejection.reason: "operator"`). Always allowed
-        for a key that holds `drafts:approve`. Emits `draft.rejected`; audit `draft.reject`.
+        Rejects an `editing`, `pending_approval`, `approved`, `scheduled` or `failed` draft (`status: "rejected"`,
+        `rejection.reason: "operator"`); a `rejected` draft answers `200` with no change. Always allowed for a
+        key that holds `drafts:approve`. Emits `draft.rejected`; audit `draft.reject`.
       x-required-permission: ['drafts:approve']
       x-key-levels: [platform, partner, tenant]
       x-rate-limit-buckets: [api]
@@ -5658,9 +5697,9 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409':
           description: >-
-            The draft is in a status that cannot be decided (`draft_not_pending`), is being sent, sent or
-            canceled (`draft_not_editable`), or `revision` is not current (`draft_revision_mismatch`); or the
-            idempotency key is in use.
+            The draft is `sent` or `canceled` (`draft_not_pending`, `details.status`), is being sent
+            (`draft_not_editable`, `retryable: true`), or `revision` is not current (`draft_revision_mismatch`);
+            or the idempotency key is in use.
           x-error-codes: [draft_not_pending, draft_not_editable, draft_revision_mismatch, idempotency_conflict, request_in_progress]
           headers:
             Request-Id: {$ref: '#/components/headers/Request-Id'}
@@ -5681,8 +5720,9 @@ paths:
       summary: List a tenant's queue of drafts
       description: >-
         The tenant's drafts awaiting approval (the default), scheduled or failed, oldest first. Items hold IDs,
-        status, kind, counts and times, never content: read a draft by ID on its identity. An identity key
-        gets `403 scope_denied`.
+        status, kind, counts and times, never content: read a draft by ID on its identity. A draft whose
+        source is quarantined or in screening is listed only for a key with `quarantine:review`. An identity
+        key gets `403 scope_denied`.
       x-required-permission: ['drafts:read']
       x-key-levels: [platform, partner, tenant]
       x-rate-limit-buckets: [api]
@@ -12859,7 +12899,7 @@ components:
             `scope_denied` on a policy write: `not_writable` or `above_ceiling`. `permission_denied`:
             `person_required` when only a signed-in person may take the decision (a guard-field loosening by a
             tenant key, a service-account approval by an API key, a draft approval by an API key), or
-            `self_approval` when a key approves a draft revision it wrote, `consumer_owner_only` on a durable
+            `self_approval` when a key approves draft content it wrote, `consumer_owner_only` on a durable
             event consumer, `signup_unverified` for a key of a provisional agent sign-up. `policy_denied` on
             `wait`: `account_not_approved`; on a send: `signup_unverified`, `signup_human_unreachable` or
             `signup_paused`.
@@ -13207,7 +13247,7 @@ components:
         | `messages:write` | Labels, read state and archiving, of a message, a thread or up to 100 messages (`batch-update`, with its atomic claim); re-run triage; resolve uncertain sends; screening feedback |
         | `drafts:read` | List and read drafts and their attachments, and the tenant's queue of drafts awaiting approval, scheduled or failed. Every key level; the tenant queue needs a platform, partner or tenant key |
         | `drafts:write` | Create, update, request approval for and delete (cancel) drafts; create, read and delete uploads (or with `messages:send`). Includes `drafts:read`. Every key level |
-        | `drafts:approve` | Approve and reject drafts. Includes `drafts:read`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own mail. Approving by an API key is also a decision reserved for people unless the tenant's `drafts.key_approval` is `true`, which admits only a platform key or the tenant's own partner key; approving with `send: true` also needs `messages:send` |
+        | `drafts:approve` | Approve and reject drafts. Includes `drafts:read`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own mail. Approving by an API key is also a decision reserved for people: a key approves only while `PM_QUARANTINE_KEY_RELEASE` is `on` or `PM_CONSOLE` is `off`, or where the tenant's `drafts.key_approval` is `true`, which admits only a platform key or the tenant's own partner key; approving with `send: true` also needs `messages:send` |
         | `attachments:read` | Attachment bytes and extracted text |
         | `search:read` | Keyword, semantic, hybrid search, contacts, related, wait |
         | `search:agentic` | Agentic search |
@@ -17082,12 +17122,13 @@ components:
     DraftFailureReason:
       type: string
       description: >-
-        `failure.reason` of a `failed` draft: the error code the send would have returned, or
+        `failure.reason` of a `failed` draft: the error code the send would have returned for a refusal that
+        is not transient (every code the send pipeline can return for a stored draft is in this list), or
         `authority_revoked` (the key or person that scheduled it can no longer send),
         `sender_address_unavailable` (its explicit `from_address` is no longer usable), `send_interrupted`
         (three attempts died before the message was stored) or `send_window_missed` (not sent within an hour
         of `send_at`).
-      enum: [identity_paused, tenant_suspended, partner_suspended, sending_paused, identity_owner_required, billing_limit, daily_cap_reached, authority_revoked, sender_address_unavailable, domain_not_ready, transport_unavailable, test_mode_recipient, loop_detected, auto_reply_not_allowed, message_too_large, thread_not_found, source_unavailable, send_interrupted, send_window_missed]
+      enum: [identity_paused, tenant_suspended, partner_suspended, sending_paused, identity_owner_required, billing_limit, daily_cap_reached, authority_revoked, sender_address_unavailable, domain_not_ready, transport_unavailable, test_mode_recipient, loop_detected, auto_reply_not_allowed, message_too_large, thread_not_found, source_unavailable, identity_not_found, too_many_recipients, policy_denied, attachment_risky, calendar_invalid, calendar_too_large, calendar_organizer_mismatch, calendar_attendee_mismatch, calendar_recipient_mismatch, calendar_sequence_stale, invalid_request, address_invalid, address_unsupported, header_not_allowed, marketing_requirements_missing, send_interrupted, send_window_missed]
     DraftAttachmentInput:
       description: >-
         Inline (`filename`, `content_type`, `content_base64`) or a reference to a `ready` upload of the same
@@ -17354,7 +17395,7 @@ components:
       description: >-
         A draft (docs › Drafts, approvals and scheduled send § 2). Every text field was written by an agent that
         mail may have steered: it is untrusted content.
-      required: [id, tenant_id, identity_id, client_id, draft_kind, kind, status, revision, etag, digest, in_reply_to, forward_of, thread_id, from_address, to, cc, bcc, subject, text, html, attachments, include_attachments, calendar, headers, unsubscribe, consent, labels, metadata, send_at, approval, send, rejection, failure, message_id, sent_at, created_by_key_id, updated_by_key_id, created_at, updated_at]
+      required: [id, tenant_id, identity_id, client_id, draft_kind, kind, status, revision, etag, digest, in_reply_to, forward_of, thread_id, from_address, to, cc, bcc, subject, text, html, attachments, include_attachments, calendar, headers, unsubscribe, consent, labels, metadata, send_at, approval, send, rejection, failure, message_id, sent_at, created_by_key_id, updated_by_key_id, content_by_key_id, created_at, updated_at]
       properties:
         id: {$ref: '#/components/schemas/DraftId'}
         tenant_id: {$ref: '#/components/schemas/TenantId'}
@@ -17457,6 +17498,9 @@ components:
               type: [string, 'null']
             approved_revision:
               type: [integer, 'null']
+            approved_digest:
+              type: [string, 'null']
+              description: The digest the approval covers; a send needs it to equal the current digest.
             approved_at:
               type: [string, 'null']
               format: date-time
@@ -17535,6 +17579,12 @@ components:
         updated_by_key_id:
           type: [string, 'null']
           description: The key that wrote the current revision (`null` for a console write).
+        content_by_key_id:
+          type: [string, 'null']
+          description: >-
+            The key that last changed the content: the create, or the last `PATCH` that changed the digest. It
+            may not approve the draft (`self_approval`); a change of only `send_at`, `labels` or `metadata`
+            leaves it.
         created_at:
           type: string
           format: date-time

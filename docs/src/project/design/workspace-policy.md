@@ -125,8 +125,8 @@ approval is never made by the key that requested the entry (`403 permission_deni
 
 For approving a draft the tenant's opt-in is `drafts.key_approval` instead of `quarantine.key_release`:
 `key_may_decide(Decision::ApproveDraft, …)` reads that field. As under `quarantine.key_release`, the opt-in
-admits only a platform key or the tenant's own partner key, never a tenant key, and a key never approves a
-revision it wrote. Loosening `drafts.require_approval` is a guard-field decision and uses
+admits only a platform key or the tenant's own partner key, never a tenant key, and a key never approves
+content it wrote. Loosening `drafts.require_approval` is a guard-field decision and uses
 `quarantine.key_release` like the other guard fields. Releasing mail held by screening is a quarantine
 release and follows the release rule above unchanged ([Screening hold §10](screening.md#10-release)).
 

@@ -1396,8 +1396,10 @@ ever ([I9](../edge-cases.md)). Three rules keep them short-lived:
    in the transaction that takes the thread lock; the accept transaction deletes it. A marker older than
    10 minutes with no `messages` row names an orphan.
 3. **Rolling sweep.** The mailbox's daily maintenance alarm deletes the objects of stale compose markers,
-   then lists the next 5,000 keys under `t/{tenant_id}/i/{identity_id}/` (continuing from
-   `meta.orphan_sweep_cursor`, wrapping at the end) and deletes every key older than 15 days that no row
+   and of `draft_att` markers older than one hour whose attachment is in no draft row
+   ([Drafts § 7](drafts.md#7-attachments)), then lists the next 5,000 keys under
+   `t/{tenant_id}/i/{identity_id}/` (continuing from `meta.orphan_sweep_cursor`, wrapping at the end) and
+   deletes every key older than 15 days that no row
    names (`messages.raw_r2_key`, `attachments.r2_key`, `attachments.text_r2_key`, the outbound
    `out/{msg}.eml` of a `messages` row, `uploads.r2_key`, and the `r2_key` of each `drafts.attachments_json`
    entry, [Drafts § 7](drafts.md#7-attachments)), in `BLOBS` and, when configured, `BACKUP`. Fifteen days is

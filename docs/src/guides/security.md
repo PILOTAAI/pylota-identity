@@ -65,7 +65,7 @@ boundary is still the key's permissions ([SDKs, skills and agent tooling § 5.3]
 | Suppression and list management | `tenant` | `suppressions:manage` |
 | Dashboards | `tenant` or `platform` | `usage:read`, `audit:read` |
 | An agent whose mail a person approves first | `identity` | `messages:read`, `search:read`, `drafts:write` and no `messages:send`: it can only write drafts, and an approver sends them ([Sending › Drafts and approval](sending.md#drafts-approval-and-scheduled-send)) |
-| Your approval screen for drafts | `tenant` | `drafts:approve` and `messages:send` (approval by a key also needs the workspace to allow it: `drafts.key_approval`, which only the operator or the workspace's partner sets) |
+| Your approval screen for drafts | `tenant` | `drafts:approve` and `messages:send` (a tenant key approves only on a deployment that lets API keys take decisions reserved for people, `PM_QUARANTINE_KEY_RELEASE=on` or `PM_CONSOLE=off`; `drafts.key_approval`, which only the operator or the workspace's partner sets, admits the partner's key, never the workspace's own) |
 | An event-feed consumer or a live dashboard | `tenant` | `events:read`, and the family permissions of the events it reads (for example `messages:read`) |
 | Deliverability dashboards | `tenant` | `metrics:read` |
 | An agent that signs up for third-party services | `identity` | What it otherwise needs, plus `accounts:request` and `search:read` (for `wait`) ([Service sign-up ledger](../project/design/service-accounts.md)) |

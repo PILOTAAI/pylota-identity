@@ -154,7 +154,7 @@ From [Drafts, approvals and scheduled send](../project/design/drafts.md).
 | Pending approval | 7 days after it was requested, or `send_at` + 1 hour when later | Pylota Mail |
 | Draft retention | 30 days after the last change (or `retention.message_days` when shorter); `sent` and `canceled` records 30 days | Pylota Mail |
 | `text`, `html` | 524,288 and 1,048,576 bytes | Pylota Mail ([Inbound › Storage caps](../project/design/inbound.md#storage-caps)) |
-| Attachments | 32 per draft; inline bytes within the 7 MiB request body | Pylota Mail |
+| Attachments | 32 per draft; inline bytes within the 7 MiB request body; 26,214,400 decoded bytes in total, as for a send | Pylota Mail |
 | Recipients, subject, headers, labels, metadata | As for sends | [Mail](#mail) |
 | `note`, `reason` | 500 characters | Pylota Mail |
 | `on_behalf_of` | 1–128 printable ASCII characters, no `@` | Pylota Mail |

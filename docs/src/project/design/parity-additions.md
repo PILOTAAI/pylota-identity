@@ -841,9 +841,13 @@ that reference it; the thread's counters, and the thread itself when it is left 
 (`raw.eml`, `out/{msg}.eml`, attachments and their extracted text) in `BLOBS` and, when configured,
 `BACKUP`, and its vectors (`deleteByIds`), with its ID written to `erased_ids` so that a late index job
 deletes what it writes ([I10](../edge-cases.md)). The drafts of [Drafts](drafts.md) are mail content too: a
-draft expires `message_hours` after its last change. Expiry keeps, as tenant retention does: `contacts`,
-`rate_windows`, suppressions, `event_index` rows (IDs and types only, pruned after `events_days`) and audit
-rows. The one difference from `EraseRows` is the idempotency row of an outbound message
+draft expires `message_hours` after its last change (`updated_at`), except a draft under an active legal
+hold (its thread, source message or sent message in a held thread), a `scheduled` draft before its fire
+([Drafts § 13.1](drafts.md#131-retention)) and a `sending` one. For a draft, expiry deletes what the drafts'
+retention purge deletes: the row, its `idempotency` and outbox rows, its attachment objects, and its
+`draft_sync` row, replaced by a `delete` one so the D1 index follows. Expiry keeps, as tenant retention
+does: `contacts`, `rate_windows`, suppressions, `event_index` rows (IDs and types only, pruned after
+`events_days`) and audit rows. The one difference from `EraseRows` is the idempotency row of an outbound message
 ([§7.6](#76-a-retried-send-never-sends-twice)).
 
 ### 7.4 The expiry alarm
@@ -854,15 +858,17 @@ The mailbox does the work itself, with its own alarm, through the same steps ten
 
 ```text
  ingest / submit commit ──▶ alarm:expiry = min(alarm:expiry, received_at + H)
+ draft write commit ──▶ alarm:expiry = min(alarm:expiry, updated_at + H)
  SetRetention set or lowered, hold removed, maintenance finds due rows ──▶ alarm:expiry = now
  alarm, purpose expiry (H = meta.retention_message_hours; nothing to do when it is absent or meta.erased):
-   1 plan     ≤ 100 due rows, oldest first, skipping held threads, queued and claimed outbound
+   1 plan     ≤ 100 due rows, oldest first, skipping held threads, queued and claimed outbound;
+              ≤ 100 due drafts, skipping held, scheduled and sending ones
    2 vectors  deleteByIds(vector IDs from chunks)                ─ error ─▶ back-off, stop
    3 objects  delete every R2 key of the batch, BLOBS then BACKUP ─ error ─▶ back-off, stop
    4 commit   one transaction: re-check each row is still due and not held, EraseRows(mode: Expiry),
               erased_ids, add the counts to meta['expiry:{YYYY-MM-DD}']
    5 re-arm   100 rows planned → alarm:expiry = now (the next slice);
-              else the next due received_at + H, but not before now + 60 s
+              else the next due received_at + H or draft updated_at + H, but not before now + 60 s
  back-off: alarm:expiry = now + 30 s × 2^(n − 1), at most 5 minutes (meta.expiry_backoff, cleared by a success)
 ```
 
@@ -886,6 +892,24 @@ would have: so step 1 also skips threads whose hold changed in the last 60 secon
 (`hold_json.set_at`), and the re-check stays the guarantee for the row itself. The daily
 `alarm:maintenance` sets `alarm:expiry = now` whenever due rows exist, so an alarm lost after Cloudflare's six
 retries ([Design § 4](index.md#4-durable-object-transactions), rule 5) costs at most a day.
+
+The same slice plans the due drafts, with the same hold test on each thread a draft touches:
+
+```sql
+SELECT d.rowid, d.id, d.attachments_json FROM drafts d
+WHERE d.updated_at <= ?1                                   -- ?1 = now − H × 3,600,000
+  AND d.status NOT IN ('scheduled', 'sending')
+  AND NOT EXISTS (SELECT 1 FROM threads t
+                  WHERE <hold active at ?2>
+                    AND (t.seq = d.thread_seq
+                         OR t.seq = (SELECT thread_seq FROM messages WHERE id = d.source_message_id)
+                         OR t.seq = (SELECT thread_seq FROM messages WHERE id = d.message_id)))
+ORDER BY d.updated_at, d.rowid LIMIT 100;
+```
+
+Step 3 deletes the drafts' attachment objects with the messages' keys, and step 4 re-checks each draft
+(still due, not held, not `scheduled` or `sending`) and deletes it in the same transaction, with the same
+60-second rule for a hold that just changed.
 
 ### 7.5 Timing
 
@@ -1405,7 +1429,7 @@ service (`S`) except where marked.
 | Z58 | The `set_retention` call fails after the `PATCH`; two `PATCH`es seconds apart; a call arriving after a newer one | The repair cron delivers it; the mailbox ends with the newest value; the older `version` is ignored | S | `it::intents::z58_set_retention_retried` |
 | Z59 | A day with expiries; the flush repeated; the identity erased before the flush | One `retention.expire` audit row per identity and UTC day with the counts; a repeated flush writes nothing more; an erased identity's pending day has no row and its erasure receipt counts what was left | S | `it::retention::z59_daily_receipt` |
 | Z60 | An erasure request or the tenant retention job running at the same time as expiry | No error and no row counted twice; the receipts count only what each deleted | S | `it::retention::z60_concurrent_erasure` |
-| Z61 | Drafts of an identity with `message_hours: 24`; a draft scheduled to send after its expiry | A draft is erased 24 hours after its last change; the schedule is refused with `400 invalid_request` (`beyond_retention`) | S | `it::drafts::z61_drafts_expire` |
+| Z61 | Drafts of an identity with `message_hours: 24`; a draft scheduled to send after its expiry; a draft in a held thread, a `scheduled` draft and a `sending` one when they fall due | A draft is erased 24 hours after its last change by the expiry alarm, with its attachment objects; the schedule is refused with `400 invalid_request` (`beyond_retention`); the held draft is kept until the hold ends, the scheduled one until its fire, and the sending one until its send ends | S | `it::drafts::z61_drafts_expire` |
 | Z62 | A reply whose thread token names an expired thread | Filed by its headers when they match a stored message, otherwise a new thread; never refused | S | `it::retention::z62_reply_to_expired_thread` |
 | Z63 | Storage after expiry; expiry on a paused identity and a suspended tenant | Stored bytes fall at the next hourly roll-up; expiry continues in both states | S | `it::retention::z63_storage_and_states` |
 | Z64 | Creating a webhook with `headers`; reading, listing and replaying the create; the audit row and logs | `header_names` only; no response, idempotency record, audit row or log line holds a value; the create's fingerprint uses `HMAC-SHA256(PM_HASH_KEY, value)` | S | `it::webhooks::z64_headers_write_only` |

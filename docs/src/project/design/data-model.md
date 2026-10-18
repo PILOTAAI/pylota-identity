@@ -648,14 +648,16 @@ CREATE TABLE draft_index (
   recipient_count     INTEGER NOT NULL,
   attachment_count    INTEGER NOT NULL,
   send_at             INTEGER,
+  next_attempt_at     INTEGER,                             -- a scheduled draft waiting after a transient condition
   status_at           INTEGER NOT NULL,
   failure_reason      TEXT,
   requested_by_key_id TEXT,
+  source_held         INTEGER NOT NULL DEFAULT 0,          -- 1 while the source is quarantined or in screening
   updated_at          INTEGER NOT NULL
 );
 CREATE INDEX draft_index_tenant ON draft_index(tenant_id, status, status_at, draft_id);
 CREATE INDEX draft_index_identity ON draft_index(identity_id, status);
-CREATE INDEX draft_index_due ON draft_index(send_at) WHERE status = 'scheduled';
+CREATE INDEX draft_index_due ON draft_index(COALESCE(next_attempt_at, send_at)) WHERE status = 'scheduled';
 
 -- Thumbprints of deleted identity keys, never published again (O7). Written by identity- and tenant-scope
 -- erasure in the step that deletes identity_keys; read by key generation, which draws a new seed when the
@@ -1501,7 +1503,8 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE INDEX IF NOT EXISTS contacts_domain ON contacts(domain);
 
 CREATE TABLE IF NOT EXISTS idempotency (
-  key_hash      TEXT PRIMARY KEY,                          -- hex SHA-256 of the Idempotency-Key header
+  key_hash      TEXT PRIMARY KEY,                          -- hex SHA-256 of the Idempotency-Key header; a draft
+                                                           -- send's internal key is namespaced (Drafts § 5.1)
   fingerprint   TEXT NOT NULL,                             -- sha256(operation, target, canonical body)
   operation     TEXT NOT NULL,                             -- send, reply, reply_all, forward; and draft_create,
                                                            -- draft_send, draft_approve, draft_reject (Drafts § 9.1);
@@ -1583,13 +1586,15 @@ CREATE TABLE IF NOT EXISTS drafts (
   to_json            TEXT NOT NULL DEFAULT '[]',
   cc_json            TEXT NOT NULL DEFAULT '[]',
   bcc_json           TEXT NOT NULL DEFAULT '[]',
-  resolved_json      TEXT,                                 -- reply kinds: {to, cc} as resolved for the last digest
+  resolved_json      TEXT,                                 -- reply kinds: {to, cc} as resolved for the last digest;
+                                                           -- rewritten with a new revision when it changes (Drafts § 2.4)
   subject            TEXT,
   text               TEXT,                                 -- ≤ 524 288 bytes
   html               TEXT,                                 -- ≤ 1 048 576 bytes, as written
   headers_json       TEXT NOT NULL DEFAULT '{}',
   attachments_json   TEXT NOT NULL DEFAULT '[]',           -- [{id, filename, content_type, disposition,
-                                                           --   content_id, size, sha256, source, r2_key, upload_id?}]
+                                                           --   content_id, size, sha256, sniffed_type, source, r2_key,
+                                                           --   upload_id?}]
   include_attachments INTEGER,                             -- forward only
   calendar_json      TEXT,                                 -- new and reply drafts: the calendar field of the send
                                                            -- routes ({ics, attach_copy}, Calendar invitations § 5.1),
@@ -1609,6 +1614,8 @@ CREATE TABLE IF NOT EXISTS drafts (
   sent_at            INTEGER,
   created_by_key_id  TEXT,
   updated_by_key_id  TEXT,
+  content_by_key_id  TEXT,                                 -- the key that last changed the content: self-approval
+                                                           -- and the writer rule read it (Drafts § 2.1)
   created_at         INTEGER NOT NULL,
   updated_at         INTEGER NOT NULL
 );
@@ -1732,7 +1739,7 @@ CREATE TABLE IF NOT EXISTS rate_windows (                  -- inbound volume cap
   100 KB per statement and 100 columns per table (read 2026-10-10). Every message row has a 1,900,000-byte
   budget ([Inbound › Storage caps](inbound.md#storage-caps)), and every list of values is bound as one
   JSON array expanded with `json_each`, so no statement binds more than 100 parameters. The widest tables,
-  `messages` (49 columns) and `drafts` (42 columns), are under the limit.
+  `messages` (49 columns) and `drafts` (43 columns), are under the limit.
 - **Size watch.** After a write transaction, when `meta.size_checked_at` is more than an hour old, and in
   the daily maintenance, the mailbox computes `pragma page_count * page_size`, writes `meta.size_bytes`
   and `size_checked_at`, and writes one `mailbox_size_bytes` point. When the previous `size_bytes` was at
@@ -2053,8 +2060,8 @@ CREATE TABLE IF NOT EXISTS erased_refs (                   -- refuses late appen
 | `t/{ten}/i/{idn}/m/{msg}/a/{att}.md` | Extracted text (Markdown, with page markers) | same | as above |
 | `t/{ten}/i/{idn}/out/{msg}.eml` | Composed outbound MIME (sent copy) | same, plus `idem_key_sha256` (hex SHA-256 of the Idempotency-Key), `fingerprint` and `operation` | Retention, erasure; the submit path when the send is refused after it was written; for the system identity, as soon as the message leaves `queued` |
 | `t/{ten}/i/{idn}/out/{msg}/a/{att}` | Outbound attachment bytes (linked attachments, copies for `GET …/attachments/{id}`, and copies of uploads) | `tenant`, `identity`, `message`, `sha256` | Retention, erasure |
-| `t/{ten}/i/{idn}/up/{upl}` | Upload bytes, verified against the declared SHA-256 ([Uploads § 5.1](uploads.md#51-mailbox-table)) | `tenant`, `identity`, `upload` | Rejection, expiry, `DELETE`, erasure; the orphan sweep after 15 days when no row names it |
-| `t/{ten}/i/{idn}/drafts/{drf}/a/{att}` | An inline draft attachment ([Drafts § 9.4](drafts.md#94-r2)) | – | When it is removed by `PATCH`, when the draft is sent or canceled (after commit), by erasure and by the retention purge of its draft; the orphan sweep removes uncommitted ones |
+| `t/{ten}/i/{idn}/up/{upl}` | Upload bytes, verified against the declared SHA-256 ([Uploads § 5.1](uploads.md#51-mailbox-table)) | `tenant`, `identity`, `upload`, `sha256` | Rejection, expiry, `DELETE`, erasure; the orphan sweep after 15 days when no row names it |
+| `t/{ten}/i/{idn}/drafts/{drf}/a/{att}` | A draft attachment: an inline part, or the copy of an upload ([Drafts § 9.4](drafts.md#94-r2)) | – | When it is removed by `PATCH`, when the draft is sent or canceled (after commit; for a held draft, when the hold ends), by erasure and by the retention purge of its draft; the orphan sweep removes uncommitted ones |
 | `t/{ten}/exports/{exp}.zip` | Subject-access export | `tenant`, `export` | 7 days after creation |
 
 For Email Routing, `email()` writes straight to the final key when routing resolved (the normal case);

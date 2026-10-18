@@ -97,7 +97,8 @@ every request it was running, so the set cannot hold a stale key.
 
    ```sql
    SELECT fingerprint, message_id, response_json FROM idempotency
-   WHERE key_hash = ?1 AND expires_at > ?2;     -- ?1 = hex(sha256(Idempotency-Key))
+   WHERE key_hash = ?1 AND expires_at > ?2;     -- ?1 = hex(sha256(Idempotency-Key)); a draft send's
+                                                --   internal key has its own namespace (Drafts § 5.1)
    ```
 
    The ledger stores only the key's SHA-256, so the same value can be kept in the R2 metadata of the
@@ -118,7 +119,8 @@ every request it was running, so the set cannot hold a stale key.
 3. Insert the key into `in_flight`; a guard removes it on every exit path.
 4. Run the policy pipeline, composition in memory (no R2 write yet), and the quota reservation (the
    `sends` hold and the daily caps). These include `.await`s, during which other requests may run. The
-   embedded uploads are read from R2 (`BLOBS.get`) for the composition; a missing object (only possible
+   embedded uploads, and a draft send's embedded stored attachments ([Drafts §5.1](drafts.md#51-senddraft)),
+   are read from R2 (`BLOBS.get`) for the composition; a missing object (only possible
    after a restore) sets the upload `expired` (`object_missing`), releases the reservations and returns
    `410 upload_expired` ([Uploads §4.4](uploads.md#44-steps-6-and-7-of-the-reservation)).
 5. **Lock and marker.** One small transaction takes the thread lock (below; a new thread needs none) and
@@ -126,9 +128,9 @@ every request it was running, so the set cannot hold a stale key.
    reservations and returns `409 thread_busy`, with nothing written to R2.
 6. **Sent copy.** Write `out/{msg}.eml` (and any linked attachments) to R2. A failed write releases the
    lock, the marker and both reservations, and returns `503 unavailable`. Every attachment that came from an
-   upload is also copied to `t/{ten}/i/{idn}/out/{msg}/a/{att}`, R2 to R2, streamed through a
-   `FixedLengthStream` of the upload's size with the `sha256` option; a failed copy takes the same path, and
-   a copy that runs past the submit deadline gets `504 timeout` before anything is committed
+   upload, or from a draft's own object, is also copied to `t/{ten}/i/{idn}/out/{msg}/a/{att}`, R2 to R2,
+   streamed through a `FixedLengthStream` of its size with the `sha256` option; a failed copy takes the
+   same path, and a copy that runs past the submit deadline gets `504 timeout` before anything is committed
    ([Uploads §4.4](uploads.md#44-steps-6-and-7-of-the-reservation)).
 7. One transaction ([Storage](#storage-of-an-accepted-send)): re-check that no `idempotency` row exists
    for the key, and, for a calendar message, re-run the stale-sequence query
@@ -138,7 +140,8 @@ every request it was running, so the set cannot hold a stale key.
    and delete the compose marker. For attachments from uploads, re-check that each pinned upload is still
    `ready`, insert the `attachments` rows with `upload_id`, `sha256` and `sniffed_type` from the upload, and
    add one to `uploads.use_count` (and set `last_used_at`) for each distinct upload. For a draft send
-   (`SubmitInput.draft`), the same transaction re-checks the draft's claim and moves it to `sent`
+   (`SubmitInput.draft`), the `attachments` rows of the draft's stored attachments carry their `upload_id`
+   and `sniffed_type`, and the same transaction re-checks the draft's claim and moves it to `sent`
    ([Drafts §5.3](drafts.md#53-exactly-once)); if the check fails, the transaction is abandoned as a
    refusal. If this transaction fails or a re-check fails, the sent copy, the upload copies and the marker
    are deleted (best effort) and the reservations released, so no refused send leaves an object behind
@@ -181,7 +184,7 @@ alarm; an expired key behaves as new.
 | 14a | Sending domain paused (`domains.sending_paused_at` set, [Tenant and domain auto-pause](#tenant-and-domain-auto-pause-g12)). A paused domain never falls back to the platform domain | `409 sending_paused`, `details.scope = "domain"`, `details.domain_id` |
 | 15 | Transport: `ses` configured (the SES secrets and region); and for `kind: marketing`, the domain of the From address resolved at step 13 has `transport` `ses` or `smtp`, because Cloudflare Email Service is for transactional mail only (FR-OUT-15, [Cloudflare Email Service FAQ](https://developers.cloudflare.com/email-service/reference/faq/), read 2026-10-10). The platform domain and every `cloudflare`-transport domain fail this. `BeginTransport` checks it again with the transport actually chosen ([The outbound consumer](#the-outbound-consumer)); and a calendar message on the `cloudflare` transport before the raw send is available (spike S1, [Calendar invitations §5.6](calendar-invitations.md#56-transports)) | `422 transport_unavailable`, `details.reason = "ses_not_configured"`, `"marketing_needs_ses"` or `"calendar_needs_raw_mime"` |
 | 16 | Per recipient: suppression, send-block, `send_allowlist_only`, `require_known_recipient` (on by default, [Recipient filters](#recipient-filters)) | not an error: the recipient's delivery is `suppressed` (FR-OUT-4, [G4](../edge-cases.md), [E2](../edge-cases.md)) |
-| 16a | Approval ([Drafts §3](drafts.md#3-approval-policy)): the effective `drafts.require_approval` (the stricter of the tenant's and the identity's `send_policy.require_approval`) needs approval for these recipients, and the send is not from a draft whose current revision carries a valid approval. The system identity is exempt | `403 approval_required`, `details.reason`, `details.recipients` |
+| 16a | Approval ([Drafts §3](drafts.md#3-approval-policy)): the effective `drafts.require_approval` (the stricter of the tenant's and the identity's `send_policy.require_approval`) needs approval for these recipients, a recipient counting as known by rules 1–3 and 5 of [Known recipient](#recipient-filters), and the send is not from a draft whose current revision carries a valid approval. The system identity is exempt | `403 approval_required`, `details.reason`, `details.recipients` |
 | 17 | Size after composition ([Attachments and size](#attachments-and-size)) | `413 message_too_large`, unless `large_attachments: "link"` |
 | 17a | The `free_sending` switch is `off` ([Observability › Automatic containment](observability.md#56-automatic-containment)) and the workspace is **Free or ramped**: it is still in the new-workspace send ramp as step 18 defines it, or it has no partner, `PM_BILLING=stripe` and is `metered` on the catalog's `default_plan`. Never the system identity | `403 policy_denied`, `details.reason = "free_sending_off"` |
 | 18 | Plan allowance and daily caps, in one `TenantQuota` request and one transaction ([TenantQuota](#tenantquota)). First the **`sends` hold** (FR-BILL-4, FR-BILL-5): `units` = recipients left after step 16, `ref` = the new `msg_` ID, gate `storage_gb` when the message has attachments; a send whose recipients are all suppressed takes no hold. Then the **daily-cap reserve** (identity cap: `send_policy.daily_cap`, else `policy.identity_daily_send_cap`; tenant cap: `policy.tenant_daily_send_cap`), counted per accepted message in the tenant's time zone ([E3](../edge-cases.md)). The tenant cap is min(`policy.tenant_daily_send_cap`, 50) while the **new-workspace send ramp** applies: `tenants.ramp_lifted_at IS NULL` and either the tenant has a partner whose `ramp_exempt` is `0` (whatever `PM_BILLING` and its billing mode), or it has no partner, `PM_BILLING=stripe` and the workspace is `metered` on the catalog's `default_plan` ([Cloud sign-up › New-workspace send ramp](cloud-signup.md#101-new-workspace-send-ramp), [W30](../edge-cases.md)). The **system identity** (`is_system = 1`) is exempt from the tenant cap: its reserve passes `tenant_cap: None`, so the tenant `sends` counter is neither checked nor incremented, and only its own `send_policy.daily_cap` (50,000) applies ([Identities and domains › The system identity](identity-domains.md#the-system-identity)). Two **stops** refuse a send before any counter moves, and never the system identity's: a workspace whose `billing_accounts.dispute_open_at` is set ([Billing › Disputes and refunds](billing.md#disputes-and-refunds)), and the shared-domain breaker, at stage 1 for a ramped workspace or one `metered` on the catalog's `default_plan`, and at stage 2 for every tenant ([Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker)). If either check fails, neither is kept. Then, with `PM_DAILY_SEND_QUOTA` set and a Cloudflare transport, `DeploymentReserve` on the default tenant's `TenantQuota` counts the recipients against the deployment's day; `Spent` releases the reservation and the hold and refuses with `shared_domain` (no lag: [Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker)) | `402 billing_limit` (`details.feature` = `sends` or `storage_gb`); `429 daily_cap_reached` with `details.cap` (`identity`, `tenant`, `shared_domain` or `billing_dispute`) and `details.resets_at` (`null` for `billing_dispute`) |

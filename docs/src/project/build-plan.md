@@ -1462,7 +1462,7 @@ owner:
 
 **Files:** `crates/core/src/drafts.rs` (the field table per kind, the state table, `approval_needed`,
 `digest`, the etag, the `send_at` window, the patch merge; pure), `crates/api-types/src/drafts.rs`,
-`crates/worker/src/handlers/drafts.rs` (the nine routes), `crates/worker/src/mailbox/drafts.rs`
+`crates/worker/src/handlers/drafts.rs` (the ten routes), `crates/worker/src/mailbox/drafts.rs`
 (storage, transitions, `SendDraft`, the `drafts` and `draft_index` alarm purposes),
 `crates/worker/src/drafts/attachments.rs`, `crates/worker/src/send/{context.rs, authority.rs}`,
 `crates/worker/src/crons/drafts_due.rs`, `crates/worker/src/console/pages/drafts.rs`,
@@ -1473,7 +1473,8 @@ that file's owner:
 
 | File | Hook |
 |---|---|
-| `mailbox/submit.rs` (M9) | `SubmitInput.draft` and `SubmitInput.approved`; the draft arm of the accept transaction; policy step 16a |
+| `mailbox/submit.rs` (M9) | `SubmitInput.draft` and `SubmitInput.approved`; stored draft attachments (an object, size, SHA-256 and `upload_id`) in steps 12, 17, 4, 6 and 7; the draft arm of the accept transaction; policy step 16a |
+| The quarantine release (M7) and the screening verdict (M31) transactions | Re-sync the `draft_index` rows of drafts whose source changed state (`source_held`, Drafts § 9.3); M31 adds its half if it lands after M29 |
 | `handlers/send.rs` (M9) | The D1 context loader moves to `send/context.rs`, unchanged, and gains the step-16a facts |
 | `crates/core/src/policy.rs` (M2, M9) | Known-recipient rule 4; step 16a; `FIELDS` gains `drafts.require_approval` (guard) and `drafts.key_approval` (platform or own partner) |
 | `policy/write.rs` (M5), `handlers/identities.rs` (M6) | The guard rule for `drafts.require_approval`; the stricter-only rule for `send_policy.require_approval` |
@@ -1488,12 +1489,12 @@ that file's owner:
 | The draft field table (`core::drafts`) | M32 (calendar invitations) adds the `calendar` field to `new` and `reply` drafts if it lands after M29 |
 
 **Implements:** FR-DRF-1 … FR-DRF-14, the changes to FR-OUT-3, FR-OUT-13, FR-CON-5, FR-CON-12, FR-CON-15
-and FR-PRV-3, and edge rows Q1–Q64 ([Drafts](design/drafts.md)); the cross-tenant suite's new routes
-(NFR-SEC-1).
+and FR-PRV-3, and edge rows Q1–Q64, Q109 and Q110 ([Drafts](design/drafts.md)); the cross-tenant suite's
+new routes (NFR-SEC-1).
 
 **Acceptance:**
 
-- Edge rows Q1–Q64 with the tests named in the register, among them
+- Edge rows Q1–Q64, Q109 and Q110 with the tests named in the register, among them
   `it::drafts::q12_concurrent_sends_one_message` and `it::drafts::q32_claim_expiry_no_duplicate` (one
   message per revision), `it::drafts::q19_approval_binds_content`, `it::drafts::q27_direct_send_approval_required`,
   `it::drafts::q35_alarm_multiplexing`, `it::drafts::q37_missed_alarm_catch_up`,
@@ -1504,7 +1505,7 @@ and FR-PRV-3, and edge rows Q1–Q64 ([Drafts](design/drafts.md)); the cross-ten
   rows.
 - `it::console::drafts_page`; the pages join `browser::console::no_js` and `browser::console::axe_scan`.
 - `it::mcp::drafts_tools`, `cli::drafts::send_key_derivation`; `sdk::coverage::every_operation` still
-  passes with the nine new operations; the routes join `it::security::cross_tenant_matrix`.
+  passes with the ten new operations; the routes join `it::security::cross_tenant_matrix`.
 - With `drafts.require_approval: never` and no draft, the M9 send suites (`it::send::*`) pass unchanged.
 - At M20: `live::drafts::scheduled_send`.
 
@@ -1678,8 +1679,9 @@ Until its result is recorded, M32 ships with calendar sends on the `cloudflare` 
 expiry arithmetic; pure), `crates/worker/src/uploads/{mod.rs, put.rs, classify.rs, copy.rs}`,
 `handlers/uploads.rs` (the four `…/uploads` routes), `mailbox/uploads.rs` (the `uploads` table, its
 operations and `alarm:uploads`), `crates/cli/src/commands/uploads.rs`. Mailbox schema: the `uploads` table
-and `attachments.upload_id` (the next mailbox schema version). Hooks in other milestones' files, each
-reviewed by that file's owner:
+and `attachments.upload_id`, in mailbox schema v1 while nothing is built
+([Data model](design/data-model.md)), as for M29. Hooks in other milestones' files, each reviewed by that
+file's owner:
 
 | File | Hook |
 |---|---|
@@ -1693,7 +1695,7 @@ reviewed by that file's owner:
 | `mcp/tools.rs` (M15) | `mail_create_upload`, `mail_get_upload`, both item shapes in the send tools, `attachments` on `mail_forward`, with rows in M15's table test |
 | `crates/cli/src/commands/send.rs` (M16) | `--attach` through uploads above 1 MiB |
 | `observability/catalogue.rs`, alert table (M17) | The nine metrics and `upload_object_missing` |
-| Drafts (M29) | Whichever of M29 and M33 lands second adds the draft-save copy (`uploads::copy_to`) and `it::uploads::q108_draft_reference` |
+| Drafts (M29) | Whichever of M29 and M33 lands second adds the draft-save copy (`uploads::copy_to`, with the pin and the `draft_att` marker), `drafts:write` in the upload routes' `any_permissions` (M29 defines the permission), and `it::uploads::q108_draft_reference` |
 
 **Implements:** FR-UPL-1 to FR-UPL-12 and edge rows Q65–Q108 ([Uploads](design/uploads.md)).
 

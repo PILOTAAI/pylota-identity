@@ -49,7 +49,7 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | `IdentityMailbox.verifications` | Verification codes and links | `wait` | 24 hours | Hygiene step; erasure (cascade) |
 | `IdentityMailbox.rate_windows` | Sender addresses in hourly windows | Inbound throttle, token brute-force limits | 48 hours ([Design conventions §4](index.md#4-durable-object-transactions), daily maintenance) | Hygiene step; counterparty erasure deletes the counterparty's rows (section 6.4); identity and tenant erasure |
 | `IdentityMailbox.chunks` | Character offsets only | Semantic index bookkeeping | As the message | Cascade with the message row |
-| Mailbox `drafts` (with `draft_sync`) and R2 `t/{tenant_id}/i/{identity_id}/drafts/` | Draft recipients, subjects, bodies, attachments | Messages an agent is writing or that wait for approval or a schedule ([Drafts](drafts.md)) | 30 days after the last change (or `retention.message_days`, or the identity's `retention.message_hours`, when shorter); `sent` and `canceled` records keep no content | Mailbox maintenance (`Hygiene`), every erasure scope, `WipeAll` ([Drafts §13](drafts.md#13-privacy)) |
+| Mailbox `drafts` (with `draft_sync`) and R2 `t/{tenant_id}/i/{identity_id}/drafts/` | Draft recipients, subjects, bodies, attachments | Messages an agent is writing or that wait for approval or a schedule ([Drafts](drafts.md)) | 30 days after the last change (or `retention.message_days`, or the identity's `retention.message_hours`, when shorter); `sent` and `canceled` records keep no content, except a draft canceled under a legal hold until the hold ends | Mailbox maintenance (`Hygiene`), every erasure scope, `WipeAll` ([Drafts §13](drafts.md#13-privacy)) |
 | `IdentityMailbox.screenings` | IDs, enumerations, times, the deciding key or user ID | Screening hold records ([Screening hold](screening.md)) | As the message (cascade) | Every scope that deletes the message deletes the row (cascade), counted as `screenings_deleted` ([Screening hold §18](screening.md#18-privacy)) |
 | `IdentityMailbox.screening_feedback` | The verdict, the caller's `notes` (≤ 500 characters, personal data), the actor | Feedback on screening verdicts | As the message (cascade) | As above, counted as `screening_feedback_deleted` |
 | Mailbox `uploads` and R2 `t/{ten}/i/{idn}/up/{upl}` | Files an agent staged to send, and their filenames | Attachments staged for sends and drafts ([Uploads](uploads.md)) | At most 7 days, capped by `retention.message_days` and the identity's `retention.message_hours`; tombstones 7 days without bytes | Their own expiry, `DELETE`, the `Hygiene` sweep as a backstop; every erasure scope ([Uploads §9](uploads.md#9-privacy)) |
@@ -814,8 +814,10 @@ objection to contact, so neither person deletion nor any erasure scope deletes i
   ignored and cleared by the next tenant retention run's `holds` step (section 5.2), or, on a tenant being erased, by
   the global `held_erasures` step (audit `hold.expired` either way).
 - A hold covers the whole thread, including messages that arrive after it was set, and the drafts whose
-  thread, source message or sent message is in it ([Drafts §13.2](drafts.md#132-erasure)). Uploads belong
-  to no thread and are never held ([Uploads §9](uploads.md#9-privacy)).
+  thread, source message or sent message is in it ([Drafts §13.2](drafts.md#132-erasure)). A held draft is
+  kept against its writer too: a patch of its content, labels or metadata answers `423 legal_hold`, and
+  `DELETE` cancels it (it is never sent) without clearing it ([Drafts §4.4](drafts.md#44-delete)). Uploads
+  belong to no thread and are never held ([Uploads §9](uploads.md#9-privacy)).
 - While active: retention skips the thread (raw and messages), and so does per-identity expiry (section 5.5); every erasure scope skips it and lists
   `{ thread_id, reason }` in `receipt.held`, and the request ends `completed_with_holds` (FR-PRV-4,
   [I2](../edge-cases.md)). Identity deletion behaves as in section 6.5; tenant erasure keeps the held

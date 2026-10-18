@@ -353,7 +353,8 @@ Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI
   `--idempotency-key`. When it is omitted, the CLI generates `pmail-<ulid>` and prints it to stderr in
   human mode (and includes it in a CLI-generated error document in JSON mode), so a person can rerun
   the command with the same key after a network error. `drafts send` without `--idempotency-key` derives
-  `cli:{draft_id}:{revision}` instead, so re-running the same command never sends twice
+  `cli:{draft_id}:{revision}:{approval.state}` instead, so re-running the same command never sends twice
+  and sends once a person has approved the revision
   ([Drafts § 17.2](drafts.md#172-cli)). Every other `POST` gets a generated key per invocation (one per
   request when a command makes several, such as `messages label` over more than 100 IDs), so the CLI's
   own retries are safe. The exceptions are the endpoints marked `x-idempotency: none` that the CLI calls:
@@ -1404,7 +1405,8 @@ answered · confidence 0.86 · 3 steps · 2.8 s
   invitation that is not verified, or a method that cannot be answered, comes back as `422` (exit 7).
   `messages get` prints a message's `calendar` object; `--json` returns it unchanged.
 - **`drafts create|list|get|update|send|approve|reject|delete`** follow [Drafts § 17.2](drafts.md#172-cli).
-  `drafts send` without `--idempotency-key` derives `cli:{draft_id}:{revision}` ([§4](#4-http-behaviour-against-the-api)).
+  `drafts send` without `--idempotency-key` derives `cli:{draft_id}:{revision}:{approval.state}`
+  ([§4](#4-http-behaviour-against-the-api)).
   `drafts list --tenant` reads the tenant's queue. `drafts approve` needs `--revision` (and takes
   `--digest`), so a person approves exactly the text they read; where people decide
   (`drafts.key_approval`), a key gets `403 permission_denied` (`person_required`), exit 4. A stale
@@ -2058,7 +2060,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::http_sign::headers_and_errors` | Prints the four headers as `Name: value` lines in order, or the response with `--json`; `--component` adds only `@method`, `@path` or `@query`; `422 web_bot_auth_disabled` is exit 7 and `403 policy_denied` exit 4 | FR-IDN-8, [O9], [O13] |
 | `cli::webhooks::verify` | Valid signatures, rotation overlap (two signatures), tampered body, old timestamp | FR-WH-2 |
 | `cli::ask::render_stream` | Recorded SSE streams for each status render as specified; `--json` prints the `done` data; `--tenant` posts to `POST /v1/tenants/{t}/search` with `mode: agentic`, and an identity key gets exit 4 | FR-SRCH-3 |
-| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}` and re-running it replays | [Drafts § 17.2](drafts.md#172-cli) |
+| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | [Drafts § 17.2](drafts.md#172-cli) |
 | `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of [§18.6](#186-events-tail) | [Event feed § 15.2](event-feed.md#152-cli), [R64](../edge-cases.md) |
 | `cli::screening::commands` | `messages feedback`, `messages feedback-list`, the screening filters of `messages list` and `screening summary` against recorded API fakes | [Screening hold § 21](screening.md#21-console-mcp-and-cli) |
 | `cli::calendar::reply_and_send_flags` | `pmail calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli) |

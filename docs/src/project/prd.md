@@ -851,9 +851,10 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   update and delete through the API (`drafts:read`, `drafts:write`). A create with a `client_id` the
   identity has already used **must** return the existing draft, or `409 client_id_conflict` if the
   request differs. A draft's kind (`new`, `reply`, `reply_all`, `forward`) **must** be fixed at creation,
-  and a field its kind does not take **must** be refused. Reply and forward drafts **must** name a source
-  message the creating key can see, never `hidden` or `throttled` mail, and `quarantined` or `screening`
-  mail only with `quarantine:review` ([Drafts](design/drafts.md)).
+  and a field its kind does not take **must** be refused. Reply and forward drafts **must** be created only
+  by a key holding `messages:read`, and **must** name a source message the creating key can see, never
+  `hidden` or `throttled` mail, and `quarantined` or `screening` mail only with `quarantine:review`
+  ([Drafts](design/drafts.md)).
 - **FR-DRF-2** Every draft **must** carry a `revision` and an `etag`. An update with a stale `If-Match`,
   and an approval of a revision or content digest that is no longer current, **must** fail with
   `409 draft_revision_mismatch` and change nothing. A draft being sent **must** refuse updates and deletes
@@ -866,17 +867,19 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   the message **must** record `draft_id`.
 - **FR-DRF-4** Tenant policy `drafts.require_approval` (`never`, `new_recipients`, `external`, `always`)
   **must** decide when a send needs approval, with `new_recipients` meaning a recipient that is neither
-  known (FR-OUT-13 rules 1–3) nor internal to the workspace and `external` meaning a recipient that is
-  not internal, and an identity's `send_policy.require_approval` **may** only make it stricter. It
+  known (FR-OUT-13 rules 1–3 and 5) nor internal to the workspace and `external` meaning a recipient that
+  is not internal, and an identity's `send_policy.require_approval` **may** only make it stricter. It
   **must** apply to every send of the tenant's identities except the system identity's: an ordinary send,
   reply, reply-all or forward that needs approval **must** be refused with `403 approval_required` before
-  anything is stored. It is a guard field (FR-TEN-4).
+  anything is stored. It is a guard field (FR-TEN-4). Whatever the level, a send of a draft whose writer
+  requested approval, or whose current content was written by a key without `messages:send`, **must**
+  need approval.
 - **FR-DRF-5** Approving and rejecting **must** need `drafts:approve`, which identity keys **must never**
   hold; approving with `send: true` **must** also need `messages:send`. On a deployment where only people
   may release quarantine (FR-CON-6), an API key **must** approve only on a tenant whose policy has
   `drafts.key_approval: true`, which only a platform key or the tenant's own partner key can set, and
   then only if it is a platform key or that partner key, never a tenant key. A key
-  **must not** approve a revision it wrote. An approval **must** bind to the digest of the content
+  **must not** approve content it wrote. An approval **must** bind to the digest of the content
   approved (sender identity, recipients as resolved, subject, bodies, attachments and their hashes,
   headers, kind, source; not `send_at`), and any change of that content **must** return the draft to
   `pending_approval` and emit `draft.approval_requested` again. The approval **must** be audit-logged with
@@ -894,8 +897,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-DRF-8** Draft attachments **must** be given inline (within the 7 MiB request body) or as upload
   references to the same identity's `ready`, unexpired uploads, whose bytes **must** be copied into the
   draft's own objects when the revision is saved, so that deleting or expiring the upload never changes the
-  draft; at send the draft's copies **must** be copied into the message's own attachment objects with their
-  SHA-256 checked.
+  draft; a revision's attachments **must** pass the classification and the 26,214,400-byte total of a send
+  when it is saved; at send the draft's copies **must** be copied into the message's own attachment objects
+  with their SHA-256 checked, without being held in memory, and keep their `upload_id`.
 - **FR-DRF-9** A forward draft **must** snapshot its source at send time, and fail with
   `409 source_unavailable` when the source was erased, is no longer visible to the sender, or cannot be
   reproduced in full (a truncated body whose raw MIME has expired, or a missing attachment object). Reply

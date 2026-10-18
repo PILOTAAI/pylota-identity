@@ -13,10 +13,10 @@ agent's mail waits for an operator, and AgentMail, which Pylota is leaving, has 
 | | |
 |---|---|
 | Requirements | FR-DRF-1 … FR-DRF-14 (this page); changes FR-OUT-3, FR-OUT-13, FR-CON-5, FR-CON-12, FR-CON-15, FR-PRV-3 |
-| Edge cases | [Q1](../edge-cases.md)–[Q64](../edge-cases.md) |
-| Code | `crates/core/src/drafts.rs` (fields per kind, the state table, the approval requirement, the digest, the etag, `send_at` bounds, the patch merge; pure), `crates/api-types/src/drafts.rs`, `crates/worker/src/handlers/drafts.rs` (the nine routes), `crates/worker/src/mailbox/drafts.rs` (storage, transitions, `SendDraft`, the `drafts` and `draft_index` alarm purposes), `crates/worker/src/mailbox/submit.rs` (the draft arm of the accept transaction), `crates/worker/src/send/{context.rs, authority.rs}` (the send-context loader moved out of `handlers/send.rs`, and the authority check), `crates/worker/src/drafts/attachments.rs` (inline parts and upload references), `crates/worker/src/crons/drafts_due.rs` (the watchdog), `crates/worker/src/auth/people.rs` (the `ApproveDraft` decision), `crates/worker/src/console/pages/drafts.rs`, `crates/worker/src/mcp/tools.rs` (six tools), `crates/cli/src/commands/drafts.rs`, the `drafts` steps of `jobs/retention.rs` and `jobs/erasure.rs` |
+| Edge cases | [Q1](../edge-cases.md)–[Q64](../edge-cases.md), [Q109](../edge-cases.md)–[Q110](../edge-cases.md) |
+| Code | `crates/core/src/drafts.rs` (fields per kind, the state table, the approval requirement, the digest, the etag, `send_at` bounds, the patch merge; pure), `crates/api-types/src/drafts.rs`, `crates/worker/src/handlers/drafts.rs` (the ten routes), `crates/worker/src/mailbox/drafts.rs` (storage, transitions, `SendDraft`, the `drafts` and `draft_index` alarm purposes), `crates/worker/src/mailbox/submit.rs` (the draft arm of the accept transaction), `crates/worker/src/send/{context.rs, authority.rs}` (the send-context loader moved out of `handlers/send.rs`, and the authority check), `crates/worker/src/drafts/attachments.rs` (inline parts and upload references), `crates/worker/src/crons/drafts_due.rs` (the watchdog), `crates/worker/src/auth/people.rs` (the `ApproveDraft` decision), `crates/worker/src/console/pages/drafts.rs`, `crates/worker/src/mcp/tools.rs` (six tools), `crates/cli/src/commands/drafts.rs`, the `drafts` steps of `jobs/retention.rs` and `jobs/erasure.rs` |
 | Tables | Mailbox `drafts`, `draft_sync`; new columns `messages.draft_id` and `idempotency.draft_id`; mailbox `meta` keys `alarm:drafts`, `alarm:draft_index`, `draft_index_backoff`; D1 `draft_index` ([Data model](data-model.md)) |
-| Contracts | The routes under `/v1/identities/{identity_id}/drafts` and `GET /v1/tenants/{tenant_id}/drafts`; the permissions `drafts:read`, `drafts:write`, `drafts:approve`; the events `draft.approval_requested`, `draft.approved`, `draft.rejected`, `draft.sent`, `draft.failed`; the policy fields `drafts.require_approval` (guard) and `drafts.key_approval` (platform or own partner), and the identity field `send_policy.require_approval`; the errors `404 draft_not_found`, `409 draft_revision_mismatch`, `409 draft_not_editable`, `409 draft_not_sendable`, `409 draft_not_pending`, `409 source_unavailable`, `403 approval_required`, the uploads errors `404 upload_not_found`, `409 upload_not_ready` and `410 upload_expired` on create and update ([Uploads](uploads.md)), `422 draft_limit_reached`, and `403 permission_denied` with `details.reason` `person_required` or `self_approval`; the Message field `draft_id` |
+| Contracts | The routes under `/v1/identities/{identity_id}/drafts` and `GET /v1/tenants/{tenant_id}/drafts`; the permissions `drafts:read`, `drafts:write`, `drafts:approve`; the events `draft.approval_requested`, `draft.approved`, `draft.rejected`, `draft.sent`, `draft.failed`; the policy fields `drafts.require_approval` (guard) and `drafts.key_approval` (platform or own partner), and the identity field `send_policy.require_approval`; the errors `404 draft_not_found`, `409 draft_revision_mismatch`, `409 draft_not_editable`, `409 draft_not_sendable`, `409 draft_not_pending`, `409 source_unavailable`, `403 approval_required`, the uploads errors `404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired` and `422 attachment_risky` on create and update ([Uploads](uploads.md)), `422 draft_limit_reached`, `423 legal_hold` on update, and `403 permission_denied` with `details.reason` `person_required` or `self_approval`; the Message field `draft_id` |
 | Limits | [§14](#14-billing-and-limits) (to be copied into [Limits › Drafts and scheduled send](../../reference/limits.md)) |
 | Built in | [M29](#23-milestone) |
 
@@ -68,12 +68,13 @@ row can only show something that is no longer waiting; it can never make anythin
 | `labels` | Labels the sent message will carry (`^[a-z0-9][a-z0-9_:-]{0,63}$`, at most 64) |
 | `metadata` | As on messages (16 keys, 512 bytes per value); copied to the message |
 | `send_at` | The time the draft should be sent, or `null` for "when sent". Setting it alone schedules nothing ([§6](#6-scheduled-send)) |
-| `approval` | `{ state, reason, requested_at, requested_by_key_id, approved_revision, approved_at, approved_by_key_id, approved_by_user_id, on_behalf_of, note }`: `state` is `none`, `requested` or `approved`; `reason` says why approval was requested (`requested` by the writer, or the policy level `new_recipients`, `external`, `always`) |
+| `approval` | `{ state, reason, requested_at, requested_by_key_id, approved_revision, approved_digest, approved_at, approved_by_key_id, approved_by_user_id, on_behalf_of, note }`: `approved_digest` is the digest the approval covers ([§5.2](#52-authority-and-approval-at-send-time)); `state` is `none`, `requested` or `approved`; `reason` says why approval was requested (`requested` by the writer, or the policy level `new_recipients`, `external`, `always`) |
 | `send` | The pending or last send request: `{ origin, requested_at, requested_by_key_id, requested_by_user_id, due_at, labels_add, labels_remove }`, `origin` = `api`, `approval` or `console`; `null` when none |
 | `rejection` | `{ reason, note, rejected_at, rejected_by_key_id, rejected_by_user_id, on_behalf_of }`, `reason` = `operator` or `expired`; `null` unless rejected |
 | `failure` | `{ reason, detail, failed_at, attempts }` while `failed` ([§6.3](#63-the-fire)) |
 | `message_id`, `sent_at` | Set when the draft became a message |
 | `created_by_key_id`, `updated_by_key_id` | The keys that created the draft and wrote its current revision (`null` for a console write, which never edits content) |
+| `content_by_key_id` | The key that last changed the content: the create, or the last `PATCH` that changed the digest. A `PATCH` of only `send_at`, `labels` or `metadata`, and a re-resolution (§2.4), leave it. The self-approval rule ([§4.6](#46-approve)) and the writer rule of [§3.1](#31-draftsrequire_approval) read it |
 | `created_at`, `updated_at` | Bookkeeping times |
 
 Every text field of a draft was written by an agent that mail may have steered, so the console shows it as
@@ -147,9 +148,9 @@ owner or admin after re-authentication. *System*: the mailbox alarm, the retenti
 | T3 | `editing`, `pending_approval`, `approved`, `scheduled`, `failed` | send with approval needed and no valid approval ([§3](#3-approval-policy)) | Sender | `pending_approval` (unchanged if already there) | `draft.approval_requested`, unless the draft was already `pending_approval` at this revision |
 | T4 | `editing`, `pending_approval`, `approved`, `scheduled`, `failed` | send, approval not needed or valid, due now | Sender | `sending`, then `sent`; a refusal answers the error and leaves the draft as it was | `draft.sent` |
 | T5 | as T4 | send, approval not needed or valid, `send_at` in the future | Sender | `scheduled` | – |
-| T6 | `editing`, `pending_approval`, `failed` | approve, `send: false` | Approver | `approved` | `draft.approved` |
+| T6 | `editing`, `pending_approval`, `failed`; `scheduled` | approve, `send: false` | Approver | `approved`; a `scheduled` draft stays `scheduled` with the approval recorded ([§4.6](#46-approve)) | `draft.approved` (not again when already approved at this revision) |
 | T7 | `editing`, `pending_approval`, `approved`, `failed` | approve, `send: true`, due now | Approver | `sending`, then `sent` or `failed` | `draft.approved` (not again when already `approved` at this revision), then `draft.sent` or `draft.failed` |
-| T8 | as T7 | approve, `send: true`, `send_at` in the future | Approver | `scheduled` | `draft.approved` (as T7) |
+| T8 | as T7, and `scheduled` | approve, `send: true`, `send_at` in the future | Approver | `scheduled` | `draft.approved` (as T7) |
 | T9 | `editing`, `pending_approval`, `approved`, `scheduled`, `failed` | reject | Approver | `rejected` (`operator`) | `draft.rejected` |
 | T10 | `pending_approval` | 7 days after the request, or `send_at` + 1 hour when later ([§13.1](#131-retention)) | System | `rejected` (`expired`) | `draft.rejected` |
 | T11 | `scheduled` | the alarm at `send_at` ([§6.3](#63-the-fire)) | System | `sending`, then `sent` or `failed`; `pending_approval` when approval is needed and missing; `scheduled` again (a later attempt) on a transient condition | `draft.sent`, `draft.failed` or `draft.approval_requested` |
@@ -157,7 +158,7 @@ owner or admin after re-authentication. *System*: the mailbox alarm, the retenti
 | T13 | any but `sending`, `sent`, `canceled`, `rejected` | `PATCH` of `send_at`, `labels` or `metadata` only | Writer | unchanged, except `scheduled` with `send_at: null` → `approved` (valid approval) or `editing`, and `failed` with a new `send_at` → `scheduled`, every check running again at the fire ([§6.6](#66-reschedule-unschedule-cancel)) | – |
 | T14 | `sending` | the accept transaction | System | `sent` | `draft.sent` |
 | T15 | `sending` | a claim older than 2 minutes ([§5.3](#53-exactly-once)) | System | the status before the claim (API origin), or `scheduled` for another attempt (approval or alarm origin; `failed` with `send_interrupted` after the third) | `draft.failed` for the last |
-| T16 | any but `sending`, `sent` | `DELETE` | Writer | `canceled` | – |
+| T16 | any but `sending`, `sent` | `DELETE` | Writer | `canceled` (its content kept while a legal hold covers it, [§4.4](#44-delete)) | – |
 | T17 | any | erasure, retention purge, identity or tenant deletion | System | row deleted | – |
 
 A `sent` draft is a record: its content is cleared in the transaction that creates the message (the
@@ -171,8 +172,8 @@ or `409 draft_not_pending`; the writer must change the content first (T12), whic
 
 ### 2.4 Revision, etag and digest
 
-- **`revision`** increases on every successful `PATCH`, whatever it changes. Approval, scheduling,
-  rejection and sending do not change it.
+- **`revision`** increases on every successful `PATCH`, whatever it changes, and on a re-resolution of a
+  reply draft's recipients (below). Approval, scheduling, rejection and sending do not change it.
 - **`etag`** is `"{revision}-{first 8 hex characters of digest}"`, quoted as HTTP requires (for example
   `"3-9f2c41ab"`), sent in the `ETag` header of every response that returns one draft, and compared with
   `If-Match` by strong comparison. `If-Match: *` matches any existing draft. A cleared draft's etag uses
@@ -201,6 +202,22 @@ or `409 draft_not_pending`; the writer must change the content first (T12), whic
 The digest is returned on every draft. An integrator can store it with its own approval record and pass it
 back on approve, so the approval names the exact content its person saw ([§4.6](#46-approve)).
 
+**Re-resolution.** A reply draft's recipients can change after its revision was saved: the reply target
+of the source moves when its `Reply-To` becomes a known contact ([D3](../edge-cases.md)). The stored
+`digest` and `resolved_json` must therefore never go stale. Whenever the mailbox resolves the recipients of
+a `reply` or `reply_all` draft that is not `sending`, `sent` or `canceled` (on `GET` of the draft and the
+console's draft page, on approve, on send and at the fire) and the result differs from `resolved_json`, it
+first commits, in one transaction: the new `resolved_json` and digest; `revision + 1`, so the etag changes
+and every `If-Match`, `revision` and `digest` of the old revision fails; the approval dropped
+(`approval.approved_*` cleared); an `approved` or `pending_approval` draft becomes or stays
+`pending_approval` with `draft.approval_requested`; a `scheduled` or `failed` draft keeps its status and
+send request, so the send-time checks of [§5.2](#52-authority-and-approval-at-send-time) decide again; the
+`draft_sync` row; `draft_approval_rerequested_total{cause="digest_changed"}` when an approval or request
+existed. `content_by_key_id` and `updated_by_key_id` stay: no key wrote the change. The request then
+continues on the new revision: an approve that named the old revision or digest answers
+`409 draft_revision_mismatch`, and a `GET` returns the new digest, which an approver can approve
+([Q25](../edge-cases.md)). A list never re-resolves; its items show the stored values.
+
 ## 3. Approval policy
 
 ### 3.1 `drafts.require_approval`
@@ -210,11 +227,14 @@ send of the tenant's identities** except the system identity's: a draft send, an
 reply-all or forward ([§3.3](#33-ordinary-sends-under-the-policy)). For each recipient of the send (`to`,
 `cc` and `bcc`, after the reply recipients are resolved), two facts are computed:
 
-- **Known**: rules 1–3 of FR-OUT-13 ([Outbound › Known recipient](outbound.md#recipient-filters)): the
+- **Known**: rules 1–3 and 5 of FR-OUT-13 ([Outbound › Known recipient](outbound.md#recipient-filters)): the
   identity wrote to it before (`contacts.outbound_count > 0`), a send-allow entry of the tenant names it or
   its `@domain`, or, for a reply or reply-all, it is the reply target of a `received` message with verdict
-  `pass`. Rule 4 ([§3.4](#34-approved-recipients-are-known)) is not used here: it is the effect of an
-  approval, not a reason to skip one.
+  `pass`, or, for a calendar reply, it is the recipient rule 5 makes known. Rule 5, like rule 3, answers
+  mail the identity received from an authenticated sender, so without it `new_recipients` would refuse
+  every calendar reply to an organizer the identity never wrote to, and the calendar-reply route has no
+  draft form to route it through. Rule 4 ([§3.4](#34-approved-recipients-are-known)) is not used here: it
+  is the effect of an approval, not a reason to skip one.
 - **Internal**: the address is an `active` or `retiring` address of an identity of the **same tenant**
   (D1 `addresses` joined to `identities` on `tenant_id`), or its domain, compared as a lower-case A-label
   and exactly (a subdomain does not match), is the `name` of a domain of the same tenant with
@@ -236,6 +256,15 @@ every case the one before it does (a recipient that is neither known nor interna
 approval only at `always`: it does not leave the workspace. `core::drafts::approval_needed(level,
 &[RecipientFacts { known, internal }]) -> Option<ApprovalReason>` is the pure function; its answer is the
 level that applied, recorded as `approval.reason`.
+
+**The writer's rule, whatever the level.** A send of a draft also needs approval, with reason `requested`,
+when its current revision's approval was requested by the writer (`approval.reason = "requested"`), or
+when the key that wrote its current content (`content_by_key_id`) does not hold `messages:send` when the
+send is decided (read with the send context; a revoked or expired key counts as not holding it). A writer
+that cannot send, or that asked for a person, cannot have its draft sent by another key without an
+approval: this is what makes pattern 2 of [§3.5](#35-the-two-approval-patterns) hold under every level,
+including `never` ([Q110](../edge-cases.md)). `approval_needed` takes the two facts as a third argument,
+`WriterFacts { requested, writer_sends }`; a direct send has none, so step 16a is unchanged by this rule.
 
 **Class: guard** ([Workspace policy §2](workspace-policy.md#2-classes-and-ceilings)). A tenant key may set a
 stricter value at any time; a looser value only where API keys may take decisions reserved for people
@@ -300,8 +329,9 @@ from one identity, where an entry is tenant-wide and lasts until deleted.
 2. **The agent holds `drafts:write` and not `messages:send`.** The agent can never send: it creates the
    draft with `request_approval: true` (or sets it later), and an approver approves with `send: true`,
    which sends with the approver's authority (T7, T8). This needs no policy: it holds whatever
-   `drafts.require_approval` says, and it is how Pylota confines every untrusted path
-   ([§19](#19-pylota-agentic-os)).
+   `drafts.require_approval` says, because the writer's rule of §3.1 makes every send of content this agent
+   wrote need an approval, also a send by another key that holds `messages:send`; it is how Pylota confines
+   every untrusted path ([§19](#19-pylota-agentic-os)).
 
 In both patterns the approval is bound to the digest, so an edit after approval asks again (T12), and the
 sent message carries `draft_id`, so the decision trail survives the draft record.
@@ -310,7 +340,7 @@ sent message carries `draft_id`, so the decision trail survives the draft record
 
 | Route | Permission | Key levels | `Idempotency-Key` |
 |---|---|---|---|
-| `POST /v1/identities/{identity_id}/drafts` | `drafts:write` | every level | optional |
+| `POST /v1/identities/{identity_id}/drafts` | `drafts:write`, and `messages:read` with `in_reply_to` or `forward_of` | every level | optional |
 | `GET /v1/identities/{identity_id}/drafts` | `drafts:read` | every level | – |
 | `GET /v1/identities/{identity_id}/drafts/{draft_id}` | `drafts:read` | every level | – |
 | `GET /v1/identities/{identity_id}/drafts/{draft_id}/attachments/{attachment_id}` | `drafts:read` | every level | – |
@@ -333,14 +363,20 @@ system identity, or of a `deleting` or `deleted` identity, answers `404 draft_no
 `403 tenant_suspended` on every write (create, update, delete, send, approve, reject); reads still work.
 A paused identity may still create, edit, approve (without sending) and reject drafts: drafting stores
 mail, as receiving does (FR-IDN-3), and nothing leaves; send, approve with `send: true` and the scheduled
-fire refuse or fail with `identity_paused` ([Q57](../edge-cases.md)). Idempotency records of these routes
+fire refuse or fail with `identity_paused` ([Q57](../edge-cases.md)). Uploads, by contrast, refuse a paused
+identity ([Uploads § 3.1](uploads.md#31-create--post-v1identitiesidentity_iduploads)), so while it is paused
+its drafts can take inline parts and uploads staged before the pause. A draft that a key may not see
+([§4.2](#42-list-get-and-attachment-bytes), a source in quarantine or screening) answers
+`404 draft_not_found` on every route, writes and decisions included, exactly as a `GET` does
+([Q44](../edge-cases.md)). Idempotency records of these routes
 live in the mailbox's `idempotency` table, scoped per identity like every mail route
 ([REST API › Idempotency](../../reference/api.md#idempotency)), with the operation (`draft_create`,
 `draft_send`, `draft_approve`, `draft_reject`) inside the fingerprint, so a key used for one operation and
 then another is `409 idempotency_conflict`. No record holds content: the response is stored as a reference
 (`{"$ref": {"kind": "draft", "identity_id": …, "id": …}}`), and a replay reads the draft again with the
-calling key's visibility and answers with `"deduplicated": true` and `Idempotent-Replayed: true`. A draft
-erased since replays its `404`.
+calling key's visibility and answers with the original status (`201` for a create, `202` for a send,
+`200` for a decision), `"deduplicated": true` and `Idempotent-Replayed: true`. A draft erased since replays
+its `404`.
 
 ### 4.1 Create
 
@@ -369,20 +405,29 @@ Rules, in order; the first failure answers and nothing is stored:
 1. **Authenticate**, require `drafts:write`, resolve the identity (common rules), charge `RL_API`.
 2. **Body**: over 7 MiB → `413 payload_too_large`; JSON or schema errors, a field the kind does not take
    ([§2.2](#22-kinds-and-the-fields-each-takes)), `in_reply_to` with `forward_of`, or `reply_all` without
-   `in_reply_to` → `400 invalid_request` with `details.errors[]`.
+   `in_reply_to` → `400 invalid_request` with `details.errors[]`. With `in_reply_to` or `forward_of`, the
+   key must also hold `messages:read`, checked once the body is parsed as a body-dependent permission
+   ([Security § 5.2](security.md#52-order-of-checks) step 2): a draft built on a message answers or
+   forwards what that message says, so a key that cannot read mail cannot draft from it
+   (`403 permission_denied`, `details.required` naming `messages:read`, [Q3](../edge-cases.md)).
 3. **Field bounds**, with the send routes' validators so a draft never holds what a send would refuse:
    each recipient a valid address (`400 address_invalid`, `400 address_unsupported` for an SMTPUTF8 local
    part); `to` + `cc` + `bcc` at most the tenant's `max_recipients` (`400 too_many_recipients`); subject at
    most 998 characters; `text` at most 524,288 bytes and `html` at most 1,048,576 bytes of UTF-8 (the stored
    message caps of [Inbound › Storage caps](inbound.md#storage-caps), so a draft is never cut when it
    becomes a message); at most 32 attachments, valid base64, a sanitised filename, a valid
-   `type/subtype`, `content_id` on inline parts; headers by [Outbound › Headers](outbound.md#headers)
+   `type/subtype`, `content_id` on inline parts; each inline part sniffed and classified as policy step 12
+   classifies it ([Uploads § 4.1](uploads.md#41-policy-step-12-extended) item 3), a quarantining risk →
+   `422 attachment_risky` with `details.index` and `details.risk`, so a person never approves an attachment
+   the send would refuse; headers by [Outbound › Headers](outbound.md#headers)
    (`400 header_not_allowed`, `400 invalid_request`); labels and metadata within their limits; `send_at`
    within its window ([§6.1](#61-the-window)); `kind: marketing` with `unsubscribe` and `consent`
    (`400 marketing_requirements_missing`, checked again at send); `calendar` by the calendar step 9a of
    [Calendar invitations §5.2](calendar-invitations.md#52-validation-in-pipeline-order) (`400 calendar_invalid`,
    `413 calendar_too_large`, checked again at send). All `400 invalid_request` unless named.
-4. **`MailboxRequest::CreateDraft`** (10-second deadline):
+4. **`MailboxRequest::CreateDraft`** (30-second deadline, as `Submit`, because step 4.5 may copy up to
+   26,214,400 bytes of uploads with the copy of submit step 6, whose time M33 measures against that
+   deadline):
    1. With an `Idempotency-Key`: the idempotency lookup (replay, `409 idempotency_conflict`, or
       `409 request_in_progress` while in flight).
    2. With a `client_id`: an existing draft with it and the same `client_fingerprint` (SHA-256 of the
@@ -393,18 +438,22 @@ Rules, in order; the first failure answers and nothing is stored:
       `404 message_not_found`.
    4. The identity has 1,000 drafts that are not `sent` or `canceled` → `422 draft_limit_reached` with
       `details.limit` ([Q8](../edge-cases.md)).
-   5. Attachments ([§7](#7-attachments)): upload references checked and their bytes copied to the draft
-      (`404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired`); inline
-      parts written to R2, each under a `meta` marker `draft_att:{att}`; the composed-size estimate checked
-      when the tenant's `large_attachments` is `refuse` (`413 message_too_large`).
+   5. Attachments ([§7](#7-attachments)): upload references checked as policy step 12 checks them
+      (`404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired`, `422 attachment_risky` for a
+      `rejected` upload or a risky final filename), pinned, and copied to the draft; the decoded total of
+      inline parts and uploads at most 26,214,400 bytes (`413 message_too_large`, `details.reason =
+      "attachments_total"`), whatever `large_attachments` says; inline parts and upload copies written to
+      R2, each under a `meta` marker `draft_att:{att}`; the composed-size estimate checked when the
+      tenant's `large_attachments` is `refuse` (`413 message_too_large`).
    6. One transaction: re-check the limit and the `client_id`; insert the draft (`revision = 1`, the
-      digest, `created_by_key_id = updated_by_key_id` = the key); with `request_approval: true`, status
-      `pending_approval`, `approval = { state: requested, reason: requested, requested_at, requested_by_key_id }`
-      and the event `draft.approval_requested`, else `editing`; the `draft_sync` row when the status is
-      indexed ([§9.3](#93-keeping-the-index-in-step)); the idempotency row; delete the markers.
+      digest, `created_by_key_id = updated_by_key_id = content_by_key_id` = the key); with
+      `request_approval: true`, status `pending_approval`, `approval = { state: requested, reason:
+      requested, requested_at, requested_by_key_id }` and the event `draft.approval_requested`, else
+      `editing`; the `draft_sync` row when the status is indexed ([§9.3](#93-keeping-the-index-in-step));
+      the idempotency row; delete the markers.
 5. **Respond** `201` with the [draft](#2-the-draft), its `ETag`, and `"deduplicated": false`. A failure after
-   step 4.5 deletes the inline objects it wrote (best effort; the orphan sweep removes any left,
-   [§7](#7-attachments)).
+   step 4.5 deletes the objects it wrote (best effort; their markers name any left for the sweep,
+   [§7](#7-attachments)). Every exit path unpins the uploads.
 
 ### 4.2 List, get and attachment bytes
 
@@ -420,7 +469,9 @@ Rules, in order; the first failure answers and nothing is stored:
   answers `404 attachment_not_found`.
 - **Visibility.** A reply or forward draft whose source is `quarantined` or `screening` is listed and
   readable only by keys holding `quarantine:review`; any other key gets `404 draft_not_found`, as it would
-  for the source itself ([Security § 5.3](security.md#53-cross-level-read-access), [Q3](../edge-cases.md)).
+  for the source itself ([Security § 5.3](security.md#53-cross-level-read-access), [Q3](../edge-cases.md)),
+  on every route (§4 common rules), and the tenant's queue leaves it out for that key
+  ([§4.8](#48-the-tenants-queue)).
 
 ### 4.3 Update
 
@@ -437,19 +488,24 @@ Rules, in order; the first failure answers and nothing is stored:
   `attachments_remove` (IDs), labels through `labels`, or `labels_add` and `labels_remove`.
   `request_approval: true` asks for approval. An empty patch is `400 invalid_request`.
 - **Rules, in order:** authenticate (`drafts:write`), resolve, `403 tenant_suspended`, validate as on
-  create (step 2 and 3), then `MailboxRequest::UpdateDraft`:
+  create (step 2 and 3), then `MailboxRequest::UpdateDraft` (30-second deadline, as create):
   1. Load the draft (`404 draft_not_found`, visibility of §4.2). `sending` → `409 draft_not_editable`
      with `details.status` and `retryable: true`; `sent` or `canceled` → `409 draft_not_editable`
-     (`retryable: false`) ([Q11](../edge-cases.md)).
+     (`retryable: false`) ([Q11](../edge-cases.md)). A draft under a legal hold (its `thread_seq`, source
+     message or sent message in a thread with an active hold, [Privacy § 8](privacy.md#8-legal-holds)) →
+     `423 legal_hold` for a patch that changes its content, `labels` or `metadata`, because the new
+     revision would replace held content; a patch of only `send_at` or `request_approval` goes on
+     ([Q109](../edge-cases.md)).
   2. `If-Match` given and not the current etag → `409 draft_revision_mismatch` with
      `details.current_revision` and `details.current_etag`; nothing is written ([Q9](../edge-cases.md)).
   3. Merge, check attachments (as create step 4.5), and compute the new digest (reply recipients resolved
      now).
   4. One transaction: re-read the draft; if its revision moved since step 1, answer
      `409 draft_revision_mismatch` when `If-Match` was given, otherwise merge the patch onto the newer
-     revision and continue (last writer wins). Then `revision + 1`, `updated_by_key_id`, the new digest,
-     and the status rule below; the `draft_sync` row; the events; delete markers. After commit, delete
-     the R2 objects of removed inline attachments.
+     revision and continue (last writer wins). Then `revision + 1`, `updated_by_key_id`, the new digest
+     (and `content_by_key_id` = the key when the digest changed), and the status rule below; the
+     `draft_sync` row; the events; delete markers. After commit, delete the R2 objects of removed
+     attachments.
   5. Respond `200` with the draft and its `ETag`.
 - **Status rule, when the digest changed (T12).** The approval and the pending send request are dropped
   (`approval.approved_*` cleared, `send = null`). The new status is `pending_approval` when the draft was
@@ -479,6 +535,12 @@ on a `canceled` draft, `200` again with no change. `sending` → `409 draft_not_
 (`retryable: true`); `sent` → `409 draft_not_editable` (the record expires after 30 days, and message
 erasure removes it earlier) ([Q62](../edge-cases.md)).
 
+**Under a legal hold** (the test of §4.3 step 1), `DELETE` still cancels: a hold must never force a send,
+so the draft becomes `canceled`, leaves the schedule and the index and is never sent. Its content, its
+attachment objects and its approval stay, as the hold requires (FR-PRV-4), and the response shows them.
+The `Hygiene` step clears them, as `DELETE` would have, at its first run after the last hold covering the
+draft ends ([§13.1](#131-retention), [Q109](../edge-cases.md)).
+
 ### 4.5 Send
 
 `POST /v1/identities/{identity_id}/drafts/{draft_id}/send` with `Idempotency-Key`. The body is optional:
@@ -505,15 +567,15 @@ read; the TypeScript SDK always passes it ([SDKs and skills](sdk-and-skills.md))
       ([Q13](../edge-cases.md)).
    2. **State.** `sending` → `409 draft_not_sendable` (`details.status`, `retryable: true`); `sent` →
       `409 draft_not_sendable` with `details.message_id`; `rejected` or `canceled` →
-      `409 draft_not_sendable` ([Q14](../edge-cases.md)). A `revision` in the body that is not current →
-      `409 draft_revision_mismatch` ([Q10](../edge-cases.md)).
+      `409 draft_not_sendable` ([Q14](../edge-cases.md)). A reply draft is re-resolved first (§2.4); then a
+      `revision` in the body that is not current → `409 draft_revision_mismatch` ([Q10](../edge-cases.md)).
    3. **Completeness.** At least one recipient (after reply recipients are resolved), a subject on a new
       draft, `text` or `html` → otherwise `400 invalid_request` with the path.
    4. **Source and attachments**: [§8](#8-replies-and-forwards-the-source-message) (`409 source_unavailable`)
       and [§7](#7-attachments) (the draft's own attachment copies; nothing is read from an upload at send).
    5. **Context.** `send::context::load` reads the D1 context of [Outbound › Handler](outbound.md#handler)
       step 6 for the resolved recipients (5-second deadline; `503 unavailable` on failure), with the facts
-      of §3.3.
+      of §3.3 and the key row of `content_by_key_id` (the writer's rule of §3.1).
    6. **Approval** ([§3](#3-approval-policy), [§5.2](#52-authority-and-approval-at-send-time)). Needed and
       no valid approval → one transaction: `pending_approval` (T3), `approval = { state: requested,
       reason: <level> }`, the send request (`origin: api`, `due_at` = the scheduled time or `null`, the
@@ -580,21 +642,27 @@ Rules, in order:
 4. **`MailboxRequest::ApproveDraft`**, with the approver (`Key { key_id, permissions }` or
    `Person { user_id, role }`):
    1. With an `Idempotency-Key`: the lookup, as on send.
-   2. **State.** `editing`, `pending_approval`, `approved` and `failed` may be approved; `scheduled` answers
-      `200` with no change (it is approved and scheduled); any other status → `409 draft_not_pending` with
-      `details.status` ([Q22](../edge-cases.md)).
-   3. **Binding.** `revision` not current, or `digest` given and not equal to the digest computed now (reply
-      recipients resolved now) → `409 draft_revision_mismatch` with `details.current_revision` and, for a
-      digest, `details.reason = "digest"` ([Q10](../edge-cases.md), [Q25](../edge-cases.md)).
-   4. **Not your own.** An API key that wrote the current revision (`updated_by_key_id`) cannot approve it:
+   2. **State.** `editing`, `pending_approval`, `approved`, `scheduled` and `failed` may be approved; any
+      other status → `409 draft_not_pending` with `details.status` ([Q22](../edge-cases.md)). A
+      `scheduled` draft may carry no approval (T5, scheduled when none was needed), so it goes through
+      every step below like the others.
+   3. **Binding.** A reply draft is re-resolved first (§2.4). Then `revision` not current, or `digest`
+      given and not equal to the stored digest → `409 draft_revision_mismatch` with
+      `details.current_revision` and, for a digest, `details.reason = "digest"`
+      ([Q10](../edge-cases.md), [Q25](../edge-cases.md)).
+   4. **Not your own.** An API key that wrote the current content (`content_by_key_id`) cannot approve it:
       `403 permission_denied` with `details.reason = "self_approval"` ([Q20](../edge-cases.md)). An approval
-      checks content someone else wrote.
+      checks content someone else wrote; a key that changed only `labels`, `metadata` or `send_at` did not
+      write it.
    5. **Complete.** Completeness, source and uploads as send steps 2.3 and 2.4: an incomplete draft cannot
       be approved, with either value of `send`.
-   6. **One transaction.** On a draft already `approved` at this revision, the approval is kept as it is
-      and no event is written; otherwise `approval = { state: approved, approved_revision, approved_digest,
-      approved_at, approved_by_key_id | approved_by_user_id, on_behalf_of, note }` and `draft.approved`
-      (with `send`). Then: `send: false` → `approved` (T6), any earlier send request dropped; `send: true`
+   6. **One transaction.** On a draft that already holds a valid approval at this revision (`approved`, or
+      `scheduled` with one), the approval is kept as it is and no event is written; otherwise `approval = {
+      state: approved, approved_revision, approved_digest, approved_at, approved_by_key_id |
+      approved_by_user_id, on_behalf_of, note }` and `draft.approved` (with `send`). Then, on a `scheduled`
+      draft: `send: false` keeps it `scheduled` with its send request (approving only never cancels a
+      schedule; reject or `DELETE` does), and `send: true` makes the approver the send request's authority;
+      on the other statuses: `send: false` → `approved` (T6), any earlier send request dropped; `send: true`
       and due later → `scheduled` with the send request (`origin: approval`, or `console`, and the
       approver as its authority; the labels of an earlier send request are kept) (T8); `send: true` and
       due now → the claim (T7). The idempotency row, unless sending now.
@@ -641,7 +709,9 @@ change; `sending` → `409 draft_not_editable` (`retryable: true`); `sent` and `
 
 - **Filters**: `status` (`pending_approval`, the default, `scheduled` or `failed`, or a comma list),
   `identity_id` (outside the key's scope → `404 identity_not_found`), `scheduled_after`,
-  `scheduled_before`. An identity key gets `403 scope_denied` ([F3](../edge-cases.md) rule).
+  `scheduled_before`. An identity key gets `403 scope_denied` ([F3](../edge-cases.md) rule). For a key
+  without `quarantine:review`, the query adds `AND source_held = 0`, so a draft it may not see (§4.2) is not
+  listed ([Q3](../edge-cases.md)).
 - **Order**: oldest first (`status_at ASC`, `draft_id ASC`), because it is a queue. The cursor holds that
   keyset in the standard cursor format ([REST API › Pagination](../../reference/api.md#pagination)).
 - **Items** (no content):
@@ -662,22 +732,26 @@ To read a draft's content, get it by ID on its identity.
 | `400 invalid_request` | all writes | Schema, a field the kind does not take, bounds, `send_at` window, an incomplete draft on send or approve, a missing `revision` or `send` on approve, a bad `on_behalf_of` |
 | `400 idempotency_key_required`, `invalid_idempotency_key` | send | As for sends |
 | `400 address_invalid`, `address_unsupported`, `too_many_recipients`, `header_not_allowed`, `marketing_requirements_missing`, `calendar_invalid`; `413 calendar_too_large` | create, update | As for sends |
-| `403 permission_denied` | all | A missing permission (`details.required`); approve by a key where people decide (`person_required`); approve by the key that wrote the revision (`self_approval`) |
+| `403 permission_denied` | all | A missing permission (`details.required`), `messages:read` included for a create with `in_reply_to` or `forward_of`; approve by a key where people decide (`person_required`); approve by the key that wrote the content (`self_approval`) |
 | `403 scope_denied` | tenant list; identity `send_policy.require_approval` | An identity key on the tenant list; an identity key loosening its own override |
 | `403 tenant_suspended` | all writes | The tenant is suspended |
 | `403 approval_required` | `POST …/messages`, `…/reply`, `…/reply-all`, `…/forward` | Step 16a ([§3.3](#33-ordinary-sends-under-the-policy)) |
 | `404 draft_not_found`, `identity_not_found`, `message_not_found`, `attachment_not_found` | as named | Missing or out of scope, indistinguishably |
 | `409 client_id_conflict` | create | Same `client_id`, another body |
 | `409 draft_revision_mismatch` | update, send, approve, reject | Stale `If-Match`, `revision` or `digest` |
-| `409 draft_not_editable` | update, delete, reject | `sending` (`retryable: true`), `sent`, `canceled` |
+| `409 draft_not_editable` | update | `sending` (`retryable: true`), `sent`, `canceled` |
+| `409 draft_not_editable` | delete | `sending` (`retryable: true`), `sent`; a `canceled` draft answers `200` again |
+| `409 draft_not_editable` | reject | `sending` (`retryable: true`); `sent` and `canceled` answer `409 draft_not_pending` |
 | `409 draft_not_sendable` | send, update (`request_approval`) | `sending` (`retryable: true`), `sent` (`details.message_id`), `rejected`, `canceled` |
 | `409 draft_not_pending` | approve, reject | A status that cannot be decided (`details.status`) |
-| `409 source_unavailable` | send, approve | [§8](#8-replies-and-forwards-the-source-message) (`details.reason`) |
+| `409 source_unavailable` | send, approve | [§8](#8-replies-and-forwards-the-source-message) (`details.reason`; `not_visible` only in a fire's `failure.detail`, because a caller that cannot see the source gets `404 draft_not_found`) |
 | `404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired` | create, update | [§7](#7-attachments), with the codes and `details` of [Uploads](uploads.md) |
+| `422 attachment_risky` | create, update; send | A risky inline part, a `rejected` upload or a risky final filename (`details.index`, `details.risk`); at send only when the classification rules changed since the revision was saved, and recorded as `failure.reason` by approve and the fire |
+| `423 legal_hold` | update | A patch of the content, `labels` or `metadata` of a draft under a legal hold ([§4.3](#43-update)) |
 | `409 idempotency_conflict`, `request_in_progress` | create, send, approve, reject | As for sends |
 | `409` and `402`, `429` codes of the send pipeline | send, approve with `send: true` | Answered by send; recorded as `failure.reason` by approve |
 | `410 cursor_expired` | lists | As for every list |
-| `413 payload_too_large`, `message_too_large` | create, update | Body over 7 MiB; own parts over the composed limit with `large_attachments: refuse` |
+| `413 payload_too_large`, `message_too_large` | create, update | Body over 7 MiB; attachments over 26,214,400 decoded bytes in total (`details.reason = "attachments_total"`); own parts over the composed limit with `large_attachments: refuse` |
 | `422 draft_limit_reached` | create | 1,000 drafts that are not `sent` or `canceled` |
 | `422 all_recipients_suppressed`, `recipient_blocked` | send dry run | As for a send's dry run |
 | `503 unavailable` | all | D1 or the mailbox is unavailable, or the deployment is frozen or read-only |
@@ -703,11 +777,21 @@ pub struct SubmitInput {
 - **Operation and target.** `new` → `send` (with `thread_id` when set), `reply` → `reply`, `reply_all` →
   `reply_all`, `forward` → `forward`, the target being the identity or `{identity_id}/{source_message_id}`,
   as for the REST routes.
-- **Body.** Built from the draft's stored fields in the request shape of the matching send route, with each
-  attachment's bytes read from R2 ([§7](#7-attachments)) and the message's labels
-  ([§5.4](#54-labels-metadata-and-draft_id)).
-- **Idempotency key** `draft:{draft_id}:{revision}`; its SHA-256 is the ledger's `key_hash` and the sent
-  copy's `idem_key_sha256` R2 metadata, as for any send, so a restore rebuilds it
+- **Body.** Built from the draft's stored fields in the request shape of the matching send route, with the
+  message's labels ([§5.4](#54-labels-metadata-and-draft_id)). Each attachment is passed as a **stored
+  attachment** (`r2_key`, `size`, `sha256`, `sniffed_type`, `filename`, `content_type`, `disposition`,
+  `content_id`, `upload_id`), never as bytes: policy step 12 counts it by `size` and checks its filename
+  and `sniffed_type` with `classify_name` as for an upload, step 17 plans embedding and links from
+  sizes, step 4 reads only the embedded ones, and step 6 copies each to the message's own object R2 to R2,
+  streamed with the `sha256` option, exactly as it copies an upload
+  ([Uploads § 4.4](uploads.md#44-steps-6-and-7-of-the-reservation)); step 7 writes the `attachments` rows
+  with `upload_id`, so the message keeps the provenance ([§7](#7-attachments), [Q108](../edge-cases.md)).
+- **Idempotency key** `draft:{draft_id}:{revision}`, kept in a namespace of its own: its ledger
+  `key_hash` is `hex(sha256(0x00 || "draft:" || draft_id || ":" || revision))`. Every client
+  `Idempotency-Key` is printable ASCII ([Outbound › Handler](outbound.md#handler) step 3), so none starts
+  with the byte `0x00`, and a client that sends the header `draft:drf_…:4` on `POST …/messages` gets a
+  different `key_hash` and can neither block nor replay the draft's send ([Q13](../edge-cases.md)). The
+  same value is the sent copy's `idem_key_sha256` R2 metadata, as for any send, so a restore rebuilds it
   ([Outbound › Composition](outbound.md#composition)). The fingerprint is
   `send_fingerprint(operation, target, body)` over the draft's fields at that revision, without labels
   and metadata, so a label change between two attempts of one revision never conflicts.
@@ -734,15 +818,17 @@ pub struct SubmitInput {
 | The alarm (a scheduled send) | The authority recorded in the send request when it was scheduled | Re-read from D1 at the fire (`send::authority::reload`): a key must be neither revoked nor expired, still hold `messages:send` (and `quarantine:review` when the source is `quarantined` or `screening`), still reach the identity, and its partner must not be suspended; a person must be an `active` user with a `members` row for the tenant whose role holds `messages:send` (owner or admin) |
 
 **A valid approval** at send time means: `approval.state` is `approved`, `approval.approved_digest`
-equals the digest computed **now** (reply recipients resolved now), and the approver is still acceptable,
+equals the digest computed **now** (reply recipients resolved now, and stored as §2.4 says when they
+changed), and the approver is still acceptable,
 re-read from D1 like an authority: a key neither revoked nor expired, still holding `drafts:approve`, with
 `key_may_decide(Decision::ApproveDraft, …)` still true for its tenant; or a person who is still an active
 owner or admin of the workspace.
 
 The checks run in this order, so the safest outcome wins:
 
-1. Approval needed (§3.1 with the current facts) and no valid approval → the draft goes back to
-   `pending_approval` with `draft.approval_requested` (`approval.reason` = the level). It is not `failed`:
+1. Approval needed (§3.1 with the current facts, the writer's rule included) and no valid approval → the
+   draft goes back to `pending_approval` with `draft.approval_requested` (`approval.reason` = the level, or
+   `requested` under the writer's rule). It is not `failed`:
    the content may be fine, and a person is asked again ([Q25](../edge-cases.md), [Q26](../edge-cases.md)).
    A scheduled draft keeps its `send_at`; when it is approved later with `send: true`, it is scheduled
    again, or sent at once if that time has passed.
@@ -766,19 +852,18 @@ alarms occur ([Q12](../edge-cases.md), [Q32](../edge-cases.md), [Q36](../edge-ca
    send runs, as for any send ([Outbound › Reservation](outbound.md#reservation-inside-the-mailbox-fr-out-1-g1)).
 3. **The accept transaction.** `submit`'s step 7 transaction (message, deliveries, idempotency row, lock)
    gains the draft arm: it re-reads the draft, checks that it is `sending` with this `claim.token` and this
-   `revision`, and in the same transaction sets `status = 'sent'`, `message_id`, `sent_at`, clears the
-   content and the claim, deletes the inline attachment objects' keys from the row (the objects are
-   deleted after commit), writes the `draft_sync` delete row, writes the idempotency row of the
-   `POST …/send` or approve request when there is one, and appends `draft.sent`. If the check fails (the
-   draft was canceled, rejected or erased while the send was composing), the transaction is abandoned and
-   `submit` takes its existing refusal path (the sent copy and the marker deleted, the reservations
-   released, [I9](../edge-cases.md)), so no message exists. **A message exists if and only if the draft
-   is `sent`.**
-4. **The internal key.** Because a refused send records nothing, a later attempt of the same revision
-   (an explicit resend after a `402`, for example) reuses `draft:{draft_id}:{revision}` and is evaluated
-   again, as FR-BILL-6 wants ([Q49](../edge-cases.md)). If a bug ever let a second attempt of a sent
-   revision reach `submit`, the idempotency row would replay the first message and the draft arm would
-   find the draft already `sent` with that `message_id` and change nothing.
+   `revision`, and in the same transaction sets `status = 'sent'`, `message_id`, `sent_at`, clears the content
+   and the claim, deletes the attachment objects' keys from the row (the objects are deleted after commit; the
+   message has its own copies), writes the `draft_sync` delete row, writes the idempotency row of the `POST
+   …/send` or approve request when there is one, and appends `draft.sent`. If the check fails (the draft was
+   canceled, rejected or erased while the send was composing), the transaction is abandoned and `submit` takes
+   its existing refusal path (the sent copy and the marker deleted, the reservations released,
+   [I9](../edge-cases.md)), so no message exists. **A message exists if and only if the draft is `sent`.**
+4. **The internal key.** Because a refused send records nothing, a later attempt of the same revision (an
+   explicit resend after a `402`, for example) reuses `draft:{draft_id}:{revision}`, with its namespaced
+   `key_hash` (§5.1), and is evaluated again, as FR-BILL-6 wants ([Q49](../edge-cases.md)). If a bug ever let
+   a second attempt of a sent revision reach `submit`, the idempotency row would replay the first message and
+   the draft arm would find the draft already `sent` with that `message_id` and change nothing.
 5. **A claim that dies.** A claim older than 2 minutes means the attempt died before the accept
    transaction (the `submit` deadline is 30 seconds), so by rule 3 no message exists. The mailbox's
    `drafts` alarm purpose resolves it (T15): for `origin: api`, the draft returns to `prior_status` and the
@@ -810,10 +895,11 @@ events say what happened to it ([Q33](../edge-cases.md)).
 seconds and at most 90 days** after the request; a `PATCH` that only stores a wanted time on an unscheduled
 draft is checked the same way. Outside the window: `400 invalid_request`, `details.errors[0].path =
 "send_at"`, `details.reason` `too_soon` or `too_far` ([Q7](../edge-cases.md)). Where the identity has
-`retention.message_hours`, `send_at` must also fall before the draft's own expiry under that setting,
-otherwise `400 invalid_request` with `details.reason = "beyond_retention"`
-([Parity additions § 7.10](parity-additions.md#710-interactions), [Z61](../edge-cases.md)). Both bounds are
-Pylota Mail choices:
+`retention.message_hours` or the tenant has `retention.message_days`, `send_at` must also fall before the
+draft's own expiry under the shorter of them ([§13.1](#131-retention)), otherwise `400 invalid_request`
+with `details.reason = "beyond_retention"` ([Parity additions § 7.10](parity-additions.md#710-interactions),
+[Z61](../edge-cases.md), [Q48](../edge-cases.md)), so a scheduled draft never outlives the mail retention
+in force when it was scheduled. Both bounds are Pylota Mail choices:
 
 - **60 seconds.** Anything sooner is a send. A minute gives the writer and the approver a window in which
   `DELETE` or reject reliably wins, and keeps every scheduled send well above the alarm's retry interval
@@ -914,6 +1000,13 @@ Every outcome is defined ([Q39](../edge-cases.md)):
 | The composed message over 5 MiB with `large_attachments: refuse` | `failed` | `message_too_large` |
 | A new draft's `thread_id` names a thread that no longer exists | `failed` | `thread_not_found` |
 | Source erased, not visible to the authority, truncated body with raw MIME gone, or an attachment object missing | `failed` | `source_unavailable` |
+| The identity is `deleting` (an erasure or deletion that has not yet reached the mailbox, policy step 1) | `failed`; the erasure then deletes the draft | `identity_not_found` |
+| A reply-all's resolved recipients, or the recipients after a lowered `max_recipients`, over the limit | `failed` | `too_many_recipients` |
+| A provisional agent sign-up's identity and a recipient other than its human (policy step 7a) | `failed` | `policy_denied` |
+| An attachment that the classification rules of this release find risky, though they passed it when the revision was saved | `failed` | `attachment_risky` |
+| The `calendar` payload refused at send (policy step 9a), its organizer or attendee no longer the resolved `From`, or its recipients no longer the attendees (step 13a) | `failed` | `calendar_invalid`, `calendar_too_large`, `calendar_organizer_mismatch`, `calendar_attendee_mismatch` or `calendar_recipient_mismatch` |
+| A later invitation with the same `UID` and a higher `SEQUENCE` was sent since (step 13b) | `failed` | `calendar_sequence_stale` |
+| Any other refusal of the pipeline that is not transient (§6.4) | `failed` | Its error code |
 | Three interrupted attempts | `failed` | `send_interrupted` |
 | Not attempted by `send_at` + 1 hour | `failed` | `send_window_missed` |
 
@@ -949,16 +1042,20 @@ object moved mid-run):
 
    ```sql
    SELECT DISTINCT identity_id, tenant_id FROM draft_index
-   WHERE status = 'scheduled' AND send_at < ?1          -- ?1 = now − 120 000 (2 minutes)
-   ORDER BY send_at LIMIT 100;
+   WHERE status = 'scheduled'
+     AND COALESCE(next_attempt_at, send_at) < ?1        -- ?1 = now − 120 000 (2 minutes)
+   ORDER BY COALESCE(next_attempt_at, send_at) LIMIT 100;
    ```
 
-   and sends each mailbox `MailboxRequest::DraftsDue`, which runs the `drafts` purpose at once and re-arms.
+   `next_attempt_at` is the time of the next attempt of a draft waiting after a transient condition
+   (§6.4), so a draft that is legitimately backing off is not poked, counted or alerted on until that
+   attempt is itself overdue ([Q38](../edge-cases.md)). The watchdog
+   sends each mailbox `MailboxRequest::DraftsDue`, which runs the `drafts` purpose at once and re-arms.
    Each such poke counts `drafts_alarm_missed_total`; a mailbox that answers that it has nothing due
    (the index lagged) is harmless. Tenants that are `erasing` or `erased`, and suspended tenants, are
    skipped (their drafts fail or are erased by their own paths).
 3. **The alert** `drafts_overdue` ([§18](#18-observability)) when any scheduled draft is more than 10
-   minutes past `send_at`.
+   minutes past `COALESCE(next_attempt_at, send_at)`.
 
 A draft found by catch-up still obeys the late limit, so a missed alarm can delay a send by at most an hour
 and never sends it later than that.
@@ -985,42 +1082,59 @@ A draft attachment is one of:
 
 - **Inline**: `{ filename, content_type, content_base64, disposition, content_id }`, counted against the
   7 MiB request body. The handler decodes and checks it as a send does
-  ([Outbound › Attachments and size](outbound.md#attachments-and-size)); the mailbox computes its SHA-256
-  and writes the bytes to R2 at `t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}` before
-  the transaction, under a `meta` marker `draft_att:{attachment_id}` that the transaction deletes. The
-  rolling orphan sweep ([Inbound › Orphan objects](inbound.md#orphan-objects), [I9](../edge-cases.md))
-  also lists `drafts/` keys and deletes an object whose attachment ID is in no draft row and has no marker
-  younger than one hour.
+  ([Outbound › Attachments and size](outbound.md#attachments-and-size)), and sniffs and classifies it as
+  policy step 12 does ([Uploads § 4.1](uploads.md#41-policy-step-12-extended) item 3): a quarantining risk
+  → `422 attachment_risky` with `details.index` and `details.risk`, nothing stored. The mailbox computes
+  its SHA-256 and writes the bytes to R2 at `t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}`
+  before the transaction, under a `meta` marker `draft_att:{attachment_id}` that the transaction deletes.
 - **An upload reference**: `{ upload_id }`, optionally with `filename`, `disposition` and `content_id` to
-  override the upload's (a new `filename` is classified again, as [Uploads § 3.5](uploads.md#35-attaching-an-upload)
-  requires). The upload must belong to the same identity and be `ready` and unexpired; otherwise the
-  uploads page's errors: `404 upload_not_found` (also for another identity's or tenant's upload, so
-  nothing is revealed), `409 upload_not_ready` or `410 upload_expired` ([Q6](../edge-cases.md)). When the
-  revision is saved, the upload's bytes are **copied** into the draft's own object at
-  `t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}`, the copy's SHA-256 checked against
-  the upload's, and the attachment row records `upload_id` for provenance only. The draft never reads the
-  upload again, so deleting or expiring the upload never changes a saved draft or its scheduled send
+  override the upload's. It is checked exactly as policy step 12 checks an upload item
+  ([Uploads § 4.1](uploads.md#41-policy-step-12-extended) item 2): `404 upload_not_found` (also for another
+  identity's or tenant's upload, so nothing is revealed), `409 upload_not_ready`, `422 attachment_risky`
+  for a `rejected` upload (`details.risk`, or `details.reason = "infected"`), `410 upload_expired`, and
+  `422 attachment_risky` when the final filename is risky under `core::attach::classify_name`
+  ([Q6](../edge-cases.md)). The upload is then pinned (Uploads § 6), so neither `DELETE` nor expiry
+  removes it while it is copied, and unpinned on every exit path. When the revision is saved, its bytes are
+  **copied** into the draft's own object at `t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}`,
+  under a `draft_att` marker like an inline part, R2 to R2 through a `FixedLengthStream` of the upload's
+  size with the `sha256` option (`uploads::copy_to`, the copy of submit step 6, never held in memory), and
+  the attachment row records `upload_id` for provenance. The draft never reads the upload again, so
+  deleting or expiring the upload never changes a saved draft or its scheduled send
   ([Uploads § 5.4](uploads.md#54-reuse-copy-never-reference), [Q108](../edge-cases.md), [Q61](../edge-cases.md)).
+
+**Totals at save.** The decoded sizes of all a revision's attachments (inline bytes and uploads' `size`)
+must be at most 26,214,400 bytes, the limit policy step 12 applies to every send
+([Uploads § 4.1](uploads.md#41-policy-step-12-extended) item 4), whatever `large_attachments` says:
+otherwise `413 message_too_large` with `details.reason = "attachments_total"` ([Q5](../edge-cases.md)). A
+draft therefore never holds what its send would refuse, and the copies of one save are bounded by the same
+total as one send's.
+
+**Orphans.** The rules of [Inbound › Orphan objects](inbound.md#orphan-objects) cover `drafts/` keys
+([I9](../edge-cases.md)): the daily maintenance deletes the object of a `draft_att` marker older than one
+hour whose attachment ID is in no draft row, as it does for stale compose markers, and the rolling sweep
+deletes any key older than 15 days that no draft row's `attachments_json` names.
 
 **Scheduling and uploads.** Scheduling does not depend on uploads: every saved revision holds its own
 copies.
 
-**At send**, the bytes are read from the draft's own objects, their SHA-256 compared with the stored value
-(a missing or changed copy, which only a storage fault can cause, fails the send with `source_unavailable`,
-`details.reason = "attachment_missing"`), and handed to composition as base64
-parts, which writes the message's own copies under `t/{tenant_id}/i/{identity_id}/out/{message_id}/a/…`
-with new `att_` IDs ([Outbound › Attachments and size](outbound.md#attachments-and-size)). The draft's
-objects (inline parts and upload copies) are deleted after the accept transaction; an upload's own object
-follows the uploads design's lifecycle. Size is checked at write time only when `large_attachments` is `refuse` and the draft's own parts
-already exceed the composed limit (`413 message_too_large`), so an agent learns before an approver spends
-time; the authoritative check is policy step 17 at send, where `large_attachments: "link"` turns oversized
-attachments into signed links as for any send. A forward's re-attached source attachments are added at
-send, as the forward route adds them.
+**At send**, each attachment goes to `submit` as a stored attachment (§5.1): its object and size, its SHA-256
+and its `upload_id`. Composition reads only the ones it embeds, and step 6 copies each into the message's own
+object under `t/{tenant_id}/i/{identity_id}/out/{message_id}/a/…` with a new `att_` ID, streamed and checked
+against the stored SHA-256 ([Outbound › Attachments and size](outbound.md#attachments-and-size)). A missing or
+changed copy, which only a storage fault can cause, fails the send with `source_unavailable`, `details.reason
+= "attachment_missing"`. The message's `attachments` rows carry the draft attachment's `upload_id`. The
+draft's objects (inline parts and upload copies) are deleted after the accept transaction; an upload's own
+object follows the uploads design's lifecycle. The composed size is checked at write time only when
+`large_attachments` is `refuse` and the draft's own parts already exceed the composed limit (`413
+message_too_large`), so an agent learns before an approver spends time; the authoritative check is policy step
+17 at send, where `large_attachments: "link"` turns oversized attachments into signed links as for any send. A
+forward's re-attached source attachments are added at send, as the forward route adds them.
 
 ## 8. Replies and forwards: the source message
 
-- **At creation**, the source (`in_reply_to` or `forward_of`) must be a message of this mailbox that the
-  creating key can see: never `hidden` or `throttled`; `quarantined` or `screening` only with
+- **At creation**, the creating key must hold `messages:read` (§4.1 step 2), and the source (`in_reply_to`
+  or `forward_of`) must be a message of this mailbox that it can see: never `hidden` or `throttled`;
+  `quarantined` or `screening` only with
   `quarantine:review` ([Screening](screening.md)); otherwise `404 message_not_found`, as the reply and
   forward routes answer ([Q3](../edge-cases.md), [Q45](../edge-cases.md)). The draft's own visibility then
   follows its source (§4.2).
@@ -1028,10 +1142,12 @@ send, as the forward route adds them.
   - erased (an erasure deletes drafts with their source, [§13.2](#132-erasure), so this is a race) →
     `source_unavailable` with `details.reason = "erased"`;
   - `quarantined` or `screening` and the authority lacks `quarantine:review` → `source_unavailable`
-    (`not_visible`);
+    (`not_visible`). Only a fire meets this, with the authority recorded when the draft was scheduled: an
+    API caller without `quarantine:review` cannot see such a draft and gets `404 draft_not_found` first
+    (§4 common rules, [Q44](../edge-cases.md));
   - reply recipients are resolved now with the reply-target rules ([D3](../edge-cases.md),
-    [A10](../edge-cases.md)); a change since the approval changes the digest and asks again
-    ([§5.2](#52-authority-and-approval-at-send-time));
+    [A10](../edge-cases.md)); a change is stored as a new revision (§2.4), which drops the approval and
+    asks again ([§5.2](#52-authority-and-approval-at-send-time));
   - a forward is built now from the source row and its attachment objects, as the forward route builds it
     (transfer note, original text, sanitised HTML, attachments without `risk` when `include_attachments`):
     it snapshots the source at send time, not at creation. When the source's stored body was cut at its
@@ -1074,13 +1190,15 @@ CREATE TABLE IF NOT EXISTS drafts (
   to_json            TEXT NOT NULL DEFAULT '[]',
   cc_json            TEXT NOT NULL DEFAULT '[]',
   bcc_json           TEXT NOT NULL DEFAULT '[]',
-  resolved_json      TEXT,                                 -- reply kinds: {to, cc} as resolved for the last digest
+  resolved_json      TEXT,                                 -- reply kinds: {to, cc} as resolved for the last digest;
+                                                           -- rewritten with a new revision when it changes (§2.4)
   subject            TEXT,
   text               TEXT,                                 -- ≤ 524 288 bytes
   html               TEXT,                                 -- ≤ 1 048 576 bytes, as written
   headers_json       TEXT NOT NULL DEFAULT '{}',
   attachments_json   TEXT NOT NULL DEFAULT '[]',           -- [{id, filename, content_type, disposition,
-                                                           --   content_id, size, sha256, source, r2_key, upload_id?}]
+                                                           --   content_id, size, sha256, sniffed_type, source, r2_key,
+                                                           --   upload_id?}]
   include_attachments INTEGER,                             -- forward only
   calendar_json      TEXT,                                 -- new and reply drafts: the calendar field of the send
                                                            -- routes ({ics, attach_copy}, Calendar invitations § 5.1),
@@ -1100,6 +1218,8 @@ CREATE TABLE IF NOT EXISTS drafts (
   sent_at            INTEGER,
   created_by_key_id  TEXT,
   updated_by_key_id  TEXT,
+  content_by_key_id  TEXT,                                 -- the key that last changed the content: self-approval
+                                                           -- and the writer rule read it (§2.1)
   created_at         INTEGER NOT NULL,
   updated_at         INTEGER NOT NULL
 );
@@ -1123,7 +1243,7 @@ CREATE TABLE IF NOT EXISTS draft_sync (                     -- index rows waitin
 
 The row stays within the 1,900,000-byte budget of [Inbound › Storage caps](inbound.md#storage-caps):
 `text` and `html` are bounded at write (§4.1), and every list is bounded (49 recipients per list, 32
-attachments, 64 labels, 16 metadata keys, 16 KB of headers). The `drafts` table has 42 columns.
+attachments, 64 labels, 16 metadata keys, 16 KB of headers). The `drafts` table has 43 columns.
 
 Changes to existing mailbox tables:
 
@@ -1157,14 +1277,16 @@ CREATE TABLE draft_index (
   recipient_count     INTEGER NOT NULL,
   attachment_count    INTEGER NOT NULL,
   send_at             INTEGER,
+  next_attempt_at     INTEGER,                             -- a scheduled draft waiting after a transient condition
   status_at           INTEGER NOT NULL,
   failure_reason      TEXT,
   requested_by_key_id TEXT,
+  source_held         INTEGER NOT NULL DEFAULT 0,          -- 1 while the source is quarantined or in screening
   updated_at          INTEGER NOT NULL
 );
 CREATE INDEX draft_index_tenant ON draft_index(tenant_id, status, status_at, draft_id);
 CREATE INDEX draft_index_identity ON draft_index(identity_id, status);
-CREATE INDEX draft_index_due ON draft_index(send_at) WHERE status = 'scheduled';
+CREATE INDEX draft_index_due ON draft_index(COALESCE(next_attempt_at, send_at)) WHERE status = 'scheduled';
 ```
 
 It goes into `0001_init.sql` while nothing is built, as the service ledger's table did (M27); otherwise into
@@ -1175,14 +1297,17 @@ the next D1 migration, which only adds it.
 1. **Inside the draft's transaction.** Every transaction that changes a draft increments its
    `index_version` and, when the draft enters, leaves or changes inside the indexed statuses, writes the
    `draft_sync` row for it (`INSERT … ON CONFLICT (draft_id) DO UPDATE`, so only the newest state waits),
-   with `op = 'upsert'` and the row, or `op = 'delete'`, and sets `alarm:draft_index = now`.
+   with `op = 'upsert'` and the row, or `op = 'delete'`, and sets `alarm:draft_index = now`. The
+   transaction that moves a message into or out of `quarantined` or `screening` (a release, a screening
+   verdict) does the same for every indexed draft whose `source_message_id` is that message, so
+   `source_held` follows its source (§4.8).
 2. **The alarm writes D1.** Only the alarm writes the index, one run at a time, so writes for one draft
    never overtake each other. It reads up to 100 `draft_sync` rows, then one D1 batch:
 
    ```sql
    INSERT INTO draft_index (draft_id, tenant_id, identity_id, status, version, revision, draft_kind,
-     approval_reason, recipient_count, attachment_count, send_at, status_at, failure_reason,
-     requested_by_key_id, updated_at)
+     approval_reason, recipient_count, attachment_count, send_at, next_attempt_at, status_at, failure_reason,
+     requested_by_key_id, source_held, updated_at)
    VALUES (…)
    ON CONFLICT (draft_id) DO UPDATE SET status = excluded.status, version = excluded.version, …
    WHERE excluded.version > draft_index.version;          -- an older state never replaces a newer one
@@ -1201,7 +1326,7 @@ the next D1 migration, which only adds it.
 
 | Key | Holds | Deleted |
 |---|---|---|
-| `t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}` | An inline draft attachment | When it is removed by `PATCH`, when the draft is sent or canceled (after commit), by erasure and by the retention purge of its draft; the orphan sweep removes uncommitted ones. Under the identity's prefix, so identity and tenant erasure sweep it ([Privacy §6.5](privacy.md#65-identity-scope-fr-idn-4), [§6.6](privacy.md#66-tenant-scope)), and the R2 backup copy follows `BLOBS` |
+| `t/{tenant_id}/i/{identity_id}/drafts/{draft_id}/a/{attachment_id}` | A draft attachment: an inline part, or the copy of an upload | When it is removed by `PATCH`, when the draft is sent or canceled (after commit; for a held draft, when the hold ends), by erasure and by the retention purge of its draft; the orphan sweep removes uncommitted ones. Under the identity's prefix, so identity and tenant erasure sweep it ([Privacy §6.5](privacy.md#65-identity-scope-fr-idn-4), [§6.6](privacy.md#66-tenant-scope)), and the R2 backup copy follows `BLOBS` |
 
 ## 10. Concurrency and idempotency
 
@@ -1237,7 +1362,7 @@ the next D1 migration, which only adds it.
 
 - **Key levels.** `drafts:read` and `drafts:write` at every level (an identity key only for its own
   identity); `drafts:approve` only for platform, partner and tenant keys; the tenant queue for platform,
-  partner (its own tenants) and tenant keys. The nine routes join `it::security::cross_tenant_matrix`: a
+  partner (its own tenants) and tenant keys. The ten routes join `it::security::cross_tenant_matrix`: a
   draft of another tenant, or of a tenant another partner created, answers `404 draft_not_found` exactly
   as a missing one ([Q53](../edge-cases.md)).
 - **Approval is a decision reserved for people** on Pylota Mail Cloud (`PM_QUARANTINE_KEY_RELEASE=off`),
@@ -1247,7 +1372,7 @@ the next D1 migration, which only adds it.
   `auth::people::key_may_decide` gains a `Decision` argument; for `ApproveDraft` it reads
   `drafts.key_approval` where the other decisions read `quarantine.key_release`, and, as for those, the
   opt-in admits only a platform key or the tenant's own partner key, never a tenant key.
-- **No self-approval** by the key that wrote the revision; an identity key cannot approve at all.
+- **No self-approval** by the key that wrote the revision's content; an identity key cannot approve at all.
 - **Approval binds to content** (§2.4): an approval cannot be moved to other content, other recipients
   (reply recipients included) or another sender identity.
 - **Untrusted content.** Draft text is agent-written. The console shows it escaped or in the sandboxed
@@ -1270,10 +1395,10 @@ step 5, which passes the tenant's `retention.message_days`). Pylota Mail choices
 |---|---|---|
 | `pending_approval` | Becomes `rejected` with reason `expired` 7 days after `approval.requested_at`, or at `send_at` + 1 hour when that is later (T10, `draft.rejected`); checked by the `drafts` alarm purpose | An undecided request should not wait forever. Seven days matches the service ledger's pending lifetime; a draft scheduled further ahead waits for its own time |
 | `editing`, `approved`, `failed`, `rejected` | Deleted 30 days after `updated_at` | Thirty days equals the idempotency window and the default `retention.events_days`, so a client replaying a request or an event within those windows still finds the draft. An abandoned draft's content is not kept beyond that |
-| `sent`, `canceled` | Content cleared at the transition; the record deleted 30 days after `sent_at` or the cancel | The message holds the content; the record links the message to its approval for a month, and the message keeps `draft_id` after that |
-| `scheduled` | Never deleted by retention before its fire; the late limit ends it | – |
-| Any | When `retention.message_days` is set and shorter than 30 days, or the identity's `retention.message_hours` ([Parity additions](parity-additions.md)) is shorter still, the shortest replaces the 30 days | A draft must not outlive the tenant's or the identity's own retention of mail |
-| Any, in a thread under an active legal hold | Kept while the hold lasts ([Privacy §8](privacy.md#8-legal-holds)) | FR-PRV-4 |
+| `sent`, `canceled` | Content cleared at the transition (for a held draft canceled by `DELETE`, at the first `Hygiene` run after the hold ends, [§4.4](#44-delete)); the record deleted 30 days after `sent_at` or the cancel | The message holds the content; the record links the message to its approval for a month, and the message keeps `draft_id` after that |
+| `scheduled` | Never deleted by retention before its fire; the late limit ends it. The `send_at` window keeps the fire inside the retention in force when it was scheduled ([§6.1](#61-the-window)); a retention shortened after that does not cancel the send, and the draft is deleted at the first run after its fire | A scheduled send is mail whose purpose is still ahead; cancelling it silently would lose a decision a person or the writer made |
+| Any other | When `retention.message_days` is set and shorter than 30 days, or the identity's `retention.message_hours` ([Parity additions § 7.3](parity-additions.md#73-what-expires)) is shorter still, the shortest replaces the 30 days of the rows above. Per-identity expiry deletes such drafts itself, in the same slices as messages and with the same hold check | A draft must not outlive the tenant's or the identity's own retention of mail |
+| Any, in a thread under an active legal hold | Kept while the hold lasts ([Privacy §8](privacy.md#8-legal-holds)), by retention, per-identity expiry and the writer alike: a patch of its content, labels or metadata answers `423 legal_hold`, and `DELETE` cancels it without clearing it ([§4.3](#43-update), [§4.4](#44-delete)) | FR-PRV-4 |
 
 Each run that deletes drafts adds `drafts_deleted` to the step's `retention.purge` audit row. A `new`
 draft without `thread_id` belongs to no thread, so no legal hold covers it.
@@ -1330,7 +1455,7 @@ records no idempotency row, so after an upgrade an explicit resend with the same
 | Pending approval | 7 days after it was requested, or `send_at` + 1 hour when later | Pylota Mail |
 | Draft retention | 30 days after the last change (or `retention.message_days` when shorter); `sent` and `canceled` records 30 days | Pylota Mail |
 | `text`, `html` | 524,288 and 1,048,576 bytes | Pylota Mail ([Inbound › Storage caps](inbound.md#storage-caps)) |
-| Attachments | 32 per draft; inline bytes within the 7 MiB request body | Pylota Mail |
+| Attachments | 32 per draft; inline bytes within the 7 MiB request body; 26,214,400 decoded bytes in total, as for a send | Pylota Mail |
 | Recipients, subject, headers, labels, metadata | As for sends | [Limits › Mail](../../reference/limits.md#mail) |
 | `note`, `reason` | 500 characters | Pylota Mail |
 | `on_behalf_of` | 1–128 printable ASCII characters, no `@` | Pylota Mail |
@@ -1359,7 +1484,7 @@ text. So an endpoint that subscribes to them needs only `webhooks:manage`: the r
 
 | Event | When | `data` |
 |---|---|---|
-| `draft.approval_requested` | A draft entered `pending_approval`, or was edited while in it, or a send found approval needed (T1, T2, T3, T11, T12, §5.2) | `draft`, `reason` (`requested`, `new_recipients`, `external`, `always`), `requested_by_key_id` |
+| `draft.approval_requested` | A draft entered `pending_approval`, or was edited while in it, or a send found approval needed, or a re-resolution changed its recipients (T1, T2, T3, T11, T12, §2.4, §5.2) | `draft`, `reason` (`requested`, `new_recipients`, `external`, `always`), `requested_by_key_id` |
 | `draft.approved` | An approver approved a revision (T6, T7, T8) | `draft`, `send` (boolean), `approved_by_key_id` or `approved_by_user_id` (the other `null`), `on_behalf_of` |
 | `draft.rejected` | An approver rejected it, or its approval request expired (T9, T10) | `draft`, `reason` (`operator` or `expired`), `rejected_by_key_id` or `rejected_by_user_id`, `on_behalf_of` |
 | `draft.sent` | The draft became a message (T4, T7, T11, T14) | `draft`, `message_id`, `thread_id`, `message_status` (`queued`, or `suppressed` when every recipient was suppressed) |
@@ -1428,7 +1553,7 @@ holds no content. Owner, admin and member sessions gain `drafts:read`; owner and
 
 | Tool | REST endpoint | Permission | Rate limit |
 |---|---|---|---|
-| `mail_create_draft` | `POST /v1/identities/{id}/drafts` (`idempotency_key` optional, sent as `Idempotency-Key`) | `drafts:write` | – (`RL_API` only) |
+| `mail_create_draft` | `POST /v1/identities/{id}/drafts` (`idempotency_key` optional, sent as `Idempotency-Key`) | `drafts:write` (and `messages:read` with `in_reply_to` or `forward_of`) | – (`RL_API` only) |
 | `mail_update_draft` | `PATCH …/drafts/{draft_id}` (`etag` argument sent as `If-Match`) | `drafts:write` | – |
 | `mail_list_drafts` | `GET /v1/identities/{id}/drafts` | `drafts:read` | – |
 | `mail_get_draft` | `GET …/drafts/{draft_id}` | `drafts:read` | – |
@@ -1481,11 +1606,13 @@ pmail drafts reject <draft_id> --identity <identity> --reason <text> [--revision
 pmail drafts delete <draft_id> --identity <identity> [--yes]
 ```
 
-`pmail drafts send` without `--idempotency-key` derives one from the draft ID and revision
-(`cli:{draft_id}:{revision}`), so re-running the same command never sends twice. `list --tenant` reads the
-tenant's queue. Exit codes follow [CLI › Exit codes](../../reference/cli.md): `approve` where people decide
-exits 4 (`403 permission_denied`, `person_required`); a stale revision exits 6 (`409`); the draft limit
-exits 7 (`422`).
+`pmail drafts send` without `--idempotency-key` reads the draft and derives a key from its ID, revision and
+approval state (`cli:{draft_id}:{revision}:{approval.state}`), so re-running the same command never sends
+twice, and re-running it after a person approved the revision sends it: a run answered `pending_approval`
+recorded its key under the state `none` or `requested`, and the approval changes the state to `approved`.
+`list --tenant` reads the tenant's queue. Exit codes follow [CLI › Exit codes](../../reference/cli.md):
+`approve` where people decide exits 4 (`403 permission_denied`, `person_required`); a stale revision exits
+6 (`409`); the draft limit exits 7 (`422`).
 
 ## 18. Observability
 
@@ -1508,7 +1635,7 @@ exits 7 (`422`).
 
 | Alert | Class | Condition | Severity | Runbook |
 |---|---|---|---|---|
-| `drafts_overdue` | B | The watchdog finds a `scheduled` draft more than 10 minutes past `send_at` in two consecutive minutes | page | Drafts overdue (below) |
+| `drafts_overdue` | B | The watchdog finds a `scheduled` draft more than 10 minutes past its due time (`next_attempt_at` while it waits after a transient condition, else `send_at`) in two consecutive minutes | page | Drafts overdue (below) |
 | `draft_index_stuck` | B | A mailbox reports a `draft_sync` row older than 15 minutes (the size check of its next write reports it, as `mailbox_size` is reported) | ticket | Check D1 health and `draft_index_write_failures_total`; the rows retry with back-off |
 | `draft_send_interrupted` | A | `draft_send_failures_total{reason=send_interrupted}` > 0 over 1 hour | ticket | Read the logs of the claims that expired (`draft_claims_expired_total`); a repeating crash in composition is a bug |
 
@@ -1528,7 +1655,7 @@ kind and three permissions:
 
 | Pylota agent or path | Key | Draft permissions | Why |
 |---|---|---|---|
-| The public-webchat coordinator, and any path whose input is untrusted (a renter's chat turn, mail-steered specialists on first contact) | **K8**, a new identity key per operator identity that needs it, minted by K1 | `drafts:write` only; no `messages:send`, no `messages:read` | It can write mail and can never send it, so every message it writes waits for an operator (pattern 2). Without `messages:read` it cannot create reply drafts to mail it cannot read (`404 message_not_found`) or read the mailbox |
+| The public-webchat coordinator, and any path whose input is untrusted (a renter's chat turn, mail-steered specialists on first contact) | **K8**, a new identity key per operator identity that needs it, minted by K1 | `drafts:write` only; no `messages:send`, no `messages:read` | It can write mail and can never send it, so every message it writes waits for an operator (pattern 2), even if a key that holds `messages:send` sends the draft (the writer's rule of [§3.1](#31-draftsrequire_approval)). Without `messages:read` it can neither read the mailbox nor create a reply or forward draft (`403 permission_denied`, [§4.1](#41-create)) |
 | Specialists that send for an operator (K3) | K3 | add `drafts:write` (which includes the `drafts:read` a draft send needs) | Under the operator tenant's `drafts.require_approval: "new_recipients"`, a direct send to a new address is refused with `403 approval_required`; the capability route then creates the same message as a draft and sends it with K3, which leaves it `pending_approval` (pattern 1, [§3.5](#35-the-two-approval-patterns)) |
 | Pylota's server, for operator decisions | K1 (partner key) | add `drafts:write` and `drafts:approve` (it already holds `messages:send`) | Reads drafts to show them in Pylota's app and approves or rejects for the operator. It needs `drafts:write` as well because a key it mints may hold only permissions it holds itself, and it mints K3 and K8 |
 
@@ -1604,9 +1731,10 @@ send":
   update and delete through the API (`drafts:read`, `drafts:write`). A create with a `client_id` the
   identity has already used **must** return the existing draft, or `409 client_id_conflict` if the
   request differs. A draft's kind (`new`, `reply`, `reply_all`, `forward`) **must** be fixed at creation,
-  and a field its kind does not take **must** be refused. Reply and forward drafts **must** name a source
-  message the creating key can see, never `hidden` or `throttled` mail, and `quarantined` or `screening`
-  mail only with `quarantine:review` ([Drafts](drafts.md)).
+  and a field its kind does not take **must** be refused. Reply and forward drafts **must** be created only
+  by a key holding `messages:read`, and **must** name a source message the creating key can see, never
+  `hidden` or `throttled` mail, and `quarantined` or `screening` mail only with `quarantine:review`
+  ([Drafts](drafts.md)).
 - **FR-DRF-2** Every draft **must** carry a `revision` and an `etag`. An update with a stale `If-Match`,
   and an approval of a revision or content digest that is no longer current, **must** fail with
   `409 draft_revision_mismatch` and change nothing. A draft being sent **must** refuse updates and deletes
@@ -1619,17 +1747,19 @@ send":
   the message **must** record `draft_id`.
 - **FR-DRF-4** Tenant policy `drafts.require_approval` (`never`, `new_recipients`, `external`, `always`)
   **must** decide when a send needs approval, with `new_recipients` meaning a recipient that is neither
-  known (FR-OUT-13 rules 1–3) nor internal to the workspace and `external` meaning a recipient that is
-  not internal, and an identity's `send_policy.require_approval` **may** only make it stricter. It
+  known (FR-OUT-13 rules 1–3 and 5) nor internal to the workspace and `external` meaning a recipient that
+  is not internal, and an identity's `send_policy.require_approval` **may** only make it stricter. It
   **must** apply to every send of the tenant's identities except the system identity's: an ordinary send,
   reply, reply-all or forward that needs approval **must** be refused with `403 approval_required` before
-  anything is stored. It is a guard field (FR-TEN-4).
+  anything is stored. It is a guard field (FR-TEN-4). Whatever the level, a send of a draft whose writer
+  requested approval, or whose current content was written by a key without `messages:send`, **must**
+  need approval.
 - **FR-DRF-5** Approving and rejecting **must** need `drafts:approve`, which identity keys **must never**
   hold; approving with `send: true` **must** also need `messages:send`. On a deployment where only people
   may release quarantine (FR-CON-6), an API key **must** approve only on a tenant whose policy has
   `drafts.key_approval: true`, which only a platform key or the tenant's own partner key can set, and
   then only if it is a platform key or that partner key, never a tenant key. A key
-  **must not** approve a revision it wrote. An approval **must** bind to the digest of the content
+  **must not** approve content it wrote. An approval **must** bind to the digest of the content
   approved (sender identity, recipients as resolved, subject, bodies, attachments and their hashes,
   headers, kind, source; not `send_at`), and any change of that content **must** return the draft to
   `pending_approval` and emit `draft.approval_requested` again. The approval **must** be audit-logged with
@@ -1647,8 +1777,9 @@ send":
 - **FR-DRF-8** Draft attachments **must** be given inline (within the 7 MiB request body) or as upload
   references to the same identity's `ready`, unexpired uploads, whose bytes **must** be copied into the
   draft's own objects when the revision is saved, so that deleting or expiring the upload never changes the
-  draft; at send the draft's copies **must** be copied into the message's own attachment objects with their
-  SHA-256 checked.
+  draft; a revision's attachments **must** pass the classification and the 26,214,400-byte total of a send
+  when it is saved; at send the draft's copies **must** be copied into the message's own attachment objects
+  with their SHA-256 checked, without being held in memory, and keep their `upload_id`.
 - **FR-DRF-9** A forward draft **must** snapshot its source at send time, and fail with
   `409 source_unavailable` when the source was erased, is no longer visible to the sender, or cannot be
   reproduced in full (a truncated body whose raw MIME has expired, or a missing attachment object). Reply
@@ -1684,32 +1815,32 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 |---|---|---|---|---|
 | Q1 | A create repeats a `client_id`, also two creates racing with it | Same body: `200` with the existing draft and `Idempotent-Replayed: true`; another body: `409 client_id_conflict` with `details.draft_id`; two racing creates make one draft. A `client_id` with `@` is `400 invalid_request` | S+I | `it::drafts::q1_client_id_idempotent_create` |
 | Q2 | `in_reply_to` with `forward_of`; `reply_all` without `in_reply_to`; a reply draft with `to`, `cc`, `bcc`, `subject` or `from_address`; a forward with `subject`; `kind: marketing` on a reply; `calendar` on a reply-all or forward draft | `400 invalid_request` with `details.errors[].path`; nothing stored | S | `core::drafts::kind_field_rules` |
-| Q3 | A reply or forward draft whose source is `hidden`, `throttled`, absent, another identity's, or `quarantined` or `screening` without `quarantine:review`; a `thread_id` not in this mailbox; reading a draft of a quarantined source without `quarantine:review` | `404 message_not_found` or `404 thread_not_found` at create or update; such a draft is listed and read only with `quarantine:review`, otherwise `404 draft_not_found` | S | `it::drafts::q3_source_visibility` |
+| Q3 | A reply or forward draft created by a key without `messages:read`; a reply or forward draft whose source is `hidden`, `throttled`, absent, another identity's, or `quarantined` or `screening` without `quarantine:review`; a `thread_id` not in this mailbox; reading, listing (also in the tenant's queue), changing, sending or deciding a draft of a quarantined source without `quarantine:review` | `403 permission_denied` naming `messages:read`; `404 message_not_found` or `404 thread_not_found` at create or update; such a draft is listed (in the identity's list and the tenant's queue) and reached only with `quarantine:review`, otherwise it is absent from both lists and every route answers `404 draft_not_found` | S | `it::drafts::q3_source_visibility` |
 | Q4 | A `PATCH` sends `in_reply_to`, `forward_of` or `reply_all` | `400 invalid_request`: the kind is fixed at creation | S | `core::drafts::kind_field_rules` |
-| Q5 | A draft body over 7 MiB; `text` over 524,288 bytes or `html` over 1,048,576; 33 attachments; bad base64; a header outside the allowed set; more recipients than `max_recipients`; own parts over the composed limit with `large_attachments: refuse` | `413 payload_too_large`; `400 invalid_request`; `400 header_not_allowed`; `400 too_many_recipients`; `413 message_too_large`; nothing stored and no R2 object left | S | `it::drafts::q5_oversize_and_bounds` |
-| Q6 | An upload reference that does not exist, belongs to another identity or tenant, is not yet `ready` or has expired | `404 upload_not_found` (also for another identity's or tenant's upload, so nothing is revealed), `409 upload_not_ready` or `410 upload_expired`; nothing stored | S | `it::drafts::q6_upload_references` |
+| Q5 | A draft body over 7 MiB; `text` over 524,288 bytes or `html` over 1,048,576; 33 attachments; bad base64; a header outside the allowed set; more recipients than `max_recipients`; own parts over the composed limit with `large_attachments: refuse`; attachments over 26,214,400 decoded bytes in total, also with `large_attachments: link`; an inline part with a quarantining risk | `413 payload_too_large`; `400 invalid_request`; `400 header_not_allowed`; `400 too_many_recipients`; `413 message_too_large`; `413 message_too_large` (`attachments_total`); `422 attachment_risky` with `details.index` and `details.risk`; nothing stored and no R2 object left | S | `it::drafts::q5_oversize_and_bounds` |
+| Q6 | An upload reference that does not exist, belongs to another identity or tenant, is not yet `ready` or has expired; a `rejected` upload; an upload renamed to a risky filename; a `DELETE` of the upload while the save copies it | `404 upload_not_found` (also for another identity's or tenant's upload, so nothing is revealed), `409 upload_not_ready` or `410 upload_expired`; `422 attachment_risky` (`details.risk`, or `details.reason = "infected"`) for the rejected and the renamed upload; nothing stored; the `DELETE` gets `409 upload_in_use` until the save ends | S | `it::drafts::q6_upload_references` |
 | Q7 | `send_at` 59 seconds ahead, 90 days and 1 ms ahead, in the past, unparseable, or with a non-UTC offset | The first three and the fourth: `400 invalid_request`, path `send_at`, `details.reason` `too_soon` or `too_far` where it applies; an offset is converted to UTC and accepted inside the window | S | `core::drafts::etag_and_send_at`, `it::drafts::q5_oversize_and_bounds` |
 | Q8 | The 1,001st draft of an identity (not counting `sent` and `canceled`), also two creates racing for the last place | `422 draft_limit_reached` with `details.limit`; exactly one of the racing creates succeeds | S | `it::drafts::q8_draft_limit` |
 | Q9 | Two writers edit one draft: both with the same `If-Match`, and both without | Same `If-Match`: one `200`, the other `409 draft_revision_mismatch` with `details.current_revision` and `current_etag`, nothing written; without: both succeed, `revision` rises by two, the second merged onto the first | S+I | `it::drafts::q9_if_match_concurrency` |
 | Q10 | An approval names a `revision` or `digest`, or a send names a `revision`, that is no longer current | `409 draft_revision_mismatch` (`details.reason = "digest"` for a digest); no approval recorded, nothing sent, no event | S+I | `it::drafts::q9_if_match_concurrency`, `it::drafts::q19_approval_binds_content` |
 | Q11 | `PATCH`, `DELETE` or reject while the draft is `sending` | `409 draft_not_editable` with `details.status = "sending"` and `retryable: true`; after the send it answers `409` (`sent`) | S | `it::drafts::q11_sending_not_editable` |
 | Q12 | Two sends of one draft at once: an API send and its alarm fire, two API sends with different keys, two approvals with `send: true` (a person and a key) | Exactly one message; the other answers `409 draft_not_sendable` (`retryable: true`) or `200` with no second approval event, or the alarm skips it | S | `it::drafts::q12_concurrent_sends_one_message` |
-| Q13 | `POST …/send` repeated with the same key (same body, another body, while in flight), a key reused on another draft, or a key first used for `POST …/messages` | Replay of the current draft with `deduplicated: true`; `409 idempotency_conflict` (with `details.original_draft_id` for another draft or operation); `409 request_in_progress` | S | `it::drafts::q13_send_idempotency` |
+| Q13 | `POST …/send` repeated with the same key (same body, another body, while in flight), a key reused on another draft, or a key first used for `POST …/messages`; a client that sends `Idempotency-Key: draft:{draft_id}:{revision}` on `POST …/messages` before that revision is sent | Replay of the current draft with `deduplicated: true`; `409 idempotency_conflict` (with `details.original_draft_id` for another draft or operation); `409 request_in_progress`; the draft's own send is untouched: its internal key hashes in a namespace no client key reaches, so it neither conflicts nor replays | S | `it::drafts::q13_send_idempotency` |
 | Q14 | `POST …/send` with a new key on a `sent` draft | `409 draft_not_sendable` with `details.message_id`; no second message | S+I | `it::drafts::q13_send_idempotency` |
 | Q15 | A key is minted at identity level with `drafts:approve` | `400 invalid_request` with `details.reason = "permission_not_allowed_for_level"` | S | `it::drafts::q15_identity_key_cannot_approve` |
 | Q16 | An API key approves where only people may (`PM_QUARANTINE_KEY_RELEASE=off`, `drafts.key_approval` false), also on a tenant with only `quarantine.key_release: true` | `403 permission_denied` with `details.reason = "person_required"`; rejecting still works; with `drafts.key_approval: true` a platform key and the tenant's own partner key approve, and a tenant key still gets `403 permission_denied` (`person_required`); with `PM_QUARANTINE_KEY_RELEASE=on` any key with `drafts:approve` approves; a console owner approves after re-authentication | S | `it::drafts::q16_key_approval_rule` |
 | Q17 | A tenant key with `policy:write`, or a console admin, sets `drafts.key_approval`; another partner's key sets it | `403 scope_denied` with `details.reason = "not_writable"`; the other partner's key gets `404 tenant_not_found`; the tenant's own partner key and a platform key set it | S | `it::drafts::q16_key_approval_rule` |
 | Q18 | A tenant key loosens `drafts.require_approval` (`always` → `never`) where only people may decide; an identity key lowers its own `send_policy.require_approval`; a tenant at `never` with an identity override `new_recipients` | `403 permission_denied` (`person_required`, `details.field`); `403 scope_denied` (`details.field = "send_policy.require_approval"`); tightening is always accepted; the effective level is the stricter, so the identity needs approval for new recipients | S | `it::drafts::q18_require_approval_guard` |
 | Q19 | The writer changes the content of an approved, scheduled or pending draft; or changes only `labels`, `metadata` or `send_at` | Content: the approval and send request are dropped, the draft is `pending_approval` (or `editing` when it never had an approval or request), `draft.approval_requested` with the new revision, and a scheduled draft leaves the schedule; labels, metadata or `send_at` only: the approval and schedule stay | S | `core::drafts::digest_canonical`, `it::drafts::q19_approval_binds_content` |
-| Q20 | The key that wrote the current revision approves it | `403 permission_denied` with `details.reason = "self_approval"`; nothing recorded | S | `it::drafts::q20_approver_rules` |
+| Q20 | The key that wrote the current content approves it, also after another key changed only its labels; a key that changed only the labels of content another key wrote approves it | `403 permission_denied` with `details.reason = "self_approval"` and nothing recorded for the first; the second approval is recorded (`content_by_key_id` decides, not `updated_by_key_id`) | S | `it::drafts::q20_approver_rules` |
 | Q21 | Approve with `send: true` by a key without `messages:send` | `403 permission_denied` with `details.required = ["messages:send"]`; nothing recorded; the same key may approve with `send: false` | S | `it::drafts::q20_approver_rules` |
-| Q22 | Approve or reject a draft that is `sent`, `canceled`, `sending`, `rejected`, or already decided the same way; two approvals of one revision race | `409 draft_not_pending` with `details.status` (reject while `sending`: `409 draft_not_editable`, retryable); a repeated decision answers `200` with no second event; of two racing approvals one records the approval | S | `core::drafts::state_table`, `it::drafts::q22_decision_states` |
+| Q22 | Approve or reject a draft that is `sent`, `canceled`, `sending`, `rejected`, or already decided the same way; two approvals of one revision race; approve a `scheduled` draft that has no approval, with a stale `revision`, and one that has | `409 draft_not_pending` with `details.status` (reject while `sending`: `409 draft_not_editable`, retryable); a repeated decision answers `200` with no second event; of two racing approvals one records the approval; on a `scheduled` draft the stale `revision` gets `409 draft_revision_mismatch`, a missing approval is recorded with `draft.approved` and the draft stays `scheduled`, and an approval it holds at this revision answers `200` with no second event | S | `core::drafts::state_table`, `it::drafts::q22_decision_states` |
 | Q23 | Nobody decides a pending draft for 7 days (or until `send_at` + 1 hour, when later) | `rejected` with reason `expired` and `draft.rejected` (`reason: "expired"`), set by the `drafts` alarm purpose; a later approve gets `409 draft_not_pending` | S | `it::drafts::q23_pending_expiry_and_late_approval` |
 | Q24 | `on_behalf_of` with `@`, over 128 characters, or with a byte outside printable ASCII; `on_behalf_of` sent by a console form | `400 invalid_request`; a valid value is stored in the approval, the audit row and `draft.approved`; the console records `actor_user_id` instead | S+I | `core::drafts::on_behalf_of_and_client_id`, `it::drafts::q24_on_behalf_of_audit` |
-| Q25 | A reply draft's recipients resolve differently at send than at approval (the `Reply-To` became a known contact, D3) | The digest no longer matches: the draft returns to `pending_approval` with `draft.approval_requested`; nothing is sent to the new recipient without a new approval | S | `it::drafts::q25_reply_recipients_changed` |
+| Q25 | A reply draft's recipients resolve differently at a `GET`, an approve, a send or a fire than when its revision was saved (the `Reply-To` became a known contact, D3); an approver then passes the digest it read before the change, or only the revision | The mailbox stores the new resolution as a new revision with a new digest, drops the approval and, for a pending or approved draft, makes it `pending_approval` with `draft.approval_requested`; both approvals get `409 draft_revision_mismatch`; a `GET` shows the new digest, and an approval of it succeeds; nothing is sent to the new recipient without a new approval | S | `it::drafts::q25_reply_recipients_changed` |
 | Q26 | Before a scheduled draft fires: the approving key is revoked, the approving person is removed or demoted, `drafts.key_approval` is turned off after a key approval; or the scheduling key loses `messages:send` while no approval is needed | Approval needed and no longer valid: back to `pending_approval` with `draft.approval_requested`, never sent; approval not needed and the authority invalid: `failed` with `authority_revoked` | S | `it::drafts::q26_approver_or_authority_revoked` |
 | Q27 | An agent with `messages:send` sends directly (`POST …/messages`, reply, reply-all, forward, or a dry run) where the policy needs approval for the recipients | `403 approval_required` with `details.reason` and `details.recipients`; nothing stored, no hold, no idempotency record; the same request made as a draft and sent waits for approval; the system identity's sends are never refused; at `never` nothing changes | S+I | `it::drafts::q27_direct_send_approval_required` |
-| Q28 | Recipient facts for the levels: an address of another identity of the same tenant; an address at the tenant's verified own domain; a subdomain of it; another workspace's address on the shared platform domain; a known external address; a `bcc` recipient | Internal, internal, external, external; known external needs approval at `external` and not at `new_recipients`; `bcc` counts like `to`; each level needs approval in a superset of the cases of the one below | S | `core::drafts::approval_levels`, `it::drafts::q27_direct_send_approval_required` |
+| Q28 | Recipient facts for the levels: an address of another identity of the same tenant; an address at the tenant's verified own domain; a subdomain of it; another workspace's address on the shared platform domain; a known external address; a `bcc` recipient; the organizer of a verified invitation answered by a calendar reply, never written to before | Internal, internal, external, external; known external needs approval at `external` and not at `new_recipients`; `bcc` counts like `to`; the organizer is known by rule 5, so the calendar reply needs approval at `external` and not at `new_recipients`; each level needs approval in a superset of the cases of the one below | S | `core::drafts::approval_levels`, `it::drafts::q27_direct_send_approval_required` |
 | Q29 | An approved draft to an address the identity never wrote to, with `require_known_recipient: true`; the same address on the suppression list or a send-block entry | Unknown but approved: delivered (rule 4), and afterwards known by `outbound_count`; suppressed or blocked: the delivery is `suppressed` despite the approval | S | `it::drafts::q29_approved_recipients_known` |
 | Q30 | A draft is sent now | `202`; the draft is `sent` with `message_id` in the same transaction as the message; its content is cleared; the message carries the draft's labels plus `labels_add` minus `labels_remove`, its metadata and `draft_id`; `draft.sent` | S | `it::drafts::q30_send_now_record_and_labels` |
 | Q31 | `POST …/send` is refused by the pipeline (paused identity, `402`, daily cap, `thread_busy`, domain not ready) | The send's own error; the draft stays as it was; no idempotency record; after the condition clears the same key sends once | S+I | `it::drafts::q31_sync_refusal_leaves_draft` |
@@ -1719,17 +1850,17 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 | Q35 | Many drafts scheduled on one identity: equal times, rescheduling one earlier, cancelling the earliest | One alarm at the earliest due time; drafts fire in `send_at`, `id` order, ten per run, then the alarm re-arms at once; rescheduling earlier re-arms earlier; cancelling the earliest re-arms to the next | S | `it::drafts::q35_alarm_multiplexing` |
 | Q36 | The alarm handler runs twice for one fire, or concurrently with an API request on the same draft | At most one message (the claim and the internal key) | S | `it::drafts::q12_concurrent_sends_one_message` |
 | Q37 | The mailbox's alarm is lost (its six retries exhausted, or never re-armed) while a draft is scheduled | The next request to the mailbox re-arms it; otherwise the every-minute watchdog finds the draft in `draft_index` 2 minutes past `send_at` and wakes the mailbox; `drafts_overdue` alerts at 10 minutes | S | `it::drafts::q37_missed_alarm_catch_up` |
-| Q38 | A fire meets a transient condition (D1 down, deployment frozen or read-only, `thread_busy`, a timeout), and a fire that cannot run until after `send_at` + 1 hour | The draft stays `scheduled` and is tried again at 30 s, 1, 2 and then every 5 minutes; past the late limit it becomes `failed` with `send_window_missed` and the last code in `failure.detail`, and is never sent by itself | S | `it::drafts::q38_late_limit_and_transient` |
-| Q39 | Every fire-time condition of [§6.3](#63-the-fire) (paused identity, suspended tenant or partner, sending paused, no owner, `402`, daily cap, retired explicit sender, domain verifying, failing domain, marketing on Cloudflare, test-mode recipient, loop, auto-reply refused, oversize, all recipients suppressed, approval now needed) | The outcome and `failure.reason` of the table, `draft.failed` for each failure; a failing domain sends through fallback; all suppressed is `sent` with `message_status: "suppressed"`; a paused identity's draft is not sent when it resumes | S | `it::drafts::q39_fire_outcomes` |
+| Q38 | A fire meets a transient condition (D1 down, deployment frozen or read-only, `thread_busy`, a timeout), and a fire that cannot run until after `send_at` + 1 hour | The draft stays `scheduled` and is tried again at 30 s, 1, 2 and then every 5 minutes; past the late limit it becomes `failed` with `send_window_missed` and the last code in `failure.detail`, and is never sent by itself; while it waits, the watchdog does not poke or count it and `drafts_overdue` does not fire until its `next_attempt_at` is itself overdue | S | `it::drafts::q38_late_limit_and_transient` |
+| Q39 | Every fire-time condition of [§6.3](#63-the-fire) (paused identity, suspended tenant or partner, sending paused, no owner, `402`, daily cap, retired explicit sender, domain verifying, failing domain, marketing on Cloudflare, test-mode recipient, loop, auto-reply refused, oversize, all recipients suppressed, approval now needed, identity deleting, too many recipients, a provisional sign-up's recipient, an attachment now risky, a refused or stale calendar payload, and a refusal the table does not name) | The outcome and `failure.reason` of the table, `draft.failed` for each failure; an unnamed refusal that is not transient fails with its own code; a failing domain sends through fallback; all suppressed is `sent` with `message_status: "suppressed"`; a paused identity's draft is not sent when it resumes | S | `it::drafts::q39_fire_outcomes` |
 | Q40 | Reschedule (`PATCH send_at`), unschedule (`send_at: null`), retry a failed draft by `PATCH send_at`, and a drafts-only key changing the content of a draft another key scheduled | Reschedule keeps the approval; unschedule gives `approved` or `editing`; the failed draft is `scheduled` and every check runs again at the fire; the content change takes it off the schedule, so the other key's authority never sends content it did not see | S | `it::drafts::q40_reschedule_unschedule` |
 | Q41 | An approval with `send: true` after `send_at` has passed | Sent at once; the console says so before the approver confirms | S | `it::drafts::q23_pending_expiry_and_late_approval` |
 | Q42 | The identity is deleted, or the tenant erased, while drafts are scheduled; an alarm fires on the erased mailbox | The drafts are erased with the mailbox and their index rows deleted; the alarm does nothing and arms nothing; the watchdog skips erasing and erased tenants | S | `it::drafts::q42_erased_mailbox_alarm` |
 | Q43 | A forward draft whose source was erased (a race), whose source has `body_truncated` and its raw MIME expired, or whose re-attached attachment object is missing; a source with a complete body and expired raw MIME | `409 source_unavailable` (`erased`, `raw_expired`, `attachment_missing`) on send or approve, `failed` with `source_unavailable` at a fire; the complete source forwards normally | S | `it::drafts::q43_source_at_send` |
-| Q44 | A reply draft to a quarantined message is sent by a key without `quarantine:review` | `409 source_unavailable` (`not_visible`); with `quarantine:review` it sends | S | `it::drafts::q43_source_at_send` |
+| Q44 | A reply draft to a quarantined message is sent or approved by a key without `quarantine:review`; a scheduled reply draft whose recorded authority lacks `quarantine:review` at the fire | `404 draft_not_found`, as for a `GET`; with `quarantine:review` it sends; the fire fails with `source_unavailable` (`not_visible`) | S | `it::drafts::q43_source_at_send` |
 | Q45 | A draft names a `screening` message as its source | As for `quarantined`: only with `quarantine:review`; at send the authority needs it while the message is still `screening` | S | `it::drafts::q3_source_visibility` |
 | Q46 | Message-scope erasure of a message that drafts reply to or forward, and of a message that was sent from a draft | Those drafts and the record of the sent one are deleted with their inline objects, outbox events and index rows; the receipt counts `drafts_deleted`; the probes find nothing | S | `it::drafts::q46_erasure_scopes` |
 | Q47 | Thread, counterparty, identity and tenant erasure with drafts; a draft in a thread under a legal hold; a `new` draft without a thread | Every draft of the scope is deleted and counted (counterparty: the address in `to`, `cc`, `bcc` or the resolved reply recipients); a held thread's drafts are kept and the thread listed in `receipt.held`; a threadless draft has no hold | S | `it::drafts::q46_erasure_scopes` |
-| Q48 | Retention: an `editing` draft untouched for 30 days, a `rejected` one, a `sent` record, a `scheduled` draft 60 days ahead, a tenant with `retention.message_days: 7`, a draft in a held thread | Deleted after 30 days (7 with the tenant's setting) with `drafts_deleted` in the audit row; the scheduled draft is kept until its fire; the held one is kept | S | `it::drafts::q48_retention` |
+| Q48 | Retention: an `editing` draft untouched for 30 days, a `rejected` one, a `sent` record, a `scheduled` draft 60 days ahead, a tenant with `retention.message_days: 7`, a draft in a held thread; with `message_days: 7`, a schedule 8 days ahead, and a draft scheduled 60 days ahead before `message_days` was set | Deleted after 30 days (7 with the tenant's setting) with `drafts_deleted` in the audit row; the scheduled draft is kept until its fire; the held one is kept; the 8-day schedule is refused with `400 invalid_request` (`beyond_retention`); the earlier schedule is kept until its fire and deleted at the first run after it | S | `it::drafts::q48_retention` |
 | Q49 | A scheduled send meets `402 billing_limit`; the workspace upgrades and the writer reschedules it | `failed` with `billing_limit`, no hold kept, no idempotency record; the explicit reschedule sends once with the same internal key | S | `it::drafts::q49_billing_at_send` |
 | Q50 | Several scheduled sends fail with `402` in one period | One `billing.limit_reached` for the period; the usage alerts are those already sent at 80% and 100%; a `draft.failed` per draft | S | `it::drafts::q49_billing_at_send` |
 | Q51 | An endpoint subscribes to `draft.*` with only `webhooks:manage`; a draft event's payload | Allowed (no mail content, J29 does not apply); `data` holds no subject, body, address, filename, note or reason text; the event has the identity's `sequence` and the same `evt_` ID in the event feed | S | `it::drafts::q51_events_thin` |
@@ -1746,6 +1877,8 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 | Q62 | `DELETE` of a scheduled draft, a second `DELETE`, and `DELETE` of a `sent` draft | `canceled`, content and inline objects deleted, never sent; `200` again with no change; `409 draft_not_editable` | S | `it::drafts::q62_cancel` |
 | Q63 | A rejected draft: send it, approve it, request approval again without a change, then edit it | `409 draft_not_sendable`, `409 draft_not_pending`, `409 draft_not_sendable`; the edit makes a new revision in `editing` (or `pending_approval` with `request_approval`) | S | `it::drafts::q22_decision_states` |
 | Q64 | Message-scope erasure leaves a thread empty while a `new` draft continues that thread | The thread is deleted and the draft with it, counted in `drafts_deleted` | S | `it::drafts::q46_erasure_scopes` |
+| Q109 | A draft whose thread, source message or sent message is under an active legal hold: a `PATCH` of its text, of its labels, and of only its `send_at`; a `DELETE` of it while it is scheduled; then the hold ends | `423 legal_hold` and nothing changed for the text and the labels; the `send_at` change applies; the `DELETE` makes it `canceled`, takes it off the schedule so it is never sent, and keeps its content and attachment objects; the first `Hygiene` run after the hold ends clears them | S | `it::drafts::q109_legal_hold` |
+| Q110 | With `drafts.require_approval: never`: a draft written with `request_approval: true` by a key that holds `messages:send`, and a draft written without it by a key that lacks `messages:send` (K8), each sent by another key that holds `messages:send` (K3); the same drafts after an approval by a third key | Both sends answer `202` with `pending_approval` (`approval.reason = "requested"`) and nothing is sent; after the approval, the send goes out | S | `it::drafts::q110_writer_rule` |
 
 ## 22. Tests
 
@@ -1794,16 +1927,18 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 | `it::drafts::q49_billing_at_send` | Q49 and Q50 with a metered workspace at its `sends` allowance | Q49, Q50 |
 | `it::drafts::q51_events_thin` | Q51; every draft event against its golden file | Q51, §15 |
 | `it::drafts::q52_system_identity_no_drafts` | Q52 | Q52 |
-| `it::drafts::q53_scope_matrix` | Q53; the nine routes join `it::security::cross_tenant_matrix` | Q53, NFR-SEC-1 |
+| `it::drafts::q53_scope_matrix` | Q53; the ten routes join `it::security::cross_tenant_matrix` | Q53, NFR-SEC-1 |
 | `it::drafts::q56_test_tenant` | Q56 | Q56 |
 | `it::drafts::q57_suspended_and_paused` | Q57 | Q57 |
 | `it::drafts::q58_index_lag` | Q58 with `d1.query` faults on `INSERT INTO draft_index`; Q59 by reading the D1 schema and every written row | Q58, Q59 |
 | `it::drafts::q62_cancel` | Q62 | Q62 |
+| `it::drafts::q109_legal_hold` | Q109: a hold set on the thread of a scheduled reply draft; the refused and accepted patches; the `DELETE` (no `draft.sent`, no message, content still stored); the hold removed and `Hygiene` run, after which the content and objects are gone | Q109 |
+| `it::drafts::q110_writer_rule` | Q110 with a K8-style identity key (`drafts:write` only) and a K3-style key under `never`; the approval by a third key then sends | Q110 |
 | `it::console::drafts_page` | The three screens for each role; approve needs re-authentication and posts `revision` and `digest`; a stale page is refused and shown again; the Overview items; escaping (Q54) | Q54, Q55, §16 |
 | `browser::console::no_js`, `browser::console::axe_scan` | The drafts screens join both | Q55 |
 | `it::mcp::drafts_tools` | Q60; each tool maps to its route and returns the same errors | Q60, §17.1 |
-| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}` and re-running it replays | §17.2 |
-| `sdk::coverage::every_operation` | Still passes with the nine new operations | FR-SDK-1 |
+| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | §17.2 |
+| `sdk::coverage::every_operation` | Still passes with the ten new operations | FR-SDK-1 |
 | `live::drafts::scheduled_send` | On staging, a draft scheduled 2 minutes ahead to a real mailbox arrives once, within a minute of `send_at`, with its labels on the stored message | FR-DRF-7 |
 
 ## 23. Milestone
@@ -1814,7 +1949,7 @@ To be added to [Build plan](../build-plan.md) after M28:
 >
 > **Files:** `crates/core/src/drafts.rs` (the field table per kind, the state table, `approval_needed`,
 > `digest`, the etag, the `send_at` window, the patch merge; pure), `crates/api-types/src/drafts.rs`,
-> `crates/worker/src/handlers/drafts.rs` (the nine routes), `crates/worker/src/mailbox/drafts.rs`
+> `crates/worker/src/handlers/drafts.rs` (the ten routes), `crates/worker/src/mailbox/drafts.rs`
 > (storage, transitions, `SendDraft`, the `drafts` and `draft_index` alarm purposes),
 > `crates/worker/src/drafts/attachments.rs`, `crates/worker/src/send/{context.rs, authority.rs}`,
 > `crates/worker/src/crons/drafts_due.rs`, `crates/worker/src/console/pages/drafts.rs`,
@@ -1825,7 +1960,8 @@ To be added to [Build plan](../build-plan.md) after M28:
 >
 > | File | Hook |
 > |---|---|
-> | `mailbox/submit.rs` (M9) | `SubmitInput.draft` and `SubmitInput.approved`; the draft arm of the accept transaction; policy step 16a |
+> | `mailbox/submit.rs` (M9) | `SubmitInput.draft` and `SubmitInput.approved`; stored draft attachments (an object, size, SHA-256 and `upload_id`) in steps 12, 17, 4, 6 and 7; the draft arm of the accept transaction; policy step 16a |
+> | The quarantine release (M7) and the screening verdict (M31) transactions | Re-sync the `draft_index` rows of drafts whose source changed state (`source_held`, Drafts § 9.3); M31 adds its half if it lands after M29 |
 > | `handlers/send.rs` (M9) | The D1 context loader moves to `send/context.rs`, unchanged, and gains the step-16a facts |
 > | `crates/core/src/policy.rs` (M2, M9) | Known-recipient rule 4; step 16a; `FIELDS` gains `drafts.require_approval` (guard) and `drafts.key_approval` (platform or own partner) |
 > | `policy/write.rs` (M5), `handlers/identities.rs` (M6) | The guard rule for `drafts.require_approval`; the stricter-only rule for `send_policy.require_approval` |
@@ -1840,12 +1976,12 @@ To be added to [Build plan](../build-plan.md) after M28:
 > | The draft field table (`core::drafts`) | M32 (calendar invitations) adds the `calendar` field to `new` and `reply` drafts if it lands after M29 |
 >
 > **Implements:** FR-DRF-1 … FR-DRF-14, the changes to FR-OUT-3, FR-OUT-13, FR-CON-5, FR-CON-12, FR-CON-15
-> and FR-PRV-3, and edge rows Q1–Q64 ([Drafts](drafts.md)); the cross-tenant suite's new routes
-> (NFR-SEC-1).
+> and FR-PRV-3, and edge rows Q1–Q64, Q109 and Q110 ([Drafts](drafts.md)); the cross-tenant suite's
+> new routes (NFR-SEC-1).
 >
 > **Acceptance:**
 >
-> - Edge rows Q1–Q64 with the tests named in the register, among them
+> - Edge rows Q1–Q64, Q109 and Q110 with the tests named in the register, among them
 >   `it::drafts::q12_concurrent_sends_one_message` and `it::drafts::q32_claim_expiry_no_duplicate` (one
 >   message per revision), `it::drafts::q19_approval_binds_content`, `it::drafts::q27_direct_send_approval_required`,
 >   `it::drafts::q35_alarm_multiplexing`, `it::drafts::q37_missed_alarm_catch_up`,
@@ -1856,7 +1992,7 @@ To be added to [Build plan](../build-plan.md) after M28:
 >   rows.
 > - `it::console::drafts_page`; the pages join `browser::console::no_js` and `browser::console::axe_scan`.
 > - `it::mcp::drafts_tools`, `cli::drafts::send_key_derivation`; `sdk::coverage::every_operation` still
->   passes with the nine new operations; the routes join `it::security::cross_tenant_matrix`.
+>   passes with the ten new operations; the routes join `it::security::cross_tenant_matrix`.
 > - With `drafts.require_approval: never` and no draft, the M9 send suites (`it::send::*`) pass unchanged.
 > - At M20: `live::drafts::scheduled_send`.
 

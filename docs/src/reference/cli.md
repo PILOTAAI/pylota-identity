@@ -1487,10 +1487,13 @@ pmail drafts reject <draft_id> --identity <identity> --reason <text> [--revision
 pmail drafts delete <draft_id> --identity <identity> [--yes]
 ```
 
-`pmail drafts send` without `--idempotency-key` derives one from the draft ID and revision
-(`cli:{draft_id}:{revision}`), so re-running the same command never sends twice. `list --tenant` reads the
-tenant's queue. `approve` where people decide exits 4 (`403 permission_denied`, `person_required`); a
-stale revision exits 6 (`409`); the draft limit exits 7 (`422`).
+`pmail drafts send` without `--idempotency-key` reads the draft and derives a key from its ID, revision and
+approval state (`cli:{draft_id}:{revision}:{approval.state}`), so re-running the same command never sends
+twice, and re-running it after a person approved the revision sends it: a run answered `pending_approval`
+recorded its key under the state `none` or `requested`, and the approval changes the state to `approved`.
+`list --tenant` reads the tenant's queue. `approve` where people decide exits 4
+(`403 permission_denied`, `person_required`); a stale revision exits 6 (`409`); the draft limit exits 7
+(`422`).
 
 ```bash
 pmail drafts create --identity bookings@acme.example.com --to jo@example.net \

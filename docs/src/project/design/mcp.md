@@ -318,7 +318,7 @@ therefore never a tool error.
 | `mail_reply` | `messages:send` | – |
 | `mail_forward` | `messages:send` | – |
 | `mail_calendar_reply` | `messages:send` | – ([Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli)) |
-| `mail_create_draft` | `drafts:write` | – ([Drafts § 17.1](drafts.md#171-mcp-tools)) |
+| `mail_create_draft` | `drafts:write` (and `messages:read` with `in_reply_to` or `forward_of`) | – ([Drafts § 17.1](drafts.md#171-mcp-tools)) |
 | `mail_update_draft` | `drafts:write` | – |
 | `mail_list_drafts` | `drafts:read` | – (`drafts:write` includes it) |
 | `mail_get_draft` | `drafts:read` | – (`drafts:write` includes it) |

@@ -137,7 +137,7 @@ A key holds a list of permissions. Every endpoint below names the one it needs.
 | `accounts:approve` | Approve, reject and delete service-ledger entries. Includes `accounts:request`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own request. Approval by an API key is also a decision reserved for people ([Approve](#post-v1identitiesidentity_idaccountsaccount_idapprove--accountsapprove)) |
 | `drafts:read` | List and read drafts and their attachments, and the tenant's queue of drafts awaiting approval, scheduled or failed ([Drafts](#drafts)). Every key level; the tenant queue needs a platform, partner or tenant key |
 | `drafts:write` | Create, update, request approval for and delete (cancel) drafts; create, read and delete uploads (or with `messages:send`). Includes `drafts:read`. Every key level |
-| `drafts:approve` | Approve and reject drafts. Includes `drafts:read`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own mail. Approving by an API key is also a decision reserved for people unless the tenant's `drafts.key_approval` is `true`, which admits only a platform key or the tenant's own partner key; approving with `send: true` also needs `messages:send` |
+| `drafts:approve` | Approve and reject drafts. Includes `drafts:read`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own mail. Approving by an API key is also a decision reserved for people: a key approves only while `PM_QUARANTINE_KEY_RELEASE` is `on` or `PM_CONSOLE` is `off`, or where the tenant's `drafts.key_approval` is `true`, which admits only a platform key or the tenant's own partner key; approving with `send: true` also needs `messages:send` |
 | `members:read` | List console members and pending invitations (tenant, partner and platform keys; every console role holds it) |
 | `members:manage` | Invite, revoke, change roles and remove console members (tenant, partner and platform keys). Includes `members:read` |
 | `partners:manage` | Create, list, read, update and delete partners, the integrators whose partner keys create tenants ([Partners](#partners)). Platform keys only |
@@ -2000,15 +2000,20 @@ The body takes the fields of `POST …/messages` (`to`, `cc`, `bcc`, `subject`, 
 `metadata`), or `in_reply_to` (with `reply_all`) or `forward_of` with the fields of reply or forward, plus
 `send_at`, `client_id` and `request_approval`. An attachment is inline (`content_base64`) or
 `{ "upload_id": "…" }`; a draft copies an upload's bytes when its revision is saved, so an upload reference
-gets `404 upload_not_found`, `409 upload_not_ready` or `410 upload_expired` here and on update. The kind is
-fixed at creation. `client_id` makes the create idempotent (`409 client_id_conflict` for another body).
-Returns `201` with the [Draft object](#draft-object) and an `ETag`. `Idempotency-Key` optional.
+gets `404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired` or `422 attachment_risky` here and
+on update, and attachments are classified and limited to 26,214,400 bytes in total as on a send. A draft
+with `in_reply_to` or `forward_of` also needs `messages:read`. The kind is fixed at creation. `client_id`
+makes the create idempotent (`200` with the existing draft, `409 client_id_conflict` for another body).
+Returns `201` with the [Draft object](#draft-object) and an `ETag`; an `Idempotency-Key` replay returns
+`201` again with `Idempotent-Replayed: true`. `Idempotency-Key` optional.
 
 ### `GET /v1/identities/{identity_id}/drafts` · `GET …/drafts/{draft_id}` · `GET …/drafts/{draft_id}/attachments/{attachment_id}` — `drafts:read`
 
 List filters: `status` (one or a comma list), `draft_kind`, `label`, `thread_id`, `client_id`,
 `scheduled_after`, `scheduled_before`; newest first; items without `text` and `html`, with `preview`.
-A draft whose source is quarantined or in screening needs `quarantine:review`.
+A draft whose source is quarantined or in screening needs `quarantine:review`, on every route and in the
+tenant's queue. `GET` of one reply draft first stores a change in its resolved recipients as a new
+revision ([Drafts §2.4](../project/design/drafts.md#24-revision-etag-and-digest)).
 
 ### `PATCH /v1/identities/{identity_id}/drafts/{draft_id}` — `drafts:write`
 
@@ -2018,12 +2023,14 @@ change through `attachments_add` and `attachments_remove`, labels through `label
 approval and the schedule and asks for approval again (`draft.approval_requested`); changing only
 `send_at`, `labels` or `metadata` keeps them. `send_at` reschedules a scheduled draft, `null`
 unschedules it, and a time on a failed draft schedules it again. `409 draft_not_editable` while it is
-being sent.
+being sent, and once it is `sent` or `canceled`. `423 legal_hold` for a change of the content, `labels` or
+`metadata` of a draft under a legal hold.
 
 ### `DELETE /v1/identities/{identity_id}/drafts/{draft_id}` — `drafts:write`
 
 Cancels the draft (`status: "canceled"`, content deleted); a scheduled draft is never sent afterwards.
-Returns `200`. `409 draft_not_editable` while it is being sent or once sent.
+Returns `200`, also again on a `canceled` draft. A draft under a legal hold is canceled with its content
+kept until the hold ends. `409 draft_not_editable` while it is being sent or once sent.
 
 ### `POST /v1/identities/{identity_id}/drafts/{draft_id}/send` — `messages:send` and `drafts:read`
 
@@ -2041,14 +2048,17 @@ only: your own user's ID, 1–128 printable ASCII, no `@`). `send: true` also ne
 sends now, or at a future `send_at`. A key may approve only where people decide is not required
 (`PM_QUARANTINE_KEY_RELEASE=on` or `PM_CONSOLE=off`), or where the tenant's `drafts.key_approval` is
 `true` and the key is a platform key or the tenant's own partner key; otherwise
-`403 permission_denied` (`person_required`); a key cannot approve a revision it wrote
-(`self_approval`). Returns `200` with the draft; a refused send shows `status: "failed"` and `failure`.
-Audit-logged.
+`403 permission_denied` (`person_required`); a key cannot approve content it wrote
+(`self_approval`). An `editing`, `pending_approval`, `approved`, `scheduled` or `failed` draft can be
+approved; a `scheduled` one stays scheduled. Returns `200` with the draft; a refused send shows
+`status: "failed"` and `failure`. Audit-logged.
 
 ### `POST /v1/identities/{identity_id}/drafts/{draft_id}/reject` — `drafts:approve`
 
-Body: `reason` (required, at most 500 characters), `revision`, `on_behalf_of`. Returns `200` with the
-draft, `status: "rejected"`. Audit-logged.
+Body: `reason` (required, at most 500 characters), `revision`, `on_behalf_of`. An `editing`,
+`pending_approval`, `approved`, `scheduled` or `failed` draft can be rejected. Returns `200` with the
+draft, `status: "rejected"` (also again on a `rejected` one). `409 draft_not_editable` while it is being
+sent; `409 draft_not_pending` once `sent` or `canceled`. Audit-logged.
 
 ### `GET /v1/tenants/{tenant_id}/drafts` — `drafts:read`, tenant, partner or platform key
 
@@ -2071,12 +2081,14 @@ never content.
   "include_attachments": null, "calendar": null, "headers": {}, "unsubscribe": null, "consent": null,
   "labels": ["quote"], "metadata": { "quote_id": "q_118" }, "send_at": null,
   "approval": { "state": "requested", "reason": "new_recipients", "requested_at": "…",
-    "requested_by_key_id": "key_01J9…", "approved_revision": null, "approved_at": null,
-    "approved_by_key_id": null, "approved_by_user_id": null, "on_behalf_of": null, "note": null },
+    "requested_by_key_id": "key_01J9…", "approved_revision": null, "approved_digest": null,
+    "approved_at": null, "approved_by_key_id": null, "approved_by_user_id": null, "on_behalf_of": null,
+    "note": null },
   "send": { "origin": "api", "requested_at": "…", "requested_by_key_id": "key_01J9…",
     "requested_by_user_id": null, "due_at": null, "labels_add": [], "labels_remove": [] },
   "rejection": null, "failure": null, "message_id": null, "sent_at": null,
-  "created_by_key_id": "key_01J9…", "updated_by_key_id": "key_01J9…", "created_at": "…", "updated_at": "…",
+  "created_by_key_id": "key_01J9…", "updated_by_key_id": "key_01J9…", "content_by_key_id": "key_01J9…",
+  "created_at": "…", "updated_at": "…",
   "deduplicated": false }
 ```
 
@@ -2090,7 +2102,8 @@ never content.
   or `auto_reply` (reply drafts only).
 - `status`: `editing`, `pending_approval`, `approved`, `scheduled`, `sending`, `sent`, `failed`, `rejected`
   or `canceled` ([Drafts §2.3](../project/design/drafts.md#23-states-and-who-moves-them)).
-- `revision`: starts at 1 and increases by one on every successful `PATCH`.
+- `revision`: starts at 1 and increases by one on every successful `PATCH`, and when a reply draft's
+  resolved recipients change ([Drafts §2.4](../project/design/drafts.md#24-revision-etag-and-digest)).
 - `etag`: the HTTP entity tag of the current revision
   ([Drafts §2.4](../project/design/drafts.md#24-revision-etag-and-digest)).
 - `digest`: the content digest of the current revision, 64 hex characters; `null` once the content is
@@ -2110,8 +2123,9 @@ never content.
 - `metadata`: as on messages (16 keys, 512 bytes per value); copied to the message.
 - `send_at`: the time the draft should be sent, or `null` for "when sent". Setting it alone schedules
   nothing ([Drafts §6](../project/design/drafts.md#6-scheduled-send)).
-- `approval`: `{ state, reason, requested_at, requested_by_key_id, approved_revision, approved_at,
-  approved_by_key_id, approved_by_user_id, on_behalf_of, note }`: `state` is `none`, `requested` or
+- `approval`: `{ state, reason, requested_at, requested_by_key_id, approved_revision, approved_digest,
+  approved_at, approved_by_key_id, approved_by_user_id, on_behalf_of, note }`: `approved_digest` is the
+  digest the approval covers; `state` is `none`, `requested` or
   `approved`; `reason` says why approval was requested (`requested` by the writer, or the policy level
   `new_recipients`, `external`, `always`).
 - `send`: the pending or last send request: `{ origin, requested_at, requested_by_key_id,
@@ -2123,6 +2137,8 @@ never content.
 - `message_id`, `sent_at`: set when the draft became a message.
 - `created_by_key_id`, `updated_by_key_id`: the keys that created the draft and wrote its current revision
   (`null` for a console write, which never edits content).
+- `content_by_key_id`: the key that last changed the content (the create, or a `PATCH` that changed the
+  digest); it may not approve the draft (`self_approval`).
 - `created_at`, `updated_at`: bookkeeping times.
 
 Every text field of a draft was written by an agent that mail may have steered: show it as untrusted

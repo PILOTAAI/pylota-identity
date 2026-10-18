@@ -253,10 +253,15 @@ upload to `pending` and increments `failed_puts`; the tenth counted failure sets
    - `expired` → `410 upload_expired` with `details.reason`; a `ready`, `pending` or `uploading` upload
      whose `expires_at` has passed is set `expired` here and answers the same;
    - no row → `404 upload_not_found`.
-6. **Resume check.** `BLOBS.head(r2_key)`. An object that exists with the declared size and a SHA-256
-   checksum equal to the declared one was written by an earlier attempt whose response was lost; skip
-   steps 7 and 8 (the `head` answer already shows both values). An object that exists and does not match
-   is deleted first.
+6. **Resume check.** `BLOBS.head(r2_key)`. An object that exists with the declared size and a `sha256`
+   custom metadata value equal to the declared digest was written by an earlier attempt whose response was
+   lost: step 7 writes that value with the `put`, and R2 stores the object only after checking the
+   `sha256` option, so the pair proves a verified write. Skip steps 7 and 8. When `head` also returns
+   `checksums.sha256`, it must agree. An object that exists and does not match is deleted first. The R2
+   Workers reference (updated 2026-07-31, read 2026-10-18) says `head` returns the object's metadata and
+   that a checksum given to `put()` is on the object `put()` returns; it does not say whether `head`
+   returns checksums, so the check does not depend on them, and `it::uploads::v_put_stream_contract`
+   records what `head` returns. Until that test runs, this is unverified.
 7. **Stream into R2.** Pipe the request body through a `FixedLengthStream` of the declared size: an
    identity transform stream that accepts exactly that number of bytes and no more
    ([Workers Request › Set the Content-Length header](https://developers.cloudflare.com/workers/runtime-apis/request/),
@@ -264,7 +269,8 @@ upload to `pending` and increments `failed_puts`; the tenth counted failure sets
    learns the length; the first task of M33 is a real-runtime test against workerd's R2
    (`it::uploads::v_put_stream_contract`) that pins both before the handler is written, and steps 7 and
    8 below hold whichever way it answers. Then call `BLOBS.put(r2_key, stream, { sha256: declared, customMetadata })` with
-   `customMetadata` `tenant`, `identity`, `upload`. R2 uses the `sha256` option to check the received
+   `customMetadata` `tenant`, `identity`, `upload` and `sha256` (the declared digest, read by step 6).
+   R2 uses the `sha256` option to check the received
    object's integrity
    ([R2 Workers API reference › R2PutOptions](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/),
    updated 2026-07-31, read 2026-10-17) and fails the `put` with `10037 BadDigest` on a mismatch, so the Worker never hashes and never buffers the file: memory
@@ -339,8 +345,9 @@ array next to `include_attachments`:
 - The upload must belong to the identity that sends. An upload of another identity, of another tenant,
   or one that does not exist is `404 upload_not_found` with `details.index`, the same answer in every
   case.
-- Drafts store attachments in the same two shapes ([Drafts, approvals and scheduled send](drafts.md));
-  a draft must not depend on the upload once a revision is saved (§5.4).
+- Drafts store attachments in the same two shapes ([Drafts, approvals and scheduled send](drafts.md)),
+  checked when a revision is saved exactly as §4.1 checks them (states, final filename, inline
+  classification, the total); a draft must not depend on the upload once a revision is saved (§5.4).
 
 `Message.attachments[]` gains `upload_id`: the upload the attachment was copied from, or `null` (inline
 base64, inbound, forwarded original). It survives the upload's expiry and deletion: it records where
@@ -457,8 +464,8 @@ already holds its own copies.
 ### 5.1 Mailbox table
 
 Added to the `IdentityMailbox` schema with the idempotent statements of
-[Design § 4, rule 6](index.md#4-durable-object-transactions) (the schema version number is assigned at
-integration, after the other parity pages' additions):
+[Design § 4, rule 6](index.md#4-durable-object-transactions), in mailbox schema v1 while nothing is built
+([Data model](data-model.md)):
 
 ```sql
 CREATE TABLE IF NOT EXISTS uploads (
@@ -502,7 +509,7 @@ R2 gains one key, added to [Data model § 4](data-model.md#4-r2-objects):
 
 | Key | Content | Custom metadata | Deleted by |
 |---|---|---|---|
-| `t/{ten}/i/{idn}/up/{upl}` | Upload bytes, verified against the declared SHA-256 | `tenant`, `identity`, `upload` | Rejection, expiry, `DELETE`, erasure; the orphan sweep after 15 days when no row names it |
+| `t/{ten}/i/{idn}/up/{upl}` | Upload bytes, verified against the declared SHA-256 | `tenant`, `identity`, `upload`, `sha256` | Rejection, expiry, `DELETE`, erasure; the orphan sweep after 15 days when no row names it |
 
 ### 5.2 Mailbox operations
 
@@ -521,7 +528,8 @@ New `MailboxRequest` variants; each runs one `transaction_sync`:
 
 The `Submit` path reads and updates `uploads` inside the mailbox; it needs no new operation. Drafts, which
 also live in the mailbox, copy an upload with the internal function `uploads::copy_to(id, dest_key)`
-(the step 6 copy), not through an RPC.
+(the step 6 copy), not through an RPC, holding the upload's pin (§6) and a `draft_att` marker on the
+destination for the length of the copy ([Drafts § 7](drafts.md#7-attachments)).
 
 ### 5.3 The `alarm:uploads` purpose
 
@@ -834,8 +842,11 @@ flow, because it sends only after the `PUT` returned `ready`.
 3. § 4.6 (what Pylota stores): the upload ID and `expires_at` on the pending action.
 4. § 6: no key change (K3 and K5 already hold `messages:send`); K7 needs none (the auth tenant sends no
    files).
-5. § 9 (erasure): a renter counterparty erasure also deletes uploads staged for that renter's letters
-   (receipt `uploads_deleted`); Pylota's own file store is erased by Pylota.
+5. § 9 (erasure): a renter counterparty erasure deletes the uploads its erased messages were copied from
+   (receipt `uploads_deleted`), and the drafts addressed to the renter with their attachment copies. An
+   upload staged and not yet sent names no recipient, so the renter's address does not find it; it
+   expires on its own within its lifetime (at most 7 days, §2). Pylota's own file store is erased by
+   Pylota.
 6. W5.5 tests: an FNOL pack over 5 MiB sent with links, a risky file refused, a retry after expiry.
 
 ## 16. Functional requirements
@@ -882,7 +893,7 @@ To add to [PRD § 6](../prd.md) as a new group, "Uploads":
 
 ## 17. Edge cases
 
-Section V of the [edge-case register](../edge-cases.md):
+Section Q of the [edge-case register](../edge-cases.md) (rows Q65–Q108):
 
 | # | Case | Required behaviour | Owner | Test |
 |---|---|---|---|---|
@@ -940,7 +951,7 @@ Section V of the [edge-case register](../edge-cases.md):
 | `core::uploads::state_machine` | Every transition of §2: claim from `pending` and from a lapsed lease, a second claim refused with the remaining lease, `ready` and `rejected` only with the claim, counted and uncounted failures, the tenth counted failure, expiry from each live state, tombstone purge after 7 days | §2, [Q69](../edge-cases.md), [Q107](../edge-cases.md) |
 | `core::attach::v19_final_name_reclassified` | `classify_name` with a sniffed PDF: `report.exe`, `report.docm` and `report.zip` are risky, `Report.PDF` and `scan.pdf` are not; an octet-stream declared type is harmless | [Q83](../edge-cases.md) |
 | `core::compose::v23_link_plan_from_sizes` | `encoded_size` equals the length of the real base64 encoding with 76-character lines for sizes 0–4,000,000 (property test); the plan replaces the largest attachments first and fits the limit exactly at the boundary | [Q87](../edge-cases.md) |
-| `it::uploads::v_put_stream_contract` | Against workerd's R2, not a fake: a request body piped through `FixedLengthStream` into `put` with the `sha256` option stores an exact body and returns its size and checksum; a short body stores nothing and fails with an error the handler maps; a wrong digest fails with code `10037`; `head` returns the checksum. Written first in M33; if workerd differs from the page's assumptions, the page changes before the handler is built | [Q66](../edge-cases.md), [Q68](../edge-cases.md) |
+| `it::uploads::v_put_stream_contract` | Against workerd's R2, not a fake: a request body piped through `FixedLengthStream` into `put` with the `sha256` option stores an exact body and returns its size and checksum; a short body stores nothing and fails with an error the handler maps; a wrong digest fails with code `10037`; `head` returns the size and the `sha256` custom metadata, and the test records whether it also returns `checksums.sha256` (§3.2 step 6). Written first in M33; if workerd differs from the page's assumptions, the page changes before the handler is built | [Q66](../edge-cases.md), [Q68](../edge-cases.md) |
 | `it::uploads::q65_invalid_create` | Each invalid field gets `400 invalid_request` with its path; no row exists afterwards | [Q65](../edge-cases.md) |
 | `it::uploads::q66_partial_body` | A `PUT` that stops halfway (fault-injected client) leaves no object, counts one failure, returns the upload to `pending`; a full `PUT` then makes it `ready` | [Q66](../edge-cases.md) |
 | `it::uploads::q67_framing` | Chunked, wrong `Content-Length` and gzip `Content-Encoding` get `400 upload_size_mismatch` with the right `reason`; `failed_puts` unchanged; no R2 call made | [Q67](../edge-cases.md) |
@@ -994,8 +1005,9 @@ To add to the [build plan](../build-plan.md):
 expiry arithmetic; pure), `crates/worker/src/uploads/{mod.rs, put.rs, classify.rs, copy.rs}`,
 `handlers/uploads.rs` (the four `…/uploads` routes), `mailbox/uploads.rs` (the `uploads` table, its
 operations and `alarm:uploads`), `crates/cli/src/commands/uploads.rs`. Mailbox schema: the `uploads` table
-and `attachments.upload_id` (the next mailbox schema version). Hooks in other milestones' files, each
-reviewed by that file's owner:
+and `attachments.upload_id`, in mailbox schema v1 while nothing is built
+([Data model](data-model.md)), as for M29. Hooks in other milestones' files, each reviewed by that
+file's owner:
 
 | File | Hook |
 |---|---|
@@ -1009,7 +1021,7 @@ reviewed by that file's owner:
 | `mcp/tools.rs` (M15) | `mail_create_upload`, `mail_get_upload`, both item shapes in the send tools, `attachments` on `mail_forward`, with rows in M15's table test |
 | `crates/cli/src/commands/send.rs` (M16) | `--attach` through uploads above 1 MiB |
 | `observability/catalogue.rs`, alert table (M17) | The nine metrics and `upload_object_missing` |
-| Drafts (M29) | Whichever of M29 and M33 lands second adds the draft-save copy (`uploads::copy_to`) and `it::uploads::q108_draft_reference` |
+| Drafts (M29) | Whichever of M29 and M33 lands second adds the draft-save copy (`uploads::copy_to`, with the pin and the `draft_att` marker), `drafts:write` in the upload routes' `any_permissions` (M29 defines the permission), and `it::uploads::q108_draft_reference` |
 
 **Implements:** FR-UPL-1 to FR-UPL-12 and edge rows Q65–Q108 ([Uploads](uploads.md)).
 
