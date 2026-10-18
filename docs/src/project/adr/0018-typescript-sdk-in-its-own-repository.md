@@ -32,7 +32,7 @@ Facts the decision rests on:
 
 ## Decision
 
-1. **The rule stands.** `AGENTS.md` is not changed. This repository gains no TypeScript or JavaScript
+1. **The rule stands.** The Rust-only rule of `AGENTS.md` is not changed. This repository gains no TypeScript or JavaScript
    source file, no npm lockfile and no Node.js toolchain for the SDK.
 2. **The SDK has its own repository.** `@pylotahq/mail` is built, tested, released and published from the
    public repository `PILOTAAI/pylota-mail-typescript`. The package name stays `@pylotahq/mail`. Its
@@ -63,7 +63,7 @@ Facts the decision rests on:
 
 ## Consequences
 
-- `AGENTS.md` and "written entirely in Rust" stay true of this repository.
+- The Rust-only rule of `AGENTS.md` and "written entirely in Rust" stay true of this repository.
 - Nothing changes for Pylota: it installs `@pylotahq/mail` from npm at an exact version, and the package
   still ships the contract it was built from as `@pylotahq/mail/openapi.json`.
 - The SDK's version is no longer the product's. Its major version stays the API's path version, and each
