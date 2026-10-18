@@ -643,7 +643,9 @@ neither reveals anything about data. A route cannot be registered without a perm
 rule (the registration function takes them as non-optional arguments), and public routes use the
 explicit `Scope::Public` variant. The permission list may be empty only for `Scope::Public`, for the six
 agent sign-up routes (`Scope::AgentSignup`: the key's own tenant's sign-up,
-[Agent self-sign-up §6](agent-signup.md#6-the-agents-routes)), and for two other routes: `GET /v1/me`, which any valid key may call (`Scope::AnyKey`), and
+[Agent self-sign-up §6](agent-signup.md#6-the-agents-routes)), for a route whose `any_permissions` is not
+empty (the four upload routes, which need one of two permissions, [Uploads §3](uploads.md#3-routes)),
+and for two other routes: `GET /v1/me`, which any valid key may call (`Scope::AnyKey`), and
 `GET /v1/tenants/{tenant_id}`, which only platform, partner and tenant keys may call (`min_level: Tenant`; an
 identity key gets `403 scope_denied` on its own tenant, step 3 of section 5.2). For the second,
 `foreign_permissions` (`tenants:manage`) is required as well when the target is not the key's own
