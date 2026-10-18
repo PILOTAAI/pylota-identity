@@ -6,7 +6,7 @@ mailbox.
 
 | | |
 |---|---|
-| Requirements | FR-IN-1 … FR-IN-12, FR-THR-1, FR-THR-2, FR-ADR-3, FR-ADR-5, FR-TEN-3, FR-DLV-5, FR-DOM-9, FR-DOM-10, FR-DOM-11, FR-SRCH-2, FR-SRCH-4, NFR-REL-1, NFR-REL-2, NFR-REL-3 |
+| Requirements | FR-IN-1 … FR-IN-15, FR-SCR-1 … FR-SCR-12, FR-CAL-1 … FR-CAL-14 (the inbound side), FR-THR-1, FR-THR-2, FR-ADR-3, FR-ADR-5, FR-TEN-3, FR-DLV-5, FR-DOM-9, FR-DOM-10, FR-DOM-11, FR-SRCH-2, FR-SRCH-4, NFR-REL-1, NFR-REL-2, NFR-REL-3 |
 | Edge cases | [A2](../edge-cases.md), [A4](../edge-cases.md), [A6](../edge-cases.md), [A9](../edge-cases.md), [A10](../edge-cases.md), [A15](../edge-cases.md), [A16](../edge-cases.md), [B1–B14](../edge-cases.md), [C9](../edge-cases.md), [D1–D5](../edge-cases.md), [D7](../edge-cases.md), [D9](../edge-cases.md), [D11–D14](../edge-cases.md), [E4](../edge-cases.md), [E5](../edge-cases.md), [E9](../edge-cases.md), [E10](../edge-cases.md) and [E13](../edge-cases.md) (the ledger gate, [Service sign-up ledger](service-accounts.md)), [I9](../edge-cases.md), [I10](../edge-cases.md), [J1–J3](../edge-cases.md), [J7](../edge-cases.md), [L3](../edge-cases.md), [N1–N7](../edge-cases.md), [N12](../edge-cases.md), [N18](../edge-cases.md), [N19](../edge-cases.md), [N27](../edge-cases.md), [N28](../edge-cases.md) |
 | Code | `crates/worker/src/email.rs`, `handlers/{wait.rs, threads.rs, messages.rs, quarantine.rs}`, `handlers/hooks_ses.rs`, `crons/ses_backstop.rs`, `inbound/sources/{routing.rs, ses.rs}`, `inbound/role_mail.rs`, `consumers/inbound.rs`, `consumers/index.rs`, `mailbox/{ingest.rs, threads.rs, messages.rs, read.rs, attachments.rs, outbox.rs}`; `crates/core/src/{mime/, sanitize.rs, text.rs, quote.rs, refs/, classify.rs, auth.rs, trust.rs, attach.rs, sns.rs}` |
 | Related | [Threading](threading.md), [Outbound](outbound.md) (delivery events, loopback), [Search](search.md) (indexing), [Triage](triage.md), [Webhooks](webhooks.md), [Domains on any DNS host](domain-connections.md) (SES receiving, probes, forwarding checks) |
@@ -433,10 +433,13 @@ last. A message is therefore retried with its batch-mates only when they are ret
 
    ```sql
    SELECT i.status, i.mailbox_do_id, i.display_name, t.status AS tenant_status, t.mode,
-          t.policy_json, t.timezone, t.name AS tenant_name
+          t.policy_json, t.provisional_until, t.timezone, t.name AS tenant_name
    FROM identities i JOIN tenants t ON t.id = i.tenant_id
    WHERE i.id = ?1 AND i.tenant_id = ?2;
    ```
+
+   It reads `policy_json` and `provisional_until`, and computes the effective policy (step 5) with the
+   provisional overlay when it is set ([Agent self-sign-up §4.2](agent-signup.md#42-policy-overlay)).
 
    An SES pointer is resolved first ([The SES source](#the-ses-source)).
    Identity `deleting`/`deleted`, or tenant `erasing`/`erased` (the cache in `email()` may have been
@@ -461,7 +464,8 @@ last. A message is therefore retried with its batch-mates only when they are ret
    attempts skip the body, attachment and reference code paths that can panic; a message that still fails
    goes to `pm-inbound-dlq` with its raw object kept for a redrive ([J8](../edge-cases.md)).
 5. **Effective policy** = built-in defaults ⊕ `PM_DEFAULT_POLICY` ⊕ `tenants.policy_json`
-   ([tenant policy](../../reference/configuration.md#tenant-policy)).
+   ([tenant policy](../../reference/configuration.md#tenant-policy)), then, for a provisional agent sign-up,
+   the fixed overlay, which only tightens.
 6. **Classify** automation ([Automated mail](#automated-mail-and-loops)). A DSN goes to
    [DSN routing](#dsn-routing-and-backscatter) inside `Ingest`.
 7. **Authenticate** ([Authentication verdict](#authentication-verdict)), unless `loopback` is set. For
@@ -472,16 +476,36 @@ last. A message is therefore retried with its batch-mates only when they are ret
 9. **References** ([Reference extraction](#reference-extraction)).
 10. **Attachments**: list, sniff, classify risk, unpack TNEF, optional scanner
     ([Attachment safety](#attachment-safety)).
+
+    10a. **Calendar**: select, read and verify calendar parts; set `kind` to `calendar` when it was
+    `normal` ([Calendar invitations §4.2](calendar-invitations.md#42-ingest)). Skipped in degraded mode
+    (step 4), so a poison invitation is stored without its object and never dropped.
 11. **Verification codes and links** ([Verification codes](#verification-codes-and-unsolicited-otp-e5)).
+
+    11a. **Steering scan** ([Screening hold §4.1](screening.md#41-consumer-step-11a-the-steering-scan)):
+    when the effective `screening.mode` is not `off`, `core::screening::scan_message` over every field an
+    agent can read and the hidden content sanitising removed; the result goes into
+    `IngestInput.screening`.
 12. **D1 facts** (one `batch`, 5-second deadline):
     - sender suppressed (only sets the flag `sender_suppressed`; it never hides the message, [D7](../edge-cases.md)): `SELECT 1 FROM suppressions WHERE tenant_id = ?1 AND address_hash = ?2 AND (expires_at IS NULL OR expires_at > ?3)`;
-    - receive lists: `SELECT kind FROM sender_lists WHERE tenant_id = ?1 AND direction = 'receive' AND entry IN (?2, ?3)` with `?2` = sender address, `?3` = `@` + sender domain (block wins over allow);
+    - receive lists, both scopes in one statement ([Parity additions § 3.5](parity-additions.md#35-storage)):
+      `SELECT identity_id, kind, entry FROM sender_lists WHERE tenant_id = ?1 AND direction = 'receive' AND identity_id IN ('', ?2) AND entry IN (SELECT value FROM json_each(?3))`
+      with `?2` = the identity and `?3` = the sender address and `@` + sender domain as one JSON array;
+      `core::lists::decide` gives the effective receive decision ([Parity additions § 3.1](parity-additions.md#31-scopes-and-precedence): an identity
+      entry overrides the tenant's of the same or a coarser granularity; among the entries left, block wins);
     - tenant domains: `SELECT name, kind FROM domains WHERE (tenant_id = ?1 OR kind = 'platform') AND state <> 'removed'`. Every row feeds the look-alike checks; only rows with `kind <> 'platform'` (the tenant's own domains) can make a sender `known_sender` ([Trust signals](#trust-signals));
     - co-recipient identities ([A9](#multiple-identities-in-one-tenant-a9));
     - only when the effective policy has `accounts.require_approval: true` and step 11 found a
       verification match: the identity's approved service-ledger entries,
       `SELECT id, sender_domains_json, address FROM service_accounts WHERE identity_id = ?1 AND status = 'approved' ORDER BY created_at`,
-      passed as `IngestInput.approved_accounts` ([Service sign-up ledger §5](service-accounts.md#5-the-verification-gate)).
+      passed as `IngestInput.approved_accounts` ([Service sign-up ledger §5](service-accounts.md#5-the-verification-gate));
+    - only when step 10a read a calendar object: the identity's addresses,
+      `SELECT address FROM addresses WHERE identity_id = ?1`, for `is_self`
+      ([Calendar invitations §4.2](calendar-invitations.md#42-ingest));
+    - only when conditions 1–6 of the ARC rescue rule held at step 7: the identity's addresses,
+      `SELECT address FROM addresses WHERE identity_id = ?1 AND status IN ('active','retiring')`, for
+      condition 7; the verdict is finished before `MailboxRequest::Ingest`
+      ([Parity additions § 6.3](parity-additions.md#63-the-rule)).
 13. **Admit** against the inbound volume caps ([Inbound volume caps](#inbound-volume-caps-d5-d13)):
     `QuotaRequest::AdmitInbound { identity_id, bucket, at, cap }` (`cap` =
     `policy.inbound.per_tenant_per_hour`) to the tenant's `TenantQuota`. The answer
@@ -550,10 +574,10 @@ Rules:
   attachments it carries (`attAttachData` with `attAttachTitle`, or the MAPI long filename). The
   extracted files become ordinary attachments. If unpacking fails, `winmail.dat` is kept as an attachment.
 - **Nested messages ([B6](../edge-cases.md), FR-THR-2).** See [Threading](threading.md#33-forwarded-and-nested-messages-fr-thr-2-b6).
-- **Calendar ([B8](../edge-cases.md)).** A `text/calendar` part sets `kind = 'calendar'` (unless the message
-  is a DSN, MDN or list mail) and its first `VEVENT` is summarised in `automated_json.calendar`:
-  `{ method, summary, dtstart, dtend, organizer, location }` (strings, each ≤ 256 characters).
-  Invites are never answered or accepted by the service.
+- **Calendar ([B8](../edge-cases.md)).** Calendar parts are read at consumer step 10a, after TNEF is
+  unpacked, into the bounded, verified `calendar` object of
+  [Calendar invitations](calendar-invitations.md). Invites are never answered or accepted by the
+  service on its own.
 
 ### Storage caps
 
@@ -571,7 +595,8 @@ every column, so a row never reaches 2 MB):
 | `to_json`, `cc_json` | 200 addresses each, and 64 KiB of JSON each (later addresses are dropped) |
 | `reply_to_json` | 10 addresses |
 | `references_json` | 200 msg-ids (the last 200), and 32 KiB of JSON (the oldest entries are dropped until it fits) |
-| `automated_json` | 64 KiB; `dsn.recipients` at most 100 entries, each `diagnostic_code` at most 512 characters; `calendar` strings 256 characters |
+| `automated_json` | 64 KiB; `dsn.recipients` at most 100 entries, each `diagnostic_code` at most 512 characters |
+| `calendar_json` | 262,144 bytes, with the shrink order of [Calendar invitations §4.1](calendar-invitations.md#41-columns-and-caps) |
 | `auth_json` | 16 KiB; at most 10 `dkim` entries |
 | `metadata_json`, `flags_json` | 16 KiB each |
 | `extracted_text` | 256 KiB |
@@ -580,11 +605,11 @@ every column, so a row never reaches 2 MB):
 | `snippet` | 240 characters of `extracted_text`, whitespace collapsed |
 
 **Row budget.** `fixed` is the size of every column except the three bodies, after the caps above (at
-most about 270 KiB). A reserve of 16 KiB is kept for later writes to the row (`triage_json`, added
+most about 526 KiB). A reserve of 16 KiB is kept for later writes to the row (`triage_json`, added
 flags). The bodies are cut in this order until `fixed + reserve + bodies ≤ 1,900,000`: first
 `html_sanitized` (the sanitised copy is a convenience; the original HTML is in the raw MIME), then
 `text`, then `extracted_text`. With every cap at its maximum, `html_sanitized` keeps at least
-about 820 KiB. The same budget and order apply to outbound rows ([Outbound › Storage of an accepted
+about 560 KiB. The same budget and order apply to outbound rows ([Outbound › Storage of an accepted
 send](outbound.md#storage-of-an-accepted-send)) and to a re-parse.
 
 When a body is cut, the message gets the flag `body_truncated`; when an address list or
@@ -594,7 +619,7 @@ delivery state.
 **Bound parameters.** No statement binds more than 100 parameters: every mailbox and D1 statement that
 takes a list of values (IDs, addresses, hashes) binds it as **one** JSON array parameter and expands it
 with `json_each(?n)` (as [Search](search.md) does), never as `IN (?, ?, …)` with one parameter per
-value. The longest fixed statement is the message insert (37 parameters). Statements are built only from
+value. The longest fixed statement is the message insert (40 parameters). Statements are built only from
 fixed fragments, so none comes near 100 KB.
 
 ## Sanitising HTML
@@ -701,6 +726,7 @@ is derived from what precedes it: `div.gmail_quote`, `blockquote[type=cite]`, `d
    | Russian | `^.{1,200} писал(а)?:$` |
    | Japanese | `^.{1,200}(さんは書きました|wrote)[:：]$` |
    | Chinese | `^.{1,200}写道[:：]$` |
+   | Arabic | None yet. A pattern is added only with a reply-attribution sample from real clients in `crates/conformance` (GAP-21 of the [gap register](../agentmail-gap-analysis.md)); a pattern is never guessed |
 
    An **Outlook-style header block** also counts: a line `^(From|Von|De|Da|Van|Från|Od) ?:` followed
    within the next 4 lines by a line `^(Sent|Date|Gesendet|Datum|Envoyé|Enviado|Inviato|Verzonden|Skickat|Wysłano|Enviada) ?:`
@@ -775,7 +801,7 @@ from every row is collected into `automated_json.evidence`.
 | 2 | `multipart/report; report-type=disposition-notification` (RFC 8098) | `mdn` |
 | 3 | `List-Id`, `List-Unsubscribe` or `List-Post` present, or `Precedence: list` or `bulk` | `list` |
 | 4 | `Auto-Submitted` present with a value other than `no` (RFC 3834 `auto-generated`, `auto-replied`; RFC 5436 `auto-notified`); `X-Autoreply`, `X-Autorespond`; `X-Auto-Response-Suppress` containing `All` or `OOF`; `Precedence: junk` or `auto_reply`; a subject starting `Out of Office`, `Automatic reply:`, `Auto:`, `Autosvar:`, `Abwesenheitsnotiz`, `Réponse automatique`; `From` local part `noreply`, `no-reply`, `donotreply`, `do-not-reply`; the null envelope sender; `X-Pylota-Mail-Hop` ≥ `MAX_HOP` (10) | `automated` |
-| 5 | A `text/calendar` part (and none of the above) | `calendar` |
+| 5 | A calendar object was read at step 10a, and none of the above (step 10a upgrades `normal` to `calendar`) | `calendar` |
 | 6 | Otherwise | `normal` |
 
 - `trust.automated` is true for `dsn`, `mdn`, `list` and `automated`. Agents must not auto-reply to these;
@@ -822,8 +848,11 @@ source; only the SPF input differs (step 5).
    and treated as bugs.
 3. **DKIM.** `verify_dkim` over the raw message gives one `DkimOutput` per signature: `d=`, `s=`, result
    (`pass`, `neutral`, `fail`, `permerror`, `temperror`, `none`).
-4. **ARC.** `verify_arc` (feature `arc`) gives `pass`, `fail` or `none` and the instance count. It is
-   recorded; it does not override DMARC in v1.0.
+4. **ARC.** `verify_arc` (feature `arc`) gives `pass`, `fail` or `none` and the instance count; for `pass`
+   the newest seal's `d=`, the newest AAR's `dmarc` result, `header.from` and `smtp.rcpttodomain`, and the
+   newest AMS's `h=` and `t=` are recorded in `auth_json.arc` (with `arc.sealer_trusted`, whether the sealer
+   is in `inbound.trusted_arc_sealers`). ARC can rescue a DMARC failure only by the rule of
+   [Parity additions § 6](parity-additions.md#6-trusted-arc-sealers-fr-in-15).
 5. **SPF.** Email Workers do not expose the client IP and `mail-auth`'s SPF check needs it. SPF is taken
    from the trusted header's `spf=` result and `smtp.mailfrom` (domain = the part after `@`, or the
    envelope sender's domain). Without a trusted header (`PM_TRUSTED_AUTHSERV_ID` empty, or the topmost
@@ -840,7 +869,8 @@ source; only the SPF input differs (step 5).
      organisational domain (`adkim=r`). SPF-aligned: SPF `pass` with the same rule over the SPF domain
      and `aspf`.
    - Result: `pass` if either is aligned; `fail` if a policy exists and neither is aligned; `temperror`
-     if a needed lookup failed and nothing passed; `none` if there is no record.
+     if a needed lookup failed and nothing passed; `none` if there is no record. `auth_json.spf.aligned`
+     records whether SPF passed and aligned under `aspf`, whatever the result.
    - Policy in force: `sp` when the record came from the organisational domain and `from_domain` is a
      subdomain, else `p`.
    - If our result is `temperror` and the trusted header has `dmarc=pass` or `dmarc=fail`, use the
@@ -854,20 +884,24 @@ source; only the SPF input differs (step 5).
    |---|---|
    | `loopback` set ([L3](../edge-cases.md)) | `pass` |
    | DMARC `pass` | `pass` |
+   | DMARC `fail`, or the `unverified` condition of the next row, and `core::auth::arc_rescue` succeeded: a validated chain whose newest seal is a trusted sealer, signing `From`, with a fresh AAR `dmarc=pass` for the `From` domain and bound to this identity ([Parity additions § 6.3](parity-additions.md#63-the-rule)) | `arc_rescued`; `auth_json.arc.rescue = { "result": "rescued" }`, else `{ "result": "refused", "reason" }` |
    | DMARC `fail`, the policy in force is `quarantine` or `reject`, no aligned DKIM `pass`, and SPF unchecked (Email Routing source without a trusted header, step 5) | `unverified`: SPF alignment, which Cloudflare checked before the Worker, could not be read (the authserv-id is recorded by [spike S2](index.md#spikes)) |
    | DMARC `fail` and the policy in force is `quarantine` or `reject` | `fail` |
    | DMARC `fail` with `p=none` | `unaligned` |
    | DMARC `temperror` | `softfail` |
    | No DMARC record | `none`. Alignment is recorded separately: `auth_json.dmarc.aligned_by` is `dkim`, `spf` or `null`, and each DKIM entry has `aligned` |
 
-   Then, if `multiple_from`, the verdict is capped at `unaligned`. Only `fail` and `unverified` can
-   quarantine; `none` and `unaligned` never quarantine on their own ([D1](../edge-cases.md)).
+   Then, if `multiple_from`, the verdict is capped at `unaligned` (the rescue rule does not run with
+   `multiple_from`). Only `fail` and `unverified` can quarantine; `none`, `unaligned` and `arc_rescued` never
+   quarantine on their own ([D1](../edge-cases.md)). `arc_rescued` is not `pass`: it never yields a
+   verification row, a service-ledger match, a `wait` release or a trusted delivery report
+   ([Parity additions § 6.5](parity-additions.md#65-how-each-rule-treats-arc_rescued)).
 8. **`auth_json`**:
 
    ```json
    {
      "authserv": { "id": "mx.cloudflare.net", "trusted": true },
-     "spf":   { "result": "pass", "domain": "mail.brightwell.example", "source": "authserv" },
+     "spf":   { "result": "pass", "domain": "mail.brightwell.example", "source": "authserv", "aligned": true },
      "dkim":  [ { "d": "brightwell.example", "s": "s1", "result": "pass", "aligned": true } ],
      "dmarc": { "result": "pass", "policy": "reject", "record_domain": "brightwell.example", "aligned_by": "dkim" },
      "arc":   { "result": "none", "instances": 0 },
@@ -884,7 +918,10 @@ source; only the SPF input differs (step 5).
    ours, `ses_auth_disagreement_total` is incremented; ours decides.
 
    The API's `trust.spf`, `trust.dkim`, `trust.dmarc` and `trust.arc` are the summary results (DKIM: `pass`
-   if any aligned signature passed, else the first signature's result, else `none`).
+   if any aligned signature passed, else the first signature's result, else `none`). `trust` also carries
+   the detail read from `auth_json`: `spf_domain`, `spf_aligned`, `dkim_domains`, `dmarc_domain`,
+   `dmarc_policy`, `dmarc_aligned_by` and `arc_sealer`
+   ([Parity additions § 5.1](parity-additions.md#51-new-trust-fields)).
 
 ## Trust signals
 
@@ -892,13 +929,16 @@ Computed partly in the consumer and finished inside `ingest`, which can see the 
 
 **Authenticated sender ([C10](../edge-cases.md)).** The sender is authenticated when the verdict is
 `pass`, or when `auth_json.dmarc.aligned_by` is `dkim` or `spf`: an aligned DKIM signature or an aligned
-SPF pass proves the `From` domain even when it publishes no DMARC record or `p=none`. Every rule below that
-trusts an address the identity knows (a contact, a participant, a known correspondent) applies only to an
-authenticated sender, because a `From` header alone can name anyone.
+SPF pass proves the `From` domain even when it publishes no DMARC record or `p=none`. A verdict of
+`arc_rescued` also makes the sender authenticated, because a trusted sealer proved the `From` address
+([Parity additions § 6.5](parity-additions.md#65-how-each-rule-treats-arc_rescued)), but never for the
+own-domain rule of `known_sender`. Every rule below that trusts an address the identity knows (a contact, a
+participant, a known correspondent) applies only to an authenticated sender, because a `From` header alone
+can name anyone.
 
 | Signal | Rule |
 |---|---|
-| `known_sender` (FR-IN-4) | True when the sender is authenticated (below) and its address is in `contacts` with `outbound_count > 0` (we have written to them), or matches a receive-allow entry, or its domain is one of the tenant's **own** domains (`kind <> 'platform'`) and the verdict is `pass`. The shared platform domain never gives domain-level trust: every tenant's agents send from it with a passing DMARC verdict, so a platform-domain sender is known only through `contacts` or an address-level receive-allow entry ([D12](../edge-cases.md)) |
+| `known_sender` (FR-IN-4) | True when the sender is authenticated (below) and its address is in `contacts` with `outbound_count > 0` (we have written to them), or its effective receive decision is `allow`, or its domain is one of the tenant's **own** domains (`kind <> 'platform'`) and the verdict is `pass` (`arc_rescued` is not enough). The shared platform domain never gives domain-level trust: every tenant's agents send from it with a passing DMARC verdict, so a platform-domain sender is known only through `contacts` or an address-level receive-allow entry ([D12](../edge-cases.md)) |
 | `shared_domain_sender` ([D12](../edge-cases.md)) | The `From` domain is `PM_PLATFORM_DOMAIN` and the sender is not an address of this identity's own tenant: the mail comes from another workspace on the shared domain, whose name the receiving agent should not take at face value |
 | `display_name_spoof` ([D2](../edge-cases.md)) | The display name contains an address-like token different from the `From` address; or its confusable fold equals the fold of the name of a contact with `outbound_count > 0` whose address differs; or it equals the identity's display name or the tenant name while the sender is not this identity |
 | `lookalike_domain` ([D2](../edge-cases.md)) | The fold of the sender's registrable domain equals the fold of a tenant domain or of a contact domain with `outbound_count > 0`, while the domains differ. For a sender on the platform domain, the fold of its local part's tenant suffix (the part after the last `.`) is also compared with the folds of the receiving tenant's own suffix and domain labels. The fold is the UTS #39 skeleton plus the ASCII rules of [Identities › Confusables](identity-domains.md#confusable-detection) |
@@ -907,15 +947,16 @@ authenticated sender, because a `From` header alone can name anyone.
 | `hidden_text` ([B11](../edge-cases.md)) | [Hidden text](#hidden-text-b11) |
 
 These are stored in `flags_json`; the API returns `hidden_text`, `display_name_spoof`,
-`lookalike_domain`, `reply_to_mismatch`, `thread_join_unverified` and `shared_domain_sender` as
-`trust.flags` and the rest as message `flags`.
+`lookalike_domain`, `reply_to_mismatch`, `thread_join_unverified`, `shared_domain_sender`,
+`steering_suspected` and `attachments_unscreened` (both set by screening, [Screening hold §7](screening.md#7-committing-a-verdict))
+as `trust.flags` and the rest as message `flags`.
 
 **Spam score** (`spam_score`, 0–1, FR-IN-4). The consumer computes a base from deterministic signals and
 `ingest` applies the sender adjustments, then clamps to [0, 1]:
 
 | Signal | Weight |
 |---|---|
-| verdict `softfail` / `none` / `unaligned` / `unverified` / `fail` | +0.20 / +0.10 / +0.10 / +0.20 / +0.50 |
+| verdict `arc_rescued` / `softfail` / `none` / `unaligned` / `unverified` / `fail` | +0.05 / +0.20 / +0.10 / +0.10 / +0.20 / +0.50 |
 | `display_name_spoof`, `lookalike_domain` | +0.30 each |
 | `shared_domain_sender` | +0.05 |
 | `hidden_text` | +0.20 |
@@ -936,22 +977,31 @@ Decided inside `ingest` (first match wins, FR-IN-5):
 
 | Order | Condition | `status` | `quarantine_reason` |
 |---|---|---|---|
-| 1 | Sender matches a receive-block entry ([D7](../edge-cases.md)) | `hidden` | `blocked_sender` |
+| 1 | The effective receive decision for the sender is `block` (an identity or tenant receive-block entry, [Parity additions § 3](parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17), [D7](../edge-cases.md)) | `hidden` | `blocked_sender` |
 | 2 | An inbound volume cap exceeded: the per-sender throttle, or a `Throttle` admission for a sender that is neither a known correspondent nor receive-allowed ([D5](../edge-cases.md), [D13](../edge-cases.md)) | `throttled` | – |
 | 3 | `verdict = 'fail'` and `quarantine.on_auth_fail` | `quarantined` | `auth_failed` |
 | 3a | `verdict = 'unverified'` and `quarantine.on_auth_fail` (no trusted `Authentication-Results` yet, so SPF alignment could not be checked) | `quarantined` | `auth_unverified` |
 | 4 | Any attachment has a `risk` that quarantines ([Attachment safety](#attachment-safety)), or `scan_status = 'infected'`, or the SES source's `virusVerdict` is `FAIL` ([N27](../edge-cases.md)) | `quarantined` | `risky_attachment` |
-| 4a | A verification match, `accounts.require_approval`, no approved service-ledger entry matching it, and the sender not on the receive-allow list ([E9](../edge-cases.md), [Service sign-up ledger §5](service-accounts.md#5-the-verification-gate)) | `quarantined` | `account_unapproved` |
+| 4a | A verification match, `accounts.require_approval`, no approved service-ledger entry matching it, and the effective receive decision is not `allow` ([E9](../edge-cases.md), [Service sign-up ledger §5](service-accounts.md#5-the-verification-gate)) | `quarantined` | `account_unapproved` |
 | 5 | Unsolicited OTP ([E5](../edge-cases.md)) and `quarantine.unsolicited_otp` | `quarantined` | `otp_unsolicited` |
-| 6 | `spam_score ≥ quarantine.spam_threshold` and the sender is not receive-allowed | `quarantined` | `spam` |
-| 7 | Otherwise | `received` | – |
+| 6 | `spam_score ≥ quarantine.spam_threshold` and the effective receive decision is not `allow` | `quarantined` | `spam` |
+| 6a | Screening in `hold` mode, an eligible message ([Screening hold §4.3](screening.md#43-quarantine-rule-6a)): the scan is decisive, or a test tenant forced `suspect` | `quarantined` | `steering_suspected` |
+| 6a | A test tenant forced `unavailable` and `on_unavailable` is `quarantine` | `quarantined` | `screening_unavailable` |
+| 6a | Nothing is scannable (`scannable = false`), or a test tenant forced `clear`, or forced `unavailable` with `on_unavailable = deliver` | `received` | – |
+| 6a | Otherwise | `screening` | – |
+| 7 | Otherwise (rule 6a did not apply) | `received` | – |
+
+Rule 6a runs only when rules 1–6 matched nothing, and only for an eligible message (not a DSN or MDN, not
+the system identity's mailbox), so it never overrides another reason; a message stored `screening` waits,
+hidden, for its verdict ([Screening hold §7](screening.md#7-committing-a-verdict)). In `monitor` mode
+rule 6a does not apply and the message is `received` with a screening record.
 
 `hidden` and `throttled` messages are stored for audit, never evented, never auto-replied to, never
-searched and never counted for notifications. Quarantined messages are visible only to keys with
-`quarantine:review`. In mail lists none of the three appears by default: a list shows them only for an
+searched and never counted for notifications. Quarantined and screening messages are visible only to keys
+with `quarantine:review`. In mail lists none of the three appears by default: a list shows them only for an
 explicit `status` filter from a key holding `quarantine:review`
 ([Security §5.3](security.md#53-cross-level-read-access)). A receive-allow entry skips rules 4a and 6 only,
-never rule 3.
+never rule 3. A receive-allow entry does not skip rule 6a.
 
 **Suppressed senders are not hidden ([D7](../edge-cases.md)).** A suppression is an outbound decision (a
 bounce, a complaint, an unsubscribe, a provider entry): it says we must not write to the address, not
@@ -970,9 +1020,13 @@ keyed by what can be trusted (FR-IN-4, FR-IN-12, [D5](../edge-cases.md), [D13](.
 | Unauthenticated, per identity | One bucket for all mail whose sender is not authenticated (none of them is a known correspondent) | 120 an hour (`inbound.unauthenticated_per_hour`) | `throttled` |
 | Per tenant | One bucket per tenant in `TenantQuota` (`AdmitInbound`), across its identities, for senders that are not known correspondents | 2,000 an hour (`inbound.per_tenant_per_hour`) | `throttled` |
 
+For these caps a sender whose verdict is `arc_rescued` is authenticated: the per-sender key is its `From`
+address, and it is outside the unauthenticated bucket; a sender whose verdict is neither `pass` nor
+`arc_rescued` and that has no aligned DKIM or SPF pass is not.
+
 A **known correspondent** is an authenticated sender in the identity's `contacts` with `outbound_count > 0`
-([C10](../edge-cases.md)); it and a receive-allowed sender are never throttled by the unauthenticated and
-tenant caps, so a flood from forged
+([C10](../edge-cases.md)); it and a sender whose effective receive decision is `allow` are never throttled
+by the unauthenticated and tenant caps, so a flood from forged
 senders cannot crowd out the people an agent already writes to. The per-identity caps use the mailbox's
 `rate_windows` inside the transaction:
 
@@ -1019,7 +1073,9 @@ Rules:
   `MailboxRequest::RegisterWait { from_domain, ttl_ms }` when it starts and every 10 seconds while it
   waits). A message with a verification match is **unsolicited** when no `wait:{d}` exists with a value
   ≥ `received_at − 30 min`, where `d` is the sender's registrable domain.
-- A `verifications` row is inserted only when the verdict is `pass` and the status is `received`:
+- A `verifications` row is inserted only when the verdict is `pass` (`arc_rescued` is not `pass`) and the
+  status is `received` (a `screening` message gets its row when it is screened clear,
+  [Screening hold §7](screening.md#7-committing-a-verdict)):
   `(message_rowid, kind, value, sender_domain, received_at + 24 h, NULL, account_id)`, where `account_id` is
   the service-ledger entry that rule 4a matched, or `NULL` when the tenant does not require approval. The
   outbox gets `verification.received` with `message_id`, `sender_domain`, `kind` and `account_id`; the value
@@ -1054,7 +1110,7 @@ rule 5 (unsolicited OTP, [E5](../edge-cases.md)) depends on its registrations.
    `MailboxRequest::WaitPoll { since_ms, from, subject_contains, thread_id, kind, release_domain }` and
    stop at the first match. The mailbox returns the oldest inbound message with `received_at > since_ms`
    that the key may see (`received`, or `quarantined` when the key holds `quarantine:review`; never
-   `hidden` or `throttled`; `wait` has no `status` filter, so the list rule of
+   `screening`, `hidden` or `throttled`; `wait` has no `status` filter, so the list rule of
    [Security §5.3](security.md#53-cross-level-read-access) does not apply) and that matches every given
    filter:
    - `from`: the `From` address equals it, or its domain equals the `@domain`;
@@ -1066,7 +1122,7 @@ rule 5 (unsolicited OTP, [E5](../edge-cases.md)) depends on its registrations.
      waits for ([C9](../edge-cases.md));
    - `kind = verification`: a `verifications` row exists for the message with `expires_at > now`.
 4. **Release.** With `kind = verification` (or `any` with a match that has a verification row), the
-   `verification` object is filled only when the message's verdict is `pass` and the row's
+   `verification` object is filled only when the message's verdict is `pass` (never `arc_rescued`) and the row's
    `sender_domain` equals `from_domain`, and, with `accounts.require_approval: true`, the row's `account_id`
    names an entry that is still `approved` (one D1 read by ID, [E13](../edge-cases.md)); otherwise it is
    `null` and the message is still returned. The
@@ -1130,17 +1186,22 @@ pub struct IngestInput {
     pub spam_base: f32, pub flags: Vec<String>,
     pub refs: Vec<Ref>, pub attachments: Vec<AttachmentMeta>, pub verification: Option<Verification>,
     pub approved_accounts: Option<Vec<ApprovedAccount>>,   // step 12; None when the gate does not apply
-    pub sender_suppressed: bool, pub receive_list: Option<ListKind>,
+    pub sender_suppressed: bool,
+    pub receive_list: Option<ListDecision>,        // core::lists::decide over both scopes (Parity additions § 3.1)
     pub tenant_domains: Vec<(String, DomainKind)>,  // own domains and the platform domain
     pub inbound_admit: Admission,                  // Admit | Throttle, from AdmitInbound (D13)
     pub is_primary_recipient: bool, pub is_bcc: bool,
     pub policy: InboundPolicy, pub parser_version: u32, pub loopback: Option<LoopbackSource>,
+    pub calendar: Option<CalendarInput>,           // step 10a; None without a calendar part
+    pub screening: Option<ScreeningInput>,         // step 11a; None when policy screening.mode is off
 }
 
 pub enum IngestOutcome {
     Stored { message_id: String, thread_id: String, status: String, duplicate: bool,
              stored_raw_r2_key: String,            // the stored message's raw key (a duplicate's differs)
-             attachments: Vec<AttachmentToStore>, suppress: Vec<SuppressionRequest> },
+             attachments: Vec<AttachmentToStore>, suppress: Vec<SuppressionRequest>,
+             screen_job: bool },                   // true when the message's screenings row is pending
+                                                   // (written now, or found by a duplicate, step 2)
     Backscatter,                                   // an unmatched DSN: nothing written (D4)
 }                                                  // an untrusted DSN (D11) is Stored, hidden, with no state change
 pub struct AttachmentToStore { pub attachment_id: String, pub part_index: u32, pub r2_key: String,
@@ -1158,8 +1219,10 @@ transaction that stores it):
    WHERE raw_sha256 = ?1 AND direction = 'inbound' LIMIT 1;
    ```
 
-   Found → return `Stored { duplicate: true, … }` with that message's attachments and, for a stored
-   DSN, its suppression requests recomputed from `automated_json.dsn`. No event, no counters.
+   Found → return `Stored { duplicate: true, … }` with that message's attachments, `screen_job` true when
+   its `screenings` row is still `pending` (so post-commit step 4a sends a `ScreenJob` that a failed send
+   lost), and, for a stored DSN, its suppression requests recomputed from `automated_json.dsn`. No event, no
+   counters.
 3. **Duplicate by Message-ID ([B3](../edge-cases.md))**, only when `message_id_synthetic = 0`:
 
    ```sql
@@ -1175,13 +1238,30 @@ transaction that stores it):
    `Backscatter` here, before any write.
 5. **Thread token.** If `detail` looks like a token, apply the brute-force limits and verify it
    ([Threading › Verification](threading.md#23-verification)).
-6. **Thread** with `resolve_inbound` ([Threading](threading.md#31-order-fr-thr-1)).
+6. **Thread** with `resolve_inbound` ([Threading](threading.md#31-order-fr-thr-1)); it receives the
+   calendar UID hash only when the calendar object is verified
+   ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)).
 7. **Trust and quarantine:** `known_sender` (own domains only), look-alike, display-name and
    shared-domain checks against `contacts` and `tenant_domains`, the final spam score, the volume-cap
    upserts and `inbound_admit` ([Inbound volume caps](#inbound-volume-caps-d5-d13)), the E5 check, then the
-   [Quarantine decision](#quarantine-decision).
+   [Quarantine decision](#quarantine-decision), rule 6a included.
 8. **Insert the thread** if new ([Threading](threading.md#34-effects-on-the-thread-row)).
-9. **Insert the message:**
+
+   **`organized_here`**, before step 9, only for a verified `reply`, `refresh` or `counter` (`false` for
+   every other object): one indexed query sets the field in the object, with `?2` its organizer and `?3`
+   the replier's party hash ([Calendar invitations §4.2](calendar-invitations.md#42-ingest)):
+
+   ```sql
+   SELECT 1 FROM messages
+   WHERE calendar_uid_hash = ?1 AND direction = 'outbound'
+     AND status NOT IN ('canceled','rejected','failed','suppressed')
+     AND json_extract(calendar_json, '$.method') IN ('request','add','publish')
+     AND json_extract(calendar_json, '$.organizer.address') = ?2
+     AND EXISTS (SELECT 1 FROM json_each(calendar_json, '$.parties') p WHERE p.value = ?3)
+   LIMIT 1;
+   ```
+
+9. **Insert the message** with the status of step 7:
 
    ```sql
    INSERT INTO messages (
@@ -1190,13 +1270,16 @@ transaction that stores it):
      reply_to_json, to_json, cc_json, delivered_to, is_bcc, is_primary_recipient, subject, text,
      html_sanitized, extracted_text, snippet, sent_at, received_at, kind, automated_json, auth_json,
      verdict, spam_score, known_sender, quarantine_reason, flags_json, read, triage_status,
-     triage_json, parser_version, metadata_json)
+     triage_json, parser_version, metadata_json, received_evented_at, calendar_json, calendar_uid_hash)
    VALUES (?1, ?2, 'inbound', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
            ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, 0, ?35, ?36,
-           ?37, '{}')
+           ?37, '{}', ?38, ?39, ?40)
    RETURNING rowid;
-   -- triage_status ?35: 'pending' for received (triage enabled), NULL for quarantined (triaged on
-   -- release), 'skipped' for received with triage disabled, and for hidden, throttled, dsn and mdn;
+   -- 40 bound parameters (the limit is 100)
+   -- received_evented_at ?38: the commit time for received (either screening mode), NULL otherwise
+   -- (Screening § 4.4); calendar_json ?39 and calendar_uid_hash ?40 from IngestInput.calendar, or NULL
+   -- triage_status ?35: 'pending' for received (triage enabled), NULL for quarantined and screening
+   -- (triaged once visible), 'skipped' for received with triage disabled, and for hidden, throttled, dsn and mdn;
    -- the system identity's mailbox: always 'skipped' (not_eligible), it is never triaged
    -- triage_json ?36: the skipped record for 'skipped' ({"status":"skipped","reason":"policy_disabled"
    -- or "not_eligible","risk_flags":[],"model":null,"version":TRIAGE_VERSION,"run":0}, Triage § 2),
@@ -1220,7 +1303,8 @@ transaction that stores it):
     ```
 
 12. **Refs:** `INSERT OR IGNORE INTO refs (message_rowid, kind, value, source) VALUES (…)` per ref.
-13. **Contacts** (only for `received` and `quarantined`):
+13. **Contacts** (only for `received`, `quarantined` and `screening`; a contact known only from held mail stays
+    hidden by the contacts visibility clause, [Search §12.1](search.md#121-contacts-search)):
 
     ```sql
     INSERT INTO contacts (address, name, domain, first_seen_at, last_seen_at, inbound_count, last_thread_seq)
@@ -1232,15 +1316,30 @@ transaction that stores it):
       last_thread_seq = excluded.last_thread_seq;
     ```
 
-14. **Verifications** row when applicable (see above).
+14. **Verifications** row when applicable (see above): only for `received`; a `screening` message gets its
+    row at the clear commit ([Screening hold §7](screening.md#7-committing-a-verdict)).
 15. **Thread counters**, from visible messages only: the thread's visible columns are recomputed when
-    the new message is visible (`received`); a quarantined, hidden or throttled message changes none of
-    them ([Threading § 3.4](threading.md#34-effects-on-the-thread-row)).
+    the new message is visible (`received`); a quarantined, screening, hidden or throttled message changes
+    none of them ([Threading § 3.4](threading.md#34-effects-on-the-thread-row)).
+
+    15a. **Screening record**, when `IngestInput.screening` is set and the message is eligible: insert the
+    `screenings` row with `mode`, `on_unavailable`, `started_at = now`, `deadline_at = now + deadline_ms`,
+    the scan's signals, and either `status = 'pending'` or, when decided at ingest (a decisive scan:
+    `suspect`, reason `rules`; nothing scannable: `clear`, reason `nothing_to_screen`; a test tenant's forced
+    verdict: reason `test_forced`), the final status, reason, `model` and `completed_at = now`. When
+    `pending`, set `meta['alarm:screen'] = min(current, deadline_at)`
+    ([Screening hold §4.4](screening.md#44-changes-to-the-ingest-transaction)).
 16. **Outbox:** `message.received` (status `received`) or `message.quarantined` (status `quarantined`),
-    plus `verification.received` when inserted. No event for `hidden`, `throttled` or DSN rows. Payloads
-    are built by the builders in [Webhooks](webhooks.md); `extracted_text` is cut to
-    `policy.webhook_text_bytes`, and `message.quarantined` carries none.
-17. Set `alarm:outbox`.
+    plus `verification.received` when inserted, plus `calendar.received` after `message.received` when the
+    message has a calendar object, is `received`, and the mailbox is not the system identity's
+    ([Calendar invitations §4.4](calendar-invitations.md#44-the-calendarreceived-event)). No event for
+    `screening`, `hidden`, `throttled` or DSN rows. A message whose screening was decided at ingest emits
+    `message.screened` first, then `message.received` (monitor, or a hold-mode `nothing_to_screen` clear)
+    or `message.quarantined` (hold, `steering_suspected`); `message.received` and `message.quarantined`
+    carry `data.screening` when the message has a record. Payloads are built by the builders in
+    [Webhooks](webhooks.md); `extracted_text` is cut to `policy.webhook_text_bytes`, and
+    `message.quarantined` carries none.
+17. Set `alarm:outbox`, and re-arm the alarm to the earliest pending wake-up, `alarm:screen` included.
 
 `ingest` also deletes `meta['parse:{msg}']` ([consumer step 4](#the-pm-inbound-consumer)). A message
 ID listed in `erased_ids` (an erasure removed it while its pointer was still queued) gets
@@ -1270,9 +1369,15 @@ After `Stored`:
    never indexed, embedded or triaged, [A15](../edge-cases.md)):
    - `AttachmentText { tenant_id, identity_id, message_id }` when any attachment has `text_pending`;
    - `Embed { tenant_id, identity_id, message_id }` for every stored inbound message
-     ([Search](search.md));
+     ([Search](search.md)); the embed consumer skips `screening` as it skips `quarantined`;
    - `Triage { tenant_id, identity_id, message_id }` when the status is `received`, the kind is not
-     `dsn` or `mdn`, and triage is enabled ([Triage](triage.md)).
+     `dsn` or `mdn`, and triage is enabled ([Triage](triage.md)), so never for `screening`.
+
+   4a. **Screen job.** When `screen_job` is true, send `ScreenJob { v: 1, tenant_id, identity_id,
+   message_id, attempt: 0, deferrals: 0, waits: 0, finalize: false }` to `pm-screen`. A failed send fails
+   the post-commit step, the pointer is retried and `ingest` returns the stored message (duplicate by
+   hash), so the send is repeated; if it never succeeds, the deadline still ends the hold
+   ([Screening hold §4.5](screening.md#45-post-commit)).
 5. Count it: `QuotaRequest::RecordUsage { metric: Inbound, n: 1 }` to the tenant's `TenantQuota`, which
    the hourly roll-up flushes to `usage_daily` ([Outbound › TenantQuota](outbound.md#tenantquota)); never
    a D1 write per message.
@@ -1294,10 +1399,13 @@ ever ([I9](../edge-cases.md)). Three rules keep them short-lived:
    in the transaction that takes the thread lock; the accept transaction deletes it. A marker older than
    10 minutes with no `messages` row names an orphan.
 3. **Rolling sweep.** The mailbox's daily maintenance alarm deletes the objects of stale compose markers,
-   then lists the next 5,000 keys under `t/{tenant_id}/i/{identity_id}/` (continuing from
-   `meta.orphan_sweep_cursor`, wrapping at the end) and deletes every key older than 15 days that no row
-   names (`messages.raw_r2_key`, `attachments.r2_key`, `attachments.text_r2_key`, and the outbound
-   `out/{msg}.eml` of a `messages` row), in `BLOBS` and, when configured, `BACKUP`. Fifteen days is
+   and of `draft_att` markers older than one hour whose attachment is in no draft row
+   ([Drafts § 7](drafts.md#7-attachments)), then lists the next 5,000 keys under
+   `t/{tenant_id}/i/{identity_id}/` (continuing from `meta.orphan_sweep_cursor`, wrapping at the end) and
+   deletes every key older than 15 days that no row
+   names (`messages.raw_r2_key`, `attachments.r2_key`, `attachments.text_r2_key`, the outbound
+   `out/{msg}.eml` of a `messages` row, `uploads.r2_key`, and the `r2_key` of each `drafts.attachments_json`
+   entry, [Drafts § 7](drafts.md#7-attachments)), in `BLOBS` and, when configured, `BACKUP`. Fifteen days is
    longer than a queue or dead-letter queue keeps a message (14 days), so no pointer that could still be
    processed or redriven names a swept key. Each deletion increments `r2_orphans_deleted_total`. A
    mailbox of any size is covered within a bounded number of days, at a cost of five list calls a day.
@@ -1419,6 +1527,8 @@ User-Agent: PylotaMail/1.0
   `scan_status = 'error'`, the message is not quarantined for it, and `scanner_error_total` is incremented.
 - Without a scanner, `scan_status` stays `skipped`. The value `pending` is not used in v1.0.
 
+The same hook scans uploads, whole, up to 26,214,400 bytes ([Uploads § 4.3](uploads.md#43-classification-and-the-scanner)).
+
 ## Attachment text extraction
 
 `pm-index` job `AttachmentText { tenant_id, identity_id, message_id }` processes every attachment of the
@@ -1464,13 +1574,17 @@ Rust; if it differs, the observed form replaces the primary rule here.
 than 2 MB of text → `text_status = 'unavailable'`. The hidden-character rules are applied to the text.
 
 **Result.** The job writes `t/{ten}/i/{idn}/m/{msg}/a/{att}.md` to R2, then sends
-`MailboxRequest::AttachmentTextReady { message_id, items: [{ attachment_id, status, pages, text_r2_key, refs }], fts_text }`.
+`MailboxRequest::AttachmentTextReady { message_id, items: [{ attachment_id, status, pages, text_r2_key, refs, steering }], fts_text }`,
+and, with the items, the steering signals of each text (`core::injection::scan` over at most 256 KiB per
+attachment, [Screening hold §8](screening.md#8-late-content)).
 In one transaction the mailbox sets `text_status`, `text_r2_key` and `text_pages`, inserts the refs with
 `source = att:{id}:{page}`, and rebuilds the message's FTS row with `fts_text` (filenames plus attachment
 text, at most 1 MiB) in the `attachments` column, as specified in [Search](search.md). It then queues an
 `Embed` job for the attachment chunks. When the message no longer exists, or its ID is in `erased_ids`
 (an erasure ran while the job converted), the mailbox answers `Erased` and writes nothing, and the job
-deletes the `.md` objects it wrote before acking ([I10](../edge-cases.md)).
+deletes the `.md` objects it wrote before acking ([I10](../edge-cases.md)). When the message has a
+`screenings` row and the new signals, with the stored ones, are decisive, the same transaction applies the
+late-content rule of [Screening hold §8](screening.md#8-late-content).
 
 **Failure ([B12](../edge-cases.md)).** A `toMarkdown` error, an `error` result, or no answer within 60 s:
 re-enqueue the job with `attempt + 1` after 60 s, then 300 s; after the third attempt, `unavailable`.
@@ -1563,11 +1677,17 @@ The consumer handles `Reparse` like `Message`, except: the raw object comes from
 `raw_r2_key` (if it is past retention, the message is skipped and counted as `raw_expired`), and it calls
 `MailboxRequest::Reparse`, which in one transaction updates the parsed columns (`text`,
 `html_sanitized`, `extracted_text`, `snippet`, `kind`, `automated_json`, `auth_json`, `verdict`,
-`flags_json` with `reprocessed` added, `parser_version`), replaces the message's refs and FTS rows, and
+`flags_json` with `reprocessed` added, `parser_version`, `calendar_json`, `calendar_uid_hash`), replaces the
+message's refs and FTS rows, and
 matches attachments to existing rows by `(sha256, part order)` so attachment IDs never change. Thread
 membership is never changed. A message whose new decision would quarantine it (for example a newly
 detected risk) moves from `received` to `quarantined`; a re-parse never releases a message. The outbox
-gets `message.received` or `message.quarantined` again with `data.reprocessed = true`.
+gets `message.received` or `message.quarantined` again with `data.reprocessed = true` (one of the two: when
+the new parse's steering scan also moves the message back to quarantine, the single `message.quarantined`
+carries `rescreened: true` too, after a `message.screened`; [Screening hold §8](screening.md#8-late-content)), and
+`calendar.received` again with `reprocessed: true` when the calendar object changed. A re-parse of a
+message that is still `screening` answers `Busy` and is retried after 60 s; the new parse's steering scan
+follows [Screening hold §8](screening.md#8-late-content).
 
 ## Test-mode loopback (L3)
 
@@ -1600,8 +1720,14 @@ pub enum ReadRequest {                      // variants of MailboxRequest
     GetThread     { thread_id: String, messages_limit: u32, cursor: Option<ListBoundary>, include: Include, review: bool },
     ListMessages  { filters: MessageFilters, limit: u32, cursor: Option<ListBoundary>, review: bool },
     GetMessage    { message_id: String, include: Include, review: bool },
-    UpdateMessage { message_id: String, labels_add: Vec<String>, labels_remove: Vec<String>, read: Option<bool>, review: bool },
-    UpdateThread  { thread_id: String, labels_add: Vec<String>, labels_remove: Vec<String>, read: Option<bool>, archived: Option<bool> },
+    UpdateMessage { message_id: String, labels_add: Vec<String>, labels_remove: Vec<String>, read: Option<bool>, review: bool,
+                    label_events: Option<LabelEventContext> },
+    UpdateThread  { thread_id: String, labels_add: Vec<String>, labels_remove: Vec<String>, read: Option<bool>, archived: Option<bool>,
+                    label_events: Option<LabelEventContext> },
+    BatchGet      { message_ids: Vec<String>, extracted_text_bytes: u32, review: bool },   // Parity additions § 2
+    BatchUpdate   { message_ids: Vec<String>, labels_add: Vec<String>, labels_remove: Vec<String>,
+                    read: Option<bool>, archived: Option<bool>, require_absent: Vec<String>, review: bool,
+                    label_events: Option<LabelEventContext> },
     ListQuarantine { limit: u32, cursor: Option<ListBoundary> },
     Release       { message_id: String, actor: Actor, reason: String, key_release: KeyRelease },
     ConfirmStored { message_id: String },   // post-commit check (I10): Stored | Erased
@@ -1609,11 +1735,16 @@ pub enum ReadRequest {                      // variants of MailboxRequest
 pub struct ListBoundary { pub sort_ms: i64, pub key: i64 }   // the last row's sort time and seq or rowid
 pub struct Include { pub quoted: bool, pub html: bool, pub headers: bool }
 pub enum KeyRelease { NotAKey, Allowed }    // decided by the handler, below
+pub struct LabelEventContext { pub actor: Actor, pub request_id: String, pub source: LabelSource }
+                                            // None when the tenant's events.labels_changed is off
 ```
 
-**Visibility.** A message is **visible** when its status is not `quarantined`, `hidden` or `throttled`.
-Lists show visible messages only; `ListMessages` with an explicit `status` filter of `quarantined`,
-`hidden` or `throttled` returns those messages only with `review`, and otherwise returns none with `200`
+**Visibility.** A message is **visible** when its status is not `quarantined`, `screening`, `hidden` or
+`throttled`. Every visibility predicate below is built from `core::visibility::not_visible_sql`, written
+out here as `NOT IN ('quarantined','screening','hidden','throttled')`
+([Screening hold §9](screening.md#9-visibility-the-hold-is-real)). Lists show visible messages only;
+`ListMessages` with an explicit `status` filter of `quarantined`, `screening`, `hidden` or `throttled`
+returns those messages only with `review`, and otherwise returns none with `200`
 ([Security § 5.3](security.md#53-cross-level-read-access)). `GetMessage` of a message that is not visible
 answers `message_not_found` without `review`, the same as a missing ID.
 
@@ -1629,7 +1760,7 @@ SELECT t.seq, t.id, t.subject, t.participants_json, t.message_count, t.unread_co
 FROM threads t
 JOIN messages lm ON lm.rowid = (SELECT m.rowid FROM messages m
                                 WHERE m.thread_seq = t.seq
-                                  AND m.status NOT IN ('quarantined','hidden','throttled')
+                                  AND m.status NOT IN ('quarantined','screening','hidden','throttled')
                                 ORDER BY m.received_at DESC, m.rowid DESC LIMIT 1)
 WHERE t.message_count > 0 AND t.archived = ?1
   AND (?3 IS NULL OR (t.last_at, t.seq) < (?3, ?4))
@@ -1641,13 +1772,13 @@ LIMIT ?2;
 The filters are fixed fragments: `category = ?`, `needs_reply >= ?`, `unread_count > 0` (`is_unread`),
 `lm.direction = ?`, `last_at >= ?` and `last_at < ?` (`after`, `before`, resolved to UTC in the handler),
 and for `label`, `EXISTS (SELECT 1 FROM labels l JOIN messages m ON m.rowid = l.message_rowid WHERE
-m.thread_seq = t.seq AND l.label = ? AND m.status NOT IN ('quarantined','hidden','throttled'))`. A thread's
+m.thread_seq = t.seq AND l.label = ? AND m.status NOT IN ('quarantined','screening','hidden','throttled'))`. A thread's
 `labels` (the union over its visible messages) come from one more query per page:
 
 ```sql
 SELECT m.thread_seq, l.label FROM labels l JOIN messages m ON m.rowid = l.message_rowid
 WHERE m.thread_seq IN (SELECT value FROM json_each(?1))
-  AND m.status NOT IN ('quarantined','hidden','throttled')
+  AND m.status NOT IN ('quarantined','screening','hidden','throttled')
 GROUP BY m.thread_seq, l.label;
 ```
 
@@ -1657,7 +1788,7 @@ GROUP BY m.thread_seq, l.label;
 fixed filters `thread_seq = (SELECT seq FROM threads WHERE id = ?)`, `direction = ?`, `status = ?`,
 `EXISTS (… labels …)`, `received_at >= ?`, `received_at < ?`. `GetThread` returns the thread summary
 plus its visible messages oldest first (`received_at ASC, rowid ASC`, `messages_limit` per page; with
-`review`, also its quarantined messages). Each message is built from its row, its `attachments`,
+`review`, also its quarantined and screening messages). Each message is built from its row, its `attachments`,
 `labels`, `refs` and, for outbound, `deliveries`. `extracted_text` is always included; `text` with
 `include=quoted`, `html` (from `html_sanitized`) with `include=html`.
 
@@ -1685,8 +1816,16 @@ pagination appears on the first page only and never shifts later pages.
 - `archived` (threads only): sets `threads.archived`. A new visible inbound message in an archived
   thread sets it back to 0.
 
-They emit no event. `UpdateMessage` on a message that is not visible needs `review` (else
-`message_not_found`). The search operator `is:unread` and the list filter `is_unread` read the same
+They emit `message.labels_changed` when the handler passes `label_events`
+([Parity additions § 4](parity-additions.md#4-label-change-events-fr-wh-6)): one event in the same
+transaction, naming only visible messages whose labels changed, none when only `read` or `archived`
+changed. `UpdateMessage` on a message that is not visible needs `review` (else `message_not_found`).
+
+**Batches** ([Parity additions § 2](parity-additions.md#2-batch-message-operations-fr-in-13)). `BatchGet`
+reads up to 100 messages in request order with a byte budget; `BatchUpdate` applies labels, read state and
+archiving to up to 100 messages in **one** transaction, with `require_absent` evaluated inside it, so two
+concurrent claims of one message give one `updated` and one `conflicts`. Both apply the visibility rule
+above per message (with `review`) and report every ID the key cannot see in `not_found`. The search operator `is:unread` and the list filter `is_unread` read the same
 columns.
 
 **Quarantine list.** `ListQuarantine` (`quarantine:review` is checked by the handler):
@@ -1702,13 +1841,17 @@ Each item is a Message object with `quarantine_reason`.
 
 **Release.** The handler first decides whether the caller may release ([J14](../edge-cases.md),
 [J16](../edge-cases.md)): a person in the console always may (`KeyRelease::NotAKey`); an API key needs
-`quarantine:review`, and, when `PM_QUARANTINE_KEY_RELEASE` is `off`, the tenant's
-`policy.quarantine.key_release` must be `true`. The policy is read from D1 for this request, never from a
+`quarantine:review`, and, when `PM_QUARANTINE_KEY_RELEASE` is `off` and `PM_CONSOLE` is `on`, the tenant's
+`policy.quarantine.key_release` must be `true` and the key must be a platform key or the partner key of the
+tenant's own partner (`auth::people::key_may_decide`, [Workspace policy §3](workspace-policy.md#3-decisions-reserved-for-people)).
+Mail held by screening is released by the same rule ([Screening hold §10](screening.md#10-release)). The policy is read from D1 for this request, never from a
 cache, immediately before the call; otherwise `403 permission_denied`, and the mailbox is not called. The
 mailbox refuses a key actor whose request does not carry `KeyRelease::Allowed`. Then, in one transaction:
 
 1. Load the row. Not found, or erased → `message_not_found`. Status not `quarantined` (including
-   `hidden` and `throttled`, which are never released) → `409 not_quarantined`.
+   `hidden` and `throttled`, which are never released) → `409 not_quarantined` with `details.status` (and
+   `details.deadline_at` for `screening`: a message still being screened is never released before its
+   verdict, [Screening hold §9](screening.md#9-visibility-the-hold-is-real)).
 2. `UPDATE messages SET status = 'received', quarantine_reason = NULL, triage_status = ?, triage_json = ?`:
    `pending` and `NULL` when triage is enabled for the tenant (the handler passes the flag) and the kind
    is not `dsn` or `mdn`; otherwise `skipped` with the skipped record.
@@ -1719,11 +1862,22 @@ mailbox refuses a key actor whose request does not carry `KeyRelease::Allowed`. 
 4. Verification: when the message has a verification match and its verdict is `pass`, insert the
    `verifications` row with `expires_at = received_at + 24 h` (none if that has passed). No
    `verification.received` event is emitted for a release.
-5. Outbox: `message.released` with `released_by_key_id` or `released_by_user_id` and `reason`.
+5. Outbox: `message.released` with `released_by_key_id` or `released_by_user_id` and `reason`; then, when
+   `received_evented_at` is `NULL`, `message.received` with `released: true` and, when the message has a
+   calendar object, `calendar.received` with `released: true`, and `received_evented_at = now`
+   ([Screening hold §10](screening.md#10-release),
+   [Calendar invitations §4.4](calendar-invitations.md#44-the-calendarreceived-event)). For a message with a
+   screening record, set its `released_by_*` and `released_at`.
+
+The events of one release are in one transaction, so they have consecutive `sequence` numbers and none
+exists without the others. **`message.received` is emitted exactly once per message**, when it first
+becomes visible to agents (re-parse re-emissions, marked `reprocessed: true`, excepted): a message that was
+`received` before (one that a late signal or a re-parse moved back to `quarantined`) gets
+`message.released` only. A second release gets `409 not_quarantined` and appends nothing.
 
 After the commit the mailbox queues `Triage { reason: Release }` (when `pending`) and
 `Embed { reason: Release }`; the handler writes the `quarantine.release` audit row with the key or user.
-The `message.released` event reaches the Notifier through the webhook fan-out
+The `message.received` event reaches the Notifier through the webhook fan-out
 ([Webhooks › Handing new mail to the Notifier](webhooks.md#handing-new-mail-to-the-notifier)).
 
 ## Open points
@@ -1749,7 +1903,7 @@ The `message.released` event reaches the Notifier through the webhook fan-out
 | `it::security::a15_system_mailbox_unreachable` | With mail in the system identity's mailbox: a tenant search, keyword or agentic, by a tenant or partner key of the default tenant never returns it; it has no FTS rows and no vectors; its events reach platform endpoints only and never a tenant endpoint or a Notifier; a subject-access export of the default tenant leaves it out; its stored bodies show `[link]` and `[code]` instead of the sign-in link and code, and its sent copy is gone once the message is `submitted` ([A15](../edge-cases.md)) |
 | `it::messages::read_path_visible_threads` | A thread whose only message is quarantined is not listed; after release it is, with the released message's subject, `snippet`, `last_direction`, participants and `unread_count`; a hidden message never changes a thread's counts; list cursors expire after 24 hours (`410 cursor_expired`) and refuse other filters or keys (`400`); `include=headers` returns `null` once the raw MIME is past `raw_days` (FR-IN-10, FR-IN-7) |
 | `it::messages::labels_and_read_state` | `PATCH` of a message and of a thread adds and removes labels and sets read state; `is:unread` and `is_unread` follow; the 65th label is `400 invalid_request`; archiving a thread hides it from the default list until new visible mail arrives; a message that is not visible needs `quarantine:review` (FR-IN-10) |
-| `it::quarantine::release_transaction` | Release moves the message to `received`, clears `quarantine_reason`, recomputes the thread, sets `triage_status = 'pending'` and queues `Triage` and `Embed`, inserts a `verifications` row for a `pass` code mail, emits `message.released` once, and writes the audit row; a second release gets `409 not_quarantined`; a hidden message cannot be released (FR-IN-5) |
+| `it::quarantine::release_transaction` | Release moves the message to `received`, clears `quarantine_reason`, recomputes the thread, sets `triage_status = 'pending'` and queues `Triage` and `Embed`, inserts a `verifications` row for a `pass` code mail, emits `message.released` once, then `message.received` with `released: true` once, and writes the audit row; a second release gets `409 not_quarantined` and appends nothing; a hidden message cannot be released (FR-IN-5) |
 | `it::inbound::a6_reject_codes` | Unknown and erased `550 5.1.1` (indistinguishable), retired `550 5.1.6`, suspended tenant temporary failure for 5 days then `550 5.2.1` ([A6](../edge-cases.md), FR-IN-2, FR-TEN-3) |
 | `it::inbound::a2_forged_token_ignored` | A forged `+t…` detail files by headers and never changes the identity ([A2](../edge-cases.md)) |
 | `it::inbound::a9_two_identities_two_copies` | Two copies, same `raw_sha256`, exactly one `is_primary_recipient = true` ([A9](../edge-cases.md)) |
@@ -1761,7 +1915,7 @@ The `message.released` event reaches the Notifier through the webhook fan-out
 | `conf::mime::b5_*` | Charsets and encodings ([B5](../edge-cases.md)) |
 | `conf::mime::b6_*` | TNEF unpacked; nested `message/rfc822` not merged ([B6](../edge-cases.md), FR-THR-2) |
 | `conf::mime::b7_cid`, `core::sanitize::b7_no_remote_fetch` | `cid:` images kept, remote `src` removed ([B7](../edge-cases.md)) |
-| `conf::mime::b8_ics`, `core::classify::b8_mdn_request_ignored` | Calendar summary; MDN request recorded, never answered ([B8](../edge-cases.md)) |
+| `conf::calendar::v*`, `core::classify::b8_mdn_request_ignored` | Calendar parts read into the bounded, verified calendar object ([Calendar invitations](calendar-invitations.md)); MDN request recorded, never answered ([B8](../edge-cases.md)) |
 | `conf::mime::b9_*` | Encrypted flagged with no body; signed-only processed ([B9](../edge-cases.md)) |
 | `core::attach::b10_*` | Every row of the risk table, sniff wins over extension, quarantine ([B10](../edge-cases.md), FR-IN-5) |
 | `core::sanitize::b11_*` | Every hidden-element signal, hidden characters, emoji ZWJ kept, flag rule ([B11](../edge-cases.md), FR-IN-9) |

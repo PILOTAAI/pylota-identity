@@ -19,7 +19,7 @@ the thread token in [Threading](threading.md)), this page states the security pr
 | Mail content: raw MIME, parsed text, attachments, extracted text | R2, `IdentityMailbox` SQLite | Personal data of counterparties and operators |
 | Addresses and contact history | `IdentityMailbox` (`contacts`, `messages`), D1 (`addresses`) | Personal data; address enumeration |
 | API key secrets | Shown once; stored as HMAC in `api_keys.hash` | Full access within a key's scope |
-| Webhook endpoint secrets (`whsec_…`) | `webhook_endpoints.secret_enc` (AES-256-GCM) | Forged events to integrators |
+| Webhook endpoint secrets (`whsec_…`) | `webhook_endpoints.secret_enc` (AES-256-GCM); custom delivery headers in `webhook_endpoints.headers_sealed` (same envelope) | Forged events to integrators |
 | Identity signing keys | `identity_keys.private_enc`: the 32-byte Ed25519 seed in the pm1 envelope, sealed under `PM_MASTER_KEY` ([Agent signing keys](agent-keys.md#8-data-model)) | Forged agent assertions: impersonation of an agent identity towards third-party services |
 | The Web Bot Auth key | D1 `signing_keys` purpose `web_bot_auth`: the seed sealed in `ciphertext` under `PM_MASTER_KEY`, the public JWK in `public_jwk` | Forged signed HTTP requests attributed to this deployment and, through the signed `From`, to any of its identities |
 | Deployment secrets `PM_*` | Worker secrets | See [section 6](#6-secrets) |
@@ -47,6 +47,7 @@ Each invariant below is enforced in code and covered by a named test (section 13
 | SEC-10 | Erasure never reports success while data remains: the receipt carries probe results ([Privacy](privacy.md)) |
 | SEC-11 | Private signing keys (identity keys and the Web Bot Auth key) are generated, sealed, used and zeroised inside the Worker. No API, log or export returns one, and a minted assertion or signature is never stored (FR-IDN-6) |
 | SEC-12 | A notification email never contains content from mail: no subject, sender, snippet or attachment name (FR-CON-14) |
+| SEC-13 | A message held by screening is invisible to every agent-facing surface until its verdict, and no text written by the screening classifier is stored, logged or returned (FR-SCR-2, FR-SCR-5) |
 
 ## 2. Trust boundaries
 
@@ -101,7 +102,10 @@ reused; the others are defined in section 13.
 | D | Floods from one sender, oversized or deeply nested mail, archive bombs, backscatter | Per-sender limit per identity ([D5](../edge-cases.md)); Cloudflare's 25 MiB cap ([B1](../edge-cases.md)) and 40 MB on the SES source ([N5](../edge-cases.md)); depth 32 and 500 parts ([B2](../edge-cases.md)); 100:1 and 100 MB archive checks ([B10](../edge-cases.md)); unmatched DSNs dropped ([D4](../edge-cases.md)); no bounce after SES has accepted a message, except the retired-address rule ([N6](../edge-cases.md)) | `it::inbound::d5_sender_throttle`, `core::mime::b2_caps`, `core::attach::b10_*`, `it::inbound::d4_backscatter_dropped`, `it::ses::large_message_40mb` |
 | E | Parser exploits, malicious attachments | Memory-safe Rust parsers, fuzzing ([Testing](testing.md#8-fuzzing)); sniffed type wins; risky attachments quarantined and never passed to extraction or agents ([B10](../edge-cases.md)) | fuzz targets `mime_parse`, `sanitize`, `dsn_parse`; `core::attach::b10_*` |
 | E | Prompt injection in body, subject, display name, filename or attachment text | Fenced untrusted content (section 8.3); read-only planner tools; `prompt_injection_suspected` flag ([E1](../edge-cases.md), [F10](../edge-cases.md)) | `core::injection::e1_*`, `it::agentic::e1_fenced`, `it::agentic::f10_steering` |
+| E | Mail that steers an integrator's agent once the agent reads it | Screening: a deterministic scan of every agent-readable field and a separate classifier; in `hold` mode the message is hidden until a verdict, fail closed by default; release only under FR-CON-6 ([Screening hold](screening.md)) | `it::screening::t1_hold_clear_then_received`, `it::screening::t17_hidden_everywhere` |
 | E | Mail to role addresses (`security@`, `abuse@`) reaching an agent | On the shared platform domain, role names are refused for identities and RFC 2142 operational names route to `PM_SECURITY_CONTACT`; on a tenant's own domain only `postmaster` and `abuse` stay reserved, and they route to the tenant's owner contact ([A4](../edge-cases.md), [Identities and domains](identity-domains.md#username-validation)) | `core::address::a4_reserved_and_confusable` |
+| S | Spoofed organizer, cancellation or reply in a calendar invitation, including a `SENT-BY` naming another user of a shared provider, or a sender's own object that reuses another event's `UID` | Each calendar object is verified against the message's authenticated sender, with the rule or the reason, and a `SENT-BY` never verifies; an unverified object is never answered by `calendar-reply` and never threaded by `UID`; matches by `UID` also need the same `ORGANIZER` ([V17](../edge-cases.md)–[V23](../edge-cases.md), [V29](../edge-cases.md)) | `it::calendar::verification_end_to_end`, `it::calendar::uid_thread_join` |
+| D | Calendar part built to exhaust the parser (deep nesting, huge recurrence, thousands of overrides or time zones) | Bounded reader: 1 MiB, 20,000 lines, 1,100 components inside the `VCALENDAR` and the other bounds of [Calendar invitations §2.2](calendar-invitations.md#22-the-bounded-reader); recurrence never expanded ([V11](../edge-cases.md)) | `core::ical::bounds`, fuzz `ical_parse` |
 
 ### 3.2 TB2: integrator → REST API
 
@@ -129,6 +133,15 @@ reused; the others are defined in section 13.
 | E | A tenant or partner key taking over a Cloudflare zone it does not own (another tenant's zone, or the zone of the deployment's own hosts) through `cloudflare_zone` | Zone permission before any Cloudflare call: the zone must be claimed for the tenant in `zone_claims` or listed in its platform-only `domains.cloudflare_zones`, and is never under the zones of `PM_PLATFORM_DOMAIN`, `PM_API_HOST` or `PM_CONSOLE_HOST` (`403 scope_denied`, `details.reason = "zone_not_allowed"`, [Identities and domains › Zone permission](identity-domains.md#zone-permission), [H8](../edge-cases.md)) | `it::domains::h8_zone_permission`, `it::security::cross_tenant_matrix` (`foreign_zone`) |
 | I | A one-time secret recovered from an idempotent replay, or a replay crossing keys | Idempotency records are keyed by the calling key, and a response carrying a secret is stored without it (`"secret_replayed": false`, [J19](../edge-cases.md)) | `it::idempotency::j19_per_key_no_secret` |
 | T | Changing a tenant while its erasure runs | Non-platform writes to an `erasing` or `erased` tenant are `*_not_found`, and only the erasure job changes its status (section 5.2, [I8](../edge-cases.md)) | `it::erasure::i8_erasing_tenant_frozen` |
+| S | A stream token stolen from a page | It works once, for 60 seconds, as its minting key and no more, and the stream is revalidated against that key every 60 seconds ([Event feed § 7.2](event-feed.md#72-stream-tokens)) | `it::stream::stream_token_single_use`, `it::stream::revocation_closes` |
+| S | A captured stream handshake replayed | The token was spent at the first handshake | `it::stream::stream_token_single_use` |
+| I | An API key put in a URL | Refused with `credential_in_url` before authentication; only the parameter's name is logged ([Event feed § 7.1](event-feed.md#71-handshake-and-authentication)) | `it::stream::handshake_validation` |
+| S | Cross-site WebSocket hijacking | No cookies exist on the API host; the page has nothing to authenticate with | `it::stream::handshake_validation` |
+| D | A slow or stalled stream client exhausting memory | The window bounds what is sent and unacknowledged ([Event feed § 7.5](event-feed.md#75-sending-and-flow-control)) | `it::stream::flow_control_slow_consumer` |
+| D | Many connections or long polls from one key | 10 connections per key (oldest replaced), 100 per tenant, 5 long polls per key and 20 per tenant, 100 client messages in 10 seconds | `it::stream::connection_limits`, `it::events::long_poll_concurrency` |
+| I | A feed reader that believes it saw everything | `withheld_types` names what its key may not see ([Event feed § 4](event-feed.md#4-who-sees-which-events)) | `it::events::visibility_matrix` |
+| T | A forged event cursor | HMAC with the log's own secret; and a position grants no access, because every read applies the key's scope and visibility | `it::events::cursor_validation` |
+| E | A revoked key kept streaming | Push on revocation, and the 60-second validation rule before every send ([Event feed § 7.7](event-feed.md#77-revalidation-revocation-and-suspension)) | `it::stream::revocation_closes` |
 
 ### 3.3 TB3: agent → MCP
 
@@ -136,8 +149,13 @@ reused; the others are defined in section 13.
 |---|---|---|---|
 | S | Unauthenticated MCP use, DNS rebinding from a browser | `Authorization: Bearer pmk_…` on every request, through the REST authentication code; an `Origin` header other than `https://{PM_API_HOST}` gets `403`; no CORS grant ([MCP › Request handling](mcp.md#21-request-handling)) | `it::security::mcp_requires_key` |
 | E | A steered agent calls a send tool | Send tools require `idempotency_key`; `send_policy.require_known_recipient`, on by default, suppresses deliveries to recipients the identity has never sent to, whatever mail they sent first ([E2](../edge-cases.md)); a send whose hop count reaches 10 is refused with `loop_detected` ([N13](../edge-cases.md)); tools the key lacks permission for are not listed and refused if called | `it::send::e2_require_known_recipient`, `it::security::mcp_tools_follow_key` |
+| S/E | An agent steered by mail sends to an attacker | Drafts: an agent holding `drafts:write` only can never send, and the tenant's `drafts.require_approval` (or the identity's stricter `send_policy.require_approval`) refuses a direct send that needs approval (`403 approval_required`, outbound policy step 16a); the approval is bound to the digest of the content, the recipients and the sender identity, so an edit asks again (FR-DRF-4, FR-DRF-5, [Drafts §3](drafts.md#3-approval-policy)) | `it::drafts::q27_direct_send_approval_required`, `it::drafts::q19_approval_binds_content` |
 | I | Tool results leaking across scope | Each tool dispatches to the same handler and router entry as its REST equivalent; there is no MCP-only data path | `it::security::cross_tenant_matrix` (MCP column) |
 | D | Long polls tying up the endpoint | `mail_wait` timeout ≤ 60 s; requests count against `RL_API` | `it::wait::e4_*` |
+
+A key's `mcp_tools` can shorten the tools an MCP-only agent sees below what its permissions allow; it is
+defence in depth, not a boundary, because REST follows the permissions
+([SDKs, skills and agent tooling §5.3](sdk-and-skills.md#53-per-key-tool-allow-list)).
 
 ### 3.4 TB4: Worker → webhook endpoints
 
@@ -204,7 +222,7 @@ section 4.9 states the security properties.
 | I | Notification content read on a lock screen, or by the person's mail provider | Notifications carry counts, inbox addresses, the workspace name and links only: never a subject, sender, snippet or attachment name from any message, and only mail visible in the inbox is counted ([Notifications §1](notifications.md#1-kinds), [O15](../edge-cases.md)) | `core::notify::no_content_in_body`, `it::notify::invisible_mail_never_notifies` |
 | D | Notification mail used to flood a person | At most 50 notification emails per person and 200 per workspace a day, `account` and `digest` excepted, the rest going into the next daily digest (one `digest` email per person a day at most) ([O24](../edge-cases.md)); a hard bounce or complaint pauses that person's preferences ([O17](../edge-cases.md)) | `it::notify::daily_caps`, `it::notify::bounce_pauses_prefs` |
 | D | Free workspaces created to send spam | New-workspace send ramp (lifted by a paid plan only once its invoice is paid, and restored by a dispute), disposable-domain block, `RL_SIGNIN`, one self-serve Free workspace per person, and the automatic shared-domain breaker ([W29](../edge-cases.md), [W30](../edge-cases.md), [W37](../edge-cases.md), [W38](../edge-cases.md), [W46](../edge-cases.md), [Cloud sign-up §10](cloud-signup.md#10-abuse-and-safety-on-cloud)) | `it::abuse::free_ramp`, `it::billing::w37_grant_after_payment`, `it::billing::w38_dispute_and_refund`, `it::abuse::w46_shared_domain_breaker` |
-| D | System mail (one sender, one platform domain, one account quota shared with Pylota) drained by strangers, so nobody can sign in | Budgets per recipient, per client network and ASN and per inviting tenant; a form ticket on the mail-sending forms; `invitation` and `notification` mail capped at 20% and 50% of the system identity's day, so sign-in mail always has a share ([W44](../edge-cases.md)) | `it::abuse::w44_system_mail_budgets` |
+| D | System mail (one sender, one platform domain, one account quota shared with Pylota) drained by strangers, so nobody can sign in | Budgets per recipient, per client network and ASN and per inviting tenant; a form ticket on the mail-sending forms; `invitation`, `notification` and `signup` mail capped at 20%, 50% and 5% of the system identity's day and at 75% together, so sign-in mail always has at least 25% ([W44](../edge-cases.md), [Agent self-sign-up](agent-signup.md)) | `it::abuse::w44_system_mail_budgets` |
 
 ### 3.8 TB8: agent proofs → third parties
 
@@ -271,7 +289,9 @@ Every authenticated request (REST and MCP) runs `auth::authenticate` once, befor
    `GET /v1/me` included, and nothing else runs ([J13](../edge-cases.md)); inbound mail is still accepted
    and stored, and the tenants' status does not change. This comes after the secret matched, so it tells
    a guesser nothing. A partner key gets no implicit permission. A `deleted` partner has no keys left
-   (deletion deletes them), so no request reaches this step for it.
+   (deletion deletes them), so no request reaches this step for it. When the tenant row has
+  `provisional_until` set (a provisional agent sign-up), the resolved permissions are intersected with the
+  provisional set of [Agent self-sign-up §4.1](agent-signup.md#41-permissions).
 
 ### 4.3 `last_used_at`
 
@@ -330,10 +350,10 @@ partner's keys, [Partner keys](#partner-keys)), `tenant` (one tenant) and `ident
    |---|---|---|---|---|
    | `platform:ops`, `partners:manage` (platform-only) | yes | no | no | no |
    | `tenants:manage` | yes | yes, for its own tenants | no | no |
-   | `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve` (tenant-only: never on identity keys) | yes | yes | yes | no |
+   | `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve`, `drafts:approve` (tenant-only: never on identity keys) | yes | yes | yes | no |
    | `tenants:erase` (tenant-scope erasure: deleting the workspace) | yes | yes, for its own tenants | only a key whose `created_by_role` is `owner` | no |
    | `identities:sign` | no (it may grant it, step 3) | no (it may grant it, step 3) | yes | yes, for its own identity |
-   | Every other permission | yes | yes | yes | yes |
+   | Every other permission (`events:read`, `metrics:read`, `drafts:read` and `drafts:write` among them) | yes | yes | yes | yes |
 
    A tenant key listing `tenants:erase` is refused unless the new key's `created_by_role` will be
    `owner`, that is, unless the workspace owner's console session mints it or the caller is a key whose
@@ -561,13 +581,17 @@ JWKS `GET /.well-known/jwks/{identity_id}.json` and the Web Bot Auth key directo
 `GET /.well-known/http-message-signatures-directory` (`404 key_not_found` while `PM_WEB_BOT_AUTH=off`;
 both serve public keys only, [Agent signing keys §3](agent-keys.md#3-publication)), the SNS
 notification endpoints `POST /hooks/ses` (SES delivery events) and `POST /hooks/ses/inbound` (SES
-inbound notifications), both authenticated by the SNS signature (section 3.5), and signed links
-`GET /v1/links/{token}` (authenticated by their MAC, section 7.3). The console (`/console/*`) and the
+inbound notifications), both authenticated by the SNS signature (section 3.5), signed links
+`GET /v1/links/{token}` and upload links `PUT /v1/links/{token}` (authenticated by their MAC, section 7.3),
+and `POST /v1/agent-signup` (`Scope::Public`; its controls are `RL_SIGNIN`, the admission budgets and the
+human-email rules, [Agent self-sign-up §14](agent-signup.md#14-security-and-visibility)). The console (`/console/*`) and the
 Stripe webhook (`/billing/stripe/webhook`) are separate route tables with session and signature checks
 of their own. In the console table, the routes that need no session are the sign-in, sign-up, waitlist,
-OAuth start and callback, and invitation-accept routes, and the unsubscribe pair
+OAuth start and callback, and invitation-accept routes, the agent sign-up verify page
+(`/console/agent-signup/verify`, a pre-session form reached by its link token), the unsubscribe pair
 (`GET` and `POST /console/notifications/unsubscribe`), which is authenticated by its token alone
-(section 4.9). Which host answers which path is in section 4.9. The Worker does not serve an MTA-STS
+(section 4.9), and the agent sign-up refuse pair (`GET` and `POST /console/agent-signup/refuse`),
+authenticated by its token alone. Which host answers which path is in section 4.9. The Worker does not serve an MTA-STS
 policy: the operator publishes one as the self-hosting guide describes.
 
 ### 4.8 The first platform key
@@ -617,8 +641,11 @@ body with `Allow: POST`, as the MCP transport expects ([MCP › Request handling
 Neither reads a key or D1, and route patterns are public, so
 neither reveals anything about data. A route cannot be registered without a permission list and a scope
 rule (the registration function takes them as non-optional arguments), and public routes use the
-explicit `Scope::Public` variant. The permission list may be empty only for `Scope::Public` and for
-two other routes: `GET /v1/me`, which any valid key may call (`Scope::AnyKey`), and
+explicit `Scope::Public` variant. The permission list may be empty only for `Scope::Public`, for the six
+agent sign-up routes (`Scope::AgentSignup`: the key's own tenant's sign-up,
+[Agent self-sign-up §6](agent-signup.md#6-the-agents-routes)), for a route whose `any_permissions` is not
+empty (the four upload routes, which need one of two permissions, [Uploads §3](uploads.md#3-routes)),
+and for two other routes: `GET /v1/me`, which any valid key may call (`Scope::AnyKey`), and
 `GET /v1/tenants/{tenant_id}`, which only platform, partner and tenant keys may call (`min_level: Tenant`; an
 identity key gets `403 scope_denied` on its own tenant, step 3 of section 5.2). For the second,
 `foreign_permissions` (`tenants:manage`) is required as well when the target is not the key's own
@@ -646,19 +673,32 @@ pub enum Scope {
     TenantPath { param: &'static str },      // /v1/tenants/{tenant_id}/...
     IdentityPath { param: &'static str },    // /v1/identities/{identity_id}/...
     Resource { kind: ResourceKind, param: &'static str }, // domain, webhook, key, erasure, export
-    TenantFilter,                            // collection with optional tenant_id filter (GET /v1/usage, /v1/audit-events)
+    TenantFilter,                            // collection with optional tenant_id filter (GET /v1/usage, /v1/audit-events,
+                                             // the event feed's routes)
+    AgentSignup,                             // /v1/agent-signup/…: the calling key's own tenant's sign-up
+}
+
+pub enum Auth {
+    Key,                                     // every route
+    KeyOrStreamToken,                        // GET /v1/events/stream only (Event feed § 7.1)
 }
 
 pub struct RouteSpec {
     pub method: Method,
     pub pattern: &'static str,
     pub permissions: &'static [Permission],  // all required
+    pub any_permissions: &'static [Permission], // at least one required when not empty (Uploads)
     pub foreign_permissions: &'static [Permission], // also required when the target is not the key's own tenant
     pub scope: Scope,
     pub idempotency: Idempotency,            // Required | Optional | None (openapi x-idempotency)
     pub min_level: Option<Level>,            // e.g. Tenant for tenant search (FR-SRCH-10), Platform for billing
+    pub auth: Auth,                          // the credential kinds the route accepts
 }
 ```
+
+`auth` is `Auth::Key` for every route except `GET /v1/events/stream`, which accepts the bearer key or a
+single-use stream token, never both ([Event feed § 7.1](event-feed.md#71-handshake-and-authentication)); a
+unit test fails for any other route with `KeyOrStreamToken`.
 
 Builds with the `itest-hooks` cargo feature expose the table at `GET /__test/routes`, so the attack
 suite can prove it covers every route ([Testing](testing.md#7-cross-tenant-attack-suite)).
@@ -670,8 +710,10 @@ For each request, before any Durable Object or R2 call:
 1. **Authenticate** (section 4.2).
 2. **Permission.** The key must hold every permission in `RouteSpec.permissions`, and those in
    `foreign_permissions` when the tenant ID in the path is not its own (section 5.1); otherwise
-   `403 permission_denied` with `details.required`. This check reads only the key and the path, never
-   the target, so a missing ID gets the same answer as an existing one and it leaks nothing. A
+   `403 permission_denied` with `details.required`. When `RouteSpec.any_permissions` is not empty, the key
+   must also hold at least one of them; otherwise `403 permission_denied` with `details.required` listing
+   them and `details.any_of: true` ([Uploads § 8](uploads.md#8-security-and-visibility)). This check reads
+   only the key and the path, never the target, so a missing ID gets the same answer as an existing one and it leaks nothing. A
    permission that depends on the body is checked here too, once the body is parsed: a tenant-scope
    erasure request also needs `tenants:erase` (section 4.6).
 3. **Level.** If the route is above the key's level and the target is the key's own tenant (an identity
@@ -721,7 +763,9 @@ For each request, before any Durable Object or R2 call:
      tenant-scope erasure request returns the running one, starts a resumption or continuation (`202`),
      or answers `409 tenant_erased`, [Privacy § 6.1](privacy.md#61-request)).
 5. **Body and query parameters naming a tenant or identity** (`tenant_id` in `POST /v1/keys`,
-   `POST /v1/erasure-requests`, `POST /v1/exports`, `identity_ids` filters, `tenant_id` filters):
+   `POST /v1/erasure-requests`, `POST /v1/exports`, `identity_ids` filters, `tenant_id` filters, and the
+   event feed's `tenant_id` and `identity_id` on `GET /v1/events`, the consumer routes, the stream-token
+   route and the stream's `subscribe`, [Event feed § 10](event-feed.md#10-security)):
    for non-platform keys, a value outside the key's scope returns `404 tenant_not_found` or
    `404 identity_not_found` (for `POST /v1/keys`, `403 key_scope_exceeded`, as api.md states), in a list
    filter as in a body, never an empty page; for a
@@ -742,26 +786,28 @@ For each request, before any Durable Object or R2 call:
 
 ### 5.3 Cross-level read access
 
-- An **identity** key reaches its tenant's domains read-only with `domains:read`, and its tenant's
-  webhook endpoints and deliveries read-only with `webhooks:read` (api.md). Writes to either from an
-  identity key return `403 scope_denied`.
+- An **identity** key reaches its tenant's domains read-only with `domains:read`, its tenant's
+  webhook endpoints and deliveries read-only with `webhooks:read` (api.md), and, with `metrics:read`, the
+  rates of its tenant and of the domains its addresses use
+  ([Deliverability metrics § 6](metrics.md#6-security-and-visibility)). Writes to domains or endpoints
+  from an identity key return `403 scope_denied`.
 - `webhooks:manage` includes `webhooks:read`. `platform:ops` and `partners:manage` can only be held by
   platform keys; `tenants:manage` by platform and partner keys; `tenants:erase` by platform and partner
   keys and by tenant keys the workspace owner minted (section 4.6).
-- **Quarantined, hidden and throttled mail in lists** (FR-IN-5). This rule is the reference the API,
-  MCP and console pages follow. A mail list (`GET /v1/identities/{identity_id}/messages`, and every
-  MCP tool and console view built on it) excludes messages with status `quarantined`, `hidden` or
-  `throttled` by default, whatever the key holds. One of them appears only when **both** hold: the
-  request filters on that status (`status=quarantined`, `status=hidden` or `status=throttled`), and the
-  key holds `quarantine:review`. A key without `quarantine:review` that sends such a filter gets `200`
+- **Quarantined, screening, hidden and throttled mail in lists** (FR-IN-5, FR-SCR-2). This rule is the
+  reference the API, MCP and console pages follow. A mail list (`GET /v1/identities/{identity_id}/messages`,
+  and every MCP tool and console view built on it) excludes messages with status `quarantined`,
+  `screening`, `hidden` or `throttled` by default, whatever the key holds. One of them appears only when
+  **both** hold: the request filters on that status (`status=quarantined`, `status=screening`,
+  `status=hidden` or `status=throttled`), and the key holds `quarantine:review`. A key without `quarantine:review` that sends such a filter gets `200`
   with none of those messages, never `403`, as search treats `include_quarantined`. A thread list has no
   `status` filter, so it never shows them. The dedicated quarantine list
   (`GET /v1/identities/{identity_id}/quarantine`) requires `quarantine:review` and lists only
-  `quarantined` messages. Reading a `quarantined`, `hidden` or `throttled` message by ID (the message itself, its attachments,
-  its raw MIME or its thread view) requires `quarantine:review` too; otherwise `404 message_not_found`,
+  `quarantined` messages. Reading a `quarantined`, `screening`, `hidden` or `throttled` message by ID (the
+  message itself, its attachments, its raw MIME or its thread view) requires `quarantine:review` too; otherwise `404 message_not_found`,
   the same answer as for a message that does not exist, so its presence is not revealed.
 - **Search** keeps its own explicit flag and does not contradict the list rule: it never returns
-  `hidden` or `throttled` mail, and returns `quarantined` mail only when the request sets
+  `hidden` or `throttled` mail, and returns `quarantined` and `screening` mail only when the request sets
   `include_quarantined` (or uses `is:quarantined`) and the key holds `quarantine:review`; without
   `quarantine:review` the flag is ignored, never refused ([Search § 2](search.md#2-request-handling)).
 - Attachments with a `risk` require `quarantine:review` (api.md).
@@ -781,12 +827,26 @@ For each request, before any Durable Object or R2 call:
   ([Configuration › Tenant policy](../../reference/configuration.md#tenant-policy), [J14](../edge-cases.md),
   [J16](../edge-cases.md)).
 - **Decisions reserved for people.** Releasing quarantined mail, loosening a guard field of the policy
-  and approving a service account each let mail or codes that nobody reviewed reach agents. One function,
-  `auth::people::key_may_decide`, decides for all three whether an API key may take them: only when
-  `PM_QUARANTINE_KEY_RELEASE` is `on`, `PM_CONSOLE` is `off`, or the tenant's `quarantine.key_release` is
-  `true`; otherwise `403 permission_denied` (for the last two with `details.reason = "person_required"`)
-  and a signed-in person decides in the console
-  ([Workspace policy §3](workspace-policy.md#3-decisions-reserved-for-people)).
+  and approving a service account each let mail or codes that nobody reviewed reach agents; approving a
+  draft lets mail that nobody approved leave. One function, `auth::people::key_may_decide`, decides for all
+  four whether an API key may take them: only when `PM_QUARANTINE_KEY_RELEASE` is `on`, `PM_CONSOLE` is
+  `off`, or the tenant's opt-in is `true` (`quarantine.key_release`, or `drafts.key_approval` for approving a
+  draft), and under the opt-in alone only for a platform key or the tenant's own partner key; otherwise
+  `403 permission_denied` (for the last three with `details.reason = "person_required"`) and a signed-in
+  person decides in the console ([Workspace policy §3](workspace-policy.md#3-decisions-reserved-for-people)).
+  Releasing mail held by screening is a quarantine release under the same rule
+  ([Screening hold §10](screening.md#10-release)).
+- **Approving drafts** ([Drafts §4.6](drafts.md#46-approve)). `drafts:approve` is never held by identity
+  keys. An API key approves only when `key_may_decide(Decision::ApproveDraft, …)` is true
+  (`PM_QUARANTINE_KEY_RELEASE` on, `PM_CONSOLE` off, or the tenant's `drafts.key_approval: true`, which only
+  a platform key or the tenant's own partner key can set), never content it wrote, and with `send: true`
+  only when it also holds `messages:send`. A draft of a quarantined or screening source is read only with
+  `quarantine:review`.
+- **Batches and lists** ([Parity additions](parity-additions.md)). `batch-get` and `batch-update` apply the
+  rules above per message and report every ID the key cannot see in `not_found`, together with missing
+  ones. Identity-scope allow and block lists need `suppressions:manage`, which identity keys cannot hold, so
+  an agent never changes the lists that filter its own mail. A `message.labels_changed` event never names
+  a message that is not visible.
 
 ### 5.4 Agentic planner and MCP scope
 
@@ -811,7 +871,7 @@ another ([Threading](threading.md)).
 
 | Secret | Single purpose | Generated by | Leak impact |
 |---|---|---|---|
-| `PM_MASTER_KEY` | Master-key slot `a` (section 6.2): AES-256-GCM encryption at rest of webhook secrets, identity signing keys, the `signing_keys` keyring (the `web_bot_auth` seed included), SMTP relay credentials, TOTP secrets, recovery-code hashes and OAuth PKCE verifiers (section 7.2) | `pmail setup`: 32 bytes from the OS CSPRNG, base64 | Decrypts stolen D1 ciphertexts (needs D1 access too) |
+| `PM_MASTER_KEY` | Master-key slot `a` (section 6.2): AES-256-GCM encryption at rest of webhook secrets, webhook delivery headers, identity signing keys, the `signing_keys` keyring (the `web_bot_auth` seed included), SMTP relay credentials, TOTP secrets, recovery-code hashes and OAuth PKCE verifiers (section 7.2) | `pmail setup`: 32 bytes from the OS CSPRNG, base64 | Decrypts stolen D1 ciphertexts (needs D1 access too) |
 | `PM_MASTER_KEY_B` | Master-key slot `b`: after a rotation either the active key or the previous one (section 6.2) | `pmail secrets rotate-master` | As `PM_MASTER_KEY` |
 | `PM_MASTER_KEY_ACTIVE` | Which slot seals new values (`a` or `b`); not a key | `pmail secrets rotate-master` | None on its own |
 | `PM_KEY_PEPPER` | HMAC-SHA256 of API key strings | `pmail setup` (section 4.8) | Offline guessing of stolen hashes is still infeasible (256-bit secrets); rotate as break-glass |
@@ -829,6 +889,7 @@ another ([Threading](threading.md)).
 | SMTP relay credentials (`domains.smtp_sealed`) | Authenticating to one customer's relay | The customer, through the API or console | Sending as that customer through their own provider |
 | TOTP secrets and recovery codes (`users.totp_sealed`, `users.recovery_codes_sealed`) | One person's second factor | The Worker: 20 bytes from `platform::Rng`; ten codes | Bypassing two-step verification for that person; a first factor is still needed |
 | Webhook secrets `whsec_…` | Signing deliveries to one endpoint | The Worker: 32 bytes from `platform::Rng`, `whsec_` + base64 | Forged events to that endpoint |
+| Webhook delivery headers (`webhook_endpoints.headers_sealed`) | Static tokens a receiver's gateway checks before the signature | The integrator, through the API or console | Requests that pass the receiver's gateway; the Standard Webhooks signature is still required |
 | API keys `pmk_…` | Authenticating one caller | The Worker (section 4.1) | Access within the key's scope |
 | `CLOUDFLARE_API_TOKEN` | CLI only: the commands in [CLI › Commands that use your Cloudflare token](../../reference/cli.md#commands-that-use-your-cloudflare-token), with the permissions in [Deploy › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token) | The operator | Never uploaded to the Worker; never stored in the CLI config file |
 
@@ -911,7 +972,8 @@ previous key stays in the other slot until the next rotation overwrites it.
    that seals with `K2` also holds the previous key, so every value opens throughout the rollout.
 5. The Worker's every-minute cron re-seals up to 500 values per run whose `kid` is not the active
    key's (about 720,000 a day), in every column of the registry: for v1.0,
-   `webhook_endpoints.secret_enc`, `webhook_endpoints.prev_secret_enc`, `identity_keys.private_enc`,
+   `webhook_endpoints.secret_enc`, `webhook_endpoints.prev_secret_enc`, `webhook_endpoints.headers_sealed`
+   (aad `pm1|webhook_endpoints|headers_sealed|{endpoint_id}`), `identity_keys.private_enc`,
    `signing_keys.ciphertext`, `domains.smtp_sealed`, `domains.smtp_pending_sealed`, `users.totp_sealed`,
    `users.recovery_codes_sealed` and `oauth_states.pkce_sealed` (section 7.2). It logs
    `secrets_reseal_progress` counts. The CLI polls `GET /v1/platform/status` every 60 seconds and prints
@@ -991,7 +1053,9 @@ aad         "pm1|{table}|{column}|{row id}", e.g. "pm1|webhook_endpoints|secret_
             thumbprint, e.g. "pm1|identity_keys|private_enc|kPrK_qmx…")
 ```
 
-Sealed columns: `webhook_endpoints.secret_enc` and `prev_secret_enc`, `identity_keys.private_enc` (the
+Sealed columns: `webhook_endpoints.secret_enc` and `prev_secret_enc`, `webhook_endpoints.headers_sealed`
+(aad `pm1|webhook_endpoints|headers_sealed|{endpoint_id}`, [Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)),
+`identity_keys.private_enc` (the
 32-byte Ed25519 seed), `signing_keys.ciphertext` (the `web_bot_auth` seed included), `domains.smtp_sealed` (aad `pm1|domains|smtp_sealed|{domain_id}`) and
 `domains.smtp_pending_sealed`, `users.totp_sealed`, `users.recovery_codes_sealed` and `oauth_states.pkce_sealed`. Each is an
 entry of the sealed-column registry `crates/core/src/sealed.rs` (table, column, row-ID expression), which
@@ -1013,6 +1077,7 @@ token   = base64url(payload || HMAC-SHA256(link key {kid}, payload)[0..16])
 payload = "l1:{kid}:att:{tenant_id}:{identity_id}:{message_id}:{attachment_id}:{expires_unix_s}"
         | "l1:{kid}:export:{tenant_id}:{export_id}:{nonce}:{expires_unix_s}"  -- export: at most 1 hour
                                                   -- ahead, and used once (link_uses)
+        | "l1:{kid}:upload:{tenant_id}:{identity_id}:{upload_id}:{expires_unix_s}"   -- upload: PUT only, at most 1 hour ahead
 kid     = the one-character kid of the link key that signed it (signing_keys, purpose link)
 ```
 
@@ -1021,6 +1086,8 @@ kid     = the one-character kid of the link key that signed it (signing_keys, pu
   the target still exists. An unknown or expired kid, a bad MAC, an expired link or a missing target all
   return `404` with the target's `*_not_found` code (`attachment_not_found` or `export_not_found`), so a
   link reveals nothing about why it failed.
+- An `upload` token is accepted only by `PUT /v1/links/{token}`, and the `att` and `export` tokens only by
+  `GET`; a token used with the other method answers as a bad one ([Uploads § 3.2](uploads.md#32-sending-the-bytes--put-v1linkstoken)).
 - No API key is needed: the MAC authenticates the link. The response uses the serving headers of
   section 8.5. The route is `GET /v1/links/{token}` in [REST API](../../reference/api.md#signed-links-and-provider-hooks).
 - A link is a bearer URL that cannot be recalled once copied, so export links expire one hour after they
@@ -1032,7 +1099,8 @@ kid     = the one-character kid of the link key that signed it (signing_keys, pu
 
 ### 8.1 What is untrusted
 
-Everything from mail (headers, display names, subjects, bodies, filenames, attachment text, DSN text),
+Everything from mail (headers, display names, subjects, bodies, filenames, attachment text, DSN text,
+calendar objects),
 provider responses (`smtpResponse`, error messages), DNS answers, RDAP data and webhook endpoint
 responses. Untrusted strings are stored and returned, but never used as instructions, file paths,
 header values or SQL.
@@ -1093,8 +1161,10 @@ Triage and the agentic planner receive mail content only inside fences, in the f
 
 The service never fetches a URL found in mail: no link previews, no image proxy, no automatic
 `List-Unsubscribe` calls for inbound mail, no fetching of verification links (they are returned by
-`wait`, never followed). Sends accept attachment content only as `content_base64`; there is no
-"attach from URL". `POST /v1/identities/{identity_id}/http-signatures` signs a URL the caller names and
+`wait`, never followed). Sends accept attachment content only as `content_base64` or as an upload the
+same identity made ([Uploads](uploads.md)); there is no "attach from URL". Calendar objects are read without
+fetching `TZURL`, `ATTACH`, `URL`, `ALTREP` or any other URI they carry
+([Calendar invitations §9](calendar-invitations.md#9-security-and-visibility)). `POST /v1/identities/{identity_id}/http-signatures` signs a URL the caller names and
 returns headers; the Worker never requests that URL, so it is not an SSRF path
 ([Agent signing keys §5.1](agent-keys.md#51-request)).
 
@@ -1186,6 +1256,9 @@ fails. At delivery time a failure is recorded as a failed attempt with error `ss
 | Cloudflare and AWS APIs | Fixed hosts compiled into `platform` (`api.cloudflare.com`, `email.{PM_SES_REGION}.amazonaws.com`), the inbound bucket host `{PM_SES_INBOUND_BUCKET}.s3.{PM_SES_REGION}.amazonaws.com`, and the host of `PM_SES_INBOUND_QUEUE_URL`, which is validated at isolate start to be `https` under `amazonaws.com` |
 | Google and GitHub (console sign-in) | Fixed provider endpoints compiled in, re-read from the providers' documentation when M24 is built ([Cloud sign-up §4](cloud-signup.md#4-google-and-github)); `https` only; no redirects followed |
 
+No request field ever makes the Worker fetch a URL; attachments come inline or from uploads
+([Uploads § 1](uploads.md#1-what-uploads-are-and-are-not)).
+
 ## 10. Rate limiting and abuse
 
 | Control | Limit | Mechanism | Error |
@@ -1210,12 +1283,14 @@ fails. At delivery time a failure is recorded as a failed attempt with error `ss
 | Sign-in code attempts | 10 per code; the token is burned after 10 failures | `login_tokens.attempts` | Code refused |
 | Failed sign-in codes per address | 30 per UTC day | `SUM(login_tokens.attempts)` for the address since 00:00 UTC ([W43](../edge-cases.md)) | Code refused until 00:00 UTC; links still work |
 | Console sign-in, sign-up and waitlist requests per client network | 10 / 60 s on `POST /console/sign-in`, `/console/sign-in/link`, `/console/sign-in/code`, `/console/sign-in/verify`, `/console/sign-up` and `/console/waitlist`, and `GET /console/oauth/{provider}/start` | `RL_SIGNIN`, keyed by `CF-Connecting-IP`, an IPv6 address by its /64 prefix; the IP is never logged | `429` page |
-| System mail | 10 a UTC day per recipient; sign-in mail 20 per client network and 200 per ASN; invitations 50 per tenant; `invitation` at most 20% and `notification` at most 50% of the system identity's day | Exact counters in the default tenant's `TenantQuota` (`SystemMail`; [Cloud sign-up §10.2](cloud-signup.md#102-system-mail-budgets), [W44](../edge-cases.md)) | Nothing sent (same page); invitations: `429 daily_cap_reached`, `details.cap: "invitations"` |
+| System mail | 10 a UTC day per recipient; sign-in mail 20 per client network and 200 per ASN; invitations 50 per tenant; `invitation` at most 20%, `notification` at most 50% and `signup` at most 5% of the system identity's day, and the three together at most 75%, so at least 25% stays for `signin` and `account` | Exact counters in the default tenant's `TenantQuota` (`SystemMail`; [Cloud sign-up §10.2](cloud-signup.md#102-system-mail-budgets), [W44](../edge-cases.md)) | Nothing sent (same page); invitations: `429 daily_cap_reached`, `details.cap: "invitations"` |
 | Two-step verification codes | 5 attempts a minute per person; 10 failures in a row lock two-step sign-in for 15 minutes | A per-person failure counter ([Cloud sign-up §5](cloud-signup.md#5-two-step-verification)) | Code refused; lock page |
 | Sends from a new Free workspace | `tenant_daily_send_cap` 50 for the first 7 days; lifts on day 7 if bounce and complaint rates are under the auto-pause thresholds, or at once on a paid plan | `TenantQuota` ([W30](../edge-cases.md)) | `429 daily_cap_reached` |
 | Sends from a new tenant of a partner | The same ramp, whatever `PM_BILLING` and the tenant's billing mode (`exempt` included), unless a platform key set the partner's `ramp_exempt`; an `exempt` tenant has no plan, so only the daily evaluation lifts it | `TenantQuota` ([W30](../edge-cases.md), [Cloud sign-up § 10.1](cloud-signup.md#101-new-workspace-send-ramp)) | `429 daily_cap_reached` |
 | Tenant creation and invitations per partner | 10 / 60 s together, across every key of the partner: `POST /v1/tenants` and `POST /v1/tenants/{tenant_id}/invitations` called with a partner key | `RL_PARTNER`, keyed by the partner ID ([J18](../edge-cases.md)) | `429 rate_limited` |
 | Tenants per partner | `partners.max_tenants` tenants not `erased` (default 25, set by a platform key) | Checked in the tenant insert ([J18](../edge-cases.md)) | `403 partner_tenant_limit` |
+| Agent sign-ups | 5 per client network, 100 per ASN and `PM_AGENT_SIGNUP_DAILY_CAP` per deployment a UTC day; 3 naming one person; one live per person | Exact counters in the default tenant's `TenantQuota` (`SystemMail`, class `signup`) and a unique index | `429 signup_limit_reached` |
+| Agent sign-up codes | 10 attempts per code; 30 failures per sign-up; 3 code emails an hour per sign-up and 5 a day per person | `agent_signups` counters and the `signup` budgets | `422 signup_code_invalid`; `429 signup_limit_reached` |
 
 - **Aggregate buckets.** A key's own buckets bound one key, and keys are cheap to mint, so two buckets
   bound the keys of one owner together: every request with a tenant or identity key also counts in
@@ -1278,13 +1353,15 @@ fails. At delivery time a failure is recorded as a failed attempt with error `ss
 | `cargo deny check` | In CI on every pull request: advisories, licences (allow-list: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0; everything else needs an ADR), bans (no `openssl-sys`; `tokio` only as a direct dependency of `worker`, which depends on it with no features: `{ crate = "tokio", wrappers = ["worker"] }`; no duplicate versions of `sha2`, `hmac` or `aes-gcm`), sources (crates.io only, no git dependencies). Bans are checked on the Worker's wasm graph (`cargo deny --manifest-path crates/worker/Cargo.toml --target wasm32-unknown-unknown --exclude-dev check bans`), because the native crates use tokio legitimately (`reqwest` in `sdk` and `cli`, `rmcp` as a dev-dependency); licences, advisories and sources over the whole workspace (`cargo deny --workspace check licenses advisories sources`). The flags are checked against the pinned `cargo-deny` at build time. `deny.toml` sets `[graph] targets` to the targets actually built (`wasm32-unknown-unknown` for the Worker; `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` for the CLI), so dependencies of other targets are ignored: cargo-deny drops a dependency link that none of the listed targets satisfies (cargo-deny configuration, "The `[graph]` field", <https://embarkstudios.github.io/cargo-deny/checks/cfg.html>, read 2026-10-10). `webpki-root-certs` (the Mozilla root certificates as data; CDLA-Permissive-2.0 on crates.io for 1.0.7 to 1.0.9, read 2026-10-10) is allowed for that crate alone with `[[licenses.exceptions]] allow = ["CDLA-Permissive-2.0"] name = "webpki-root-certs"` (cargo-deny licences configuration, <https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html>, read 2026-10-10), never through the general allow-list; this sentence is the record the allow-list rule asks for. Which crate pulls it in on wasm32 is not verified here; `cargo deny` reports the path on the first run of M0 `cargo xtask check-layering` also proves that tokio has no feature enabled in that graph ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)) |
 | `cargo audit` | RustSec advisories on every pull request and daily on `main`; a new advisory opens an issue |
 | SBOM | `cargo cyclonedx --format json` for the Worker (`--target wasm32-unknown-unknown`) and for the CLI, attached to every release |
-| Signed releases | `SHA256SUMS` lists the Worker bundle and CLI binaries and has a detached minisign signature `SHA256SUMS.sig` with the trusted comment `pylota-mail v{version}` ([Rust workspace](rust-workspace.md#9-xtask)). The verification keys are compiled into `pmail`, which checks the signature, the trusted comment and the bundle checksum before deploying (FR-OPS-2; signature format and verification in [CLI and setup](cli.md)). Releases carry build provenance from `actions/attest@v4` (permissions `id-token: write`, `attestations: write`, `contents: read`), verifiable with `gh attestation verify <file> -R PILOTAAI/pylota-mail`. **The signing key never enters CI** or any online system: the minisign secret key lives on an encrypted removable drive, with a second drive at the break-glass record's location and the password in the owner's password manager ([Observability § 5.7](observability.md#57-break-glass-record)). `release.yml` builds and attests the files, uploads them with `SHA256SUMS` to a draft release, and stops. The owner runs `cargo xtask release sign v<x.y.z>` on their own machine with the drive attached: it downloads `SHA256SUMS` and every file it lists, checks each checksum and each file's attestation (`gh attestation verify`, whose provenance must name `release.yml` on that tag), and only then signs, uploads `SHA256SUMS.sig` and starts `release-publish.yml` on the tag. That workflow's `verify` job checks the signature against the public keys compiled into `pmail` before the draft becomes a pre-release, and its `publish` job promotes it only through `cargo xtask release-gate` (section 16) ([Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline)). A compromised CI can build and attest a bad release but cannot sign it, and the owner signs only files whose provenance is the tagged workflow. The two paths around the signature are closed too ([J35](../edge-cases.md)): `cloud-deploy.yml` verifies the `pmail` it runs against `SHA256SUMS.sig` with public keys written in the workflow, and its attestation against `release.yml` on that tag; and crates are published only by the owner, from a clean clone of the signed tag (`cargo xtask release crates`), so no workflow holds the crates.io token. Immutable releases stop a published asset or tag from being replaced. There is no second signer ([ADR 0015](../adr/0015-solo-operator.md)): the attestation check is the mechanical second look |
+| Signed releases | `SHA256SUMS` lists the Worker bundle, the CLI binaries, `openapi.json` and the TypeScript SDK fixtures tarball, and has a detached minisign signature `SHA256SUMS.sig` with the trusted comment `pylota-mail v{version}` ([Rust workspace](rust-workspace.md#9-xtask)). The verification keys are compiled into `pmail`, which checks the signature, the trusted comment and the bundle checksum before deploying (FR-OPS-2; signature format and verification in [CLI and setup](cli.md)). Releases carry build provenance from `actions/attest@v4` (permissions `id-token: write`, `attestations: write`, `contents: read`), verifiable with `gh attestation verify <file> -R PILOTAAI/pylota-mail`. **The signing key never enters CI** or any online system: the minisign secret key lives on an encrypted removable drive, with a second drive at the break-glass record's location and the password in the owner's password manager ([Observability § 5.7](observability.md#57-break-glass-record)). `release.yml` builds and attests the files, uploads them with `SHA256SUMS` to a draft release, and stops. The owner runs `cargo xtask release sign v<x.y.z>` on their own machine with the drive attached: it downloads `SHA256SUMS` and every file it lists, checks each checksum and each file's attestation (`gh attestation verify`, whose provenance must name `release.yml` on that tag), and only then signs, uploads `SHA256SUMS.sig` and starts `release-publish.yml` on the tag. That workflow's `verify` job checks the signature against the public keys compiled into `pmail` before the draft becomes a pre-release, and its `publish` job promotes it only through `cargo xtask release-gate` (section 16) ([Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline)). A compromised CI can build and attest a bad release but cannot sign it, and the owner signs only files whose provenance is the tagged workflow. The two paths around the signature are closed too ([J35](../edge-cases.md)): `cloud-deploy.yml` verifies the `pmail` it runs against `SHA256SUMS.sig` with public keys written in the workflow, and its attestation against `release.yml` on that tag; and crates are published only by the owner, from a clean clone of the signed tag (`cargo xtask release crates`), so no workflow holds the crates.io token. Immutable releases stop a published asset or tag from being replaced. There is no second signer ([ADR 0015](../adr/0015-solo-operator.md)): the attestation check is the mechanical second look |
 | Site deploy (`.github/workflows/site.yml`) | The landing page and docs Worker `pylota-mail-site` is deployed with Wrangler installed from `site/package-lock.json` by `npm ci --ignore-scripts` (exact `wrangler` 4.139.0, every package with its `integrity` hash), never fetched by name at run time. Its token, the `production` environment's `CLOUDFLARE_API_TOKEN`, is an account-owned token scoped to the single Worker `pylota-mail-site` with the per-Worker **Editor** role, plus **Zone (pylotamail.com) › Workers Routes › Edit**, and nothing else: no account-wide Workers Scripts Edit (in Pylota's shared account that would reach every Worker) and no DNS Edit. Custom Domains that already exist need only Editor to redeploy; adding, changing or removing one needs Workers Routes Write on the zone (Cloudflare "Workers roles and permissions" and the changelog "Grant teammates and agents access to specific Workers", 2026-09-15, both read 2026-10-10). Editor cannot create a Worker, so the first deploy of a new site Worker is done once by hand with a wider token |
 | CodeQL | CodeQL for Rust (supported for editions 2021 and 2024, per codeql.github.com, read 2026-10-09) on pull requests and weekly; open high-severity alerts block a release |
 | Renovate | Cargo and GitHub Actions managers; exact pins kept; weekly grouped pull requests; `worker` and `worker-build` upgrades are never grouped and must pass spike S1's smoke checks plus the full integration suite; security updates raised immediately; nothing auto-merges |
 | GitHub Actions | Actions pinned to full commit SHAs; `permissions:` least privilege per job; no `pull_request_target` workflow checks out pull-request code; secrets only in protected environments |
 | Secret scanning | GitHub secret scanning with push protection on the repository |
 | Bundle hygiene | `cargo xtask build-worker` refuses the `itest-hooks` feature and fails if the bundle contains the string `/__test/`; the size budget (NFR-SEC-2) is checked on every build |
+| npm package | `@pylotahq/mail` has no runtime dependencies and no install scripts. It is built in its own repository, `PILOTAAI/pylota-mail-typescript`, only from an `openapi.json` and fixtures whose release signature verifies; it is packed in that repository's `release.yml`, attested, listed in a `SHA256SUMS` the owner signs offline, and published only by that repository's `release-publish.yml` through npm trusted publishing (OIDC, environment `release`), which attaches provenance; the package disallows token publishing. Pre-releases are never published ([SDKs, skills and agent tooling §2.16](sdk-and-skills.md#216-versioning-and-release)) |
+| Agent plugin | `integrations/pylota-mail-plugin/` holds only Markdown skills and one remote MCP server entry: no hooks, executables, scripts, monitors, commands or agents (`xtask::skills_format`), and no secret (`xtask::skills_no_secrets`). The marketplaces point at release tags |
 
 ## 12. Logging rules
 
@@ -1298,7 +1375,12 @@ fails. At delivery time a failure is recorded as a failed attempt with error `ss
   notification carries the message's headers), OAuth codes, `state` and tokens, TOTP and recovery codes,
   cookie values, private keys and seeds, minted agent assertions, their `audience`, `nonce` and `ext`,
   the URL and headers of a signed HTTP request (`Signature`, `Signature-Input`, `From`), notification
-  unsubscribe tokens and the bodies of notification emails.
+  unsubscribe tokens, the bodies of notification emails, the `Sec-WebSocket-Protocol` header, stream
+  tokens, event cursors and event envelopes ([Event feed § 10](event-feed.md#10-security)), agent sign-up
+  human addresses, codes, link and refuse tokens, `agent_name`, `source`, and keys pasted into the claim
+  page ([Agent self-sign-up §14](agent-signup.md#14-security-and-visibility)), webhook delivery header
+  values and ARC or `Authentication-Results` headers ([Parity additions](parity-additions.md)).
+- **Never a label name in a metric label**: label names are chosen by integrators and agents.
 - **Logged instead:** IDs (`ten_`, `idn_`, `msg_`, `key_` …), the matched route pattern, error codes,
   SMTP status codes, counts, sizes, durations, and pseudonyms.
 - **Pseudonyms:** `ph_` + the first 16 hex characters of `HMAC-SHA256(PM_HASH_KEY, normalised address)`
@@ -1341,7 +1423,7 @@ address used by the integration suite, captures all Worker output, and fails if 
 | `it::idempotency::j19_per_key_no_secret` | A replay needs the same key: a second key of the same tenant or partner sending the same `Idempotency-Key` gets no replay; a replay of `POST /v1/keys`, `POST /v1/keys/{key_id}/rotate`, `POST /v1/webhooks`, `POST /v1/tenants/{tenant_id}/webhooks` and `POST /v1/webhooks/{webhook_id}/rotate-secret` returns the stored body without `secret` and with `"secret_replayed": false`; no `idempotency_records.response_body` contains a secret | FR-KEY-2, FR-WH-2, [J19](../edge-cases.md) |
 | `it::quarantine::j14_key_release_policy` | Only a platform key or the tenant's own partner key sets `quarantine.key_release`; a tenant key gets `403 permission_denied` on `PATCH /v1/tenants/{tenant_id}`, and on `PATCH /v1/tenants/{tenant_id}/policy` `403 permission_denied` without `policy:write` and `403 scope_denied` (`details.field = "quarantine.key_release"`, `reason = "not_writable"`) with it; the policy is unchanged; another partner's key gets `404 tenant_not_found` | FR-CON-6, [J14](../edge-cases.md) |
 | `it::quarantine::j16_key_release_override` | With `PM_QUARANTINE_KEY_RELEASE=off`, the partner key and a platform key with `quarantine:review` release mail of a tenant whose policy has `quarantine.key_release: true`, writing `quarantine.release` with the key, while a tenant key and an identity key with `quarantine:review` still get `403 permission_denied` (`person_required`), and so does a tenant key loosening `quarantine.on_auth_fail`; on a tenant without it every key gets `403 permission_denied`; with `on`, the policy changes nothing | FR-CON-6, [J16](../edge-cases.md) |
-| `it::security::cross_tenant_matrix` | Section 5 matrix: every route × every foreign key class, the `foreign_partner` class included → `*_not_found`, `scope_denied`, or `permission_denied` where the control call gets the same body, identical to a missing ID, no side effects; REST and MCP ([Testing §7](testing.md#7-cross-tenant-attack-suite)) | NFR-SEC-1, FR-KEY-3, FR-KEY-4, FR-TEN-1 |
+| `it::security::cross_tenant_matrix` | Section 5 matrix: every route × every foreign key class, the `foreign_partner` class included → `*_not_found`, `scope_denied`, or `permission_denied` where the control call gets the same body, identical to a missing ID, no side effects; REST and MCP ([Testing §7](testing.md#7-cross-tenant-attack-suite)). The parity routes are in it: the ten draft routes, the ten event routes and the stream handshake (a foreign stream token gets `4401`), the calendar-reply route, the four upload routes and `PUT /v1/links/{token}`, the screening feedback routes, the two metrics routes, the seven agent sign-up routes, and the batch, identity-list and webhook-header routes | NFR-SEC-1, FR-KEY-3, FR-KEY-4, FR-TEN-1 |
 | `it::security::route_table_complete` | Every entry of `GET /__test/routes` appears in the matrix; every route has a permission and scope | SEC-1 |
 | `it::routes::unknown_route_and_method` | An unknown path gets `404 route_not_found`, an API path on the console host and a console path on the API host too (two hosts); `PUT /v1/keys` gets `405 method_not_allowed` with `Allow: GET, POST`, and `GET /mcp` a `405` with an empty body and `Allow: POST`; none needs a key, and the bodies are the same with and without one | section 5.1 |
 | `it::auth::missing_permission` | A key lacking a route's permission gets `403 permission_denied` with `details.required` naming it, on a real and on a missing target alike | section 5.2 |
@@ -1359,7 +1441,7 @@ address used by the integration suite, captures all Worker output, and fails if 
 | `it::search::f3_tenant_scope_denied` | Identity key on tenant search → `403 scope_denied` | [F3](../edge-cases.md) |
 | `it::security::search_canary_isolation` | A canary term in tenant B's mail is never returned to tenant A in keyword, semantic, hybrid or agentic mode | NFR-SEC-1 |
 | `it::security::vector_foreign_id_dropped` | A fake Vectorize result containing another tenant's vector ID is dropped by the mailbox read-back | NFR-SEC-1 |
-| `it::security::mcp_requires_key`, `it::security::mcp_tools_follow_key` | No key, no MCP; tools listed and callable only with their permission; with a partner key, tools act only on its own tenants and a `NULL`-partner tenant is unreachable | FR-MCP-1, FR-KEY-4 |
+| `it::security::mcp_requires_key`, `it::security::mcp_tools_follow_key` | No key, no MCP; tools listed and callable only with their permission; with a partner key, tools act only on its own tenants and a `NULL`-partner tenant is unreachable. Extended for the per-key allow-list: with a partner key and with a tenant key, a tool outside `mcp_tools` is hidden in every tenant the key reaches | FR-MCP-1, FR-KEY-4, FR-SDK-12 |
 | `core::ssrf::refuses_private_ranges` (with a property test over each range) | Every address in each blocked range (including mapped and embedded IPv4) is refused; public addresses pass | FR-WH-5 |
 | `core::ssrf::url_rules` | Section 9.1 rules 1 to 4, including integer, hexadecimal and octal IPv4 literals and `hooks.example.com` allowed | FR-WH-5 |
 | `it::webhooks::ssrf_refused`, `it::webhooks::no_redirects_and_caps` | Guard at create and at delivery; `3xx` is a failure and is not followed; 15 s deadline; bodies over 4 KB are cut | FR-WH-5 |
@@ -1387,6 +1469,21 @@ address used by the integration suite, captures all Worker output, and fails if 
 | `cli::setup::bootstrap_key` ([CLI and setup](cli.md)) | The bootstrap key authenticates and expires after 24 hours; a re-run with keys present refuses without `--rotate-pepper` | section 4.8 |
 | `it::security::well_known_security_txt` | `security.txt` fields and the 404 when `PM_SECURITY_CONTACT` is unset | section 14 |
 | `it::logs::i5_no_content_in_logs` | No canary content or address appears in captured output | [I5](../edge-cases.md), FR-PRV-6 |
+| `it::drafts::q53_scope_matrix` | Another tenant's key, another partner's key, or an identity key of another identity reaching a draft gets `404 draft_not_found`, the same body as a missing draft; an identity key on the tenant queue gets `403 scope_denied`; the ten draft routes join `it::security::cross_tenant_matrix` | section 5, [Q53](../edge-cases.md) |
+| `it::drafts::q16_key_approval_rule` | Approval by an API key across `PM_QUARANTINE_KEY_RELEASE`, `PM_CONSOLE`, `drafts.key_approval` and `quarantine.key_release`: with `drafts.key_approval: true` a platform key and the tenant's own partner key approve and a tenant key still gets `403 permission_denied` (`person_required`); only those two keys set the field | section 5.3, [Q16](../edge-cases.md), [Q17](../edge-cases.md) |
+| `it::stream::handshake_validation` | A credential in the stream URL is refused with `credential_in_url` before anything is authenticated; both or neither credential, a missing subprotocol, a `GET` without `Upgrade` and a cross-site page are refused; the `101` carries only `pylota-mail.events.v1` | section 5.1, [Event feed § 7.1](event-feed.md#71-handshake-and-authentication) |
+| `it::stream::stream_token_single_use` | A stream token works once within 60 seconds; reuse, expiry, forgery, another tenant and a since-revoked key each give `error` and `4401` without reaching the object | [Event feed § 7.2](event-feed.md#72-stream-tokens) |
+| `it::stream::revocation_closes` | Revocation, expiry and each suspension close an open stream within 60 seconds by push and, with the push suppressed, by the backstop; no event is sent after the validation lapses | section 16, [Event feed § 7.7](event-feed.md#77-revalidation-revocation-and-suspension) |
+| `it::events::scope_matrix` | Tenant and identity scope for every event route; a foreign consumer ID gets `404 event_consumer_not_found`; every route joins `it::security::cross_tenant_matrix` with the same answers for foreign and missing targets | section 5.2, [Event feed § 10](event-feed.md#10-security) |
+| `it::screening::t17_hidden_everywhere` | A message in status `screening` is absent from every agent-facing surface (lists, reads by ID, search, `wait`, webhooks, triage, MCP), driven by `GET /__test/routes` and `tools/list` | SEC-13, FR-SCR-2 |
+| `it::screening::t53_no_model_text` | A classifier reply carrying prose in an extra field is invalid; no stored column holds model text | SEC-13, FR-SCR-5 |
+| `it::calendar::verification_end_to_end` | Through `email()` with the DNS and DKIM fixtures: a passing organizer invitation is verified; a forged organizer, a failing `From` and several `From` addresses are not | section 3.1, [V17](../edge-cases.md), [V18](../edge-cases.md), [V22](../edge-cases.md) |
+| `it::signup::x17_human_scope_identical` | The five person-scope refusals of an agent sign-up give byte-identical bodies apart from `request_id`; a `+tag` variant counts as the same person | section 10, FR-ASU-5 |
+| `it::signup::x23_permission_overlay` | With a provisional key every route outside the provisional set answers `permission_denied` (`signup_unverified`); after verification the verified set is allowed; other tenants' keys on the sign-up routes get `404 signup_not_found` | section 4.2, FR-ASU-6 |
+| `it::signup::x26_code_limits` | Ten wrong codes burn a code; 30 lock the code path; concurrent wrong codes make at most 10 comparisons | section 10, FR-ASU-9 |
+| `it::signup::x34_claim` | Claiming an agent's inbox needs re-authentication and the key; the pasted key is absent from logs, audit rows and the page | section 12, FR-ASU-12 |
+| `ts::secrets::y43_key_never_serialised` | A canary key is absent from `message`, `toString`, `JSON.stringify`, `util.inspect`, `meta` and the user agent of every TypeScript SDK error class (run in the SDK repository) | section 12, FR-SDK-8 |
+| `ts::release::y67_npm_tarball_in_signed_sums` | The SDK repository's release lists the npm tarball in its `SHA256SUMS`; the publish job refuses a tarball whose checksum, attestation or owner signature does not match, and publishes only that tarball | section 11, FR-SDK-9 |
 | `worker::db::no_formatted_sql`, `cargo xtask check-layering`, `cargo xtask build-worker` | No `format!`-built SQL in data-access code; no `worker` import outside `platform`; release bundle without `/__test/` or `itest-hooks` | sections 8.2, 11 |
 
 ## 14. security.txt
@@ -1461,3 +1558,7 @@ an independent agent verifying the release, checks.
 - [ ] With SES configured: both SNS topics have `SignatureVersion=2`, the inbound bucket blocks public
       access, and the IAM policy matches [Domains on any DNS host §4.2](domain-connections.md#42-deployment-set-up-for-ses).
 - [ ] Release bundle checked for `/__test/` and the `itest-hooks` feature.
+- [ ] The event feed's routes are in the cross-tenant matrix, and a revoked key's stream closes within 60
+      seconds (`it::stream::revocation_closes`).
+- [ ] The npm tarball of this release is in the signed `SHA256SUMS`, the trusted publisher names
+      `release-publish.yml` and environment `release`, and token publishing is disallowed on the package.

@@ -153,8 +153,8 @@ message when all of these hold:
 2. the organisational domain of the message's `From` address (the stored `messages.sender_domain`) is one
    of the entry's `sender_domains`, compared as A-labels: `noreply@mail.github.com` matches `github.com`,
    while `github.com.evil.example` and a confusable look-alike do not;
-3. the message's authentication verdict is `pass`, so that domain is proven (DMARC-aligned); a forged or
-   unauthenticated `From` never matches ([D1](../edge-cases.md));
+3. the message's authentication verdict is `pass` (`arc_rescued` is not `pass`), so that domain is proven
+   (DMARC-aligned); a forged or unauthenticated `From` never matches ([D1](../edge-cases.md));
 4. the message's `delivered_to` (the envelope recipient without its `+detail`, [Inbound › A9](inbound.md#multiple-identities-in-one-tenant-a9))
    equals the entry's `address`, so a code sent to another address of the identity does not match.
 

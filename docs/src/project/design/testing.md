@@ -11,7 +11,7 @@ pipeline; this page adds what they must contain.
 |---|---|
 | Requirements | PRD release criteria 1–7, NFR-QUAL-1, NFR-QUAL-2, NFR-QUAL-3, NFR-SEC-1, NFR-SEC-2, NFR-OPS-1 |
 | Edge cases | Every row marked `S` or `S+I` in the [edge-case register](../edge-cases.md) |
-| Code | `crates/core/src/**` (`#[cfg(test)]` modules), `crates/conformance/`, `crates/worker/tests/it/`, `crates/worker/tests/browser/`, `crates/worker/tests/live/`, `fuzz/`, `xtask/` |
+| Code | `crates/core/src/**` (`#[cfg(test)]` modules), `crates/conformance/`, `crates/worker/tests/it/`, `crates/worker/tests/browser/`, `crates/worker/tests/live/`, `fuzz/`, `xtask/`; the TypeScript SDK's tests live in its own repository ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)) |
 
 ## 1. Principles
 
@@ -50,7 +50,8 @@ pipeline; this page adds what they must contain.
 | Integration | `it::` | `crates/worker/tests/it/` | `cargo xtask itest` | Section 6 |
 | Attack suite | `it::security::` | `crates/worker/tests/it/security/` | `cargo xtask itest` | Section 7 |
 | Browser | `browser::` | `crates/worker/tests/browser/`: Playwright specs in TypeScript, with `@playwright/test` and `@axe-core/playwright` at exact versions in its `package.json` and lockfile (pinned at build time) | `cargo xtask itest`, after the `it::` tests and against the same running Worker; `cargo xtask itest --suite browser` alone | Console pages with JavaScript disabled and the axe accessibility scan (FR-CON-1; build plan M21, M24, M26). Section 6.8 |
-| Evaluation | – | `crates/conformance/golden/`, `xtask` | `cargo xtask eval-search`, `eval-agentic`, `eval-triage` | Section 9 |
+| TypeScript SDK | `ts::`, `ts::it::` | The SDK repository `PILOTAAI/pylota-mail-typescript`, `test/`: Vitest tests with a fake `fetch`, a fake WebSocket and the shared fixtures that this repository's releases ship from `sdks/fixtures/` | In the SDK repository's CI: `ts::` on Node.js 22, 24 and 26, then `ts::runtime::` on the packed tarball; `ts::it::` against this repository's harness, started at the contract's tag with `cargo xtask itest --serve`. Their names reach `trace` through `sdks/typescript-tests.json` | The TypeScript SDK and its packaging (FR-SDK-2–9; [SDKs, skills and agent tooling](sdk-and-skills.md#tests)) |
+| Evaluation | – | `crates/conformance/golden/`, `crates/conformance/screening/`, `xtask` | `cargo xtask eval-search`, `eval-agentic`, `eval-triage`, `eval-screening` | Section 9 |
 | Live | `live::` | `crates/worker/tests/live/` | `cargo xtask live` | Section 10 |
 
 ## 3. Unit and worker-logic tests
@@ -61,7 +62,9 @@ pipeline; this page adds what they must contain.
 - Worker-logic tests build a `Platform` bundle from `platform::fakes`: an in-memory clock that tests
   advance, a seeded RNG, `rusqlite` for D1 and Durable Object SQLite (with FTS5), maps for R2, captured
   queue sends, scripted AI and Vectorize, a DNS zone map, a recording HTTP client and a recording mail
-  sender. They exercise transactions, outbox writes, state machines and policy without workerd.
+  sender. They exercise transactions, outbox writes, state machines and policy without workerd. The R2
+  fake (`BlobStore`) also implements `put_stream`, `head_checksum` and `copy`, and can fail them with R2's
+  error codes `10013`, `10037` and `10058` ([Uploads](uploads.md)).
 - Error-code tests compare `ErrorCode::http_status()` and `retryable()` with every row of
   [Errors](../../reference/errors.md) (`core::errors::catalogue_matches_reference`), and every
   `ErrorCode` variant with the catalogue in both directions.
@@ -83,6 +86,8 @@ pipeline; this page adds what they must contain.
 | `core::citations::f11_*` (property part) | A sentence survives verification only if every cited ID is in the evidence set and every quoted phrase occurs in the cited source after normalisation ([F11](../edge-cases.md)) |
 | `core::keys::format_round_trip` | Generated keys match the key regex; parsing rejects every other shape |
 | `core::mime::b2_caps` (property part) | Random nesting and part counts never exceed depth 32 or 500 parts in the parsed tree and never panic ([B2](../edge-cases.md)) |
+| `core::abuse::y_rates_match_decision` | For random outcome histories and thresholds, every window's `tripped` equals the predicate the pause decision acts on, and `headroom` further outcomes of its kind trip it while one fewer does not; at least 10,000 cases on every run, CI included ([Deliverability metrics](metrics.md#14-tests), [Y1](../edge-cases.md)–[Y3](../edge-cases.md)) |
+| `core::abuse::headroom_properties` | For random window states and thresholds from 0 to 1: the predicate holds at the search bound unless `headroom` is `null`, and `null` occurs only for a threshold of 1; no mix of fewer than `headroom` further outcomes trips the rule; a delivered outcome lowers headroom only below a window's minimum, and by at most one; a batch that passes the batch check of [Deliverability metrics § 3.2](metrics.md#32-get-v1metricsrates) never trips the window; at least 10,000 cases on every run ([Deliverability metrics](metrics.md#14-tests), [Y2](../edge-cases.md)) |
 
 ## 5. MIME conformance corpus (`conf::`)
 
@@ -97,9 +102,11 @@ crates/conformance/
     threading/     c1_*, c2_*, c7_*, c8_*                          headers and subjects
     sanitize/      b7_*, b11_*, e1_*                               remote content, hidden text, injection text
     attachments/   b10_*, b12_*                                    risky types, archive bombs, extraction inputs
+    calendar/      u1_* … u16_*                                    calendar parts, time zones, methods, bounds
   dns/             zone files (TOML) for the fake resolvers: DKIM keys, DMARC and SPF records
   keys/            DKIM signing keys generated for tests only (file names end in .test-only.pem)
   golden/          the evaluation set (section 9)
+  screening/       the labelled steering set and labels.toml for eval::screening (section 9)
   src/             loader, expectation checker, generators
   THIRD_PARTY.md   origin and licence of every imported fixture
 ```
@@ -208,9 +215,15 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    `PM_ITEST_URL=https://localhost:8799` and `PM_ITEST_CA=target/itest/tls/cert.pem`. The test client
    (`reqwest`) trusts that certificate as its only extra root and pins `localhost` and
    `console.localhost` to `127.0.0.1` (`ClientBuilder::resolve`), so console requests go to
-   `https://console.localhost:8799` with no `Host` override. The `it` test target declares
+   `https://console.localhost:8799` with no `Host` override. The harness also has a native WebSocket client
+   (`tokio-tungstenite` `=0.30.0`, the SDK's `stream` feature) for the event stream tests
+   ([Event feed](event-feed.md)). The `it` test target declares
    `required-features = ["itest-hooks"]`, so `cargo test --workspace` never builds it.
 7. From M21, run the browser suite (section 6.8) while wrangler and the fake server are still up.
+   With `--serve` (from M36), steps 6 and 7 are skipped: once step 5 has seeded the deployment, it keeps
+   wrangler and the fake server running and writes `target/itest/serve.json` (URL, CA path, platform key),
+   so the TypeScript SDK repository's CI can run its `ts::it::` tests against this Worker; it stops both
+   when that job ends.
 8. Stop wrangler and the fake server; delete `target/itest/state` unless `--keep` was passed.
 
 ### 6.2 Test hooks
@@ -223,7 +236,8 @@ the release bundle contains `/__test/`.
 |---|---|
 | Invocation sync | At the start of every `fetch`, `email`, `queue`, `scheduled`, `alarm` and Durable Object request, read `GET {fakes}/state` (clock offset and fault-plan version) into isolate state |
 | `POST /__test/inbound` | Runs the `email()` handler code with a synthetic message (`mail_from`, `rcpt_to`, `raw_base64`) and returns `{ "outcome": "accepted" \| "rejected" \| "tempfail", "smtp": "550 5.1.1 …" }`. Used for cases the local endpoint cannot carry (no `Message-ID`, [B3](../edge-cases.md)) and to observe reject and temporary-failure outcomes ([A6](../edge-cases.md), [J1](../edge-cases.md)) |
-| `POST /__test/alarm` | `{ "class": "mailbox" \| "domain" \| "job" \| "quota" \| "notifier", "object_id" }`: runs the object's alarm handler now, executing every purpose due at the fake clock |
+| `POST /__test/alarm` | `{ "class": "mailbox" \| "domain" \| "job" \| "quota" \| "notifier" \| "events", "object_id" }`: runs the object's alarm handler now, executing every purpose due at the fake clock |
+| `POST /__test/evict` | `{ "class", "object_id" }`: evicts the Durable Object from memory, so its next message or alarm re-creates it (`it::stream::resume_no_loss`, [Event feed](event-feed.md)) |
 | `GET /__test/routes` | The router table (method, pattern, permissions, scope, idempotency) for the attack suite |
 | `POST /__test/rpc` | Sends a raw `RpcEnvelope` to an object, for owner-mismatch tests |
 | `POST /__test/delivery-event` | Publishes a provider event payload to `pm-delivery-events` through `Q_DELIVERY` |
@@ -243,6 +257,7 @@ traits that call it:
 | `Ai::run` (embeddings) | Feature hashing of normalised tokens into 1,024 dimensions, L2-normalised: deterministic and similarity-preserving enough for hybrid tests |
 | `Ai::run` (rerank) | Cosine similarity of the same vectors |
 | `Ai::run` (triage) | Schema-valid output looked up by `raw_sha256` from the labelled set, a default rule-based output otherwise; scriptable invalid JSON and timeouts (FR-TRI-4) |
+| `Ai::run` (screening) | Schema-valid output looked up by `raw_sha256` from `crates/conformance/screening/`, `steering: false` otherwise; scriptable invalid output, prose in an extra field, errors and timeouts ([Screening](screening.md)) |
 | `Ai::run` (planner) | Scripted tool-call sequences per question from `crates/conformance/golden/questions.toml`, including a hostile script that tries to widen scope ([F10](../edge-cases.md)) |
 | `Ai::to_markdown` | Text from a sidecar fixture, or a scripted failure or timeout ([B12](../edge-cases.md)) |
 | `VectorIndex` | In-memory namespaces with metadata filters (equality and `sent_at` ranges), mutation IDs, a configurable processing lag and `processedUpToDatetime`; `describe()` with the vector count, which tests can offset for the drift check; scriptable failures ([F14](../edge-cases.md)) and a "keep one vector" mode for probe tests ([F6](../edge-cases.md)) |
@@ -255,6 +270,8 @@ traits that call it:
   [L3](../edge-cases.md)); only live tenants use the fake mail sender. The real Cloudflare transport is
   exercised by spike S1 and the live suite: the local `send_email` simulation cannot serialise binary
   attachments (Cloudflare Email Service local-development docs, read 2026-10-09).
+- R2 is workerd's local R2 in `it::` tests, never a fake: `it::uploads::v_put_stream_contract` relies on it
+  to prove the streaming `put` with its length and SHA-256 checks ([Uploads](uploads.md)).
 - Webhook receiver fakes record each request (headers, body, signature check result) and can return any
   status, delay past the 15 s timeout, redirect, or stream an oversized body.
 - The SSRF guard runs unchanged: the DNS fake answers webhook and SMTP relay hosts with a fixed public
@@ -272,6 +289,15 @@ traits that call it:
   identity also sends ([Console › Requesting a link or code](console.md#requesting-a-link-or-code));
   `/__test/delivery-event` for a hard bounce on a notification; the DNS fake to make the platform domain
   `failing`).
+- The groups of the AgentMail-parity milestones: `it::drafts::*` (fake clock and `/__test/alarm` for
+  schedules, claims and pending approvals; the every-minute cron for the watchdog), `it::events::*` and
+  `it::stream::*` (the WebSocket client, `/__test/evict`, `/__test/alarm` with class `events`),
+  `it::screening::*` (the screening model fake, `/__test/alarm` for deadlines), `it::calendar::*`,
+  `it::uploads::*` (workerd's R2), `it::metrics::*`, `it::signup::*`, which also holds the agent
+  self-sign-up tests (the mail-sender fake for codes, the fake clock for expiry), and the parity additions'
+  groups (`it::lists::*`, `it::retention::*` and the others named in
+  [Parity additions › Tests](parity-additions.md#15-tests)); the SDK repository's `ts::it::*` runs against
+  the same Worker and fakes through `--serve`.
 - **Another value of a deployment variable or secret.** A test that needs one (`PM_CONSOLE=off` for
   `it::console::disabled`, `PM_WEB_BOT_AUTH=off` for `it::http_signatures::disabled_and_policy`,
   `PM_BILLING=off` for `it::notify::billing_off_no_usage_alerts`, `PM_NOTIFICATIONS=off`, or the secrets
@@ -294,6 +320,8 @@ documentation does not say how a `setReject` is reported to the caller, so tests
   `POST {fakes}/clock { "advance_ms" }` or `{ "set_ms" }` and synchronised at each invocation (6.2).
 - **Alarms.** Objects arm alarms at absolute times computed from the fake clock, which may be far in the
   real future; tests run them with `/__test/alarm`. Purposes not yet due at the fake clock do not run.
+- **Event feed.** The harness drives the `TenantEvents` revalidation alarm (`/__test/alarm`, class
+  `events`) and the long poll's one-second ticks with the fake clock ([Event feed](event-feed.md)).
 - **Cron.** `GET /cdn-cgi/local/scheduled?cron=<expression>&time=<ms>` triggers `scheduled()` with that
   cron and `scheduledTime` (Cloudflare docs, read 2026-10-09); `time` is the fake clock.
 - **Queue delays.** `platform::itest` producers and `Incoming::retry` record the requested delay at the
@@ -314,9 +342,9 @@ documentation does not say how a `setReject` is reported to the caller, so tests
 |---|---|---|
 | `r2.put`, `r2.get`, `r2.delete`, `r2.list` | `error`, `timeout` | [J1](../edge-cases.md), erasure retries |
 | `d1.query` (with `match.sql_prefix`) | `error` | [J7](../edge-cases.md) (directory lookup), job retries |
-| `do.call` | `error`, `timeout` | Partial tenant search ([F15](../edge-cases.md)) |
+| `do.call` | `error`, `timeout`, `delay` (`{ "ms": n }`: holds the matching call) | Partial tenant search ([F15](../edge-cases.md)); `delay` for [Z21](../edge-cases.md) |
 | `transport.send` | the mail sender's scripted outcomes | [G2](../edge-cases.md), [G3](../edge-cases.md), [G10](../edge-cases.md) |
-| `ai.run`, `ai.to_markdown` | `error`, `timeout`, `invalid_output` | [F12](../edge-cases.md), [B12](../edge-cases.md), FR-TRI-4 |
+| `ai.run`, `ai.to_markdown` | `error`, `timeout`, `invalid_output` | [F12](../edge-cases.md), [B12](../edge-cases.md), FR-TRI-4; screening model calls too ([Screening](screening.md)) |
 | `vectorize.upsert`, `vectorize.query`, `vectorize.delete` | `error`, `lag` | [F14](../edge-cases.md), [F6](../edge-cases.md) |
 | `doh.query` | `error`, `answer` (per resolver) | [H7](../edge-cases.md) |
 | `http.send` (by host) | `error`, `status`, `delay`, `redirect` | Webhooks, SSRF tests, SES, S3, SQS, OAuth and Stripe failures |
@@ -382,7 +410,8 @@ canary term. A third tenant C is a test tenant. Two partners, P and Q, each have
 every permission valid at the partner level and a partner webhook endpoint: P's key created A, Q's key
 created B, and C was created by a platform key, so it has no partner. A's domain was added with
 `nameservers`, so the Cloudflare fake holds A's zone and its `zone_claims` row; the fake also holds the
-zone of `PM_PLATFORM_DOMAIN`.
+zone of `PM_PLATFORM_DOMAIN`. From M30 each tenant also has a durable event consumer and an open event
+stream.
 
 "Every permission valid at that level" follows [Security §4.6](security.md#46-creating-keys-fr-key-1):
 a tenant key holds every permission except `tenants:manage`, `partners:manage`, `platform:ops` and
@@ -409,8 +438,13 @@ path parameter and every attacker class, calls the route with A's resource IDs (
 a valid body). The enumeration includes the identity-key routes (`…/keys`, `…/keys/rotate`,
 `…/keys/{kid}/revoke` with A's kid), `POST …/assertions` and `POST …/http-signatures` on A's
 identities; the scope check answers before any signing rule, so they give the same
-`404 identity_not_found` as a missing identity. For each call it also makes a control call with the same key and a random non-existent
-ID of the same type. It asserts:
+`404 identity_not_found` as a missing identity. It also covers the routes of the AgentMail-parity
+milestones: the ten draft routes (M29); the ten event routes, where a foreign `consumer_id` gets
+`404 event_consumer_not_found`, the stream handshake with a foreign `tenant_id`, and a foreign stream token,
+which closes the stream with `4401` (M30); the four screening routes (M31); `POST …/calendar-reply` (M32);
+the four upload routes and `PUT /v1/links/{token}` (M33); the seven agent sign-up routes (M34); the two
+metrics routes (M35); and the operations the parity additions add or change (M37). For each call it also
+makes a control call with the same key and a random non-existent ID of the same type. It asserts:
 
 1. The status is `404` with the route's `*_not_found` code, or `403 scope_denied` for a route above the
    key's level on its own tenant, or `401` for revoked and expired keys, or `403 permission_denied` when
@@ -437,7 +471,7 @@ no MX record of A's zone is deleted, and A's routing is unchanged.
 
 | Test | Attack |
 |---|---|
-| `it::security::route_table_complete` | Every route in `/__test/routes` appears in the matrix, has a scope rule and a non-empty permission list (except `Scope::Public`, `GET /v1/me` and `GET /v1/tenants/{tenant_id}`, which carries `foreign_permissions` instead; `GET /v1/usage` needs `usage:read`, which tenant and identity keys hold implicitly); a route added without them fails this test. The `Scope::Public` set is exactly the list of [Security §4.7](security.md#47-unauthenticated-routes), the two `/.well-known/` key routes included |
+| `it::security::route_table_complete` | Every route in `/__test/routes` appears in the matrix, has a scope rule and a non-empty permission list (except `Scope::Public`, the six `Scope::AgentSignup` routes, a route whose `any_permissions` is not empty (the four upload routes), `GET /v1/me` and `GET /v1/tenants/{tenant_id}`, which carries `foreign_permissions` instead; `GET /v1/usage` needs `usage:read`, which tenant and identity keys hold implicitly); a route added without them fails this test. The `Scope::Public` set is exactly the list of [Security §4.7](security.md#47-unauthenticated-routes), the two `/.well-known/` key routes included |
 | `it::security::body_scope_ignored` | For every `POST`, `PATCH` and list route: `tenant_id`, `identity_id` and `identity_ids` naming A in bodies and query strings, sent with B's keys |
 | `it::security::search_canary_isolation` | B searches for A's canary in every mode, including agentic with a question that asks for "all tenants"; zero hits and no evidence from A |
 | `it::security::vector_foreign_id_dropped` | The Vectorize fake returns one of A's vector IDs to B's semantic query; the mailbox read-back drops it and `rpc_owner_mismatch_total` does not move (the ID is simply not found in B's mailbox) |
@@ -456,7 +490,7 @@ not asserted in CI (too noisy); both code paths do the same D1 read by construct
 ## 8. Fuzzing
 
 The fuzz project lives in `fuzz/` (cargo-fuzz, libFuzzer, nightly toolchain only) with the targets listed
-in [Rust workspace](rust-workspace.md#9-xtask). The five required by the edge-case work:
+in [Rust workspace](rust-workspace.md#9-xtask). The six required by the edge-case work:
 
 | Target | Invariants checked beyond "no panic" |
 |---|---|
@@ -465,9 +499,10 @@ in [Rust workspace](rust-workspace.md#9-xtask). The five required by the edge-ca
 | `address_parse` | Normalisation is idempotent; a validated username matches `^[a-z0-9][a-z0-9._-]{0,23}$` |
 | `sanitize` | Output contains no `<script`, no `on*=` attribute, no remote `src`; `sanitize(sanitize(x)) == sanitize(x)`; derived text contains none of the hidden-text code points |
 | `dsn_parse` | The classification is one of the defined kinds; a DSN's recipients are syntactically valid addresses or absent |
+| `ical_parse` | `object_status` is one of `parsed`, `invalid`, `too_large`, `too_complex`, `unsupported`; every output string is valid UTF-8; time per input under 1 s; for a parsed object, writing it and reading the result gives the same object |
 
 - Seeds come from `crates/conformance/corpus/`.
-- CI runs the five for 60 seconds each on every pull request (`fuzz-smoke`); nightly runs every target
+- CI runs the six for 60 seconds each on every pull request (`fuzz-smoke`); nightly runs every target
   for 10 minutes.
 - A crash is minimised (`cargo fuzz tmin`), committed as a regression input under
   `crates/core/tests/fuzz_regressions/<target>/`, and replayed by
@@ -479,8 +514,8 @@ in [Rust workspace](rust-workspace.md#9-xtask). The five required by the edge-ca
 
 The golden set, the labelled queries, the agentic questions, the triage labels and the metric
 definitions are owned by [Search › Quality evaluation](search.md#13-quality-evaluation) and
-[Triage › Evaluation set](triage.md#13-evaluation-set-and-nfr-qual-3). This section defines how the
-harness runs them.
+[Triage › Evaluation set](triage.md#13-evaluation-set-and-nfr-qual-3), and the labelled steering set by
+[Screening](screening.md). This section defines how the harness runs them.
 
 ### 9.1 Files
 
@@ -495,13 +530,17 @@ crates/conformance/golden/
   triage.toml       labelled triage set
 ```
 
+The screening set is `crates/conformance/screening/`: at least 400 synthetic messages on reserved domains
+(steering mail and look-alike legitimate mail) and `labels.toml`, which labels each message.
+
 Message keys are stable names (`brightwell_invoice_88213`) mapped to message IDs at load time. All content
 is synthetic, on reserved domains, under the repository's licence (FSL-1.1-ALv2). Accepted scores (the baseline) are recorded in
 `docs/src/project/quality.md`, as the search and triage designs specify.
 
 ### 9.2 Running
 
-`cargo xtask eval-search`, `eval-agentic` and `eval-triage`:
+`cargo xtask eval-search`, `eval-agentic`, `eval-triage` and `eval-screening` (which injects the screening set
+in place of the golden mailbox and reads each message's screening record):
 
 1. `cargo xtask eval-setup` provisions the index: in the evaluation account (`PM_EVAL_CF_ACCOUNT_ID`,
    a Cloudflare account of its own, never the production account) it deletes `pm-mail-chunks-eval` if
@@ -538,6 +577,8 @@ is synthetic, on reserved domains, under the repository's licence (FSL-1.1-ALv2)
 | search (`eval::search`) | Hybrid recall@10 ≥ 0.90 and no drop of more than 0.01 against the baseline (NFR-QUAL-1); keyword zero-result rate 0 on exact-reference queries | [Search §13.2](search.md#132-labelled-queries-and-metrics) |
 | agentic (`eval::agentic`) | Citation precision after verification ≥ 0.98 (NFR-QUAL-2); steering failures 0; no `answered` status on unanswerable questions (FR-SRCH-9) | [Search §13.3](search.md#133-agentic-evaluation) |
 | triage (`eval::triage`) | Category accuracy ≥ 0.85 (NFR-QUAL-3) and no drop of more than 0.01 against the baseline | [Triage §13](triage.md#13-evaluation-set-and-nfr-qual-3) |
+| screening (`eval::screening`) | Recall ≥ 0.90 on steering mail and false-positive rate ≤ 0.02 on legitimate mail, both tracked against the baseline in `quality.md` | [Screening](screening.md) |
+| skills (`eval::skills_safe_send`) | None: report-only. The pass rate of an agent with the skills on scripted faults (key reuse, no resend after `uncertain`, no instruction-following) is recorded per release | [SDKs, skills and agent tooling](sdk-and-skills.md#tests) |
 
 **Repeat policy.** Model output varies between runs. Every model call in an evaluation uses the
 production parameters: triage `temperature: 0` with its fixed `seed` ([Triage](triage.md)), the planner's
@@ -588,7 +629,16 @@ deployment (its own zone, platform domain, D1, R2, Vectorize and queues, [Archit
 | `live::http_signatures::crawltest_unregistered_401` | M20 step 14, only with S13 passed and `PM_WEB_BOT_AUTH=on` (skipped otherwise, and the skip is reported): a signed request to `https://crawltest.com/cdn-cgi/web-bot-auth` returns `401`, because staging's directory is not registered |
 | `live::notify::usage_alert_once` | M20 step 15, with the staging catalog: Free sends crossing 80% (8 of 10) bring exactly one `usage` email to the owner's Gmail test mailbox, and crossing it again after a release brings none |
 | `live::notify::new_mail_no_content` | M20 step 15: a person following an inbox with `instant` gets one `new_mail` email in the Gmail test mailbox, and it contains none of the canaries planted in the source message's subject, sender, body and attachment name |
+| `live::arc::cloudflare_forward_behaviour` | A Google Workspace forwarding rule sends a DMARC-failing message (from a `p=reject` test domain) to the staging platform domain; records whether Cloudflare Email Routing delivers it to the Worker, and if so asserts `arc_rescued` ([Z45](../edge-cases.md)) |
+| `live::docs::z78_anchor_resolves` | A real error from staging carries `docs`; the URL loads and the page has the element `id` ([Z78](../edge-cases.md)) |
 | `live::notify::gmail_one_click_unsubscribe` | **Manual.** M20 step 15: a person presses Gmail's unsubscribe button on a `new_mail` notification; the harness then checks that the preference is `off` and that the next message sends nothing |
+
+The live tests of the AgentMail-parity milestones (M20 step 16) are defined on their design pages:
+`live::drafts::scheduled_send`, `live::events::stream_through_deploy`, `live::screening::t1_hold_round_trip`,
+`live::calendar::*`, `live::uploads::large_attachment_link`, `live::signup::end_to_end`,
+`live::signup::x40_refuse_one_click_headers`, `live::metrics::bounce_moves_rates` and
+`ts::live::round_trip`. The last runs in the TypeScript SDK's own repository, against the same staging
+deployment, with a staging test key ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)).
 
 **Manual tests.** Rows marked **Manual** need a person in a browser (a Google consent screen, a Stripe
 Checkout page, Gmail's unsubscribe button). They are `#[ignore]`d in the nightly run. Before a release, a
@@ -631,6 +681,8 @@ credentials are rotated every quarter.
 | `sdk::<module>::<name>` | Native test in `crates/sdk` | `sdk::coverage::every_operation` |
 | `xtask::<name>` | A check run by `cargo xtask` over the workspace, the docs or the built bundle | `xtask::size_budget` |
 | `browser::<area>::<name>` | Playwright test against workerd (section 6.8) | `browser::console::no_js` |
+| `ts::<module>::<name>` | Vitest test of the TypeScript SDK with fakes and shared fixtures, in the SDK repository | `ts::retry::y20_timeout_retries_same_key_and_bytes` |
+| `ts::it::<area>::<name>` | Vitest test of the TypeScript SDK against this repository's workerd harness, in the SDK repository | `ts::it::send::y20_lost_response_one_email` |
 | `eval::<suite>` | An evaluation run (section 9): its `Covers:` line names the quality requirement | `eval::search` |
 
 - The row ID (`a6`, `j7`) starts the last segment, so `cargo test a6_` finds every test for a row. A test
@@ -652,7 +704,16 @@ lines from the source tree (including generated `conf::` names), and fails when:
 - a `Covers:` line names an unknown row or requirement.
 
 It also collects every test named in a design page's Tests table, and every test named in a milestone's
-acceptance.
+acceptance. `ts::` tests live in the TypeScript SDK's own repository, which builds only from a product
+release's signed contract, so each repository gates its own side and neither waits for the other. Here,
+`trace` reads the `ts::` names and `Covers:` lines from `sdks/typescript-tests.json`, the inventory an SDK
+release produces and a pull request copies here: a listed name whose `Covers:` line names an unknown row
+or requirement fails, and a `ts::` name the register or a design table uses that the inventory lacks is
+printed `pending (SDK)` and does not fail, in `release.yml` too, because the SDK release that defines it
+comes after this one. Every product release attaches `ts-tests-required.json` (each such `ts::` name with
+its rows), listed in the signed `SHA256SUMS`, and the SDK repository's release refuses to adopt a
+contract whose required names it does not all define: a missing TypeScript test blocks the SDK release,
+never the product release.
 
 **Landed milestones.** A file `MILESTONES` at the repository root lists the milestones that have landed,
 one ID per line; each milestone's pull request adds its own line. Until `M20` is listed, `trace` checks
@@ -713,16 +774,16 @@ adds the security and traceability jobs:
 
 | Workflow | Jobs | Trigger |
 |---|---|---|
-| `ci.yml` | `fmt`, `clippy`, `test` (with coverage), `layering`, `wasm`, `itest` (`cargo xtask itest --suite it`; includes the attack suite and the deterministic keyword recall), `browser` (`cargo xtask itest --suite browser`: the console without JavaScript and the axe scan, section 6.8), `fuzz-smoke`, `deny`, `audit` (`cargo audit`), `openapi`, `docs`, `trace` (`cargo xtask trace`) | Every pull request and push to `main` |
+| `ci.yml` | `fmt`, `clippy`, `test` (with coverage), `layering`, `wasm`, `itest` (`cargo xtask itest --suite it`; includes the attack suite and the deterministic keyword recall), `browser` (`cargo xtask itest --suite browser`: the console without JavaScript and the axe scan, section 6.8), `fuzz-smoke`, `deny`, `audit` (`cargo audit`), `openapi`, `docs` (`mdbook build docs`, then `cargo xtask docs-check`), `trace` (`cargo xtask trace`), `skills` (`gen-skills` check, the four `xtask::skills_*` checks, `skills-ref validate`, `claude plugin validate --strict` when it runs unsigned) | Every pull request and push to `main` |
 | `codeql.yml` | CodeQL for Rust | Every pull request, weekly |
 | `heartbeat.yml` | `pmail doctor --json --check health --check alerts` against production, and once a day `--mail-test`, with the keys of the `ops` environment ([Observability § 5.5](observability.md#55-alert-email-and-the-external-heartbeat)) | Every 15 minutes, and by hand |
-| `nightly.yml` | All fuzz targets for 10 minutes each; property tests at 65,536 cases; `eval-search`, `eval-agentic`, `eval-triage`; the large benchmarks (`it::bench::*`, section 6.9); `live::` suite; `cargo audit` on `main` | Nightly |
-| `release.yml` | Builds a release, exactly as defined in [Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline): version check; the full `ci.yml` gate and the three evaluations; CLI binaries; `cargo xtask release` (bundle, unsigned `SHA256SUMS`, SBOMs, provenance) into a draft GitHub Release, then stops for the owner's offline signature (`cargo xtask release sign`, [Security § 11](security.md#11-supply-chain)). It never deploys Pylota Mail Cloud | Tag `v*` |
-| `release-publish.yml` | Verifies `SHA256SUMS.sig` against the public keys compiled into `pmail` and marks the draft a pre-release; a staging deploy of that release and the `live::` suite; then `cargo xtask release-gate` and, for a version without a pre-release part, promotion to a full release and `cargo publish` | Manual (`workflow_dispatch` on the tag, started by `cargo xtask release sign`) |
+| `nightly.yml` | All fuzz targets for 10 minutes each; property tests at 65,536 cases; `eval-search`, `eval-agentic`, `eval-triage`, `eval-screening`, `eval::skills_safe_send` (report-only); the large benchmarks (`it::bench::*`, section 6.9); `live::` suite; `cargo audit` on `main` | Nightly |
+| `release.yml` | Builds a release, exactly as defined in [Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline): version check; the full `ci.yml` gate and the three evaluations; CLI binaries; `cargo xtask release` (bundle, `openapi.json` and the SDK fixtures tarball for the TypeScript SDK's repository, unsigned `SHA256SUMS`, SBOMs, provenance) into a draft GitHub Release, then stops for the owner's offline signature (`cargo xtask release sign`, [Security § 11](security.md#11-supply-chain)). It never deploys Pylota Mail Cloud | Tag `v*` |
+| `release-publish.yml` | Verifies `SHA256SUMS.sig` against the public keys compiled into `pmail` and marks the draft a pre-release; a staging deploy of that release and the `live::` suite; then `cargo xtask release-gate` and, for a version without a pre-release part, promotion to a full release and `cargo publish`. The npm package is published by the TypeScript SDK's own repository | Manual (`workflow_dispatch` on the tag, started by `cargo xtask release sign`) |
 | `cloud-deploy.yml` | Rolls a published release out to Pylota Mail Cloud: `pmail deploy --version <v> --gradual` (10% → 50% → 100%, [Architecture](../architecture.md)) with the `production` environment's secrets; refuses a pre-release | Manual (`workflow_dispatch`, input `version`) |
 
 **Required checks to merge into `main`:** `fmt`, `clippy`, `test`, `layering`, `wasm`, `itest`,
-`browser`, `fuzz-smoke`, `deny`, `audit`, `openapi`, `docs`, `trace`, `codeql`. The milestone gate's
+`browser`, `fuzz-smoke`, `deny`, `audit`, `openapi`, `docs`, `trace`, `skills`, `codeql`. The milestone gate's
 `cargo xtask itest` runs both suites that the `itest` and `browser` jobs split.
 
 **Required to publish a release:** all of the above on the tagged commit; the three evaluation gates

@@ -52,7 +52,8 @@ mdbook build docs                            # builds docs into site/public/docs
 
 - Tenant isolation: every Durable Object and every D1 query is scoped by tenant and identity taken from the
   authenticated key, never from the request body.
-- `Idempotency-Key` is required on send, reply, reply-all and forward. Same key + same body returns the
+- `Idempotency-Key` is required on send, reply, reply-all, forward, calendar reply and draft send (every
+  operation marked `x-idempotency: required` in `openapi.yaml`). Same key + same body returns the
   original result. Same key + different body returns `409 idempotency_conflict`. A transport outcome that
   is unknown becomes `uncertain` and is never resent automatically.
 - Raw mail is written to R2 before an inbound message is acknowledged.

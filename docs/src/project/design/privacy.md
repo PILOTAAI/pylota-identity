@@ -7,10 +7,10 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 
 | | |
 |---|---|
-| Requirements | FR-PRV-1, FR-PRV-2, FR-PRV-3, FR-PRV-4, FR-PRV-5, FR-PRV-6, FR-IDN-4, FR-IDN-7, FR-IDN-9, FR-ADR-5, FR-SRCH-11, FR-DOM-9, FR-CON-8, FR-CON-14, FR-CON-15, FR-KEY-4 (partner deletion), NFR-PRV-1 |
+| Requirements | FR-PRV-1, FR-PRV-2, FR-PRV-3, FR-PRV-4, FR-PRV-5, FR-PRV-6, FR-PRV-7, FR-IDN-4, FR-IDN-7, FR-IDN-9, FR-ADR-5, FR-SRCH-11, FR-DOM-9, FR-CON-8, FR-CON-14, FR-CON-15, FR-KEY-4 (partner deletion), NFR-PRV-1 |
 | Edge cases | [I1](../edge-cases.md)–[I13](../edge-cases.md), [J7](../edge-cases.md), [A5](../edge-cases.md), [A6](../edge-cases.md), [A13](../edge-cases.md), [F6](../edge-cases.md), [J8](../edge-cases.md), [J12](../edge-cases.md), [W34](../edge-cases.md), [N4](../edge-cases.md), [N7](../edge-cases.md), [O7](../edge-cases.md), [O15](../edge-cases.md), [O19](../edge-cases.md) |
 | Code | `crates/worker/src/jobs/` (`JobRunner`, step planners), `crates/core/src/jobs/` (pure step logic, receipt builder), `crates/worker/src/mailbox/erase.rs`, `crates/worker/src/mailbox/export.rs` |
-| Tables | `jobs`, `erasure_requests`, `exports`, `address_tombstones`, `suppressions`, `ses_ingest`, `identity_keys`, `key_tombstones`, `notification_prefs`, `partners`, the console tables (`users`, `members`, `invitations`, `login_tokens`, `sessions`, `oauth_identities`, `oauth_states`, `waitlist`) (D1); `steps`, `meta` (JobRunner); every `IdentityMailbox` table; the `Notifier` tables ([Data model](data-model.md)) |
+| Tables | `jobs`, `erasure_requests`, `exports`, `address_tombstones`, `suppressions`, `ses_ingest`, `identity_keys`, `key_tombstones`, `notification_prefs`, `partners`, `draft_index`, `agent_signups`, `agent_signup_refusals`, the console tables (`users`, `members`, `invitations`, `login_tokens`, `sessions`, `oauth_identities`, `oauth_states`, `waitlist`) (D1); `steps`, `meta` (JobRunner); every `IdentityMailbox` table; the `Notifier` and `TenantEvents` tables ([Data model](data-model.md)) |
 
 ## 1. Principles
 
@@ -40,20 +40,27 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | R2 `…/a/{att}`, `…/a/{att}.md` | Attachment bytes and extracted text | Download, extraction, search | As the message (`retention.message_days`, default kept) | Retention job (message purge); erasure |
 | R2 `t/{ten}/exports/{exp}.zip` | Every message in the export | Subject-access export | 7 days | Retention job sets the export `expired` and deletes the object; every erasure of the tenant expires the tenant's unexpired exports, and an export that was running restarts (section 6.11, [I11](../edge-cases.md)); tenant erasure |
 | R2 backup bucket (`PM_BACKUP_BUCKET`, optional, off by default; set on Pylota Mail Cloud) | Copies of `t/` objects under the same keys | Recovery from a bug that deletes blobs (section 5.4) | As the source object | Every retention and erasure delete is applied to both buckets; tenant erasure sweeps `t/{tenant_id}/` in both; a copy that lands after the source was deleted is removed by the backup job itself (section 5.4, [I11](../edge-cases.md)) |
-| `IdentityMailbox.messages`, `threads`, `deliveries`, `attachments`, `labels` | Addresses, names, subjects, bodies, filenames, SMTP responses | The mailbox | `retention.message_days` (default kept) | Retention job; erasure |
+| `IdentityMailbox.messages`, `threads`, `deliveries`, `attachments`, `labels` | Addresses, names, subjects, bodies, filenames, SMTP responses, calendar objects (`calendar_json`, whose `parties` hold truncated keyed hashes only, [Calendar invitations §10](calendar-invitations.md#10-privacy)) | The mailbox | `retention.message_days` (default kept) | Retention job; erasure |
 | `IdentityMailbox.fts`, `fts_tri`, `refs` | Index terms and extracted references (plates, phone numbers, emails, amounts) derived from content | Keyword search | As the message | Deleted in the same transaction as the message row |
 | `IdentityMailbox.contacts` | Counterparty addresses, names, counts | Contacts, known-sender signal | Until the counterparty or identity is erased | Counterparty, identity and tenant erasure |
 | `IdentityMailbox.outbox` | Event payloads: message summaries, addresses, up to 64 KB of extracted text | Webhook dispatch and replay | `retention.events_days` (default 30), counted from `occurred_at`, once dispatched | Retention job; erasure deletes events referencing erased messages |
+| `TenantEvents` Durable Object (one per tenant) | Event envelopes: message summaries, addresses, up to 64 KB of extracted text; durable consumer names and key IDs; stream-token hashes; erased message and identity IDs for 7 days | The event feed, consumers and the WebSocket stream ([Event feed](event-feed.md)) | `retention.events_days` after the append, within a 6 GB budget; tokens 60 s | Tenant retention job (`Purge`); every erasure scope (section 6); tenant erasure deletes the object's storage |
 | `IdentityMailbox.idempotency` | Response bodies of sends (recipients, subject summary) | Safe retries | 30 days | Hygiene step of the retention job; erasure |
+| `IdentityMailbox.delivery_stubs` | Keyed hashes of recipient addresses, recipient domains, provider message IDs and delivery statuses of outbound messages that per-identity expiry deleted; no content and no clear address | Late bounces and complaints still suppress and count ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events)) | 30 days after the send | Daily maintenance; counterparty erasure of the address; identity and tenant erasure (`WipeAll`) |
 | `IdentityMailbox.verifications` | Verification codes and links | `wait` | 24 hours | Hygiene step; erasure (cascade) |
 | `IdentityMailbox.rate_windows` | Sender addresses in hourly windows | Inbound throttle, token brute-force limits | 48 hours ([Design conventions §4](index.md#4-durable-object-transactions), daily maintenance) | Hygiene step; counterparty erasure deletes the counterparty's rows (section 6.4); identity and tenant erasure |
 | `IdentityMailbox.chunks` | Character offsets only | Semantic index bookkeeping | As the message | Cascade with the message row |
+| Mailbox `drafts` (with `draft_sync`) and R2 `t/{tenant_id}/i/{identity_id}/drafts/` | Draft recipients, subjects, bodies, attachments | Messages an agent is writing or that wait for approval or a schedule ([Drafts](drafts.md)) | 30 days after the last change (or `retention.message_days`, or the identity's `retention.message_hours`, when shorter); `sent` and `canceled` records keep no content, except a draft canceled under a legal hold until the hold ends | Mailbox maintenance (`Hygiene`), every erasure scope, `WipeAll` ([Drafts §13](drafts.md#13-privacy)) |
+| `IdentityMailbox.screenings` | IDs, enumerations, times, the deciding key or user ID | Screening hold records ([Screening hold](screening.md)) | As the message (cascade) | Every scope that deletes the message deletes the row (cascade), counted as `screenings_deleted` ([Screening hold §18](screening.md#18-privacy)) |
+| `IdentityMailbox.screening_feedback` | The verdict, the caller's `notes` (≤ 500 characters, personal data), the actor | Feedback on screening verdicts | As the message (cascade) | As above, counted as `screening_feedback_deleted` |
+| Mailbox `uploads` and R2 `t/{ten}/i/{idn}/up/{upl}` | Files an agent staged to send, and their filenames | Attachments staged for sends and drafts ([Uploads](uploads.md)) | At most 7 days, capped by `retention.message_days` and the identity's `retention.message_hours`; tombstones 7 days without bytes | Their own expiry, `DELETE`, the `Hygiene` sweep as a backstop; every erasure scope ([Uploads §9](uploads.md#9-privacy)) |
+| `IdentityMailbox.metric_counts` | None: counts per hour and day by event type and domain | Event counts of the metrics API ([Metrics](metrics.md)) | 192 hours (hourly), 92 days (daily) | Their own pruning; identity and tenant erasure (`WipeAll` or the prefix delete); message, thread and counterparty erasure leave them ([Metrics §7](metrics.md#7-privacy)) |
 | Vectorize `pm-mail-chunks` | Embeddings derived from content; IDs; filter metadata (`identity_id`, `thread_id`, `sent_at`, `sender_domain`, `direction`, `has_attachment`, `verdict`, `kind`); no text, subjects or addresses | Semantic search | As the message | `deleteByIds` from the chunk map; namespace sweep for tenant erasure (section 7.5) |
 | D1 `identities` | Accountable human (`owner_name`, `owner_email`), display name, signature, metadata | Identity management, FR-IDN-2 | Life of the identity | Identity and tenant erasure clear or delete the row |
 | D1 `addresses` | Agent addresses | Directory | Life of the identity; retired rows kept so they are never reassigned | Moved to `address_tombstones` on identity deletion or erasure |
 | D1 `domains` | Domain names; for `smtp_relay`, the sealed relay credentials (`smtp_sealed`; the username is often an address) and the last probe result | Domain management and sending | Life of the domain | Domain removal; tenant erasure |
 | D1 `ses_ingest` | S3 object key and the envelope recipient (an agent address) | Exactly-once ingestion of SES messages ([N4](../edge-cases.md)) | 30 days | Global retention job (`ses_ingest` step) |
-| D1 `tenants` | Workspace name, slug, address suffix, time zone, `policy_json`; `require_two_factor`, `onboarding_dismissed_at`, `quota_do_id`, `notify_do_id` and `partner_id` hold no personal data. The slug and the address suffix are often derived from the business's name, and for a sole trader that name can identify a person (section 3, "Names kept after tenant erasure") | The workspace | Life of the tenant | Tenant erasure blanks `name` and `policy_json` and keeps the row, so the slug and suffix are never reused; the slug and suffix are kept in clear, on the basis recorded in section 3 |
+| D1 `tenants` | Workspace name, slug, address suffix, time zone, `policy_json`; `require_two_factor`, `onboarding_dismissed_at`, `quota_do_id`, `notify_do_id`, `events_do_id`, `provisional_until` and `partner_id` hold no personal data. The slug and the address suffix are often derived from the business's name, and for a sole trader that name can identify a person (section 3, "Names kept after tenant erasure") | The workspace | Life of the tenant | Tenant erasure blanks `name` and `policy_json` and keeps the row, so the slug and suffix are never reused; the slug and suffix are kept in clear, on the basis recorded in section 3 |
 | D1 `partners` | The partner's name (an organisation's name; nothing about a person is asked for), its status and default billing mode | Partner keys ([REST API › Partners](../../reference/api.md#partners)) | Life of the partner | `DELETE /v1/partners/{partner_id}` once every tenant of the partner is erased (section 6.10) |
 | D1 `users` | Sign-in address, name, `last_login_at`, `last_tenant_id`, `terms_version` and `terms_accepted_at`, the sealed TOTP secret (`totp_sealed`, with `totp_enabled_at` and `totp_last_step`), the sealed recovery-code hashes (`recovery_codes_sealed`) | Console accounts | Life of the account | Person deletion (section 6.9); tenant erasure for people left in no workspace |
 | D1 `members` | Which person belongs to which workspace, and the role | Console access | Life of the membership | Member removal; person deletion; tenant erasure |
@@ -63,21 +70,24 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | D1 `oauth_identities` | Google `sub` or GitHub numeric ID; the address at linking time (`email_at_link`) | Google and GitHub sign-in | Life of the account | Person deletion; tenant erasure for people left in no workspace |
 | D1 `oauth_states` | Keyed hashes of `state` and the browser cookie, the sealed PKCE verifier, the `next` path, plan and accepted terms version | One sign-in flow | 10 minutes; rows deleted 24 hours after expiry | Global retention job (`signup` step) |
 | D1 `waitlist` | Address and plan of interest | Inviting people before open sign-up (FR-CON-8) | A row exists only once confirmed (an unused confirmation link expires after 10 minutes); kept until 30 days after its invitation | Global retention job (`signup` step); person deletion |
+| D1 `agent_signups` | While provisional: the person's address in clear. Always: the keyed hash of their base address, `source`, the network hash, the accepted terms version, times | Agent sign-up: the person an agent names confirms or refuses ([Agent sign-up](agent-signup.md)) | Provisional: at most 7 days. Verified: life of the tenant (the clear address is removed at verification) | Tenant-scope erasure (`delete_d1_rows`, before `api_keys` and `identities`), which every end of a provisional sign-up starts, with the message-scope erasure of each code email in the system identity's mailbox when it ends unverified; person deletion replaces `human_hash` of the rows they verified with the row's own ID (section 6.9) |
+| D1 `agent_signup_refusals` | Keyed hash of a base address | Refusing later agent sign-ups that name the person | Until the person lifts it | `/console/settings` (**Allow again**). Not deleted by person deletion or by any erasure: it records an objection to contact, as a suppression does (section 7.6); it holds no clear data |
 | D1 `billing_accounts` | Stripe customer and subscription IDs | Plans and billing ([Billing](billing.md)) | Life of the tenant | Tenant erasure, after its `cancel_billing` step (section 6.6) |
 | D1 `billing_events` | Stripe event IDs, types and outcomes; the tenant ID | Webhook deduplication and the `stripe_webhook_errors` alert ([Billing › Webhook endpoint](billing.md#webhook-endpoint)) | 400 days from `received_at` | Global retention job (`billing_events` step); tenant erasure |
 | D1 `address_tombstones` | Keyed hash of the address | Never reassign an address ([A5](../edge-cases.md)) | Permanent | Never deleted (no clear-text address) |
 | D1 `suppressions` | Keyed hash, masked hint, optional note and source message ID | Honour bounces, complaints and objections | `expires_at` or permanent | Counterparty erasure clears `note` and `source_message_id` and keeps the rest ([I7](../edge-cases.md)); tenant erasure deletes |
-| D1 `sender_lists` | Clear addresses or domains chosen by the tenant | Allow and block lists | Until the tenant removes them | Tenant erasure; otherwise the tenant's own `DELETE …/lists/…` (section 7.3) |
-| D1 `webhook_endpoints`, `webhook_deliveries`, `event_index` | URLs; event IDs and types | Webhooks and replay | Deliveries and index: the tenant's `retention.events_days` (default 30); platform rows (`tenant_id IS NULL`): 30 days | Retention job; tenant erasure; partner deletion removes a partner's endpoints and their deliveries (section 6.10) |
+| D1 `sender_lists` | Clear addresses or domains chosen by the tenant, for the whole tenant or for one identity ([Parity additions §3](parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17)) | Allow and block lists | Until the tenant removes them | Identity erasure deletes the identity's entries, tenant erasure every entry (sections 6.5, 6.6); otherwise the tenant's own `DELETE …/lists/…` (section 7.3) |
+| D1 `webhook_endpoints`, `webhook_deliveries`, `event_index` | URLs; event IDs and types; the endpoint's sealed custom delivery headers (`headers_sealed`), credentials of the receiver rather than personal data, deleted with the endpoint ([Parity additions §8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)) | Webhooks and replay | Deliveries and index: the tenant's `retention.events_days` (default 30); platform rows (`tenant_id IS NULL`): 30 days | Retention job; tenant erasure; partner deletion removes a partner's endpoints and their deliveries (section 6.10) |
 | D1 `idempotency_records` | Response bodies of non-mail POSTs: an identity's owner name and address (identity create and update), agent addresses (address create), a suppressed or listed address (suppression and list writes). Never mail content: search is never recorded, and a replay of release, cancel, resolve or a thread hold stores a reference that is re-read ([Data model](data-model.md#1-d1-control-plane)) | Safe retries | 30 days (`expires_at`) | Retention job (global step); identity erasure (`identity_id`); tenant erasure (`tenant_id`); identity erasure deletes the tenant's records whose body names the identity ID, counterparty erasure those whose body contains the address (sections 6.4, 6.5); tenant erasure deletes them all |
 | D1 `erasure_requests`, `jobs` | Counterparty HMAC, the identity and the `msg_` or `thr_` target ID, free-text `reason`, receipt counts | Accountability for erasure, and re-applying erasures after a restore (section 11) | Erasure records: life of the deployment. Other jobs: 90 days after completion | Retention job (global step) for non-erasure jobs |
 | D1 `audit_log` | Key IDs and target IDs; never content or clear addresses | Accountability | Life of the tenant | Tenant erasure deletes all but `erasure.*` rows |
 | D1 `identity_keys` | Public JWKs and sealed Ed25519 seeds, tied to one identity; no person's name or address | Agent assertions ([Agent signing keys](agent-keys.md#8-data-model)) | Life of the identity: `retired` rows stay until the identity is deleted, so a key ID is never reused | Identity and tenant erasure delete the rows and record each key ID in `key_tombstones` (sections 6.5 and 6.6) |
 | D1 `service_accounts` | The agent's own accounts at third-party services: the identity's address, a username or account email at the service, the service's domains, an agent-written purpose, decision notes, actor IDs; no counterparty data and no mail content | The service sign-up ledger ([Service sign-up ledger](service-accounts.md)) | Pending: 7 days, then rejected as expired. Rejected and closed: 90 days after the decision or closure. Approved: life of the identity | Global retention job (`service_accounts` step); `DELETE …/accounts/{account_id}`; identity and tenant erasure (sections 6.5 and 6.6) |
+| D1 `draft_index` | None: draft, identity and tenant IDs, status, counts and times ([Drafts §9.2](drafts.md#92-d1-draft_index)) | Listing drafts that wait for approval or a schedule | As the draft | Kept in step by the mailbox; message, thread and counterparty erasure delete the rows of erased drafts (`scrub_control_plane`); identity and tenant erasure (sections 6.3–6.6) |
 | D1 `key_tombstones` | Key IDs (RFC 7638 thumbprints) of deleted identity keys and `deleted_at`; no identity, tenant or address | Never publish a deleted key ID again ([O7](../edge-cases.md)) | Permanent | Never deleted (it holds no personal data) |
 | D1 `notification_prefs` | Which person wants which notification kind in which workspace: `mode`, `filter`, the followed inboxes (`identity_ids`), `paused_reason` | Notifications ([Notifications §2](notifications.md#2-preferences)) | Life of the membership | Member removal deletes the person's rows for that workspace ([O19](../edge-cases.md)); person deletion deletes all their rows (section 6.9); tenant erasure deletes the workspace's rows |
 | `Notifier` Durable Object (one per tenant) | Person (`usr_`), identity and message IDs, counts and times in `pending`, `held`, `windows` and `sent`; never mail content, subjects, senders or addresses ([Notifications §8](notifications.md#8-notifier-object)) | Coalescing, waiting for triage, schedules and daily caps of notifications | Pending items until their window sends them; `held` rows at most 5 minutes; or until the person is removed ([O19](../edge-cases.md)) | Member removal drops the person's pending and held items; tenant erasure deletes the object's storage (`delete_all`, section 6.6) |
-| D1 `usage_daily`, `TenantQuota` | Counts only, including the `assertions` and `http_signatures` metrics, and the usage-alert markers `alerted:{feature}:{threshold}:{period}` in `TenantQuota.meta` | Usage, caps, abuse windows, usage alerts | 92 days (usage); 1,000 outcomes per identity | Retention job; identity and tenant erasure |
+| D1 `usage_daily`, `TenantQuota` | Counts only, including the `assertions` and `http_signatures` metrics, and the usage-alert markers `alerted:{feature}:{threshold}:{period}` in `TenantQuota.meta`; on the default tenant, keyed hashes and counts of agent sign-up (`sysmail:signup:*`, `asu:*`) | Usage, caps, abuse windows, usage alerts, agent sign-up limits | 92 days (usage); 1,000 outcomes per identity; one UTC day (`sysmail:signup:*`) and 48 hours (`asu:*`) | Retention job; the object's daily cleanup; identity and tenant erasure |
 | JobRunner `meta` | During a counterparty erasure or export only: the clear target address | Matching messages | Until the job's `finalise` step, which also runs when the job fails or is canceled (section 4, [I13](../edge-cases.md)) | Deleted by `finalise` |
 | `DomainMonitor` | Domain names, DNS results, RDAP fingerprint (hash) | Domain health | Last 500 checks | Domain removal; tenant erasure (`delete_all`) |
 | Queues | Pointers; inbound pointers carry the envelope sender and recipient ([Inbound](inbound.md)) | Async work | Until consumed; dead-letter items at most 14 days | Consumers ack; queue retention |
@@ -250,21 +260,24 @@ per call.
 |---|---|
 | `RetentionPlan { raw_cutoff_ms, message_cutoff_ms, after_rowid, limit }` | Messages older than a cutoff outside held threads, with their R2 keys and vector IDs |
 | `PurgeRaw { message_ids }` | Sets `raw_r2_key = NULL` (the raw endpoint then returns `410 raw_expired`) |
-| `PurgeEvents { cutoff_ms }`, `Hygiene { now_ms }` | Deletes dispatched outbox rows older than the cutoff; expired `idempotency`, `verifications`, `rate_windows` |
-| `ErasurePlan { target, after_rowid, limit }` | `{ messages: [{ rowid, id, thread_id, r2_keys, vector_ids }], held: [{ thread_id, reason }], next_after_rowid }` |
-| `EraseRows { rowids, counterparty }` | Deletes the rows (section 6.2) and returns counts |
+| `PurgeEvents { cutoff_ms }`, `Hygiene { now_ms }` | Deletes dispatched outbox rows older than the cutoff; expired `idempotency`, `verifications`, `rate_windows`. `Hygiene` also purges drafts by [Drafts §13.1](drafts.md#131-retention) and expires pending approvals, and runs the uploads expiry sweep as a backstop ([Uploads §9](uploads.md#9-privacy)) |
+| `ErasurePlan { target, after_rowid, limit }` | `{ messages: [{ rowid, id, thread_id, r2_keys, vector_ids, uploads: [{ id, r2_key }] }], drafts: [{ id, r2_keys }], held: [{ thread_id, reason }], next_after_rowid }`. `uploads` lists the still-existing uploads the message's attachments were copied from (`attachments.upload_id`, [Uploads §9](uploads.md#9-privacy)); `drafts` the drafts the target erases ([Drafts §13.2](drafts.md#132-erasure)) |
+| `EraseRows { rowids, counterparty, draft_ids, upload_ids, mode }` | Deletes the rows (section 6.2) and returns counts and the deleted message IDs, which it also leaves pending in `erased_ids` for the event log. `mode` is `Erasure` (requests), `Retention` (tenant retention, section 5.2 step 3: as `Erasure`, and for outbound messages a content-free delivery stub) or `Expiry` (per-identity expiry, section 5.5), which keeps a content-free idempotency stub and, for outbound messages, a content-free delivery stub |
 | `ProbeKeyword { target }` | Number of messages still matching the target |
-| `CountAll` | Counts per table, used before a wipe |
+| `CountAll` | Counts per table, used before a wipe (`drafts`, `uploads`, `screenings` and `screening_feedback` included, for the receipt) |
 | `WipeAll` | `delete_all()`, then writes a three-row tombstone `meta` (`erased = '1'`, `tenant_id`, `identity_id`) so the object refuses every later request with `identity_not_found` |
 | `ExportBatch { target, after_rowid, limit }` | Message records and R2 keys for export |
 | `ForgetSender { target }` | Deletes the `rate_windows` rows whose `sender` matches a counterparty target; returns the count |
+| `UploadPlan { after, limit }`, `EraseUploads { ids }` | For erasure of a held identity: lists the uploads with their keys, then deletes the rows → count ([Uploads §5.2](uploads.md#52-mailbox-operations)) |
 | `ActiveHolds { now_ms }` | Clears holds whose `until` has passed (audit `hold.expired`, section 8) and returns the number of threads still held |
 
 `target` is one of `Message { id }`, `Thread { id }`, `Counterparty { address }`,
 `CounterpartyHash { hash }` or `All`. `CounterpartyHash` is used only when an erasure is re-applied after a
 restore, because the erasure record keeps the address's HMAC and never the address (section 11): the
 mailbox computes `HMAC-SHA256(PM_HASH_KEY, a)` for each normalised address `a` a message, contact,
-participant list or `rate_windows` row holds, and matches it against `hash`. It matches exactly the
+participant list, draft or `rate_windows` row holds, and matches it against `hash`. Calendar
+objects keep no clear address: their `parties` entries are the first 16 bytes of that HMAC, so both
+targets compare the first 16 bytes of the target's hash with them ([Calendar invitations §10](calendar-invitations.md#10-privacy)). It matches exactly the
 messages that `Counterparty` matches, more slowly; the keyword probe uses the same comparison instead
 of a `participant:` search.
 
@@ -283,11 +296,12 @@ once per day for control-plane tables.
 |---|---|---|
 | 1 | `plan` | Reads the tenant's effective `retention` policy and fixes the cutoffs: `raw_cutoff = now − raw_days`, `message_cutoff = now − message_days` (skipped when `null`), `events_cutoff = now − events_days`. The system identity (`is_system = 1`, default tenant only) always uses `raw_days = 7` and `message_days = 30`, whatever the policy says, because its mailbox holds sign-in, invitation and notification mail addressed to people ([Identities › The system identity](identity-domains.md#the-system-identity)) |
 | 2 | `raw` | For each identity (cursor `identity_id:rowid`), `RetentionPlan` for raw cutoff → delete `raw.eml` and `out/{msg}.eml` objects → `PurgeRaw`. Objects are deleted before the column is cleared, so a crash leaves no unreferenced object |
-| 3 | `messages` | Only when `message_days` is set: for each identity, `RetentionPlan` for message cutoff → `deleteByIds` for the vector IDs → delete every R2 key of the batch → `EraseRows` |
-| 4 | `events` | For each identity, `PurgeEvents { events_cutoff }`. In D1, in batches (section 6.12): `DELETE FROM event_index WHERE rowid IN (SELECT rowid FROM event_index WHERE tenant_id = ?1 AND occurred_at < ?2 LIMIT 1000)`, repeated until it deletes nothing, and the same for `webhook_deliveries.created_at` |
-| 5 | `hygiene` | For each identity, `Hygiene`. Expire exports: `exports` rows past `expires_at` → delete the ZIP object → status `expired` |
+| 3 | `messages` | Only when `message_days` is set: for each identity, `RetentionPlan` for message cutoff → `deleteByIds` for the vector IDs → delete every R2 key of the batch → `EraseRows` (`mode: Retention`, which
+keeps the delivery stubs of [Parity additions § 7.13](parity-additions.md#713-late-delivery-events)), whose deleted IDs the mailbox's `log_erase` purpose then deletes from the tenant's event log, so the log keeps no event of a message that retention removed ([Event feed § 11.3](event-feed.md#113-erasure)) |
+| 4 | `events` | For each identity, `PurgeEvents { events_cutoff }`. In D1, in batches (section 6.12): `DELETE FROM event_index WHERE rowid IN (SELECT rowid FROM event_index WHERE tenant_id = ?1 AND occurred_at < ?2 LIMIT 1000)`, repeated until it deletes nothing, and the same for `webhook_deliveries.created_at`; then `EventsRequest::Purge { appended_before: events_cutoff }` on the tenant's `TenantEvents` object, repeated until it reports done, its count added to the audit row as `log_events_deleted` ([Event feed §11.2](event-feed.md#112-retention)) |
+| 5 | `hygiene` | For each identity, `Hygiene` (which also purges drafts and sweeps expired uploads, section 4.1). Expire exports: `exports` rows past `expires_at` → delete the ZIP object → status `expired` |
 | 6 | `holds` | For each identity, `ActiveHolds`, which clears holds whose `until` has passed (audit `hold.expired`, section 8). For an identity still `deleting` whose latest identity-scope erasure request is `completed_with_holds`, an answer of 0 creates the continuation: an identity-scope request with reason `hold_released:{era_id}` and `resumes_id` = that request, audit-logged (`erasure.create`; section 6.5) |
-| 7 | `audit` | One `audit_log` row per step that deleted anything: `action = "retention.purge"`, `target_type = "tenant"`, `details_json = { "step", "cutoff_ms", "identities", "r2_objects_deleted", "messages_deleted", "vectors_deleted", "events_deleted" }` (FR-PRV-2) |
+| 7 | `audit` | One `audit_log` row per step that deleted anything: `action = "retention.purge"`, `target_type = "tenant"`, `details_json = { "step", "cutoff_ms", "identities", "r2_objects_deleted", "messages_deleted", "vectors_deleted", "events_deleted" }`, plus `log_events_deleted` (step 4) and `drafts_deleted` (step 5) when non-zero (FR-PRV-2) |
 
 Every R2 delete in steps 2, 3 and 5 is sent to `BACKUP` too when it is configured (section 5.4).
 
@@ -340,7 +354,9 @@ records why a nightly copy replaces the event-driven copy the plan proposed):
   bind it as `BACKUP` ([Configuration](../../reference/configuration.md#variables)).
 - Once per UTC day the `*/15` cron starts a `backup` job (`jobs.kind = 'backup'`, `tenant_id = NULL`).
   Its one step lists `t/` in key order (cursor = the last key) and copies to `BACKUP`, under the same
-  key and with the same custom metadata, every object uploaded since the previous run's start. Errors
+  key and with the same custom metadata, every object uploaded since the previous run's start, except keys
+  under `…/up/` ([Uploads §9](uploads.md#9-privacy)): restoring an upload is never useful, and a copy would
+  outlive the upload's expiry. Errors
   retry under the JobRunner backoff; the result counts copied, skipped and errored objects
   (`backup_objects_total{result=copied|skipped|error}`).
 - The backup never deletes an object that still exists in `BLOBS`. Retention and erasure delete each
@@ -356,6 +372,53 @@ records why a nightly copy replaces the event-driven copy the plan proposed):
 - Restoring is a manual copy back from `BACKUP` to `BLOBS` for the affected keys, listed from the
   mailbox rows that point at missing objects.
 - Cost: one list operation per 1,000 objects in `t/` each night, and one write per new object.
+
+### 5.5 Per-identity expiry
+
+An identity can set `retention.message_hours` (1–8,760, or `null` for the tenant's policy alone), so that its
+mail is gone within hours whatever the rest of the workspace keeps (FR-PRV-7). When the tenant's
+`message_days` is also set, the shorter applies. The full design is
+[Parity additions §7](parity-additions.md#7-per-identity-message-retention-fr-prv-7); in summary:
+
+- **Who.** `identities:write`; setting a number where there was `null`, or lowering it, deletes mail sooner
+  and also needs `erasure:manage`. Every change writes `identity.retention_update` and emits
+  `identity.updated`. The system identity keeps its fixed 30 days (section 5.2).
+- **How the mailbox learns it.** D1 keeps `identities.message_hours`; an `rpc_intents` row (op
+  `set_retention`) and `MailboxRequest::SetRetention { message_hours, version }` carry it to the mailbox,
+  which stores `meta.retention_message_hours` and re-plans at once (`alarm:expiry = now`) when the value is set
+  or lowered.
+- **What expires.** Every message, inbound or outbound and of every status, `message_hours` after
+  `received_at`, except a message in a thread under an active legal hold (until the hold ends, section 8) and
+  an outbound message still `queued` or with a transport claim younger than 5 minutes. Expiry deletes what
+  `EraseRows` deletes (section 6.2), the message's R2 objects in `BLOBS` and `BACKUP` and its vectors, and
+  writes `erased_ids`; a draft expires `message_hours` after its last change. The event log's copies of the
+  message's events go too, through the mailbox's `log_erase` purpose
+  ([Event feed § 11.3](event-feed.md#113-erasure)). It keeps what tenant retention keeps: `contacts`,
+  `rate_windows`, suppressions, `event_index` rows and audit rows.
+- **Late bounces and complaints still count.** Each delivery of an expired outbound message with a provider
+  message ID becomes a content-free `delivery_stubs` row (keyed recipient hash, provider message ID, status,
+  `first_reply`, sending domain) for 30 days after the send, so a complaint or hard bounce that arrives after
+  the message expired still suppresses the address and reaches `RecordOutcome`, the abuse pauses and
+  `metric_counts`, with no message event ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events)).
+- **The expiry alarm.** The mailbox does the work itself (`alarm:expiry`, `mailbox/expiry.rs`), with no
+  `JobRunner`: in slices of at most 100 messages or 20 seconds it plans the due rows, deletes their vectors and
+  R2 objects, then in one transaction re-checks each row and runs `EraseRows` with `mode: Expiry`. A failure
+  backs off from 30 seconds to 5 minutes, and the daily maintenance alarm re-arms an alarm that was lost.
+- **Timing.** At most 15 minutes after the due time while R2, Vectorize and the mailbox answer (Pylota Mail
+  target); `retention_expiry_overdue:{identity_id}` fires when a due row is more than 1 hour overdue.
+- **A retried send never sends twice.** In `mode: Expiry` an outbound message's idempotency row is kept until
+  its own `expires_at`, with no content and a keyed fingerprint; a retry with the same key and body gets
+  `410 message_expired`, a different body `409 idempotency_conflict`. An erasure request still deletes the row
+  (section 6.2, step 4).
+- **One-time codes** are available for the shorter of 24 hours and `message_hours`.
+- **What expiry cannot recall.** Copies outside the mailbox: webhook payloads already delivered, the copies
+  event-feed consumers received, exports completed earlier, recipients' copies of outbound mail, and the
+  processor logs and recovery windows of section 11. An export collecting while messages expire leaves them out
+  and counts them in `jobs.result_json.expired_during_export`.
+- **Receipts.** One audit row per identity per UTC day that expired anything (`action = "retention.expire"`,
+  `target_type = "identity"`), with the day, the counts of an erasure receipt (section 10), `drafts_deleted`,
+  `held_skipped`, `first_expired_at` and `last_expired_at` (FR-PRV-2), written by the daily maintenance alarm
+  with a deterministic ID, so a repeated flush writes one row.
 
 ## 6. Erasure
 
@@ -416,25 +479,40 @@ In one transaction per batch, for each message rowid:
    tokenizer-mode reindex has created them, the same from `fts_next` and `fts_tri_next`
    ([Search §7.2](search.md#72-reindex-job-analyzer-change)), so a swap can never bring an erased row back.
 2. `DELETE FROM messages WHERE rowid = ?1`, cascading to `deliveries`, `attachments`, `labels`, `refs`,
-   `chunks` and `verifications`.
+   `chunks`, `verifications`, `screenings` and `screening_feedback`.
 3. `DELETE FROM outbox WHERE payload_json` references the message ID (the outbox payload builder stores
    the message ID in a top-level `data.message_id` or `data.message.id`; the delete uses
-   `json_extract`).
-4. `DELETE FROM idempotency WHERE message_id = ?1`.
+   `json_extract`). It also matches `message.labels_changed` rows whose `data.messages` lists the message:
+   the entry is removed with `json_remove`, the row is deleted when no entry is left, and the count of deleted
+   rows goes to `events_deleted` ([Parity additions §4.3](parity-additions.md#43-rules), rule 8).
+4. `DELETE FROM idempotency WHERE message_id = ?1`. Per-identity expiry (`mode: Expiry`, section 5.5) keeps
+   the row instead, as a stub without content, until its own `expires_at`, and turns each delivery of an
+   outbound message that has a `provider_message_id` into a `delivery_stubs` row before step 2 deletes it
+   ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events)).
 5. Update the thread's counters and `participants_json`; delete a thread left with no messages.
-6. For a counterparty target, also: delete the `contacts` row for the address, and remove the address
-   from `participants_json` of every surviving thread.
+6. For a counterparty target, also: delete the `contacts` row for the address, remove the address
+   from `participants_json` of every surviving thread, and delete the `delivery_stubs` rows whose
+   `address_hash` is the target's keyed hash.
+7. Delete the drafts of the plan ([Drafts §13.2](drafts.md#132-erasure)): the draft row, its `draft_sync` row
+   (writing a `delete` row), its `idempotency` rows and its outbox rows; count `drafts_deleted`.
+8. Delete the `uploads` rows the plan lists for the batch's messages; their objects were deleted before the
+   transaction, with the message's keys ([Uploads §9](uploads.md#9-privacy)); count `uploads_deleted`.
 
 Counts returned per batch: messages, attachments, FTS rows (rows deleted from `fts`; `fts_tri` rows are
-deleted alongside and not counted), refs, outbox events.
+deleted alongside and not counted), refs, outbox events, screening records and screening feedback (counted
+before the delete, because a cascade reports no count), drafts and uploads; and the IDs of the messages
+deleted, which an erasure job passes to the event log (sections 6.3 and 6.4). The same transaction writes
+those IDs to `erased_ids` with `log_erased_at = NULL` and sets `alarm:log_erase = now`, in every mode, so the
+mailbox itself deletes the log's copies after tenant retention and per-identity expiry too, and repeats an
+erasure job's call that was lost ([Event feed § 11.3](event-feed.md#113-erasure)).
 
 ### 6.3 Message and thread scope
 
 | # | Step | Does |
 |---|---|---|
 | 1 | `init` | Records the target; resolves the identity's `mailbox_do_id` |
-| 2 | `erase_mailbox` | `ErasurePlan { Message \| Thread }`. A held thread yields no messages and one `held` entry. For each batch: `deleteByIds(vector_ids)` → delete each R2 key (`raw.eml`, `out/{msg}.eml`, inbound and outbound attachments and their `.md`) from `BLOBS` and, when configured, `BACKUP` → `EraseRows` |
-| 3 | `scrub_control_plane` | Delete `event_index` rows for the deleted event IDs; expire the tenant's exports (section 6.11) |
+| 2 | `erase_mailbox` | `ErasurePlan { Message \| Thread }`. A held thread yields no messages and one `held` entry. For each batch: `deleteByIds(vector_ids)` → delete each R2 key (`raw.eml`, `out/{msg}.eml`, inbound and outbound attachments and their `.md`, the objects of the uploads the attachments were copied from, and the `drafts/{id}/` objects of the plan's drafts) from `BLOBS` and, when configured, `BACKUP` → `EraseRows`; after each `EraseRows` batch, `EventsRequest::EraseMessages` with the batch's message IDs ([Event feed § 11.3](event-feed.md#113-erasure)) |
+| 3 | `scrub_control_plane` | Delete `event_index` rows for the deleted event IDs, and `draft_index` rows for the erased draft IDs; expire the tenant's exports (section 6.11) |
 | 4 | `probe` | Section 6.7 |
 | 5 | `receipt` | Section 10 |
 | 6 | `finalise` | Clears job-local target data |
@@ -442,15 +520,18 @@ deleted alongside and not counted), refs, outbox events.
 ### 6.4 Counterparty scope ([I1](../edge-cases.md))
 
 A message matches when the normalised address equals `from_address`, appears in `to_json`, `cc_json`,
-`bcc_json` or `reply_to_json`, or is a `deliveries.address` of the message. A message that only
+`bcc_json` or `reply_to_json`, or is a `deliveries.address` of the message, or is a party of the message's
+calendar object (the `parties` list of `calendar_json`, [Calendar invitations §10](calendar-invitations.md#10-privacy)).
+A draft matches when the address is in its `to_json`, `cc_json`, `bcc_json` or `resolved_json`, or when its
+source or sent message matches ([Drafts §13.2](drafts.md#132-erasure)). A message that only
 mentions the address in its body is not "to or from" the counterparty and is not erased; erase it with
 message scope if needed.
 
 | # | Step | Does |
 |---|---|---|
 | 1 | `init` | Stores `meta.target_address`; lists the tenant's identities (every status except `deleted`), or, when the job's params carry `identity_ids`, only those identities |
-| 2 | `erase_mailboxes` | For each identity (cursor `identity_id:rowid`): `ErasurePlan { Counterparty }` → per batch `deleteByIds` → delete R2 keys (in `BACKUP` too, when configured) → `EraseRows { counterparty }`; then `ForgetSender { Counterparty }`. Held threads are collected into `held` |
-| 3 | `scrub_control_plane` | `suppressions` for `(tenant_id, counterparty_hash)`: set `note = NULL`, `source_message_id = NULL`, keep the row ([I7](../edge-cases.md)); delete `event_index` rows for deleted event IDs; delete the tenant's `dlq_items` whose pointer's envelope sender or recipient, normalised, is the address (the Worker reads the tenant's rows, at most 14 days' worth, and compares); `DELETE FROM idempotency_records WHERE tenant_id = ?1 AND instr(response_body, ?2) > 0` with the normalised address; expire the tenant's exports (section 6.11). With `PM_CF_API_TOKEN`: `GET /accounts/{PM_CF_ACCOUNT_ID}/email/sending/suppressions?email={address}` and `DELETE …/suppressions/{suppression_id}` for each entry whose scope is `sending_domain` with one of the tenant's own domains and that is not `read_only` (our hashed suppression keeps refusing the address, so the provider's clear copy is not needed; [I12](../edge-cases.md)); `account` entries and entries of the shared platform domain, which other tenants' sends also create, are kept (section 11). Without the token the provider step is skipped and counted in `jobs.result_json` as `provider_suppressions_skipped` |
+| 2 | `erase_mailboxes` | For each identity (cursor `identity_id:rowid`): `ErasurePlan { Counterparty }` → per batch `deleteByIds` → delete R2 keys (in `BACKUP` too, when configured) → `EraseRows { counterparty }`; after each `EraseRows` batch, `EventsRequest::EraseMessages` with the batch's message IDs ([Event feed § 11.3](event-feed.md#113-erasure)); then `ForgetSender { Counterparty }`. As in message scope, the R2 keys include the objects of the uploads the matched messages' attachments were copied from, and of the matched drafts. Held threads are collected into `held` |
+| 3 | `scrub_control_plane` | `suppressions` for `(tenant_id, counterparty_hash)`: set `note = NULL`, `source_message_id = NULL`, keep the row ([I7](../edge-cases.md)); delete `event_index` rows for deleted event IDs, and `draft_index` rows for the erased draft IDs; delete the tenant's `dlq_items` whose pointer's envelope sender or recipient, normalised, is the address (the Worker reads the tenant's rows, at most 14 days' worth, and compares); `DELETE FROM idempotency_records WHERE tenant_id = ?1 AND instr(response_body, ?2) > 0` with the normalised address; expire the tenant's exports (section 6.11). With `PM_CF_API_TOKEN`: `GET /accounts/{PM_CF_ACCOUNT_ID}/email/sending/suppressions?email={address}` and `DELETE …/suppressions/{suppression_id}` for each entry whose scope is `sending_domain` with one of the tenant's own domains and that is not `read_only` (our hashed suppression keeps refusing the address, so the provider's clear copy is not needed; [I12](../edge-cases.md)); `account` entries and entries of the shared platform domain, which other tenants' sends also create, are kept (section 11). Without the token the provider step is skipped and counted in `jobs.result_json` as `provider_suppressions_skipped` |
 | 4 | `probe` | Section 6.7, for every identity in `identities_affected` |
 | 5 | `receipt` | Section 10 |
 | 6 | `finalise` | Deletes `meta.target_address` |
@@ -471,8 +552,8 @@ those identities.
 |---|---|---|
 | 1 | `init` | `identities.status = 'deleting'`; revoke every identity-level key (`revoked_at = now`, `prev_hash = NULL`) |
 | 2 | `tombstone_addresses` | For every address row of the identity (all statuses): `INSERT OR IGNORE` into `address_tombstones (address_hash, identity_id, reason)` with reason `erased`, delete the `addresses` row, and delete its literal routing rule. For `DELETE /v1/identities/{identity_id}` the handler has already done the tombstones and row deletes in its D1 batch with reason `deleted` ([Identities and domains › Delete](identity-domains.md#delete-fr-idn-4-a13)) and passes the deleted rows' `(zone_id, routing_rule_id)` pairs in the job's `params_json`, so this step only deletes those rules. From here inbound to these addresses gets `550 5.1.1` ([A6](../edge-cases.md), [A13](../edge-cases.md)) after at most the 60-second directory cache. On an SES domain, each retired address is also removed from the `pm-retired-{n}` rule named by `addresses.ses_bounce_rule` (for `DELETE /v1/identities/{identity_id}` the handler passes these names in `params_json` with the rule pairs), so its mail is dropped like an unknown address's instead of being bounced as retired |
-| 3 | `erase_mailbox` | No holds: page through `chunks` for every vector ID → `deleteByIds`; list and delete every R2 object under `t/{ten}/i/{idn}/` (in `BACKUP` too, when configured); `CountAll` (recorded for the receipt); `WipeAll`. With holds: as counterparty step 2 with target `All`, deleting R2 objects by key and keeping held threads |
-| 4 | `scrub_control_plane` | `identities`: clear `owner_name`, `owner_email`, `signature_text`, `signature_html`, `client_id`, `client_fingerprint`, set `display_name = ''`, `metadata_json = '{}'`, `send_policy_json = '{}'`, and `status = 'deleted'` (no holds) or keep `deleting` (holds). In one D1 batch, `INSERT OR IGNORE INTO key_tombstones (kid, deleted_at)` the `id` of every `identity_keys` row of the identity, then delete those rows, so a deleted key ID is never published again ([O7](../edge-cases.md); the JWKS already answers `404 identity_not_found` from step 1, when the identity became `deleting`); delete `event_index` and `webhook_deliveries` rows for the identity's events, and `idempotency_records` with `identity_id` = the identity; delete the identity's `service_accounts` rows; `QuotaRequest::ForgetIdentity` deletes its `outcomes` and counters; `DELETE FROM idempotency_records WHERE tenant_id = ?1 AND instr(response_body, ?2) > 0` with the identity ID (the identity create and update responses carry the owner's name and address); delete the tenant's `dlq_items` whose pointer names the identity; expire the tenant's exports (section 6.11). Webhook `identity_ids` filters keep the opaque ID: removing it could widen an endpoint to every identity |
+| 3 | `erase_mailbox` | No holds: page through `chunks` for every vector ID → `deleteByIds`; list and delete every R2 object under `t/{ten}/i/{idn}/` (in `BACKUP` too, when configured); `CountAll` (recorded for the receipt); `WipeAll`. `CountAll` includes the `uploads`, `drafts`, `screenings` and `screening_feedback` rows. With holds: as counterparty step 2 with target `All`, deleting R2 objects by key and keeping held threads; then `UploadPlan` and `EraseUploads` delete every upload of the identity and its objects, because a hold covers threads and an upload belongs to none ([Uploads §9](uploads.md#9-privacy)) |
+| 4 | `scrub_control_plane` | `identities`: clear `owner_name`, `owner_email`, `signature_text`, `signature_html`, `client_id`, `client_fingerprint`, set `display_name = ''`, `metadata_json = '{}'`, `send_policy_json = '{}'`, and `status = 'deleted'` (no holds) or keep `deleting` (holds). In one D1 batch, `INSERT OR IGNORE INTO key_tombstones (kid, deleted_at)` the `id` of every `identity_keys` row of the identity, then delete those rows, so a deleted key ID is never published again ([O7](../edge-cases.md); the JWKS already answers `404 identity_not_found` from step 1, when the identity became `deleting`); delete `event_index` and `webhook_deliveries` rows for the identity's events, and `idempotency_records` with `identity_id` = the identity; delete the identity's `service_accounts` and `draft_index` rows, and its `sender_lists` rows (`identity_id` = the identity), counted as `list_entries_deleted`; `QuotaRequest::ForgetIdentity` deletes its `outcomes` and counters; `DELETE FROM idempotency_records WHERE tenant_id = ?1 AND instr(response_body, ?2) > 0` with the identity ID (the identity create and update responses carry the owner's name and address); delete the tenant's `dlq_items` whose pointer names the identity; expire the tenant's exports (section 6.11). Webhook `identity_ids` filters keep the opaque ID: removing it could widen an endpoint to every identity; `EventsRequest::EraseIdentity` with the held threads ([Event feed § 11.3](event-feed.md#113-erasure)) |
 | 5 | `probe` | Section 6.7. A wiped mailbox answers `identity_not_found`, recorded as zero hits |
 | 6 | `receipt` | Section 10. When the identity is now `deleted` (no holds remain), emits `identity.deleted` with `identity_id` and `erasure_request_id`, once: the event is written only by the job that moves the identity to `deleted` (the first job when there are no holds, otherwise the follow-up `hold_released` job) |
 | 7 | `finalise` | — |
@@ -495,14 +576,14 @@ Order: stop routing, then billing (money stops before anything else is removed),
 
 | # | Step | Does |
 |---|---|---|
-| 1 | `stop_routing` | `tenants.status = 'erasing'`, which only this job changes afterwards (a `PATCH` with `status` gets `409 tenant_erased`, and non-platform keys can no longer write to the tenant) (inbound for every tenant address now gets `550 5.1.1`; outbound consumers drop messages for the tenant); revoke every tenant and identity key; disable the tenant's webhook endpoints (`enabled = 0`, `disabled_reason = 'manual'`); cancel the tenant's other running jobs |
+| 1 | `stop_routing` | `tenants.status = 'erasing'`, which only this job changes afterwards (a `PATCH` with `status` gets `409 tenant_erased`, and non-platform keys can no longer write to the tenant) (inbound for every tenant address now gets `550 5.1.1`; outbound consumers drop messages for the tenant); revoke every tenant and identity key; disable the tenant's webhook endpoints (`enabled = 0`, `disabled_reason = 'manual'`); cancel the tenant's other running jobs; `CloseStreams { All, 4404 }` on the tenant's `TenantEvents` |
 | 2 | `cancel_billing` | Skipped when `PM_BILLING=off`, or when the tenant has no `billing_accounts.stripe_customer_id`. Otherwise read the customer's subscriptions (`GET /v1/subscriptions?customer=…&expand[]=data.schedule`, every status except canceled) and cancel each one, the plan subscription and every top-up subscription, at once (a subscription that carries a schedule, such as a downgrade waiting for the period end, has the schedule released first with `POST /v1/subscription_schedules/{id}/release`): immediate cancellation with `invoice_now=true` and `prorate=false`, so anything not yet invoiced is billed on a final invoice, with no proration credit and no refund ([Billing › Stripe integration](billing.md#stripe-integration) records why). The step is done when the read returns none, so a re-run after a partial failure cancels only what is left; a customer Stripe no longer knows counts as done. Failures retry under the job's backoff (section 4). The third failed attempt fires `billing_cancel_failed:{tenant_id}` (page; [Observability › Alert list](observability.md#53-alert-list)), so the operator cancels in the Stripe Dashboard at once, while the step keeps retrying until `deadline_at − 4 h` like any erasure step (section 4). Webhooks for this tenant afterwards are answered `200` and recorded `ignored_erased`, except that a live subscription created after the deletion is cancelled (`cancelled_after_erasure`; [Billing › Webhook endpoint](billing.md#webhook-endpoint)) |
 | 3 | `remove_domains` | For each tenant domain, run the `domain_remove` steps of [Identities and domains › Domain removal](identity-domains.md#domain-removal) inline (literal rules, catch-all, routing, sending onboarding, event subscription, the SES identity with `DeleteEmailIdentity` and its DKIM CNAMEs, including a failover identity, the domain's addresses in `pm-retired-{n}` receipt rules, ownership record, zone); then `DomainMonitor` `delete_all` |
 | 4 | `erase_identities` | For each identity: identity steps 2 and 3 (tombstone every address, including retired ones; erase the mailbox). An identity with held threads keeps them, with their R2 objects and vectors, and stays `deleting` (below) |
-| 5 | `delete_d1_rows` | In this order, all `WHERE tenant_id = ?1`, each table in batches of at most 1,000 rows (section 6.12): `webhook_deliveries`, `webhook_endpoints`, `event_index`, `suppressions`, `sender_lists`, `idempotency_records` (`scope = ?1 OR tenant_id = ?1`: the tenant's own records, and the records of platform and partner keys whose stored response belongs to the tenant, such as the `POST /v1/tenants` that created it), `rpc_intents`, `usage_daily`, `identity_keys` (after `INSERT OR IGNORE INTO key_tombstones` of every row's `id`, as in identity scope), `service_accounts`, `notification_prefs`, `api_keys`, `identities` (except rows still `deleting` with holds, which are scrubbed as in identity step 4 and kept), `domains`, `exports`, non-erasure `jobs`, `invitations`, `sessions` (active workspace = this tenant), `members`, `billing_events`, `billing_accounts`, `dlq_items`, `audit_log` rows whose `action` does not start with `erasure.` (or `hold.`, while holds remain); then `tenants` set `status = 'erased'`, `name = ''`, `policy_json = '{}'` (the row, slug and suffix stay, so neither is reused; with holds, `status` stays `erasing`); `TenantQuota` `delete_all` and `Notifier` `delete_all`, so no pending notification survives. Every person the `members` delete left with no workspace is then deleted as in section 6.9, which also removes their `oauth_identities`, `login_tokens` and `waitlist` row |
+| 5 | `delete_d1_rows` | In this order, all `WHERE tenant_id = ?1`, each table in batches of at most 1,000 rows (section 6.12): `webhook_deliveries`, `webhook_endpoints`, `event_index`, `suppressions`, `sender_lists` (counted as `list_entries_deleted`), `idempotency_records` (`scope = ?1 OR tenant_id = ?1`: the tenant's own records, and the records of platform and partner keys whose stored response belongs to the tenant, such as the `POST /v1/tenants` that created it), `rpc_intents`, `usage_daily`, `identity_keys` (after `INSERT OR IGNORE INTO key_tombstones` of every row's `id`, as in identity scope), `service_accounts`, `draft_index`, `notification_prefs`, `agent_signups`, `api_keys`, `identities` (except rows still `deleting` with holds, which are scrubbed as in identity step 4 and kept), `domains`, `exports`, non-erasure `jobs`, `invitations`, `sessions` (active workspace = this tenant), `members`, `billing_events`, `billing_accounts`, `dlq_items`, `audit_log` rows whose `action` does not start with `erasure.` (or `hold.`, while holds remain); then `tenants` set `status = 'erased'`, `name = ''`, `policy_json = '{}'` (the row, slug and suffix stay, so neither is reused; with holds, `status` stays `erasing`); `TenantQuota` `delete_all` and `Notifier` `delete_all`, so no pending notification survives, and `EventsRequest::Erase` on `TenantEvents` (counted, then `delete_all()` and `meta.erased`). Every person the `members` delete left with no workspace is then deleted as in section 6.9, which also removes their `oauth_identities`, `login_tokens` and `waitlist` row |
 | 6 | `sweep_vectors` | Vectorize has no method to delete a namespace (Vectorize client API, read 2026-10-09: only `deleteByIds`). Query the tenant namespace with a fixed probe vector (`topK = 100`, `returnMetadata: "none"`), `deleteByIds` the IDs returned, wait 10 seconds, and repeat until two consecutive queries return nothing (at most 100 rounds per alarm slice; section 6.8). With holds: skipped, because the held vectors would answer every query; the vectors of everything not held were deleted by ID in step 4, and the continuation runs the sweep |
 | 7 | `sweep_r2` | List and delete every object under `t/{tenant_id}/`, in `BLOBS` and, when configured, `BACKUP`. With holds: only `t/{tenant_id}/exports/` and the `t/{tenant_id}/i/{idn}/` prefix of each identity wiped without holds; the other objects of a held identity were deleted by key in step 4, and the continuation sweeps the whole prefix |
-| 8 | `probe` | Section 6.7, plus: `t/{tenant_id}/` lists empty; a namespace query returns nothing; D1 counts for the tenant are zero except the kept rows. With holds, the prefix and namespace probes cover only what steps 6 and 7 swept, and held items are excluded as in every scope |
+| 8 | `probe` | Section 6.7, plus: `t/{tenant_id}/` lists empty; a namespace query returns nothing; D1 counts for the tenant are zero except the kept rows (every table of step 5, `agent_signups` and `draft_index` among them). With holds, the prefix and namespace probes cover only what steps 6 and 7 swept, and held items are excluded as in every scope |
 | 9 | `receipt` | Section 10. `erasure.completed` goes to platform endpoints and, for a tenant a partner's key created, to that partner's endpoints (the tenant's own endpoints are disabled). With holds the status is `completed_with_holds` and the tenant stays `erasing` |
 | 10 | `finalise` | — |
 
@@ -517,7 +598,7 @@ thread, in any step, and the tenant is not `erased` while one remains:
   `deleting`. Its addresses are tombstoned and its domains removed like any other, so nothing new
   arrives; its keys and identity keys are gone, so nothing is sent or signed.
 - Everything else of the tenant is erased by the same steps: billing, domains, the other identities,
-  every other D1 row, people left with no workspace, the `TenantQuota` and `Notifier` objects.
+  every other D1 row, people left with no workspace, the `TenantQuota`, `Notifier` and `TenantEvents` objects.
 - The request ends `completed_with_holds`, with each held thread in `receipt.held`, and the tenant stays
   `erasing`, so every write from a non-platform key is still refused. Until it is `erased` it counts
   toward its partner's `max_tenants` and blocks the partner's deletion ([J12](../edge-cases.md),
@@ -542,7 +623,8 @@ thread, in any step, and the tenant is not `erased` while one remains:
 |---|---|---|
 | Keyword | For each affected identity, `ProbeKeyword { target }`: a search for the erased message IDs and, for counterparty scope, the address as a `participant:` filter ([Search §6.7](search.md#67-deletion-on-erasure)); it must return no hits | `probe.keyword_hits` (sum) |
 | Semantic | `getByIds` over every vector ID deleted by the job (kept in the runner's `deleted_vectors` table) and every vector ID an erased message could have (`{msg}:0`–`{msg}:63`, `{msg}:a{k}:0`–`{msg}:a{k}:199`), in batches (section 6.8), so a vector an index job wrote after the deletion is found ([I10](../edge-cases.md)); count IDs still returned. Tenant scope adds the namespace query of step 6 | `probe.semantic_hits` |
-| Objects | A prefix list of each erased message's `m/{msg}/` and `out/{msg}` keys (a prefix list of the identity or tenant for those scopes); an object found is deleted and the probe repeated | not in the receipt; a non-zero result re-runs the deleting step |
+| Event log | `EventsRequest::Probe` on the tenant's `TenantEvents`: the rows still found for the erased message IDs (or the identity, outside held threads) must be 0 ([Event feed § 11.3](event-feed.md#113-erasure)) | `probe.log_hits` |
+| Objects | A prefix list of each erased message's `m/{msg}/` and `out/{msg}` keys and each erased draft's `drafts/{id}/` (a prefix list of the identity or tenant for those scopes); an object found is deleted and the probe repeated | not in the receipt; a non-zero result re-runs the deleting step |
 
 A non-zero probe re-runs the step that should have deleted the item (counted as an attempt). The job
 completes only with all probes at zero, except held items.
@@ -569,7 +651,8 @@ deletion for every person it leaves with no workspace (section 6.6, step 5).
    ([O19](../edge-cases.md)), the seat is released and `member.removed` is emitted.
 2. In one D1 batch: delete the person's `sessions`, `pending_auth` rows, the `login_tokens` for their
    address, their `oauth_identities`, their `notification_prefs` rows in every workspace, and any `waitlist` row for
-   their address; and scrub the address of the invitations they accepted
+   their address; replace the keyed hash on the agent sign-ups they verified
+   (`UPDATE agent_signups SET human_hash = id WHERE verified_user_id = ?usr`); and scrub the address of the invitations they accepted
    (`UPDATE invitations SET email = ?usr_id WHERE status = 'accepted' AND email = ?address`), whose rows
    stay with their workspaces as the record of who invited the member.
 3. In the same batch, scrub the `users` row rather than delete it, because `invitations.invited_by` and
@@ -689,9 +772,12 @@ The integrator can remove it with `DELETE /v1/tenants/{tenant_id}/suppressions/{
 
 ### 7.3 Allow and block lists
 
-`sender_lists` entries are the tenant's own configuration and are not changed by counterparty erasure:
-removing a block entry would re-open contact, and the entry is not a message. The privacy guide tells
-integrators to remove entries for an erased counterparty with the lists API when appropriate.
+`sender_lists` entries, of the tenant scope and of the identity scope
+([Parity additions §3](parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17)), are the tenant's own
+configuration and are not changed by counterparty erasure: removing a block entry would re-open contact, and the
+entry is not a message. The privacy guide tells integrators to remove entries for an erased counterparty with
+the lists API when appropriate. Identity erasure deletes the identity's entries and tenant erasure every entry,
+both counted as `list_entries_deleted` (sections 6.5 and 6.6).
 
 ### 7.4 What agent assertions and signed requests disclose
 
@@ -727,6 +813,13 @@ so its composed message (the person's address, counts, inbox addresses, the work
 is kept in the system identity's mailbox for 30 days, and `out/{msg}.eml` for 7 days, whatever the default
 tenant's policy says (section 5.2). Deleting the person erases it at once (section 6.9, step 5).
 
+### 7.6 Agent sign-up refusals
+
+A person whom an agent named at sign-up can refuse it, and every later sign-up that names them
+([Agent sign-up](agent-signup.md)). `agent_signup_refusals` keeps only the keyed hash of their base address,
+until they lift it at `/console/settings` (**Allow again**). Like a suppression (section 7.2), it records an
+objection to contact, so neither person deletion nor any erasure scope deletes it; it holds no clear data.
+
 ## 8. Legal holds
 
 - `POST /v1/identities/{identity_id}/threads/{thread_id}/hold { "reason", "until" }` sets
@@ -735,8 +828,12 @@ tenant's policy says (section 5.2). Deleting the person erases it at once (secti
 - A hold is active while `hold_json` is set and `until` is `null` or later than now. An expired hold is
   ignored and cleared by the next tenant retention run's `holds` step (section 5.2), or, on a tenant being erased, by
   the global `held_erasures` step (audit `hold.expired` either way).
-- A hold covers the whole thread, including messages that arrive after it was set.
-- While active: retention skips the thread (raw and messages); every erasure scope skips it and lists
+- A hold covers the whole thread, including messages that arrive after it was set, and the drafts whose
+  thread, source message or sent message is in it ([Drafts §13.2](drafts.md#132-erasure)). A held draft is
+  kept against its writer too: a patch of its content, labels or metadata answers `423 legal_hold`, and
+  `DELETE` cancels it (it is never sent) without clearing it ([Drafts §4.4](drafts.md#44-delete)). Uploads
+  belong to no thread and are never held ([Uploads §9](uploads.md#9-privacy)).
+- While active: retention skips the thread (raw and messages), and so does per-identity expiry (section 5.5); every erasure scope skips it and lists
   `{ thread_id, reason }` in `receipt.held`, and the request ends `completed_with_holds` (FR-PRV-4,
   [I2](../edge-cases.md)). Identity deletion behaves as in section 6.5; tenant erasure keeps the held
   threads, their objects and vectors, keeps the tenant `erasing` and finishes after the last hold ends
@@ -772,7 +869,7 @@ read 2026-10-10). `pmail setup` adds a lifecycle rule to `BLOBS` that aborts inc
 after 1 day (`wrangler r2 bucket lifecycle add … --abort-multipart-days 1`), a backstop for an abort that
 never ran ([I13](../edge-cases.md)).
 
-Held, quarantined, hidden and throttled messages are included as `.eml` only when `meta.include_held` is
+Held, quarantined, `screening`, hidden and throttled messages are included as `.eml` only when `meta.include_held` is
 set, because reading them through the API needs `quarantine:review` too; otherwise each appears in
 `messages.json` with its `id`, `identity_id`, `status` and dates and `content_withheld:
 "quarantine_review_required"`, and no `.eml` ([I14](../edge-cases.md)). With it, an export is a read of
@@ -780,6 +877,11 @@ everything the deployment holds about the subject in the workspace's mailboxes. 
 read by an export, whichever tenant it is on ([A15](../edge-cases.md)); a person's system mail is covered
 by person deletion ([§6.9](#69-people-console-accounts)). The ZIP is written with a pure-Rust ZIP writer (for example the
 `zip` crate with only a pure-Rust deflate backend), pinned at build time.
+
+The event log ([Event feed §11.6](event-feed.md#116-export-and-logs)), uploads
+([Uploads §9](uploads.md#9-privacy)) and event counts ([Metrics §7](metrics.md#7-privacy)) are not exported:
+the first holds copies of message data the export already holds, the second is a staging area whose sent bytes
+are in the exported messages' attachments, and the third is not about a data subject.
 
 ### 9.2 ZIP layout
 
@@ -820,6 +922,12 @@ exp_01JA4….zip
       "attachments": [ { "id": "att_01J9…", "filename": "licence.jpg", "content_type": "image/jpeg",
                          "size": 81234, "sha256": "9f2c…" } ],
       "deliveries": null,
+      "calendar": null,
+      "screening": { "status": "clear", "mode": "hold", "reason": "model_clear", "signals": [],
+                     "model": "@cf/openai/gpt-oss-20b", "started_at": "2026-09-14T08:12:03Z",
+                     "deadline_at": "2026-09-14T08:14:03Z", "completed_at": "2026-09-14T08:12:05Z",
+                     "late": false, "released_by": null },
+      "screening_feedback": [],
       "eml_path": "eml/idn_01J9…/20260914T081203Z_msg_01J9….eml",
       "eml_source": "original",
       "bcc_redacted": false
@@ -829,6 +937,11 @@ exp_01JA4….zip
 ```
 
 - `deliveries` is set for outbound messages: `[{ "address", "field", "status", "smtp_code", "updated_at" }]`.
+- `calendar` is the message's calendar object as the API returns it, without the internal `parties` list, or
+  `null` ([Calendar invitations §10](calendar-invitations.md#10-privacy)).
+- `screening` is the message's screening record as the API returns it, or `null`, and `screening_feedback`
+  lists the feedback given on the message (`verdict`, `notes`, `created_at`): an assessment of a person's mail
+  is data about them ([Screening hold §18](screening.md#18-privacy)).
 - In a counterparty export, `bcc` contains the counterparty's own address when present and nothing
   else; other Bcc recipients are never disclosed.
 - Messages contain other people's data. The controller reviews the export before disclosing it.
@@ -872,9 +985,11 @@ The receipt matches the [erasure request object](../../reference/api.md#erasure-
 {
   "messages_deleted": 14, "attachments_deleted": 9, "r2_objects_deleted": 38,
   "fts_rows_deleted": 14, "refs_deleted": 51, "vectors_deleted": 63,
-  "events_deleted": 31, "identities_affected": ["idn_01J9…", "idn_01JA…"],
+  "events_deleted": 31, "log_events_deleted": 31, "drafts_deleted": 2, "uploads_deleted": 1,
+  "screenings_deleted": 3, "screening_feedback_deleted": 1, "list_entries_deleted": 0,
+  "identities_affected": ["idn_01J9…", "idn_01JA…"],
   "held": [ { "thread_id": "thr_01JA…", "reason": "PCN dispute WM12345678" } ],
-  "probe": { "keyword_hits": 0, "semantic_hits": 0 }
+  "probe": { "keyword_hits": 0, "semantic_hits": 0, "log_hits": 0 }
 }
 ```
 
@@ -887,9 +1002,15 @@ The receipt matches the [erasure request object](../../reference/api.md#erasure-
 | `refs_deleted` | `refs` rows deleted |
 | `vectors_deleted` | Vector IDs passed to `deleteByIds` (including the tenant namespace sweep) |
 | `events_deleted` | `outbox` rows deleted |
+| `log_events_deleted` | Rows deleted from the tenant's event log |
+| `drafts_deleted` | `drafts` rows deleted (including by `WipeAll`, from `CountAll`) |
+| `uploads_deleted` | `uploads` rows deleted (including by `WipeAll`, from `CountAll`) |
+| `screenings_deleted` | `screenings` rows deleted (with their messages) |
+| `screening_feedback_deleted` | `screening_feedback` rows deleted (with their messages) |
+| `list_entries_deleted` | `sender_lists` rows deleted (identity and tenant scope) |
 | `identities_affected` | Identities where anything was deleted or held |
 | `held` | One entry per held thread skipped |
-| `probe` | Section 6.7; `null` values only when the job failed before the probe step |
+| `probe` | Section 6.7: `keyword_hits`, `semantic_hits` and `log_hits`; `null` values only when the job failed before the probe step |
 
 - `status` is `completed`, `completed_with_holds` (at least one `held` entry) or `failed`.
 - A receipt is always produced (NFR-PRV-1): a failed job writes the counts reached so far, and
@@ -903,8 +1024,12 @@ The receipt matches the [erasure request object](../../reference/api.md#erasure-
 |---|---|---|
 | D1 Time Travel | 30 days (Workers Paid) | A restore within that window brings erased D1 rows back ([I6](../edge-cases.md)) |
 | Durable Object point-in-time recovery | 30 days | Covers each SQLite-backed object's whole database |
+| `TenantEvents` point-in-time recovery | 30 days | Never used: a damaged log is rebuilt from the owners' outboxes ([Event feed § 9.3](event-feed.md#93-rebuilding-a-log)) |
 | R2 | None by default | R2 has no versioning, point-in-time recovery or replication, so a deleted object is gone. The optional backup bucket (section 5.4) is deleted from in the same steps as `BLOBS`, so it holds no erased data. A deployer who copies the bucket any other way must apply erasure to that copy too; `it::erasure::i6_backup_purge` asserts that no object remains under erased prefixes in `BLOBS` or `BACKUP` and that the Worker has no other R2 binding |
 | Suppressions | Until expiry or removal | Hash and masked hint only ([I7](../edge-cases.md)) |
+| Agent sign-up refusals | Until the person lifts them | Keyed hash of a base address only (section 7.6) |
+| Event counts per hour and day | Kept 192 hours and 92 days, after message and counterparty erasure | Numbers only ([Metrics §7](metrics.md#7-privacy)) |
+| Unsent uploads | Until `expires_at` (at most 7 days) | Not exported; not in the backup bucket ([Uploads §9](uploads.md#9-privacy)) |
 | Address tombstones | Permanent | Keyed hash only ([A5](../edge-cases.md)) |
 | Erasure records | Life of the deployment | Counterparty hash, reason, counts |
 | Cloudflare Email Sending activity log | 30 days | Processor-side; outside the Worker's reach |
@@ -966,6 +1091,8 @@ canaries.
 | `it::erasure::i2_hold_tenant_scope` | Tenant erasure of a workspace with one held thread: billing, domains, the other identities and every other D1 row are erased; the held thread's messages, R2 objects (both buckets) and vectors survive, its identity stays `deleting` and the tenant stays `erasing`; the receipt is `completed_with_holds`; the partner key reads the held thread and releases the hold (`DELETE …/hold`), while every other partner-key write gets `404`; the next `held_erasures` run creates `hold_released:{era_id}`, which erases the thread, sweeps the namespace and the prefix, and leaves the tenant `erased` | [I2](../edge-cases.md), section 6.6 |
 | `it::erasure::f6_probe_empty` | After erasure, keyword, semantic and object probes return nothing; a fake Vectorize that keeps one vector makes the job retry, then fail with `erasure.failed` | [F6](../edge-cases.md), FR-SRCH-11 |
 | `it::privacy::system_mail_retention_and_person_delete` | The system identity's mailbox drops messages after 30 days and raw MIME after 7 even when the default tenant keeps mail forever; deleting a person erases the sign-in, invitation and notification mail sent to them at once, through a counterparty erasure whose `identity_ids` is the system identity alone: mail to or from the same address in the default tenant's other identities is untouched, and the receipt's `identities_affected` names only the system identity | FR-PRV-2, FR-PRV-3, section 6.4 |
+| `it::calendar::erasure_and_holds` | Counterparty erasure of an attendee or organizer address that appears only in an invitation's `calendar_json`, also by `CounterpartyHash` after a restore; message, thread, identity and tenant erasure; a held thread keeps its calendar messages; receipt counts and probes | [V51](../edge-cases.md), section 6.4 |
+| `it::calendar::export_and_logs` | `messages.json` includes `calendar` without `parties`; captured logs contain none of the canary `UID`, summary or attendee addresses | [V52](../edge-cases.md), section 9.3 |
 | `it::erasure::i6_backup_purge` | With `BACKUP` bound, every erasure scope leaves no object under erased prefixes in either bucket; no R2 binding other than `BLOBS` and `BACKUP` | [I6](../edge-cases.md) |
 | `it::erasure::i6_reapply_by_hash` | After a simulated mailbox restore to before a counterparty, a message and an identity erasure, `POST /v1/platform/erasure-requests/{id}/reapply` erases the same data again from the stored rows alone: the counterparty one by `counterparty_hash` with no address supplied; the new requests carry reason `reapply_after_restore:{era_id}`; probes are zero | [I6](../edge-cases.md), section 11 |
 | `it::erasure::i11_inflight_copies` | An erasure expires the tenant's completed exports (ZIP deleted, status `expired`); an export whose collection overlapped an erasure (completed after `meta.collect_started_at`, or still `queued` or `running` at `complete`) deletes its ZIP and restarts once, its `init` waiting until the erasure ends, and a second conflict fails it; an erasure created just after an export completed expires it; a backup copy written after an erasure deleted its key from both buckets is removed by the backup job's own check (`backup_objects_total{result=revoked}`) | [I11](../edge-cases.md), sections 5.4, 6.11 |

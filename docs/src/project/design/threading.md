@@ -180,17 +180,25 @@ pub struct InboundThreadInputs<'a> {
     pub in_reply_to: Option<&'a str>,         // normalised msg-id, see 3.2
     pub references: &'a [String],             // normalised msg-ids, header order
     pub sender: &'a str,                      // normalised From address
-    pub sender_authenticated: bool,           // Inbound › Authenticated sender: verdict pass, or an aligned
-                                              // DKIM or SPF pass (auth_json.dmarc.aligned_by is not null)
+    pub sender_authenticated: bool,           // Inbound › Authenticated sender: verdict pass or arc_rescued,
+                                              // or an aligned DKIM or SPF pass (auth_json.dmarc.aligned_by
+                                              // is not null)
+    pub calendar_uid_hash: Option<&'a str>,   // hex SHA-256 of the primary UID, set only for a verified
+                                              // calendar object (Calendar invitations § 4.3)
+    pub calendar_organizer: Option<&'a str>,  // its normalised ORGANIZER address, set with calendar_uid_hash
+    pub calendar_replier: Option<&'a str>,    // reply, refresh, counter: the replier's party hash
+                                              // (Calendar invitations § 4.2); None for organizer methods
 }
 
 pub trait ThreadLookup {                      // implemented over the mailbox SQLite connection
     fn thread_exists(&self, seq: i64) -> bool;
     fn thread_of_message_id(&self, msg_id: &str) -> Option<i64>;
     fn is_participant(&self, seq: i64, address: &str) -> bool;
+    fn thread_of_calendar_uid(&self, uid_hash: &str, organizer: &str, replier: Option<&str>)
+        -> Option<i64>;                       // step 3b, query below
 }
 
-pub enum JoinVia { Token, InReplyTo, References }
+pub enum JoinVia { Token, InReplyTo, References, CalendarUid }
 pub enum ThreadDecision { Join { seq: i64, via: JoinVia }, New }
 
 pub struct ThreadResolution {
@@ -212,6 +220,27 @@ pub fn resolve_inbound(inp: &InboundThreadInputs, db: &impl ThreadLookup) -> Thr
    (`via: InReplyTo`).
 3. **References.** Walk `references` from the **last** entry to the first (most recent first), at most
    50 lookups. The first hit is joined (`via: References`).
+
+   3b. **Calendar UID.** If the message carries a **verified** calendar object (`calendar_uid_hash` is
+   set), look up `db.thread_of_calendar_uid(uid_hash, organizer, replier)`; on a hit, join that thread
+   (`via: CalendarUid`) ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)). Only
+   threads that hold an outbound calendar message or a verified inbound one with the same `UID` **and**
+   `ORGANIZER` match, and an attendee's answer matches only an invitation this identity sent whose parties
+   hold that attendee, so a stranger who learned a `UID` never joins by it, whether its object is
+   unverified, names itself as organizer, or answers an invitation that does not name it:
+
+   ```sql
+   -- ThreadLookup::thread_of_calendar_uid; ?3 is NULL for organizer methods
+   SELECT thread_seq FROM messages
+   WHERE calendar_uid_hash = ?1 AND status NOT IN ('hidden','throttled')
+     AND json_extract(calendar_json, '$.organizer.address') = ?2
+     AND (direction = 'outbound' OR json_extract(calendar_json, '$.verified') = 1)
+     AND (?3 IS NULL OR (direction = 'outbound'
+          AND status NOT IN ('canceled','rejected','failed','suppressed')
+          AND json_extract(calendar_json, '$.method') IN ('request','add','publish')
+          AND EXISTS (SELECT 1 FROM json_each(calendar_json, '$.parties') p WHERE p.value = ?3)))
+   ORDER BY rowid DESC LIMIT 1;
+   ```
 4. **New.** Otherwise `New`. The subject is never consulted ([C1](../edge-cases.md)).
 
 `join_unverified` is set when any of these holds:
@@ -221,8 +250,8 @@ pub fn resolve_inbound(inp: &InboundThreadInputs, db: &impl ThreadLookup) -> Thr
 - the decision is `Join { via: Token }`, the sender is not an authenticated participant
   (`!(sender_authenticated && db.is_participant(seq, sender))`), and neither `In-Reply-To` nor any
   `References` entry resolved to the same seq;
-- the decision is `Join { via: InReplyTo }` or `Join { via: References }` and the sender is not an
-  authenticated participant of that thread. A `Message-ID` is in every copy of a message, so anyone who saw
+- the decision is `Join { via: InReplyTo }`, `Join { via: References }` or `Join { via: CalendarUid }` and
+  the sender is not an authenticated participant of that thread. A `Message-ID` is in every copy of a message, so anyone who saw
   one (a recipient, a forwardee, a list) can write a header join into the thread ([C9](../edge-cases.md));
   and a `From` header can name a participant whose domain publishes no enforcing DMARC policy, so a
   participant counts only when the message authenticates its sender ([C10](../edge-cases.md)).
@@ -277,7 +306,7 @@ cannot see them.
 ### 3.4 Effects on the thread row
 
 A thread's summary columns describe **visible** mail only: a message counts when its status is not
-`quarantined`, `hidden` or `throttled` (every outbound message counts). So a thread list never shows a
+`quarantined`, `screening`, `hidden` or `throttled` (every outbound message counts). So a thread list never shows a
 count, a date, a subject or a participant that comes from mail an agent cannot see, and a thread whose
 messages are all invisible has `message_count = 0` and is never listed
 ([Inbound › Read path and release](inbound.md#read-path-and-release)).
@@ -301,11 +330,11 @@ released, and when an erasure or retention purge deletes a message of the thread
 ```sql
 UPDATE threads SET
   message_count   = (SELECT COUNT(*) FROM messages
-                     WHERE thread_seq = ?1 AND status NOT IN ('quarantined','hidden','throttled')),
+                     WHERE thread_seq = ?1 AND status NOT IN ('quarantined','screening','hidden','throttled')),
   unread_count    = (SELECT COUNT(*) FROM messages
                      WHERE thread_seq = ?1 AND direction = 'inbound' AND status = 'received' AND read = 0),
   last_at         = COALESCE((SELECT MAX(received_at) FROM messages
-                     WHERE thread_seq = ?1 AND status NOT IN ('quarantined','hidden','throttled')), first_at),
+                     WHERE thread_seq = ?1 AND status NOT IN ('quarantined','screening','hidden','throttled')), first_at),
   last_inbound_at = (SELECT MAX(received_at) FROM messages
                      WHERE thread_seq = ?1 AND direction = 'inbound' AND status = 'received'),
   subject         = CASE WHEN subject = '' THEN ?2 ELSE subject END,
@@ -315,8 +344,9 @@ WHERE seq = ?1;
 -- ?2 normalise_subject of the earliest visible message, ?3 the participants list of section 6
 ```
 
-The subqueries use `messages_thread (thread_seq, received_at)`. A quarantined, hidden or throttled
-message changes none of the columns (its `thread_seq` still records where it belongs, so a later release
+The subqueries use `messages_thread (thread_seq, received_at)`; the status list is the one of
+`core::visibility::not_visible_sql` ([Screening hold §9](screening.md#9-visibility-the-hold-is-real)). A
+quarantined, screening, hidden or throttled message changes none of the columns (its `thread_seq` still records where it belongs, so a later release
 recomputes them).
 
 ## 4. Outbound threading
@@ -484,6 +514,7 @@ truncated at a character boundary.
 | [A2](../edge-cases.md) | Forged or unrelated sub-address tags never change the identity; a token-shaped tag that fails is ignored | 2.3 |
 | [B6](../edge-cases.md) | Forwarded `message/rfc822` parsed as nested content | 3.3 |
 | [D10](../edge-cases.md) | Failed verifications rate-limited and flagged | 2.5, 3.1 |
+| [V28](../edge-cases.md), [V29](../edge-cases.md) | A verified calendar reply joins by UID and organizer; an unverified one, or a stranger's object reusing the UID, never does | 3.1 |
 
 ## 9. Tests
 
@@ -503,6 +534,8 @@ truncated at a character boundary.
 | `core::thread::c9_header_join_non_participant` / `it::inbound::c9_header_join_flagged` | `resolve_inbound` sets `join_unverified` for an `In-Reply-To` or `References` join by a sender who is not a participant, and not for a participant; through `email()`, such a message joins the thread with `thread_join_unverified` in `trust.flags` and does not end a `wait` with `kind=reply` (C9) |
 | `core::thread::c10_forged_participant` / `it::inbound::c10_forged_participant_unverified` | A message whose `From` is a participant of the thread, joining by `In-Reply-To`, with no DMARC record and no aligned DKIM or SPF pass (an attacker's own envelope domain passing SPF): `join_unverified` is set, it does not satisfy `wait(kind=reply)`, `known_sender` is false and it counts in the unauthenticated and tenant inbound caps; the same message with an aligned DKIM signature is a normal join ([C10](../edge-cases.md)) |
 | `it::messages::thread_counts_visible_only` | A quarantined first message leaves the thread unlisted with `message_count = 0`; a throttled reply changes neither `last_at` nor `participants`; after release the counts, subject and participants include the released message; after a counterparty erasure the counterparty leaves `participants` |
+| `core::thread::calendar_uid_step` | `resolve_inbound` joins by `UID` only for a verified object, after token and headers, only into a thread with the same `UID` and `ORGANIZER`, and for an attendee's answer only into an invitation whose parties hold the attendee; it sets `join_unverified` for a non-participant ([Calendar invitations §4.3](calendar-invitations.md#43-threading-by-uid)) |
+| `it::calendar::uid_thread_join` | A header-less verified `REPLY` joins the invitation's thread; an unverified object with the same `UID`, a stranger's own verified `REQUEST` or `CANCEL` with it, and a stranger's verified `REPLY` naming the identity as organizer each start a new thread; a non-participant's verified join is flagged (V28, V29) |
 | `core::thread::c2_trim_references` | 150 references → first + 19 most recent, order kept, duplicates removed (C2) |
 | `core::thread::c2_rfc5322_parent_rules` | Parent without References uses its In-Reply-To |
 | `it::addresses::c3_reply_from_retiring` | After a promote, replies go from the retiring address the counterparty used; after retirement, from the primary (C3) |

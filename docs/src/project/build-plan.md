@@ -39,7 +39,7 @@ wire behaviour and the design page wins for internal behaviour
 | Phase | What | Elapsed time with AI coding agents |
 |---|---|---|
 | A. Foundation and spikes | M0–M1 | 0.5–1 day. Spikes need a real Cloudflare account and DNS |
-| B. Build | M2–M19, M21–M27, run as parallel tracks after M5 | 3–5 days of agent time, depending on parallelism and review speed |
+| B. Build | M2–M19, M21–M27 and M29–M37, run as parallel tracks after M5; M29–M37 (the AgentMail-parity features, [ADR 0017](adr/0017-agentmail-parity.md)) follow the core tracks they extend | 3–5 days of agent time, depending on parallelism and review speed |
 | C. Live proof | M20: staging deploy, live end-to-end suite, deliverability checks | 2–5 days. DNS propagation, Email Sending onboarding and real-mailbox tests are wall-clock bound |
 | D. Hardening before production traffic | DMARC ramp (`p=none` → `quarantine` → `reject`), Postmaster Tools enrolment, external review | 4–6 weeks of calendar time, mostly waiting, run in parallel with early use |
 | E. Cloud production | M28: commission `pylotamail.com` and open it in three gated phases, partner-only, waitlist, then open ([Cloud commissioning](cloud-commissioning.md)) | Phase A within a day of M20; phase B at least 14 days later; phase C at least 30 days after B, alongside phase D |
@@ -91,8 +91,8 @@ M0 skeleton ─▶ M1 spikes ─▶ M2 core ─▶ M3 api-types ─▶ M4 platfo
             M18 quality gates ─▶ M20 staging + live proof ─▶ v1.0
 ```
 
-The console, billing, domain-method, agent-key and notification milestones, and the two halves of M17,
-join the graph like this. Each also feeds M20:
+The console, billing, domain-method, agent-key and notification milestones, the two halves of M17, and
+the AgentMail-parity milestones M29–M37 join the graph like this. Each also feeds M20:
 
 ```text
 M7, M8, M9, M10, M11, M12, M13, M14 ─▶ M21 console ─▶ M22 billing ─▶ M24 cloud sign-up and sign-in
@@ -108,6 +108,25 @@ M5 ─▶ M17 Foundation (metrics writer, alert evaluator, alert table, re-seal 
    (M17 Completion, the checks that measure later milestones, is accepted at M20)
 M7, M8, M14, M15, M16, M21 ─▶ M27 service sign-up ledger ─▶ M20
    (M27 also adds two tools to M15's table and its commands to M16's CLI)
+M8, M9, M14, M15, M16, M21, M22, M24, M26 ─▶ M29 drafts, approvals and scheduled send ─▶ M20
+   (M29 also adds six tools to M15's table and its commands to M16's CLI; the upload arm of
+    drafts/attachments.rs lands with whichever of M29 and M33 comes second)
+M8, M14, M15, M16, M17 Foundation, M21 ─▶ M30 event feed and live stream ─▶ M20
+   (M30 replaces M5's TenantEvents stub, adds the hibernation glue to M4's platform crate, a tool to M15 and
+    commands to M16)
+M7, M8, M12, M14, M15, M16, M17 Foundation, M21, M26 ─▶ M31 screening hold ─▶ M20
+   (M31 adds Q_SCREEN to M5's template if M5 has merged, a tool to M15 and commands to M16)
+M7, M8, M9, M14, M15, M16, M21 ─▶ M32 calendar invitations ─▶ M20   (S1 records the raw send)
+M7, M9, M14, M15, M16, M22 ─▶ M33 uploads ─▶ M20
+   (M33 adds two tools to M15's table, commands to M16's CLI, and a draft-save hook shared with M29)
+M24, M26, M27, M29, M30, M31, M33 ─▶ M34 agent self-sign-up ─▶ M20
+   (M34 adds four tools to M15's table and its commands to M16's CLI)
+M9, M13, M14, M15, M16, M21 ─▶ M35 deliverability metrics ─▶ M20
+   (M35 moves M9's pause evaluation behind core::abuse first, adds two tools to M15 and commands to M16)
+M8, M15, M16, M19 ─▶ M36 SDKs, skills and agent tooling ─▶ M20
+   (its event helpers after M30, draft helpers after M29, upload helpers after M33)
+M7–M16, M21, M23, M27 ─▶ M37 parity additions ─▶ M20 (or the next staging candidate once M20 has passed)
+   (M37 adds hooks to M29's drafts and M30's feed when those have landed)
 M20 staging + live proof ─▶ M28 Cloud production commissioning (phases A, B, C)
 ```
 
@@ -129,7 +148,12 @@ webhook dispatcher and M12's triage, which come before M21, and adds hooks to M2
 M15 also waits for M22, whose `GET /v1/usage` its `mail_get_usage` tool calls, and for M25, whose two
 signing tools it registers. M27 comes after M7, M8, M14, M15, M16 and M21, because its gate changes M7's
 ingest and `wait`, its events need M8's fan-out, its rows join M14's erasure and retention jobs, it adds two
-tools to M15 and commands to M16, and its page joins M21's console. M28 runs against production after M20.
+tools to M15 and commands to M16, and its page joins M21's console. M29 to M36 come after the milestones
+named in their headings, for the reasons each gives; M34 also waits for M29, M30, M31 and M33, whose
+permissions, events, policy fields and routes its provisional overlay restricts. M37 comes after M7 to
+M16, M21, M23 and M27, because each of its nine additions extends one of them (the list in its hooks
+table); its additions are independent and can land as separate pull requests. All nine come before M20,
+so the live proof covers them. M28 runs against production after M20.
 M17 is accepted in two halves, without renumbering: **M17 Foundation** (the
 metrics writer, the alert evaluator, the alert table and the master-key re-seal sweep) is Track 3's first
 pull request and merges before M7, M8 and M9, because M7 and M8 emit their SLI metrics through its writer
@@ -149,10 +173,13 @@ rule of their own:
   later milestones replace the behaviour of the variants they own and never change a signature: M7
   (`AdmitInbound`), M9 (`Reserve`, `Release`, `RecordOutcome`), M11 (`CountAgentic`), M12
   (`CountTriageModel`), M22 (the allowance variants, through
-  `billing/quota.rs`), M24 (`OutcomeRates`, `SystemMail`) and M26 (the `NotifierRequest::UsageThreshold`
-  hook).
+  `billing/quota.rs`), M24 (`OutcomeRates`, `SystemMail`), M26 (the `NotifierRequest::UsageThreshold`
+  hook), M31 (`CountScreenModel`) and M34 (`SystemMailClass::Signup`, `CountSignupOutcome`). The one
+  exception is M35, which adds `GetRates` and the `thresholds` field of `RecordOutcome`
+  ([Deliverability metrics § 3.3](design/metrics.md#33-one-source-of-truth)).
 - `consumers/index.rs`, the `pm-index` consumer. M7 creates it for attachment text, M10 adds chunking,
-  embedding and reconciliation, and M12 the triage job. M7 writes the whole `IndexJob` enum
+  embedding and reconciliation, M12 the triage job, and M31 the `Skip` of embedding and triage for a
+  message in `screening`. M7 writes the whole `IndexJob` enum
   ([Search § 6](design/search.md#6-indexing-pipeline-pm-index)), so each later milestone fills in only the
   arm of its own job kind.
 - `billing/webhook.rs`, the Stripe webhook handler. M22 creates it; M24 adds the `ramp_lifted_at` updates
@@ -161,27 +188,40 @@ rule of their own:
 - `jobs/erasure.rs`, tenant and person erasure. M14 creates it with every step and the named stubs of its
   table (below); M21 (console rows), M22 (`cancel_billing` and the billing rows), M23 (the
   `pm-retired-{n}` entries), M24 (person deletion), M26 (the Notifier rows) and M27 (the
-  `service_accounts` rows) each fill in their own stub.
+  `service_accounts` rows) each fill in their own stub; M29 (the draft rows and `drafts_deleted`), M30 (the
+  event-log steps), M31 (the screening receipt counts), M33 (the upload rows and `uploads_deleted`), M34
+  (the `agent_signups` rows and the person scrub) and M37 (`list_entries_deleted` and the identity-scope
+  `sender_lists` rows) each add their own steps.
 - `jobs/retention.rs`, the global retention job. M14 creates it with the job framework and the steps whose
   tables have writers by then; M21 (`console`), M22 (`billing_events`), M23 (`ses_ingest`), M24
-  (`signup`), M25 (`identity_keys`) and M27 (`service_accounts`) each add their own step and its test. If M23 or M25 lands before
+  (`signup`), M25 (`identity_keys`), M27 (`service_accounts`), M29 (draft purge and pending-approval expiry)
+  and M30 (the event-log steps) each add their own step and its test. If M23 or M25 lands before
   M14, M14 writes that step, and the milestone's test runs once M14 has landed.
 - `deploy/wrangler.toml.tmpl` and the `export_worker!` call in `crates/worker/src/lib.rs`. M5 writes
   both whole: every binding of [Configuration › Bindings](../reference/configuration.md#bindings) (the
-  six Durable Object namespaces, the queues, the nine `RL_*` bindings, Vectorize, Workers AI, Email
-  Sending, Analytics Engine and the crons) and all six Durable Object classes in the one `v1` migration tag,
+  seven Durable Object namespaces, the queues, the nine `RL_*` bindings, Vectorize, Workers AI, Email
+  Sending, Analytics Engine and the crons) and all seven Durable Object classes in the one `v1` migration tag,
   each class a stub until its milestone: an `ObjectApp` that answers `Init` by storing the owner and
   everything else with `internal_error`. `TenantQuota` is M5's own stub (below). Later milestones replace
   a stub class and add consumers and cron jobs; none adds a binding or a class: `IdentityMailbox` in M6,
   `JobRunner` a stub in M6 and real in M14, `DomainMonitor` and `SesControl` in M13 (`SesControl`'s SES
-  calls in M23), `Notifier` in M26. A queue whose consumer is not built yet has no producer either, so it
-  receives nothing.
+  calls in M23), `Notifier` in M26, `TenantEvents` in M30. M5's `TenantEvents` stub also exports the three
+  WebSocket hibernation handlers, each closing with `1011`, so that M30 changes no export. The one
+  exception to "no binding" is M31: if M5 merged before `Q_SCREEN` was listed, M31 adds `Q_SCREEN`, the
+  `pm-screen` consumer and `pm-screen-dlq`. A queue whose consumer is not built yet has no producer either,
+  so it receives nothing.
 - `crates/core/src/sealed.rs`, the registry of columns sealed under `PM_MASTER_KEY`. M17 Foundation
   creates it with the columns written by then (`signing_keys.ciphertext`); each milestone that writes a
   sealed column adds its entry and its case in `it::secrets::master_key_rotation`: M8 (webhook secrets),
-  M23 (SMTP credentials), M24 (second factors, the pending enrolment secret and PKCE verifiers) and M25
-  (identity keys). M25 is the only
+  M23 (SMTP credentials), M24 (second factors, the pending enrolment secret and PKCE verifiers), M25
+  (identity keys) and M37 (webhook delivery headers, `webhook_endpoints.headers_sealed`). M25 is the only
   one that can land before M17 Foundation; if it does, M17 Foundation adds its entry.
+- `drafts/attachments.rs`: its upload arm is written by whichever of M29 and M33 lands second, with
+  `it::drafts::q6_upload_references` and `it::uploads::q108_draft_reference`.
+- `mailbox/ingest.rs` and `core::thread`: M7 creates them; M32 adds the `UID` step of thread resolution.
+  `core::compose`: M9 creates it; M32 adds the iMIP structure.
+- `console/pending.rs`, the pending sign-in step: M24 creates it; M34 adds the `two_factor` step with
+  `agent_signup_id`.
 
 Each change to one of these files has one owner, the milestone that needs it. When two tracks change the
 same file at once, the one that merges second rebases onto the other and re-runs the gate; neither edits
@@ -255,7 +295,7 @@ shipped), plus a written result.
 
 | Spike | Prove | Pass criteria | If it fails |
 |---|---|---|---|
-| S1 Bindings smoke | From Rust with `worker` 0.8.7, through the `platform::export_worker!` entry glue (which replaces `#[event]` and `#[durable_object]`, see [Rust workspace](design/rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)): receive an email event and read `from`, `to`, headers and the raw stream; send with the `send_email` binding's structured `send()` including `replyTo`, `headers` (`In-Reply-To`, `References`, `Auto-Submitted`, `X-*`) and attachments (`attachment` and `inline` with `contentId`); produce and consume Queues with `delay_seconds` and `retry_with_options`, and confirm that `Message::timestamp()` is unchanged across retries; DO SQLite with the `transactionSync` extern (a thrown error rolls back) and alarms; D1 `batch`; a multi-statement request to the D1 query API (`POST /accounts/{a}/d1/database/{id}/query`); and the response of the local `wrangler dev` email endpoint to a `setReject` ([Testing §6.4](design/testing.md#64-injecting-inbound-mail)) | Every call works from Rust. The returned `messageId` is captured. A rolled-back transaction leaves no rows. A multi-statement D1 query-API request is atomic: when its last statement fails, none of the earlier statements' rows remain | Raw MIME send (`EmailMessage`) built with `mail-builder` for any missing structured field. If the entry glue cannot replace the macros: an ADR allowing exactly one file, `crates/worker/src/entry.rs`, to use them ([Rust workspace §2](design/rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)). If the D1 query API is not atomic: every migration file is made re-runnable and a CI lint enforces it ([CLI and setup §8.5](design/cli.md#85-d1-migrations)). **`transactionSync` has no fallback; this is an accepted risk.** The planned path is a `wasm-bindgen` call to `ctx.storage.transactionSync`, which Cloudflare documents with no restriction on the calling method beyond a SQLite-backed object ([SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), read 2026-10-09), so any JS method of the class, including the glue's, may call it. If S1 shows otherwise, the build stops and an ADR is written before M4 continues. The owner accepted this risk on 2026-10-09 |
+| S1 Bindings smoke | From Rust with `worker` 0.8.7, through the `platform::export_worker!` entry glue (which replaces `#[event]` and `#[durable_object]`, see [Rust workspace](design/rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)): receive an email event and read `from`, `to`, headers and the raw stream; send with the `send_email` binding's structured `send()` including `replyTo`, `headers` (`In-Reply-To`, `References`, `Auto-Submitted`, `X-*`) and attachments (`attachment` and `inline` with `contentId`); produce and consume Queues with `delay_seconds` and `retry_with_options`, and confirm that `Message::timestamp()` is unchanged across retries; DO SQLite with the `transactionSync` extern (a thrown error rolls back) and alarms; D1 `batch`; a multi-statement request to the D1 query API (`POST /accounts/{a}/d1/database/{id}/query`); and the response of the local `wrangler dev` email endpoint to a `setReject` ([Testing §6.4](design/testing.md#64-injecting-inbound-mail)); and a raw `EmailMessage` send of a calendar message (`multipart/alternative` with `text/plain` and `text/calendar; method=REQUEST; charset=UTF-8`) to two arbitrary recipients: whether it is accepted, whether one `EmailMessage` can carry several envelope recipients, whether the `text/calendar` part and its `method` parameter arrive unchanged, and whether Cloudflare keeps the composed `Message-ID` ([Calendar invitations §5.6](design/calendar-invitations.md#56-transports)) | Every call works from Rust. The returned `messageId` is captured. A rolled-back transaction leaves no rows. A multi-statement D1 query-API request is atomic: when its last statement fails, none of the earlier statements' rows remain | Raw MIME send (`EmailMessage`) built with `mail-builder` for any missing structured field. If the entry glue cannot replace the macros: an ADR allowing exactly one file, `crates/worker/src/entry.rs`, to use them ([Rust workspace §2](design/rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)). If the D1 query API is not atomic: every migration file is made re-runnable and a CI lint enforces it ([CLI and setup §8.5](design/cli.md#85-d1-migrations)). **`transactionSync` has no fallback; this is an accepted risk.** The planned path is a `wasm-bindgen` call to `ctx.storage.transactionSync`, which Cloudflare documents with no restriction on the calling method beyond a SQLite-backed object ([SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), read 2026-10-09), so any JS method of the class, including the glue's, may call it. If S1 shows otherwise, the build stops and an ADR is written before M4 continues. The owner accepted this risk on 2026-10-09. Calendar sends on the `cloudflare` transport stay refused with `422 transport_unavailable` (`calendar_needs_raw_mime`); with one recipient per raw send, they are limited to one recipient (`calendar_single_recipient`). |
 | S2 Inbound failure semantics | What the sending MTA sees when `email()` throws, versus `setReject` (documented as a permanent error); which `Authentication-Results` headers reach the handler | Throwing yields a 4xx temporary failure and the sender retries. The exact SMTP reply text for both cases is recorded. Record which `Authentication-Results` authserv-id Cloudflare stamps on delivered mail (setup later writes it to `PM_TRUSTED_AUTHSERV_ID`, [Inbound › Authentication verdict](design/inbound.md#authentication-verdict)) | **Throw only.** The handler keeps its in-handler R2 retries (three attempts) and then throws, as designed, whatever the sender is shown; the spike result records the observed reply in [Inbound](design/inbound.md#interface). There is no `forward()` to a backup address: setup registers no Email Routing destination address ([Identities and domains › Cloudflare API token](design/identity-domains.md#cloudflare-api-token-permissions)), so none exists to forward to |
 | S3 FTS5 in DO SQLite | `content='', contentless_delete=1`, the `trigram` tokenizer, `bm25()` with six column weights, `DELETE FROM fts WHERE rowid = ?`, and renaming an FTS5 table (for the index swap in [Search](design/search.md)) | All work on the deployed runtime, not only on local workerd | External-content table `fts_docs` ([Data model](design/data-model.md)); disable trigram and rely on reference normalisation plus semantic fallback; without rename, the swap rebuilds `fts` in place |
 | S4 Wasm budget | Bundle size, cold start, CPU time and peak memory when parsing and verifying a 25 MiB message and a 40 MB message from the SES source ([N5](edge-cases.md)), and `mail-auth` verdict parity on the corpus | Compressed bundle ≤ 10 MiB (NFR-SEC-2), cold start under 1 s, both messages parsed under 128 MB peak and inside the CPU limit, DKIM and DMARC verdicts equal the reference implementation on every corpus message | Write attachments to R2 before parsing bodies; move heavy features behind cargo features; switch the release profile to `opt-level = "z"` |
@@ -332,7 +372,8 @@ FR-SRCH-3/4/8 (verifier), FR-TRI-2, FR-DOM-4/5 (the pure state machine).
 **Implements:** the trait set and the `Platform` bundle in [Rust workspace and platform](design/rust-workspace.md),
 with Cloudflare implementations and in-memory fakes for native tests; `WorkerApp`, `ObjectApp`,
 `HttpRequestIn` and `CfPlatform` (§6.3); `export_worker!` for the `fetch`, `email`, `queue` and
-`scheduled` handlers and six Durable Object classes; `Config` with the startup rules (§6.1).
+`scheduled` handlers and seven Durable Object classes (with the three WebSocket hibernation handlers of
+`TenantEvents`); `Config` with the startup rules (§6.1).
 
 **Acceptance:**
 
@@ -350,7 +391,7 @@ with Cloudflare implementations and in-memory fakes for native tests; `WorkerApp
 **Files:** `crates/worker/src/{lib.rs, router.rs, auth.rs, errors.rs, ratelimit.rs, request_id.rs, keyring.rs, rpc.rs, log.rs, metrics.rs, handlers/{meta.rs, tenants.rs, partners.rs, keys.rs, audit.rs}, db/{mod.rs, tenants.rs, partners.rs, keys.rs, audit.rs, idempotency.rs, signing_keys.rs, intents.rs}, crons/{mod.rs, intents.rs}, objects/stubs.rs, quota/mod.rs}`,
 `crates/core/src/{keys.rs, crypto.rs}` (key format and the sealing envelope, pure)
 (`TenantQuota` as a stub class that answers every `QuotaRequest` variant, see below),
-`deploy/wrangler.toml.tmpl` whole and the `export_worker!` call with the six classes, five of them stubs
+`deploy/wrangler.toml.tmpl` whole and the `export_worker!` call with the seven classes, six of them stubs
 ([Shared files](#dependency-graph)); `ratelimit.rs` holds the compiled-in limit of every `RL_*` binding;
 `log.rs` and `metrics.rs` are minimal writers (the typed log line with no free-text field, and the
 `event = "metric"` line plus the Analytics Engine data point) that M17 Foundation extends with the
@@ -1417,6 +1458,510 @@ owner:
 
 ---
 
+## M29 · Drafts, approvals and scheduled send (after M8, M9, M14, M15, M16, M21, M22, M24 and M26)
+
+**Files:** `crates/core/src/drafts.rs` (the field table per kind, the state table, `approval_needed`,
+`digest`, the etag, the `send_at` window, the patch merge; pure), `crates/api-types/src/drafts.rs`,
+`crates/worker/src/handlers/drafts.rs` (the ten routes), `crates/worker/src/mailbox/drafts.rs`
+(storage, transitions, `SendDraft`, the `drafts` and `draft_index` alarm purposes),
+`crates/worker/src/drafts/attachments.rs`, `crates/worker/src/send/{context.rs, authority.rs}`,
+`crates/worker/src/crons/drafts_due.rs`, `crates/worker/src/console/pages/drafts.rs`,
+`crates/cli/src/commands/drafts.rs`. No migration while nothing is built: `draft_index` goes into
+`0001_init.sql`, and `drafts`, `draft_sync`, `messages.draft_id` and `idempotency.draft_id` into mailbox
+schema v1 ([Drafts §9](design/drafts.md#9-storage)). Hooks in other milestones' files, each reviewed by
+that file's owner:
+
+| File | Hook |
+|---|---|
+| `mailbox/submit.rs` (M9) | `SubmitInput.draft` and `SubmitInput.approved`; stored draft attachments (an object, size, SHA-256 and `upload_id`) in steps 12, 17, 4, 6 and 7; the draft arm of the accept transaction; policy step 16a |
+| The quarantine release (M7) and the screening verdict (M31) transactions | Re-sync the `draft_index` rows of drafts whose source changed state (`source_held`, Drafts § 9.3); M31 adds its half if it lands after M29 |
+| `handlers/send.rs` (M9) | The D1 context loader moves to `send/context.rs`, unchanged, and gains the step-16a facts |
+| `crates/core/src/policy.rs` (M2, M9) | Known-recipient rule 4; step 16a; `FIELDS` gains `drafts.require_approval` (guard) and `drafts.key_approval` (platform or own partner) |
+| `policy/write.rs` (M5), `handlers/identities.rs` (M6) | The guard rule for `drafts.require_approval`; the stricter-only rule for `send_policy.require_approval` |
+| `auth/people.rs` (M21) | `key_may_decide` gains `Decision`, with `ApproveDraft` reading `drafts.key_approval` |
+| `webhooks/payloads.rs` (M8), `mailbox/outbox.rs` (M6) | `draft_summary`, `draft_event`; the audit rows of `draft.approved` and `draft.rejected` in the dispatch batch |
+| `jobs/erasure.rs`, `jobs/retention.rs` (M14) | The draft rows of every scope, `drafts_deleted` in the receipt; draft purge and pending expiry in `Hygiene` |
+| `mcp/tools.rs` (M15) | The six draft tools, with their rows in M15's table test; one sentence in the three send tools' descriptions |
+| `crates/cli/src/commands/drafts.rs` (M16) | `pmail drafts …` |
+| `console/pages/overview.rs` (M24) and the Notifier's needs-a-person counts (M26) | The two "Needs a person" items |
+| The every-minute cron (M5, M17 Foundation) | `crons/drafts_due.rs` |
+| `drafts/attachments.rs`, upload arm | Built by whichever of M29 and M33 (uploads) lands second, with `it::drafts::q6_upload_references` |
+| The draft field table (`core::drafts`) | M32 (calendar invitations) adds the `calendar` field to `new` and `reply` drafts if it lands after M29 |
+
+**Implements:** FR-DRF-1 … FR-DRF-14, the changes to FR-OUT-3, FR-OUT-13, FR-CON-5, FR-CON-12, FR-CON-15
+and FR-PRV-3, and edge rows Q1–Q64, Q109 and Q110 ([Drafts](design/drafts.md)); the cross-tenant suite's
+new routes (NFR-SEC-1).
+
+**Acceptance:**
+
+- Edge rows Q1–Q64, Q109 and Q110 with the tests named in the register, among them
+  `it::drafts::q12_concurrent_sends_one_message` and `it::drafts::q32_claim_expiry_no_duplicate` (one
+  message per revision), `it::drafts::q19_approval_binds_content`, `it::drafts::q27_direct_send_approval_required`,
+  `it::drafts::q35_alarm_multiplexing`, `it::drafts::q37_missed_alarm_catch_up`,
+  `it::drafts::q38_late_limit_and_transient` and `it::drafts::q39_fire_outcomes`.
+- `core::drafts::{kind_field_rules, state_table, approval_levels, digest_canonical, etag_and_send_at,
+  on_behalf_of_and_client_id}`.
+- Erasure and retention: `it::drafts::q46_erasure_scopes` and `it::drafts::q48_retention` fill M14's
+  rows.
+- `it::console::drafts_page`; the pages join `browser::console::no_js` and `browser::console::axe_scan`.
+- `it::mcp::drafts_tools`, `cli::drafts::send_key_derivation`; `sdk::coverage::every_operation` still
+  passes with the ten new operations; the routes join `it::security::cross_tenant_matrix`.
+- With `drafts.require_approval: never` and no draft, the M9 send suites (`it::send::*`) pass unchanged.
+- At M20: `live::drafts::scheduled_send`.
+
+---
+
+## M30 · Event feed and live stream (after M8, M14, M15, M16, M17 Foundation and M21)
+
+**Files:** `crates/core/src/events/{mod.rs, cursor.rs, visibility.rs, filter.rs, stream.rs, token.rs}`
+(pure); `crates/api-types/src/events/feed.rs`; `crates/worker/src/events/{mod.rs, object.rs, log.rs,
+consumers.rs, stream.rs, tokens.rs, schema/}` (the `TenantEvents` class, replacing M5's stub);
+`handlers/events.rs` (the ten routes); `jobs/event_log_rebuild.rs`; `crates/platform/src/cf/hibernation.rs`
+and `crates/platform/src/fakes/hibernation.rs`; `crates/sdk/src/events.rs` (feature `stream`);
+`crates/cli/src/commands/events.rs`. `tenants.events_do_id` and the `event_log_rebuild` job kind are in
+`0001_init.sql`; rows still at `''` get their object from the every-minute cron. Hooks in other milestones'
+files, each reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `crates/platform/src/cf/glue.rs` and `export_worker!` (M4, M5) | The three hibernation handlers exported for `TenantEvents`; `ObjectApp`'s provided WebSocket methods; `HttpResponseOut`'s upgrade variant; `DurableObjects::upgrade` |
+| `auth/routes.rs` (M5) | The ten route entries; `Auth::KeyOrStreamToken` for the stream route |
+| `consumers/webhooks.rs` (M8) | The append step before endpoint resolution, its age-based retry, and the Notifier hand-off reading step 1's payloads |
+| `handlers/keys.rs`, `handlers/tenants.rs`, `handlers/partners.rs` (M5) | The best-effort `ForgetKeys` and `CloseStreams` calls after revocation and suspension |
+| `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `EraseMessages` after each `EraseRows` batch, `EraseIdentity`, `CloseStreams` and `Erase` in tenant erasure, `Probe`, the receipt fields; `Purge` in the tenant retention job's `events` step |
+| `mailbox/erase.rs` (M14), `mailbox/expiry.rs` (M37) | `erased_ids.log_erased_at` and the `log_erase` alarm purpose, which sends `EraseMessages` for what every `EraseRows` deleted, tenant retention and per-identity expiry included (§11.3). If M37 lands first, M30 adds the purpose and runs `it::events::retention_and_expiry_reach_log` against expiry |
+| `mcp/tools.rs` (M15) | `mail_events`, with its rows in M15's table test |
+| `crates/cli` (M16) | `pmail events …` |
+| `console/pages/webhooks.rs` (M21) | The event consumers and streams section |
+| `crons/` (M17 and M26's minting loop) | Minting `events_do_id` for rows at `''` |
+
+**Implements:** FR-EVT-1 to FR-EVT-11 and edge rows R1–R69
+([Event feed and live stream](design/event-feed.md)).
+
+**Tasks:**
+
+1. **Stream spike first** (design § 7.9): from Rust through `export_worker!`, on workerd and on staging,
+   accept with tags, an attachment surviving eviction, the auto-response, the three handlers, a `101` with
+   `Sec-WebSocket-Protocol`, 4000-range close codes reaching a native client and a browser, and the deploy
+   disconnect. Record the result in the design. If the glue cannot export the handlers, write the one-file
+   `entry.rs` ADR before continuing.
+2. `core::events`: cursors, the visibility table, filters, index fields, the stream protocol, the window, close
+   codes and the token format, each unit-tested.
+3. The `TenantEvents` object: schema, `Init`, `Append`, `Read`, `Head`, consumers, tokens, erasure requests,
+   `Purge`, `Reset`, `Stats`, and its two alarms.
+4. The append step in the `Fanout` consumer, with the retry schedule and the payload reuse.
+5. The handlers, the long poll, the stream handshake on both credential paths, revalidation, and the
+   push and backstop closes.
+6. Erasure, retention and the `event_log_rebuild` job.
+7. `mail_events`, the CLI commands and the SDK stream client.
+8. The console section, the metrics, the four alerts and the runbook.
+
+**Acceptance:**
+
+- Edge rows R1–R69, with the tests named in the register (`core::events::*`, `it::events::*`,
+  `it::stream::*`, `it::mcp::events_tool`, `cli::events::tail_resume_and_exit_codes`,
+  `sdk::events::stream_close_rules`, `live::events::stream_through_deploy`).
+- The ten routes join `it::security::cross_tenant_matrix`; `sdk::coverage::every_operation` passes with the
+  new operations.
+- M8's suites (`it::webhooks::*`) pass unchanged, and `it::webhooks::notifier_handoff_never_blocks` reads
+  payloads once per batch.
+- M14's erasure suites gain the log assertions: `log_events_deleted` and `probe.log_hits = 0` in every scope.
+- `it::console::event_consumers_section`; the section joins `browser::console::no_js` and
+  `browser::console::axe_scan`.
+- NFR-REL-3 still holds on staging with the append in the path (`webhook_delivery_latency_ms`).
+
+---
+
+## M31 · Screening hold (after M7, M8, M12, M14, M15, M16, M17 Foundation, M21 and M26)
+
+**Goal.** Inbound mail can be held until a deterministic scan and a separate classifier have judged whether it
+steers agents, with the deadline, release, feedback, summary, events, console, MCP and CLI of
+[Screening hold](design/screening.md).
+
+**Why these dependencies.** M7 (the inbound consumer, ingest, release and `wait` it changes), M8 (the outbox
+builders and the J29 check for `message.screened`), M12 (the shared model adapter and `core::injection`), M14
+(erasure counts, export), M15 (the MCP tool), M16 (the CLI), M17 Foundation (metrics and the alert evaluator),
+M21 (the console pages) and M26 (the Notifier hand-off change).
+
+**Files:** `crates/core/src/{screening.rs, visibility.rs}`, `crates/worker/src/screening/{mod.rs, prompt.rs,
+schema.rs, summary.rs}`, `consumers/screen.rs`, `mailbox/screening.rs`, `handlers/screening.rs`,
+`console/pages/screening.rs`, `crates/cli/src/commands/screening.rs`; the mailbox schema migration of §14. Hooks
+in other milestones' files, each reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `core/src/injection.rs` (M2, M10, M12) | `role_marker`, the confusable fold, the added patterns, every pattern compiled through the fold |
+| `consumers/inbound.rs` (M7) | Step 11a; `IngestInput.screening`; post-commit step 4a |
+| `mailbox/ingest.rs` (M7) | Rule 6a, step 15a, the `received_evented_at` writes, events |
+| `mailbox/read.rs` (M7) | Every visibility predicate from `core::visibility`; release: `received_evented_at`, `message.received` (`released: true`), `released_by` on the record; `409 not_quarantined` details |
+| `handlers/wait.rs` (M7) | Never return `screening` |
+| `mailbox/attachments.rs`, `mailbox/reparse.rs` (M7), `consumers/index.rs` (M7, M10, M12) | The late scan; the embed and triage `Skip` for `screening` |
+| `search/*` (M10, M11) | Predicates from `core::visibility`; `include_quarantined` covers `screening`; evidence `steering_suspected` from the record |
+| `triage/*` (M12) | `409 triage_not_eligible` reason `screening` |
+| `webhooks/payloads.rs`, `handlers/webhooks.rs`, `consumers/webhooks.rs` (M8, M26) | `message_screened` builder; `data.screening`, `released`, `rescreened`; J29 row; the Notifier hand-off without `message.released` |
+| `quota/mod.rs` (M5 stub, M12) | `CountScreenModel` with the sender sub-cap (`screen_sender:{h}`); `CountScreenFailure` on the default tenant (`screen_fail`) |
+| `deploy/wrangler.toml.tmpl`, `crates/worker/src/lib.rs` (M5) | `Q_SCREEN`, the `pm-screen` consumer and `pm-screen-dlq`. If M5 has already merged, M31 adds them; the rule that one milestone owns each change still holds |
+| `jobs/erasure.rs`, `mailbox/erase.rs`, `mailbox/export.rs` (M14) | Receipt counts; export fields |
+| `policy/*`, `core/src/policy.rs` (M5, M21) | The three guard fields and their tightening rules |
+| `mcp/tools.rs` (M15) | `mail_screening_feedback` and its row in M15's table test |
+| `ops/alerts.rs` (M17) | The two conditions |
+| `console/pages/{quarantine.rs, thread.rs, policy.rs}` (M21) | §21 |
+| `crates/conformance/screening/` | The labelled steering set: at least 400 messages (200 steering across body, quoted history, filenames, attachment text, hidden text and five languages; 200 look-alike legitimate messages), synthetic, on reserved domains |
+
+**Implements:** FR-SCR-1 … FR-SCR-12, edge rows T1–T61, and the cross-tenant suite's four new routes (NFR-SEC-1).
+
+**Acceptance:**
+
+- Every edge row T1–T61 with the tests named in the register.
+- The `core::screening::*`, `core::injection::t52_confusable_fold`, `core::policy::t34_screening_guard_fields` and
+  `core::visibility::hidden_statuses` tests; `conf::screening::*`.
+- `it::screening::t17_hidden_everywhere` passes with every read route of the router table and every MCP tool
+  covered.
+- With `screening.mode: off`, the M7, M10, M12 and M26 suites pass unchanged; with the default `monitor`, the M7
+  suites pass with the screening record added and no status change.
+- `it::quarantine::release_transaction` is updated for the new event pair and still passes.
+- `live::screening::t1_hold_round_trip` on staging; `eval::screening` records its first baseline in `quality.md`.
+- `sdk::coverage::every_operation` passes with the four new operations; the console pages join
+  `browser::console::no_js` and `browser::console::axe_scan`.
+
+---
+
+## M32 · Calendar invitations (after M7, M8, M9, M14, M15, M16 and M21)
+
+**Goal:** read, verify and expose inbound iCalendar, send iMIP from caller-supplied objects, and answer
+verified invitations, with no calendar store ([Calendar invitations](design/calendar-invitations.md)).
+
+**Files:** `crates/core/src/ical/{mod.rs, lex.rs, value.rs, rrule.rs, tz.rs, windows_zones.rs,
+vtimezone.rs, write.rs}`, `crates/core/src/calendar.rs`, `crates/worker/src/mailbox/calendar.rs`,
+`handlers/calendar_reply.rs`, `xtask/src/cldr.rs`, `fuzz/fuzz_targets/ical_parse.rs`,
+`crates/conformance/corpus/calendar/`, `crates/cli/src/commands/calendar_reply.rs`; no migration (the two
+`messages` columns and their index are in mailbox schema v1). Hooks in other milestones' files, each
+reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `consumers/inbound.rs` (M7) | Step 10a (calendar), the step 12 address query, `IngestInput.calendar` |
+| `core::classify` (M2, M7) | Row 5 reads the calendar object; step 10a upgrades `normal` to `calendar` |
+| `mailbox/ingest.rs`, `core::thread` (M7) | The `UID` step of `resolve_inbound`, `organized_here`, the two columns, `calendar.received` in the outbox; the same event in the release transaction and in `Reparse` |
+| `webhooks/payloads.rs`, `handlers/webhooks.rs` (M8) | The `calendar_received` builder and its golden file; `calendar.received` in the J29 permission table |
+| `handlers/send.rs`, `core::policy`, `core::compose`, `mailbox/submit.rs`, `transport/cloudflare.rs`, `consumers/outbound.rs` (M9) | The `calendar` field; policy steps 9a, 13a and 13b; recipient rule 5; the iMIP MIME; the stale-sequence re-check in the accept transaction; the raw Cloudflare path or its refusal; no fallback for calendar messages; `forward`'s `application/ics` form; `SendOp::CalendarReply` |
+| `jobs/erasure.rs` and the mailbox `ErasurePlan` (M14) | Counterparty matching on `calendar_json.parties`; `calendar` in the export's `messages.json` |
+| `mcp/tools.rs` (M15) | `mail_calendar_reply`; `calendar` on `mail_send` and `mail_reply`; the output caps |
+| `crates/cli/src/commands/send.rs` (M16) | `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` |
+| `console/pages/thread.rs` (M21) | The calendar panel |
+| The draft send (M29) and the screening verdict (M31) | Whichever of M29, M31 and M32 lands later adds the `calendar` draft field and the `calendar.received` append at the end of screening |
+
+**Spike:** S1 gains the raw calendar case of [Calendar invitations §5.6](design/calendar-invitations.md#56-transports).
+Until its result is recorded, M32 ships with calendar sends on the `cloudflare` transport refused
+(`calendar_needs_raw_mime`).
+
+**Implements:** FR-CAL-1 … FR-CAL-14 and edge rows V1–V55, with the rewritten B8.
+
+**Acceptance:**
+
+- Every test of [Calendar invitations §18](design/calendar-invitations.md#18-tests) passes, including the
+  corpus cases `conf::calendar::v*` (native and through workerd) and 60 seconds of `ical_parse` in
+  `fuzz-smoke` without a crash.
+- The existing suites pass unchanged: `conf::mime::b8_ics` is replaced by `conf::calendar::v1_duplicate_parts`;
+  `it::send::*`, `it::inbound::*` and `it::thread::*` pass with the new steps.
+- `POST …/calendar-reply` joins `it::security::cross_tenant_matrix`, and `sdk::coverage::every_operation`
+  passes with the new operation.
+- The console panel joins `browser::console::no_js` and `browser::console::axe_scan`.
+- At M20, `live::calendar::inbound_real_invitations`, `live::calendar::client_matrix` and
+  `live::calendar::reply_applied` pass, and their results for the `invite.ics` copy and the generated
+  `VTIMEZONE` are recorded on the design page.
+
+---
+
+## M33 · Uploads (after M7, M9, M14, M15, M16 and M22)
+
+
+**Files:** `crates/core/src/uploads.rs` (create validation, the state machine, the upload-token payload,
+expiry arithmetic; pure), `crates/worker/src/uploads/{mod.rs, put.rs, classify.rs, copy.rs}`,
+`handlers/uploads.rs` (the four `…/uploads` routes), `mailbox/uploads.rs` (the `uploads` table, its
+operations and `alarm:uploads`), `crates/cli/src/commands/uploads.rs`. Mailbox schema: the `uploads` table
+and `attachments.upload_id`, in mailbox schema v1 while nothing is built
+([Data model](design/data-model.md)), as for M29. Hooks in other milestones' files, each reviewed by that
+file's owner:
+
+| File | Hook |
+|---|---|
+| `crates/platform/src/lib.rs`, `cf/glue.rs` (M4) | `BlobStore::put_stream(key, BodyStream, len, sha256, meta)`, `head_checksum(key) -> Option<(u64, Option<[u8; 32]>)>` and `copy(from, to, len, sha256)`; `RequestBody::stream()` for the handler; the fakes gain the same, with fault injection for `10037`, `10013` and `10058` |
+| `router.rs`, `auth/routespec.rs` (M5) | `RouteSpec.any_permissions`; the four routes and `PUT /v1/links/{token}` |
+| `handlers/links.rs` (M9) | `PUT` with purpose `upload`; `GET` refuses `upload` tokens |
+| `mailbox/submit.rs`, `core/src/compose.rs` (M9) | Policy step 12 additions, the size plan from sizes, steps 4, 6 and 7 with uploads, pins; classification of inline base64 items |
+| `core/src/attach.rs` (M7) | `classify_name` exposed for the final filename |
+| `jobs/erasure.rs`, `jobs/backup.rs`, `mailbox/maintenance.rs` (M14) | `ErasurePlan` and `EraseRows` with source uploads, `UploadPlan` and `EraseUploads`, `uploads_deleted`; the backup job skips `up/`; the orphan sweep names `uploads.r2_key`; `Hygiene` runs the uploads sweep |
+| `billing/storage.rs` (M22) | Upload bytes in the mailbox storage report; the create gate |
+| `mcp/tools.rs` (M15) | `mail_create_upload`, `mail_get_upload`, both item shapes in the send tools, `attachments` on `mail_forward`, with rows in M15's table test |
+| `crates/cli/src/commands/send.rs` (M16) | `--attach` through uploads above 1 MiB |
+| `observability/catalogue.rs`, alert table (M17) | The nine metrics and `upload_object_missing` |
+| Drafts (M29) | Whichever of M29 and M33 lands second adds the draft-save copy (`uploads::copy_to`, with the pin and the `draft_att` marker), `drafts:write` in the upload routes' `any_permissions` (M29 defines the permission), and `it::uploads::q108_draft_reference` |
+
+**Implements:** FR-UPL-1 to FR-UPL-12 and edge rows Q65–Q108 ([Uploads](design/uploads.md)).
+
+**Order.** `it::uploads::v_put_stream_contract` is the first pull request of the milestone: it runs the
+`FixedLengthStream` and `sha256` behaviour against workerd's R2 and settles §3.2 steps 7 and 8 before any
+handler code.
+
+**Acceptance:**
+
+- Edge rows Q65–Q108 with the tests named in the register, all passing.
+- `core::uploads::*`, `core::attach::v19_final_name_reclassified`, `core::compose::v23_link_plan_from_sizes`.
+- `it::uploads::scope_matrix`; the routes join `it::security::cross_tenant_matrix`.
+- `it::uploads::erasure_scopes` fills the uploads rows of M14's erasure suites; the receipt schema has
+  `uploads_deleted`.
+- `it::uploads::lifecycle_and_reads`, `it::mcp::upload_tools`, `cli::uploads::create_and_attach`;
+  `sdk::coverage::every_operation` passes with the four new operations and the `PUT`.
+- `live::uploads::large_attachment_link` passes in M20, and its `upload_copy_ms` for 20 MiB is below the
+  submit deadline with at least a factor of 3 to spare; otherwise the per-message attachment total is
+  lowered before release.
+- With no upload used, the M9 send suites pass unchanged, except `it::uploads::inline_base64_classified`'s
+  deliberate change (risky inline attachments are refused).
+
+---
+
+## M34 · Agent self-sign-up (after M24, M26, M27, M29, M30, M31 and M33)
+
+**Goal:** an agent with no key creates a provisional Free workspace with one inbox and one key, which
+can email only the person it names until that person verifies; unverified workspaces are erased after 7
+days. Behind `PM_AGENT_SIGNUP` (off), on Pylota Mail Cloud only ([Agent self-sign-up](design/agent-signup.md)).
+
+**Files:** `crates/core/src/signup.rs` (pure: normalisation, the username and human-email rules, the base
+address, the permission and policy overlays, code and token encodings); `crates/worker/src/signup/{mod.rs,
+create.rs, admit.rs, verify.rs, human.rs, end.rs, mail.rs, outcomes.rs}`; `handlers/agent_signup.rs`;
+`console/pages/agent_signup.rs`; `crons/agent_signup.rs` (on the `*/15` cron); no migration (the two
+tables, `tenants.provisional_until`, `pending_auth.agent_signup_id` and the `ops_switches` value are in
+`0001_init.sql`). Hooks in other milestones' files, each reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `auth/mod.rs` (M5) | Step 9: `provisional_until` read with the tenant row, the permission overlay |
+| `auth/routes.rs` (M5) | `Scope::AgentSignup` and its entry in the empty-permission exception list |
+| `crates/core/src/policy.rs` (M2, M5) | `effective(…, provisional)` with `PROVISIONAL_POLICY`; send steps 4 and 7a |
+| `handlers/send.rs` (M9) | The human-address read for a provisional tenant |
+| `consumers/inbound.rs` (M7) | Passes `provisional_until` to `effective` |
+| `consumers/delivery.rs` (M9) | Sign-up outcomes, `CountSignupOutcome`, the `agent_signup_off` rule |
+| `quota/mod.rs` (M5 stub, M24 `SystemMail`) | `SystemMailClass::Signup` and its budgets; `CountSignupOutcome` |
+| `handlers/identities.rs`, `handlers/addresses.rs` (M6) | `409 address_taken` at a live sign-up's human address |
+| `console/pending.rs` (M24) | The `two_factor` step with `agent_signup_id` |
+| `console/pages/settings.rs` (M24) | The refusal notice and **Allow again** |
+| `crons/signup_ramp.rs` (M24) | `verified_at` as the ramp's start for verified agent workspaces |
+| `notify/` (M26) | `AccountEvent::AgentSignupVerified` |
+| `jobs/erasure.rs` (M14) | `agent_signups` in `delete_d1_rows` and in the step-8 probe; person deletion's `human_hash` scrub |
+| `handlers/uploads.rs` (M33) | `403 permission_denied` (`signup_unverified`) while provisional |
+| `mcp/tools.rs` (M15) | The four `mail_signup_*` tools and their rows in M15's table test |
+| `crates/cli/src/commands/agent_signup.rs` (M16) | `pmail agent-signup …`, `pmail agent-signups list` |
+| `crons/alerts.rs` (M17) | `agent_signup_spike`, `agent_signup_cap_80`, `containment:agent_signup_off` |
+
+**Implements:** FR-ASU-1 to FR-ASU-16 and the amended FR-IDN-2; edge rows X1–X59 and X61–X63 (X60 is
+integrator-owned).
+
+**Acceptance:**
+
+- Every test of [Agent self-sign-up § 25](design/agent-signup.md#25-tests): the `core::signup::*` and
+  `core::policy::x21_provisional_send_steps` tests; the `it::signup::*` tests; `it::mcp::signup_tools`;
+  `it::console::agent_signup_pages` (the pages join `browser::console::no_js` and
+  `browser::console::axe_scan`); `cli::agent_signup::create_writes_profile`.
+- The new routes join `it::security::cross_tenant_matrix`; `sdk::coverage::every_operation` passes with
+  the seven new operations; `it::logs::i5_no_content_in_logs` carries the new canaries;
+  `platform::config::startup_rules` covers the two variables.
+- With `PM_AGENT_SIGNUP = "off"` every M24, M26 and M27 suite passes unchanged.
+- `live::signup::x40_refuse_one_click_headers` and `live::signup::end_to_end` pass on staging (M20's
+  environment) before the gate below.
+
+**Gate:** `PM_AGENT_SIGNUP` stays `off` on Cloud until gate D of [Cloud commissioning](cloud-commissioning.md#10-go-live-gates):
+phase C has run for at least 30 days with no `containment:*` page, no `shared_domain_breaker` at stage 2
+and no unresolved `signup_ramp_review`; DMARC on the platform domain is at `p=reject`; the two `live::signup`
+tests pass on production with the variable on for one hour, then it is turned off again until the owner
+decides.
+
+---
+
+## M35 · Deliverability metrics (after M9, M13, M14, M15, M16 and M21)
+
+
+**Files:** `crates/core/src/abuse.rs` (the window catalogue, `evaluate`, `decide`, `headroom`, parts per
+million; pure), `crates/core/src/metrics.rs`, `crates/worker/src/metrics/{mod.rs, rates.rs, events.rs}`,
+`handlers/metrics.rs`, `quota/rates.rs`, `mailbox/metric_counts.rs`, `console/pages/deliverability.rs`,
+`crates/cli/src/commands/metrics.rs`. Mailbox schema: `metric_counts`, in mailbox schema v1 while nothing is built.
+Hooks in other milestones' files, each reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `quota/outcomes.rs`, `quota/mod.rs` (M9, the M5 stub) | `RecordOutcome.thresholds`; the evaluation moved behind `core::abuse::{window_states, evaluate, decide}` with the pinned windows; `GetRates` |
+| `consumers/delivery.rs` (M9) | Resolve `AbuseThresholds` from the effective policy (60-second isolate cache) and pass them |
+| `mailbox/outbox.rs` (M6) | The `metric_counts` upserts beside each counted outbox append |
+| `mailbox/maintenance.rs` (M6) | Pruning of `metric_counts` |
+| `router.rs`, `auth/permissions.rs` (M5) | `metrics:read`; the two routes |
+| `mcp/tools.rs` (M15) | The two tools, with rows in M15's table test |
+| `console/pages/{inboxes.rs, domains.rs}` (M21) | The identity and domain windows |
+| `observability/catalogue.rs` (M17) | The four metrics |
+
+**Implements:** FR-MET-1 to FR-MET-10 and edge rows Y1–Y19 ([Deliverability metrics](design/metrics.md)).
+
+**Order.** The first pull request moves the existing pause evaluation behind `core::abuse` with no
+behaviour change except the pinned windows and the thresholds argument; the M9 delivery suites
+(`it::delivery::*`, G12, G13, J33) must pass unchanged on it before the routes are added.
+
+**Acceptance:**
+
+- Edge rows Y1–Y19 with the tests named in the register, all passing.
+- `core::abuse::y_rates_match_decision` and `core::abuse::headroom_properties`, each with at least 10,000
+  generated cases per run.
+- `it::metrics::events_counts_match_outbox`, `it::metrics::record_outcome_thresholds`.
+- `it::metrics::scope_matrix`; the routes join `it::security::cross_tenant_matrix`.
+- `it::console::deliverability_page`; the page joins `browser::console::no_js` and `browser::console::axe_scan`.
+- `it::mcp::metrics_tools`, `cli::metrics::rates_and_events`; `sdk::coverage::every_operation` passes
+  with the two new operations.
+- `live::metrics::bounce_moves_rates` passes in M20.
+
+---
+
+## M36 · SDKs, skills and agent tooling (after M8, M15, M16 and M19; the event, draft and upload helpers after M30, M29 and M33)
+
+**Goal.** Integrators and coding agents get a TypeScript SDK, skills and MCP and CLI tooling that keep the
+service's safety guarantees on the client side, so no integration hand-writes retries, keys, webhook
+verification or stream resume.
+
+**Files:** in this repository, `sdks/fixtures/**`, `sdks/typescript-tests.json`, `integrations/**`,
+`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `.cursor-plugin/marketplace.json`,
+`xtask/src/{gen_skills.rs, skills_check.rs}`, `crates/cli/src/{schema.rs, query.rs, commands/skills.rs,
+commands/mcp_stdio.rs}`, the new guides. In the SDK repository `PILOTAAI/pylota-mail-typescript`
+([ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)): the package, its generator, tests, compiled guide examples and
+release workflows ([SDKs, skills and agent tooling § 2.1](design/sdk-and-skills.md#21-package-and-layout)). Hooks in other
+milestones' files, each reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `migrations/d1/0001_init.sql` (M5) | `api_keys.mcp_tools_json` |
+| `crates/worker/src/auth.rs`, `handlers/keys.rs` (M5) | `Scope.mcp_tools`; minting validation, audit, `GET /v1/me` |
+| `crates/worker/src/mcp/{tools.rs, schemas.rs}` (M15) | Effect classes, computed annotations, `_meta`, the allow-list filter, description budgets |
+| `crates/sdk` (M16) | `Unknown(String)` for response enums and `ErrorCode`; fixtures and their canonical decodings written to `sdks/fixtures/` |
+| `crates/cli/src/commands/mcp.rs` (M16) | `mcp config --client codex\|claude-desktop\|agent-sdk` |
+| `console/pages/keys.rs`, `console/pages/connect.rs` (M21) | The MCP tools fieldset; the new snippets |
+| `.github/workflows/ci.yml` (M19) | Job `skills` |
+| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-mail-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
+
+**Tasks.**
+
+1. In this repository: the shared fixtures, the two release assets, `itest --serve` and the `trace`
+   inventory. In the SDK repository: the generator, the generated layer and the hand-written layer of
+   §2.4–§2.9 and §2.13–§2.14.
+2. Webhook verification and the handler (§2.10).
+3. `mcp_tools` end to end: column, minting rules, filter, `GET /v1/me`, console fieldset.
+4. Effect classes, `_meta` hints and description budgets in the MCP server.
+5. `pmail mcp stdio`, `mcp config` clients, `--schema`, `--query`, `skills generate`.
+6. The skills, the rule registry, `gen-skills`, the checks and the three marketplaces.
+7. The SDK repository's release path: `npm pack` and the owner's signature in its `release.yml`, trusted
+   publishing in its `release-publish.yml`, the contract and version checks, the npm trusted-publisher
+   configuration (a human step on npmjs.com).
+8. After M30: the event helpers of §2.11. After M29 and M33: the draft and upload helpers of §2.12.
+9. The guides of §7.
+
+**Human prerequisites.** Create the public repository `PILOTAAI/pylota-mail-typescript` (FSL-1.1-ALv2).
+Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com, configure the trusted publisher
+for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail-typescript`, workflow `release-publish.yml`,
+environment `release`) and turn on "Require two-factor authentication and disallow tokens" after the first
+publish. Give the SDK repository a staging test key for `ts::live::round_trip`. Pin Deno and Bun
+versions for the SDK repository's CI.
+
+**Acceptance:**
+
+- Edge rows Y20–Y71 with the tests named in the register; the `ts::` tests pass in the SDK repository's
+  CI and are listed in `sdks/typescript-tests.json`; the helpers of rows Y32–Y37 accept on M30, Y47 on M29
+  and Y46 on M33, and are `pending` in `cargo xtask trace` until those land.
+- The first release after M36 carries `openapi.json` and `sdk-fixtures-{version}.tar.gz` in its signed
+  `SHA256SUMS`, and the SDK repository's `fetch-contract.mjs` verifies and uses them.
+- `ts::coverage::every_operation`, `ts::generate::output_current`, `ts::fixtures::rust_parity`,
+  `ts::errors::envelope_round_trip`, `ts::package::exports_valid`, `ts::package::no_install_scripts`,
+  `ts::compat::pylota_tsconfig`, `ts::compat::dts_consumers`, `ts::doctest::published_examples`,
+  `ts::runtime::node_matrix`, `ts::runtime::deno_bun_smoke`, `ts::runtime::y66_workers_smoke` and
+  `ts::retry::unsafe_request_not_repeated`.
+- `it::mcp::annotations_complete`, `it::mcp::y53_result_size_meta`, `it::mcp::y54_description_budgets`,
+  and the extended `it::security::mcp_tools_follow_key`; `it::mcp::inspector_replay` still replays green.
+- `cli::skills::generate_for_key` and `cli::mcp::y59_client_snippets`; the `skills` job green with
+  `skills-ref validate` (and `claude plugin validate --strict` if it runs without signing in).
+- The SDK repository's first release candidate produces `pylotahq-mail-{version}.tgz` in its draft
+  release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
+  `npm audit signatures` in a fresh project reports a verified attestation for it.
+- `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
+- M20 gains `ts::live::round_trip`.
+
+---
+
+## M37 · Parity additions (after M7 to M16, M21, M23 and M27)
+
+**Goal:** the nine additions of [Parity additions](design/parity-additions.md) (section numbers below are
+that page's), each wired end to end, with the register's section Z green. The nine are independent of each other and can land as separate pull requests in any order, each with its own
+rows of section Z.
+
+**Tasks**, in a workable order:
+
+1. Docs link (§10): `docs`, `ErrorCode::anchor()`, `PM_DOCS_URL`, the anchors in `errors.md`, `cargo xtask
+   docs-check`. First, because every later error code needs its anchor.
+2. Trust detail (§5): `spf.aligned`, `arc.{sealer, sealer_trusted, aar}` in `auth_json`; the seven `trust` fields.
+3. Trusted ARC sealers (§6): the policy field, `core::auth::arc_rescue`, the step-12 binding read, the verdict
+   value, each consumer of the §6.5 table; the live test on staging.
+4. Batch operations (§2): the two routes, `BatchGet` and `BatchUpdate`, the audit rows, MCP and CLI.
+5. Label events (§4), on top of 4: the policy field, `OPT_IN_EVENT_TYPES`, the outbox append in the three
+   label-changing requests.
+6. Identity-scope lists (§3): the table change, `core::lists::decide`, the four routes, the inbound and
+   outbound readers, erasure counts.
+7. Webhook headers (§8): the columns and sealed entry, create and `PATCH …/headers`, delivery, host-change
+   clearing.
+8. Retention (§7): the identity field, the `set_retention` intent, `mailbox/expiry.rs`, the idempotency stub,
+   the delivery stub (§7.13), the daily receipt, the alert.
+9. Zone export (§9): `core::zonefile::render` and the `format` parameter.
+
+**Files:** as the Code row of [Parity additions](design/parity-additions.md). One migration, `migrations/d1/00NN_parity_additions.sql` only if
+`0001_init.sql` has shipped to a production deployment when M37 lands; otherwise `0001_init.sql` and mailbox
+schema v1 are edited in place (`sender_lists`, `identities.message_hours`, the three `webhook_endpoints`
+columns, the `rpc_intents.op` value and the `messages.verdict` value). Hooks in other milestones' files, each
+reviewed by that file's owner:
+
+| File | Hook |
+|---|---|
+| `mailbox/read.rs` (M7) | `BatchGet`, `BatchUpdate`, and the label-event append in `UpdateMessage` and `UpdateThread` |
+| `consumers/inbound.rs`, `mailbox/ingest.rs` (M7) | Identity-scope list rows at step 12; the ARC rescue in steps 7 and 12; `arc_rescued` in the trust signals, caps and verification rules |
+| `crates/core/src/auth.rs`, `trust.rs` (M2, M7) | `arc_rescue`, the trust detail fields, `auth_json` keys |
+| `handlers/wait.rs` (M7), `accounts` gate (M27) | `arc_rescued` is not `pass` for releases and the ledger match |
+| `handlers/send.rs`, `consumers/outbound.rs`, `mailbox/idempotency.rs` (M9) | Identity-scope send entries at step 6 and composition step 1; the expired stub in the reservation |
+| `consumers/delivery.rs`, `ApplyDeliveryEvent` in the mailbox (M9) | The `delivery_stubs` lookup after reconciliation, its transitions and `metric_counts`, and the answer with the stub's `first_reply` and `domain_id` (§7.13) |
+| `webhooks/payloads.rs`, `consumers/webhooks.rs`, `handlers/webhooks.rs`, `webhooks/client.rs` (M8) | The `labels_changed` builder, `OPT_IN_EVENT_TYPES`, headers on delivery, `PATCH …/headers`, host-change clearing |
+| `search/citations.rs` (M11), `triage/rules.rs` (M12) | The `Rescued` evidence state; rule 13 |
+| `handlers/domains.rs` (M13, M23) | `format=bind` |
+| `mailbox/erase.rs`, `jobs/erasure.rs` (M14) | `EraseRows { mode: Expiry }` and `{ mode: Retention }` (delivery stubs only); `list_entries_deleted`; the identity-scope list rows of identity erasure |
+| `handlers/identities.rs`, `crons/intents.rs` (M6) | `retention`, the `set_retention` intent |
+| `crates/api-types/src/errors.rs` (M3), `crates/worker/src/errors.rs` (M5) | `docs`, `ErrorCode::anchor()`, `PM_DOCS_URL` |
+| `mcp/tools.rs` (M15) | `mail_update_labels` with `message_ids` and `require_absent` |
+| `crates/cli/src/commands/*` (M16) | The commands of the page |
+| `console/pages/*` (M21) | Inbox retention and lists, ARC wording, webhook header names, zone download |
+| `crates/core/src/sealed.rs` (M17 Foundation) | `webhook_endpoints.headers_sealed`, with its case in `it::secrets::master_key_rotation` |
+| `drafts` (M29), event feed (M30) | Draft expiry and `beyond_retention` (M29); feed entries of label events and of expired messages through the mailbox's `log_erase` purpose (M30, R65 and R66). If M29 or M30 lands after M37, that milestone adds its hook and runs the test named for it (`it::drafts::z61_drafts_expire`, `it::events::retention_and_expiry_reach_log`, `it::events::label_event_erasure`) |
+
+**Implements:** FR-IN-13, FR-IN-14, FR-IN-15, FR-OUT-17, FR-WH-6, FR-WH-7, FR-PRV-7, FR-DOM-15, FR-API-3, and edge
+rows Z1–Z81.
+
+**Acceptance:**
+
+- Every test of [Parity additions § 15](design/parity-additions.md#15-tests), by row: Z1–Z12 (batch), Z13–Z23
+  (lists), Z24–Z29 and Z80 (label events), Z30–Z32 (trust detail), Z33–Z46 (ARC), Z47–Z63 and Z81 (retention), Z64–Z71 (webhook
+  headers), Z72–Z76 (zone export), Z77–Z79 (docs links).
+- The new routes (seven operations) and the changed ones join `it::security::cross_tenant_matrix`;
+  `sdk::coverage::every_operation` passes with the new operations; `it::mcp::input_schemas_plain_objects` passes.
+- `it::webhooks::filters` asserts that `*` includes every type except `message.labels_changed`.
+- `live::arc::cloudflare_forward_behaviour` has run on staging and its result is recorded in
+  [Parity additions § 6.1](design/parity-additions.md#61-sources-read-on-2026-10-17) as a "Spike result" note, on the first staging candidate that
+  carries M37 ([Testing § 10](design/testing.md#10-live-end-to-end-suite-live)); `live::docs::z78_anchor_resolves`
+  runs in the same suite.
+- `cargo xtask docs-check` is in the CI gate and passes; `mdbook build docs` passes.
+- With every new setting at its default (`events.labels_changed: false`, no identity lists,
+  `retention.message_hours: null`, no webhook headers), the M7, M8, M9 and M14 suites pass unchanged, except
+  the trust golden files, which gain the seven fields, and `it::webhooks::filters`.
+
+---
+
 ## M20 · Staging deploy and live proof
 
 **Implements:** NFR-OPS-1 (the timed rehearsal, step 12) and the live measurements of NFR-REL-3,
@@ -1479,6 +2024,18 @@ the ones marked manual there need a person in a browser and run with `cargo xtas
     arrives once (`live::notify::usage_alert_once`); a `new_mail` notification reaches the Gmail test
     mailbox with no content from the mail (`live::notify::new_mail_no_content`); Gmail's one-click
     unsubscribe turns that kind off (`live::notify::gmail_one_click_unsubscribe`, manual).
+16. The AgentMail-parity milestones, with the live tests their acceptance names: a scheduled draft send
+    (`live::drafts::scheduled_send`, M29); the event stream across a deploy
+    (`live::events::stream_through_deploy`, M30); a screening hold round trip
+    (`live::screening::t1_hold_round_trip`, M31); real invitations, the client matrix and an applied reply
+    (`live::calendar::inbound_real_invitations`, `live::calendar::client_matrix`,
+    `live::calendar::reply_applied`, M32); a large attachment through an upload
+    (`live::uploads::large_attachment_link`, M33); agent self-sign-up end to end and its one-click refusal
+    headers (`live::signup::end_to_end`, `live::signup::x40_refuse_one_click_headers`, M34); a bounce that
+    moves the rates (`live::metrics::bounce_moves_rates`, M35); a TypeScript SDK round trip
+    (`ts::live::round_trip`, M36); and an ARC-sealed forward through Cloudflare and a `docs` link that
+    resolves (`live::arc::cloudflare_forward_behaviour`, `live::docs::z78_anchor_resolves`, M37). Each is
+    defined on its milestone's design page.
 
 **v1.0 release criteria:** [PRD §9](prd.md#9-release-criteria-v10). `v1.0.0` is tagged on a commit that
 changes only the workspace version of the last candidate that passed this milestone and adds

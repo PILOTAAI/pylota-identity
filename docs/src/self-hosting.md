@@ -110,7 +110,7 @@ affected zone; once it exists, deploys that do not change it need only *Editor* 
 | Workers product | Workers · Metadata Read-Only | Yes | Yes | – | Reading other Workers' rate-limit namespace IDs, so setup picks unused ones (setup step 10) |
 | Account | D1 · Edit | Yes | Yes | – | Creating the `pylota-mail` database, applying migrations, the CLI's D1 queries (setup, `doctor`, `domains add --local-token`, `domains subscribe`), and the export, Time Travel restore and replay of `pmail ops restore d1` |
 | Account | Workers R2 Storage · Edit | Yes | Yes | – | Creating the `pylota-mail-blobs` bucket (and the backup bucket) and its lifecycle rule |
-| Account | Queues · Edit | Yes | Yes | Yes | Creating the five work queues and their dead-letter queues (your tokens); listing queues and creating each domain's Email Sending event subscription to `pm-delivery-events` (all) |
+| Account | Queues · Edit | Yes | Yes | Yes | Creating the six work queues and their dead-letter queues (your tokens); listing queues and creating each domain's Email Sending event subscription to `pm-delivery-events` (all) |
 | Account | Vectorize · Edit | Yes | Yes | Only if spike S6 fails | Creating the `pm-mail-chunks` index, its metadata indexes and later index generations; the Worker's REST fallback |
 | Account | Workers AI · Read and Workers AI · Edit | Yes | Yes | Only if spike S6 fails | Checking that the configured models exist, and the embedding probe when you change `PM_EMBED_MODEL`; the Worker's REST fallback. Cloudflare's Workers AI REST page asks a custom token for both to run a model (read 2026-10-09) |
 | Account | Email Sending · Edit | Yes | Yes | Yes | Onboarding domains for sending and reading their DNS records |
@@ -208,7 +208,7 @@ and run the same command again. It finds what already exists and creates only wh
 | Release bundle | `deploy/.bundle/<version>/` | The verified Worker release that setup deploys |
 | D1 database | `pylota-mail` | In the chosen jurisdiction. Migrations applied. Holds the control plane: tenants, identities, the address directory, domains, hashed API keys, webhooks, suppressions, jobs, audit log |
 | R2 bucket | `pylota-mail-blobs` | Same jurisdiction. Lifecycle rules delete `inbound-staging/` after 15 days and abort incomplete multipart uploads after one day |
-| Queues | `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index` | Each with a dead-letter queue (`pm-inbound-dlq` and so on) |
+| Queues | `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index`, `pm-screen` | Each with a dead-letter queue (`pm-inbound-dlq` and so on) |
 | Vectorize index | `pm-mail-chunks` | 1,024 dimensions, cosine, eight metadata indexes. Holds no message text |
 | Email Routing | On the platform domain | Enabled, with a catch-all rule that sends every address to the Worker |
 | Ownership record | TXT `_pylota-mail.agents.example` | `pm-verify=…`, the proof that this deployment controls the domain |
@@ -216,7 +216,7 @@ and run the same command again. It finds what already exists and creates only wh
 | Event subscription | Platform domain → `pm-delivery-events` | Delivery, bounce, complaint and other Email Sending events |
 | Rate-limit namespaces | `RL_API`, `RL_SEARCH`, `RL_AGENTIC`, `RL_SEND`, `RL_SIGNIN`, `RL_SIGN`, `RL_PARTNER` | Seven bindings, with namespace IDs from 1001 that no other Worker in the account uses |
 | Worker secrets | `PM_MASTER_KEY`, `PM_KEY_PEPPER`, `PM_HASH_KEY` | 32 random bytes each, one purpose each. The keys that sign thread tokens, links, search cursors and Web Bot Auth requests, and each identity's signing keys, are generated later by the Worker itself and kept sealed in D1. See [Configuration › Secrets](reference/configuration.md#secrets) |
-| Worker | `pylota-mail` | Its six Durable Object classes (`IdentityMailbox`, `DomainMonitor`, `JobRunner`, `TenantQuota`, `SesControl`, `Notifier`), its cron triggers and the API host's Custom Domain (two, with `--console-host`) |
+| Worker | `pylota-mail` | Its seven Durable Object classes (`IdentityMailbox`, `DomainMonitor`, `JobRunner`, `TenantQuota`, `SesControl`, `Notifier`, `TenantEvents`), its cron triggers and the API host's Custom Domain (two, with `--console-host`) |
 | Temporary platform key | `setup-bootstrap`, in your CLI profile | Expires after 24 hours. Replace it in [step 5](#5-create-the-first-api-key) |
 | Platform domain record | `dom_…` with `tenant_id: null` | Visible to every key. Its health is monitored like any other domain, from the Worker's first cron run |
 | Default tenant | – | The one tenant whose address suffix is empty, so its identities get `name@agents.example`. Its console owner is the `--owner-email` person |
@@ -621,12 +621,12 @@ What is billed (see Cloudflare's pricing pages for current prices):
 | Workers Paid subscription | Required |
 | Workers requests and CPU time | API calls, inbound mail, queue consumers, cron |
 | Email Sending | Outbound messages. Workers Paid includes a monthly allowance, then a per-message charge. Inbound Email Routing has no per-message charge; the Worker it invokes is billed as Workers usage |
-| Durable Objects | Requests, duration and SQLite storage of mailboxes |
+| Durable Objects | Requests, duration and SQLite storage of mailboxes and of each tenant's event log. Live event streams use WebSocket hibernation, so an idle stream is not billed for duration |
 | D1 | Rows read and written, and storage |
 | R2 | Storage of raw mail and attachments, and operations. Egress is free |
-| Queues | Operations on the five queues |
+| Queues | Operations on the six queues |
 | Vectorize | Stored and queried vector dimensions |
-| Workers AI | Embeddings, reranking, triage, attachment text extraction and the agentic planner, measured in neurons |
+| Workers AI | Embeddings, reranking, triage, screening, attachment text extraction and the agentic planner, measured in neurons |
 | Amazon SES, S3, SNS and SQS (only with `pmail setup ses`) | Mail sent and received on SES domains, billed by AWS. Prefer the à la carte plan ([Connect Amazon SES](#connect-amazon-ses-optional)) |
 
 The biggest levers are inbound volume (each message is parsed, embedded and triaged), agentic search

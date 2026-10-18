@@ -308,12 +308,19 @@ month later. `SetPlan` from the billing webhook then confirms or corrects the pe
 Storage is not held: it grows with inbound mail, which is never refused. It acts as a **gate** instead
 (FR-BILL-8). `Hold` for `inboxes` and `custom_domains`, and for `sends` when the message carries
 attachments, passes `gates: [StorageGb]`. While storage is over its allowance, those holds are denied with
-`feature: storage_gb`.
+`feature: storage_gb`. Create of an upload is refused with `402 billing_limit` (`storage_gb`) while storage is
+at or over its allowance: it takes no hold, so the upload handler reads `QuotaRequest::GetUsage` and refuses
+when `storage_gb` has a `granted` value and `used ≥ granted`, skipped for billing `exempt` or `disabled`
+([Uploads § 3.1](uploads.md#31-create--post-v1identitiesidentity_iduploads)). The `PUT` of its bytes is not
+gated, because its create already was.
 
 The hourly usage roll-up (below) computes stored bytes per workspace as the sum, over its identities, of
 what each `IdentityMailbox` reports: `messages.raw_size` for messages whose raw MIME is still stored
-(`raw_r2_key` not null, so retention purges lower it), `attachments.size`, and its own SQLite size
-(`page_count × page_size`). Messages with status `throttled` or `hidden` and their attachments are left
+(`raw_r2_key` not null, so retention purges lower it), `attachments.size`, the `size` of `uploads` whose
+object is present or being deleted (`object_state` `present` or `deleting`, [Uploads § 10](uploads.md#10-billing-and-limits)),
+and its own SQLite size (`page_count × page_size`). Drafts are not metered, and count towards `storage_gb` only
+through what this sum already measures ([Drafts § 14](drafts.md#14-billing-and-limits)). The tenant's event log is not counted, as the outbox is
+not ([Event feed § 12](event-feed.md#12-billing-and-limits)). Messages with status `throttled` or `hidden` and their attachments are left
 out of the first two sums, so a flood of unsolicited mail cannot push a workspace over its storage
 allowance and block its sends ([Inbound › Inbound volume caps](inbound.md#inbound-volume-caps-d5-d13),
 [D13](../edge-cases.md)). It calls `SetMeasured`, which sets `storage_gb.used = ceil(bytes / 2^30)`, and
@@ -349,12 +356,22 @@ table test lists each row; a metered action without a row fails CI (build plan M
 |---|---|---|---|---|
 | `inboxes` | One identity | `POST /v1/tenants/{id}/identities` (and the console's create form), after body validation and the `client_id` replay check, before the D1 batch ([Identities › Create](identity-domains.md#create) step 6). `ref` = the new `idn_` ID. Gate: `storage_gb` | Consumed when the D1 batch commits. Released when the request fails (`username_taken`, `address_taken`, `domain_not_ready`, D1 error) | Identity delete moves it to `deleting`: `Adjust −1` |
 | `sends` | One recipient (FR-BILL-5) | `IdentityMailbox.submit`, after the idempotency lookup, the in-flight check and policy steps 1–17, together with the daily-cap reserve of step 18 ([Outbound › Policy pipeline](outbound.md#policy-pipeline)). `units` = recipients left after the per-recipient filters of step 16; a send whose recipients are all suppressed takes no hold. `ref` = the new `msg_` ID. Gate: `storage_gb` when the message has attachments | At `RecordTransportOutcome`: consume one unit per recipient the transport accepted (`submitted`). Release for `rejected`, `failed` and `canceled`, for recipients refused by the provider's suppression ([G4](../edge-cases.md)), when the thread lock fails at step 19, and when the outcome is `uncertain`. A reconciled uncertain send, or one resolved with `{"outcome":"sent"}`, consumes then without a hold ([W5]) | Never (monthly) |
-| `triage` | One stored analysis | The triage consumer, at the start of each attempt, `ref` = message ID ([Triage › Metering](triage.md#12-metering)). Quarantined mail takes its hold only when released (FR-BILL-7) | Consumed when the commit stores `done`; released for `failed`, a no-op commit, or a transient error before a retry | Never (monthly) |
+| `triage` | One stored analysis | The triage consumer, at the start of each attempt, `ref` = message ID ([Triage › Metering](triage.md#12-metering)). Quarantined mail takes its hold only when released (FR-BILL-7). Screening never takes a hold ([Screening hold §19](screening.md#19-billing-and-limits)) | Consumed when the commit stores `done`; released for `failed`, a no-op commit, or a transient error before a retry | Never (monthly) |
 | `custom_domains` | One domain of kind `zone`, `delegated` or `external` | `POST /v1/tenants/{id}/domains` (and the console), after validation and the `domain_exists` check, before any provider call ([Adding a domain](identity-domains.md#adding-a-domain)). `ref` = the `dom_` ID. Gate: `storage_gb` | Consumed when the D1 row is written. Released on any failure (`502 upstream_error`, `409 existing_mx`, …) | The `domain_remove` job's `finish` step sets `removed`: `Adjust −1` ([Domain removal](identity-domains.md#domain-removal)) |
-| `storage_gb` | GB stored, rounded up | No hold: a gate on the three rows above | `used` is set by the hourly roll-up | As measured |
+| `storage_gb` | GB stored, rounded up | No hold: a gate on the three rows above, and on upload create ([Storage](#storage)) | `used` is set by the hourly roll-up | As measured |
 | `seats` | One member or pending invitation | `POST /v1/tenants/{id}/invitations` and the console's invite form, before the `INSERT INTO invitations`. `ref` = the `inv_` ID ([Console › Invitations](console.md#invitations)) | Consumed when the invitation row is inserted. Released if the insert fails (an invitation for that address is already pending) | Invitation revoked or expired: `Adjust −1`. Member removed: `Adjust −1`. An accepted invitation turns into a member and keeps its seat |
 
-Not metered against a plan: inbound mail (never refused, FR-BILL-8), search, agentic search, agent
+The features of [ADR 0017](../adr/0017-agentmail-parity.md) add no allowance. A draft takes its `sends` hold
+when it is actually sent, by `submit`'s step 18 like any send, never while it is written, waits for
+approval or is scheduled; a scheduled send that meets `402 billing_limit` becomes `failed` with
+`billing_limit` ([Drafts § 14](drafts.md#14-billing-and-limits)). A calendar send and a calendar reply are
+sends ([Calendar invitations § 11](calendar-invitations.md#11-billing-and-limits)). A provisional agent
+sign-up is `metered` on the catalog's default plan from creation, with no Stripe customer and no Stripe call
+([Agent self-sign-up § 17](agent-signup.md#17-billing-and-limits)).
+
+Not metered against a plan: inbound mail (never refused, FR-BILL-8), screening (its model calls are bounded
+by `triage.daily_model_cap` on their own counter), the event feed, consumers and streams, deliverability
+metrics, the SDKs, skills and the MCP bridge, search, agentic search, agent
 assertions and signed HTTP requests (they are counted in `usage_daily` as `assertions` and
 `http_signatures`, through `RecordUsage`, and limited only by `RL_SIGN`), and notification email. Agentic
 search is bounded by the per-key rate limit and the tenant's daily `agentic_daily_cap`

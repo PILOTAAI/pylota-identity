@@ -48,11 +48,20 @@ request locally.
 
 Events are not guaranteed to arrive in order. Each payload carries `occurred_at`, and a `sequence` that
 increases strictly per owner: per identity for mailbox events (`message.*`, `identity.*`,
-`verification.received`, `suppression.created`, `quota.warning`), per domain for `domain.*` events, and
+`verification.received`, `calendar.received`, `draft.*`, `suppression.created`, `quota.warning`), per domain for `domain.*` events, and
 per job for `erasure.*` and `export.*` events, and for `identity.deleted`, which the erasure job emits
 after the mailbox is gone (it still carries `identity_id`, so identity-filtered endpoints receive it). Use it to discard stale updates, for example a
 `message.deferred` arriving after `message.delivered`. Platform events (`webhook.disabled`,
-`webhook.test`, `member.*`, `billing.*`, `tenant.policy_updated` and `account.*`) have `sequence: null`.
+`webhook.test`, `member.*`, `billing.*`, `tenant.policy_updated`, `account.*` and `signup.verified`) have
+`sequence: null`.
+
+`message.screened` always precedes, by one `sequence`, the `message.received` or `message.quarantined` it
+causes, and `message.released` precedes its `message.received`. `message.received` is emitted exactly once
+per message (re-parse re-emissions excepted).
+
+The same events can also be read in order from the tenant's event log
+([REST API › Event feed](api.md#event-feed)): positions follow the order of appends, not `occurred_at`, and
+an event is in the log before its first webhook delivery is queued.
 
 ## Envelope
 
@@ -75,11 +84,12 @@ events); `identity.deleted` is the one job event that sets it. `tenant_id` is `n
 Payloads are **thin**. They carry IDs, a summary, verdicts and up to `policy.webhook_text_bytes` of
 `extracted_text` (default 16 KB, maximum 64 KB). Fetch anything else through the API.
 
-Because the `message.*` and `verification.received` payloads carry mail, an endpoint that receives them
-can only be created, re-pointed or replayed by a key that also holds `messages:read` (and
+Because the `message.*`, `verification.received` and `calendar.received` payloads carry mail, an endpoint
+that receives them can only be created, re-pointed or replayed by a key that also holds `messages:read` (and
 `quarantine:review` for `message.quarantined`) ([REST API › Webhooks](api.md#webhooks),
-[J29](../project/edge-cases.md)). Events of the deployment's system identity go to platform endpoints
-only.
+[J29](../project/edge-cases.md)). An endpoint subscribed to `message.screened` also needs
+`quarantine:review`, because a verdict can reveal a held message. Events of the deployment's system identity
+go to platform endpoints only.
 
 ## Event types
 
@@ -87,10 +97,11 @@ only.
 
 | Type | When | `data` |
 |---|---|---|
-| `message.received` | An inbound message is stored and visible | `message` (summary, see below), `thread_id`, `trust`, `extracted_text`, `extracted_text_truncated`, `attachments[]` (id, filename, content type, size); plus `reprocessed: true` when a re-parse emits it again ([J3](../project/edge-cases.md)): it is not new mail |
-| `message.quarantined` | An inbound message is stored but quarantined | as `message.received`, plus `quarantine_reason`. No `extracted_text`. `reprocessed: true` as for `message.received` |
-| `message.released` | A quarantined message was released | `message`, `released_by_key_id` (API release) or `released_by_user_id` (console release; the other is `null`), `reason` |
+| `message.received` | An inbound message is stored and visible | `message` (summary, see below), `thread_id`, `trust` (with the authentication detail: `spf_domain`, `dkim_domains`, `dmarc_domain`, `arc_sealer` and the rest), `extracted_text`, `extracted_text_truncated`, `attachments[]` (id, filename, content type, size); plus `reprocessed: true` when a re-parse emits it again ([J3](../project/edge-cases.md)): it is not new mail; `screening` (the record or `null`); `released: true` when a release emitted it: it is the first time this message is visible |
+| `message.quarantined` | An inbound message is stored but quarantined | as `message.received`, plus `quarantine_reason`. No `extracted_text`. `reprocessed: true` as for `message.received`; `screening`; `rescreened: true` when a late signal moved a delivered message back (a re-parse that does both emits one event with both flags, after `message.screened`) |
+| `message.released` | A quarantined message was released | `message`, `released_by_key_id` (API release) or `released_by_user_id` (console release; the other is `null`), `reason`. Followed in the same transaction by `message.received` (`released: true`) when the message was never evented as received |
 | `message.triaged` | Triage finished (or failed) | `message_id`, `thread_id`, `triage` (with `version`, the triage logic version, and `run`, which counts completed runs) |
+| `message.screened` | A screening verdict was reached (or decided at ingest), or a late signal changed it | `message_id`, `thread_id`, `message_status`, `quarantine_reason`, `late`, `screening` (the record). No subject, address or text ([Screening hold §20](../project/design/screening.md#20-events)) |
 | `message.sent` | The transport accepted an outbound message, or a person resolved an uncertain send as `sent` | `message`, `provider`, `provider_message_id` (`null` after a resolve), `sent_via_fallback` |
 | `message.delivered` | A recipient's server accepted it | `message_id`, `recipient`, `smtp_code` |
 | `message.deferred` | A temporary failure; the provider is retrying | `message_id`, `recipient`, `smtp_code`, `smtp_response` |
@@ -102,6 +113,7 @@ only.
 | `message.reconciled` | An uncertain send was matched to a provider event | `message_id`, `status` |
 | `message.suppressed` | Every recipient is suppressed | `message_id`, `recipients[]` |
 | `message.canceled` | Cancelled while queued | `message_id` |
+| `message.labels_changed` | Opt-in. Labels of visible messages changed through the API, MCP or the console | `messages[]` (`message_id`, `thread_id`; at most 100), `added`, `removed`, `actor` (`kind`, `key_id`, `user_id`), `source` (`message`, `thread` or `batch`), `request_id`, `part`, `parts` |
 | `verification.received` | A verification code or link was found in authenticated mail | `message_id`, `sender_domain`, `kind` (`code` or `link`), `account_id` (the approved service-ledger entry that matched, or `null` when the tenant does not require approval). The value itself is only available through `wait` |
 
 The **message summary** used in `data.message` is:
@@ -113,9 +125,37 @@ The **message summary** used in `data.message` is:
   "to": [ { "address": "bookings.acme@agents.example", "name": "" } ],
   "cc": [], "delivered_to": "bookings.acme@agents.example", "is_primary_recipient": true,
   "subject": "Change of dates for BK-2291", "sent_at": "…", "received_at": "…",
-  "kind": "normal", "labels": [], "in_reply_to": "…", "flags": []
+  "kind": "normal", "labels": [], "in_reply_to": "…", "draft_id": null, "flags": []
 }
 ```
+
+`draft_id` is the draft an outbound message was sent from, or `null`.
+
+**Opt-in events.** `message.labels_changed` is written only while the tenant's policy has
+`events.labels_changed: true`, and is delivered only to endpoints that name it: `*` never includes it. It
+is never emitted for state the service sets (labels given at send time, erasure, expiry, release), and never
+names a message that is not visible ([Parity additions § 4](../project/design/parity-additions.md#4-label-change-events-fr-wh-6)).
+
+### Calendar
+
+| Type | When | `data` |
+|---|---|---|
+| `calendar.received` | A message with a calendar object first becomes visible as `received`: when it is stored, released from quarantine or screening, or when a re-parse changed its object. Never for quarantined, screening, hidden or throttled mail, or the system identity | `message_id`, `thread_id`, `object_status`, `method`, `uid`, `sequence`, `recurrence_id`, `verified`, `verified_by`, `reason`, `organized_here`; `released: true` or `reprocessed: true` when it comes from a release or a re-parse. The `uid` is text the sender chose; read the object with `GET …/messages/{message_id}` |
+
+### Drafts
+
+Mailbox events with the identity's `sequence` ([Drafts](../project/design/drafts.md#15-events)). They carry
+no subject, body, address, filename or note, so an endpoint needs only `webhooks:manage` to receive them.
+`draft` is the draft summary: `id`, `identity_id`, `draft_kind`, `kind`, `status`, `revision`, `digest`,
+`recipient_count`, `attachment_count`, `send_at`, `in_reply_to`, `forward_of`, `thread_id`, `client_id`.
+
+| Type | When | `data` |
+|---|---|---|
+| `draft.approval_requested` | A draft waits for approval, or was edited while waiting | `draft`, `reason` (`requested`, `new_recipients`, `external`, `always`), `requested_by_key_id` |
+| `draft.approved` | A revision was approved | `draft`, `send`, `approved_by_key_id` or `approved_by_user_id`, `on_behalf_of` |
+| `draft.rejected` | An approver rejected it, or the request expired after 7 days | `draft`, `reason` (`operator` or `expired`), `rejected_by_key_id` or `rejected_by_user_id`, `on_behalf_of` |
+| `draft.sent` | The draft became a message | `draft`, `message_id`, `thread_id`, `message_status` (`queued` or `suppressed`) |
+| `draft.failed` | A scheduled or approved send ended without a message | `draft`, `reason`, `attempts` |
 
 ### Identities and addresses
 
@@ -170,6 +210,7 @@ The **message summary** used in `data.message` is:
 | `billing.plan_changed` | `from_plan`, `to_plan`, `reason` (`checkout`, `portal` (an upgrade confirmed in the Stripe Customer Portal), `scheduled_downgrade` (a downgrade the owner scheduled took effect at the period end), `payment_failed_grace_ended`, `payment_recovered` (the plan was restored after a late payment, or when a dispute closed in the workspace's favour), `canceled`, `operator`, `dispute` (a payment was disputed: the default plan applies and sends stop until the dispute closes)) |
 | `billing.payment_failed` | `grace_until` |
 | `billing.limit_reached` | `feature`, `granted`, `resets_at` (sent once per feature per period, when the first `402` is returned) |
+| `signup.verified` | `signup_id`, `address`, `verified_via` (`code`, `link` or `claim`), `user_id`. A provisional agent sign-up was verified; a platform event with `tenant_id` and `identity_id` set ([Agent self-sign-up](../project/design/agent-signup.md#18-events-and-audit)) |
 | `tenant.policy_updated` | `fields` (the dotted paths written), `by` (`platform`, `partner`, `tenant` or `console`), `actor_key_id`, `actor_user_id` (one of them `null`), `policy_version`. Sent for every policy write except a tenant's creation, to the tenant's, its partner's and platform endpoints ([Workspace policy](../project/design/workspace-policy.md#7-audit-and-events)) |
 
 ### Service accounts
@@ -191,3 +232,15 @@ Platform events with `tenant_id` and `identity_id` set, so an endpoint's identit
 the version. v1 has one version, `2026-10-01`, so there is nothing to pin and endpoints have no
 version field. A breaking change would get a new `api_version`, and the old one would stay available for
 12 months; the endpoint field that selects a version is added with that change, through an ADR.
+
+## Reading events without an endpoint
+
+Every event that webhooks deliver for a tenant is also kept, with the same envelope and `evt_` ID, in the
+tenant's event log for `retention.events_days` ([Event feed and live stream](../project/design/event-feed.md)):
+
+- `GET /v1/events`: pages after a cursor, with a long poll of up to 60 seconds;
+- durable event consumers: a named position kept for you, with commit and redelivery;
+- `GET /v1/events/stream`: a WebSocket that pushes events and resumes from a cursor with nothing lost.
+
+Endpoint filters do not apply to the log. A key sees an event only when it could read its subject through
+the API, and events of the system identity are never in a log. Deduplicate on `id` across every surface.

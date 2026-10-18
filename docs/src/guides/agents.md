@@ -13,15 +13,37 @@ owns.
 | **MCP** (`/mcp`, Streamable HTTP) | An agent that talks to tools directly: Claude Code, an MCP-capable runtime | Authenticated with an API key as a bearer token in v1.0. The agent sees only the tools its key allows. See [MCP server](../reference/mcp.md) |
 | **REST API** behind your own tool layer | A product that already has its own tools, approvals and audit | You decide exactly which operations the model can trigger, and you can add approval steps. See [REST API](../reference/api.md) |
 | **Rust SDK** (`pylota-mail`) | Services written in Rust: webhook consumers, job workers | Typed client for the whole REST API |
-| **CLI** (`pmail`) | People, scripts and coding agents doing operations | `--json` output on every command. See [CLI](../reference/cli.md) |
+| **CLI** (`pmail`) | People, scripts and coding agents doing operations | `--json` output on every command, `--query` to filter it, `--schema` to describe a command. See [CLI](../reference/cli.md) |
+| **TypeScript SDK** (`@pylotahq/mail`) | Services in TypeScript: Node.js 22+, Workers, Deno, Bun | Required keys on sends, safe retries, typed `uncertain`, webhook verification, event stream with resume |
+| **Agent skills** | Coding agents in Claude Code, Codex and Cursor | Teach safe sending, untrusted mail, verification codes, drafts, search and events; install from the plugin marketplaces or `pmail skills generate` |
+| **`pmail mcp stdio`** | Clients that run only local MCP servers, such as Claude Desktop without request headers | Key from your profile, never in the client's config |
+
+The TypeScript SDK, the agent skills, `pmail mcp stdio` and the CLI's `--query` and `--schema` are P1: they
+ship in v1.0 unless they threaten the release ([PRD § 5](../project/prd.md#5-scope-and-priorities)). The
+TypeScript SDK is built in its own repository, `PILOTAAI/pylota-mail-typescript`, and installed from npm.
 
 A common setup: specialist agents use MCP with narrow identity keys, while the integrating
 application consumes webhooks and runs sends that need approval through the REST API.
 
-The 17 MCP tools are `mail_list_identities`, `mail_list_threads`, `mail_search`, `mail_deep_search`,
-`mail_get_thread`, `mail_get_message`, `mail_get_attachment_text`, `mail_find_related`,
-`mail_search_contacts`, `mail_wait`, `mail_get_usage`, `mail_send`, `mail_reply`, `mail_forward`,
-`mail_update_labels`, `mail_sign_assertion` and `mail_sign_http_request`. Send tools require an
+The 36 MCP tools ([MCP server § 3](../project/design/mcp.md#3-authentication-and-tool-filtering)) are:
+
+- reading: `mail_list_identities`, `mail_list_threads`, `mail_search`, `mail_deep_search`,
+  `mail_get_thread`, `mail_get_message`, `mail_get_attachment_text`, `mail_find_related`,
+  `mail_search_contacts`, `mail_wait` and `mail_events` (the event feed);
+- usage and deliverability: `mail_get_usage`, `mail_get_rates` and `mail_get_event_counts`;
+- sending: `mail_send`, `mail_reply`, `mail_forward` and `mail_calendar_reply`;
+- drafts and uploads: `mail_create_draft`, `mail_update_draft`, `mail_list_drafts`, `mail_get_draft`,
+  `mail_send_draft`, `mail_delete_draft`, `mail_create_upload` and `mail_get_upload`;
+- labels and screening: `mail_update_labels` and `mail_screening_feedback`;
+- signing: `mail_sign_assertion` and `mail_sign_http_request`;
+- service sign-ups: `mail_request_account` and `mail_list_accounts`;
+- an agent's own sign-up, listed only while it is provisional or for a tenant that has one:
+  `mail_signup_status`, `mail_signup_verify`, `mail_signup_resend` and `mail_signup_set_human`.
+
+No tool approves a draft, releases held mail or abandons a sign-up: those are decisions for people. Each
+tool declares annotations (read-only, destructive, idempotent, open-world) for clients that ask before
+acting. A key can be minted with `mcp_tools`, a shorter list of the tools it may see; it narrows the MCP
+surface only, never the key's REST permissions. Send tools require an
 `idempotency_key` argument: 1–255 printable ASCII characters, spaces included
 (`^[\x20-\x7E]{1,255}$`), the same rule as the REST `Idempotency-Key` header. `mail_get_usage` shows
 the workspace's remaining allowances; every tenant and identity key can call it, and platform and
@@ -41,6 +63,7 @@ so the key is the boundary of what an agent can do, whatever it is told.
 | A read-only research or summarising agent | `identity` | `messages:read`, `search:read`, `attachments:read` |
 | The same agent across several mailboxes | `tenant` | `identities:read`, `messages:read`, `search:read`, `attachments:read`. A tenant key must name the identity on every call, and `identities:read` lets it look the identity up |
 | An agent that proves who it is to other services or websites | `identity` | What it otherwise needs, plus `identities:sign` ([Agent assertions](#agent-assertions)) |
+| An agent whose mail a person approves before it leaves | `identity` | `messages:read`, `search:read`, `drafts:write`, and no `messages:send` ([Sending › Drafts, approval and scheduled send](sending.md#drafts-approval-and-scheduled-send)) |
 | A coordinator that routes work across a tenant's agents | `tenant` | `identities:read`, `messages:read`, `search:read`, plus `messages:send` only if it sends itself |
 | Your backend (webhooks, provisioning) | `tenant` | What it needs, for example `identities:write`, `webhooks:manage`, `messages:write` |
 
@@ -51,8 +74,8 @@ Rules:
   someone else's mail ([F2](../project/edge-cases.md)). If it needs a fact from mail, have a trusted
   agent look it up and pass on only the answer.
 - **Keep human permissions away from agents.** `quarantine:review`, `erasure:manage`, `keys:manage`,
-  `suppressions:manage`, `policy:write`, `accounts:approve` and `tenants:manage` belong to people and
-  back-office services.
+  `suppressions:manage`, `policy:write`, `accounts:approve`, `drafts:approve` and `tenants:manage` belong to
+  people and back-office services. Identity keys cannot hold `drafts:approve` at all.
 - **Ask before signing up anywhere.** An agent that creates an account at a third-party service with its
   address requests it first (`POST /v1/identities/{identity_id}/accounts`, MCP `mail_request_account`,
   permission `accounts:request`), waits until a person approves it, then signs up and uses `wait` with
@@ -161,6 +184,12 @@ job(event)
   something new arrived ([C5](../project/edge-cases.md)).
 - Fetch content through the API. Event payloads are thin, and carry at most
   `policy.webhook_text_bytes` of text.
+- **Reconcile from the event feed.** Webhooks, `GET /v1/events`, durable consumers
+  (`/v1/event-consumers`) and the live stream (`GET /v1/events/stream`, a WebSocket) all read the same
+  per-tenant log, and every channel uses the same `evt_` ID, so one `processed_events` table deduplicates
+  them all ([Event feed](../project/design/event-feed.md)). A consumer that missed webhooks reads the feed
+  from its saved cursor; `pmail events tail --cursor-file …` does it from a shell, and the SDKs' streams
+  resume on their own. The feed needs `events:read`.
 
 The receiving guide has the signature code: [Set up a webhook endpoint](receiving.md#set-up-a-webhook-endpoint).
 
@@ -171,7 +200,7 @@ decision. Useful patterns:
 
 | Pattern | How |
 |---|---|
-| **Approval before send** | The agent drafts in your system (v1.0 has no server-side drafts). A person approves. Your system sends with the key chosen at draft time. Approval expiry is yours to enforce ([E7](../project/edge-cases.md)) |
+| **Approval before send** | The agent writes a server-side draft (`drafts:write`, without `messages:send`, or under `drafts.require_approval`). A person approves the exact revision in the console, or your approval screen does with a key holding `drafts:approve` where `drafts.key_approval` allows it; an edit after approval asks again, and a pending approval expires after 7 days ([Sending › Drafts, approval and scheduled send](sending.md#drafts-approval-and-scheduled-send), [E7](../project/edge-cases.md)). Your own draft store still works: then approval expiry is yours to enforce |
 | **Cancel a queued message** | `POST …/messages/{id}/cancel` works only while the message is `queued`. That window is short (the target is p95 ≤ 60 s to the transport), so it is a safety net, not an approval step |
 | **Resolve an uncertain send** | A person checks what happened and calls `resolve` with `sent` or `not_sent`. Agents should never resolve their own uncertain sends |
 | **Mandatory review for risky mail** | Require approval before acting on messages with `payment_change_request`, `credential_request` or `prompt_injection_suspected`, or with a `verdict` other than `pass` when the action depends on who sent it ([D1](../project/edge-cases.md), [D8](../project/edge-cases.md)) |
@@ -346,7 +375,7 @@ it.
 | [A7](../project/edge-cases.md) | S+I | Handle `409 identity_paused`, and show the operator why the identity is paused |
 | [A9](../project/edge-cases.md) | S+I | Act only on the copy with `is_primary_recipient: true` |
 | [A10](../project/edge-cases.md) | S+I | Never reveal that an identity was BCC'd. Pylota Mail's `reply-all` already excludes BCC |
-| [B8](../project/edge-cases.md) | S+I | Never accept calendar invitations automatically. Never send read receipts |
+| [B8](../project/edge-cases.md) | S+I | Never accept calendar invitations automatically; answer verified ones with `calendar-reply` only when the operator wants it. Never send read receipts |
 | [C4](../project/edge-cases.md) | S+I | Retry `409 thread_busy` after `details.retry_after` |
 | [C5](../project/edge-cases.md) | I | Mark a pending draft stale when new mail arrives in its thread, and re-validate it |
 | [C6](../project/edge-cases.md) | S+I | Hand a conversation to another identity with `forward`, or start a new thread with an explicit note |

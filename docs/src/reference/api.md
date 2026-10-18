@@ -43,18 +43,23 @@ list uses one format (search keeps its own, [Search › Cursors](../project/desi
 
 ### Idempotency
 
-- **Required** on `POST …/messages`, `…/reply`, `…/reply-all` and `…/forward`. A missing key returns
+- **Required** on `POST …/messages`, `…/reply`, `…/reply-all`, `…/forward`, `…/calendar-reply` and
+  `POST …/drafts/{draft_id}/send`. A missing key returns
   `400 idempotency_key_required`. The one exception is a dry run (`?dry_run=true`), where the key is
   optional and never recorded ([Sending](#sending)).
-- **Optional** on every other `POST`, except six that ignore the header and never record it
+- **Optional** on every other `POST`, except ten that ignore the header and never record it
   (`x-idempotency: none` in [`openapi.yaml`](openapi.yaml)): the two search endpoints
   (`POST /v1/identities/{identity_id}/search` and `POST /v1/tenants/{tenant_id}/search`), which return
-  mail and change nothing, so their results are never stored; the two signing endpoints
+  mail and change nothing, so their results are never stored;
+  `POST /v1/identities/{identity_id}/messages/batch-get`, for the same reason; the two signing endpoints
   ([`…/assertions`](#post-v1identitiesidentity_idassertions--tenant-or-identity-key-identitiessign) and
   [`…/http-signatures`](#post-v1identitiesidentity_idhttp-signatures--tenant-or-identity-key-identitiessign)),
-  because each call signs anew and a replay record would have to store what was signed; and the two
+  because each call signs anew and a replay record would have to store what was signed; the two
   Amazon SNS endpoints, `POST /hooks/ses` and `POST /hooks/ses/inbound`, which SNS calls without the
-  header.
+  header; `POST /v1/events/stream-tokens`, because each call mints a single-use secret that a stored
+  replay would have to keep or drop; `POST /v1/agent-signup` (no key), whose answer holds a key secret, for
+  the same reason ([Agent self-sign-up](../project/design/agent-signup.md)); and the mailbox restore,
+  `POST /v1/platform/identities/{identity_id}/restore`.
 - The header is `Idempotency-Key: <1–255 printable ASCII characters>`. Keys are kept for 30 days. For
   mail they are scoped per identity. For everything else they are scoped per calling API key and per
   tenant (or, for a request that names no tenant, per partner for a partner key and per deployment for a
@@ -67,7 +72,8 @@ list uses one format (search keeps its own, [Search › Cursors](../project/desi
   without `secret` and with `"secret_replayed": false`. A secret is shown once, in the first response;
   if it was lost, rotate or revoke ([J19](../project/edge-cases.md)).
 - No stored response holds mail content. A response that carries a message or a thread
-  (`…/release`, `…/cancel`, `…/resolve`, `…/threads/{thread_id}/hold`) is stored as a reference, and a
+  (`…/release`, `…/cancel`, `…/resolve`, `…/threads/{thread_id}/hold`), or a draft (the `…/drafts…`
+  routes), is stored as a reference, and a
   replay reads the resource again with the calling key's visibility (a resource erased since replays its
   `404`). Records belong to the identity they name, so identity and tenant erasure delete them
   ([Data model](../project/design/data-model.md#1-d1-control-plane)).
@@ -84,15 +90,17 @@ See [Sending and safe retries](../guides/sending.md#safe-retries).
 | All requests | 600 per minute | per API key |
 | All requests of a tenant's keys together (binding `RL_TENANT`) | 1,800 per minute | per tenant, across all its tenant and identity keys |
 | All requests of a partner's partner keys together (binding `RL_PARTNER_API`) | 1,800 per minute | per partner, across all its partner keys |
-| Search (`keyword`, `semantic`, `hybrid`, related messages, contacts) | 120 per minute | per API key |
+| Search (`keyword`, `semantic`, `hybrid`, related messages, contacts) and event counts (`GET /v1/metrics/events`), together (binding `RL_SEARCH`) | 120 per minute | per API key |
 | Agentic search | 20 per minute | per API key, plus a daily tenant cap |
 | Send (accepted into queue) | 120 per minute | per identity, plus daily caps from policy |
 | Signing (agent assertions and HTTP signatures together, binding `RL_SIGN`) | 600 per minute | per identity |
 | Tenant creation and invitations by partner keys (binding `RL_PARTNER`) | 10 per minute, together | per partner, across all its keys |
+| Agent sign-up (binding `RL_SIGNIN`, shared with the console's sign-in forms) | 10 per minute | per client network |
 
 Every authenticated response includes `RateLimit-Limit`: on a `429`, the limit of the bucket that refused
-(`details.bucket` names it: `key`, `tenant`, `partner`, `search`, `agentic`, `send`, `sign` or
-`partner_create`); otherwise the limit of the route's per-key bucket.
+(`details.bucket` names it: `key`, `tenant`, `partner`, `search`, `agentic`, `send`, `sign`,
+`partner_create` or `signin`, and on the [event feed](#event-feed) `events_wait`, `stream_tokens` or
+`streams`); otherwise the limit of the route's per-key bucket.
 A `429 rate_limited` also includes `Retry-After` and `RateLimit-Reset`, both the seconds to the end of the
 bucket's current period (other `429` codes, such as `daily_cap_reached`, set `Retry-After` to their own
 wait). There is no `RateLimit-Remaining`: Cloudflare's rate-limiting
@@ -108,28 +116,35 @@ A key holds a list of permissions. Every endpoint below names the one it needs.
 | `identities:read`, `identities:write` | Read, and create, update, pause or delete identities and addresses, and test forwarding; read, and create, rotate or revoke [identity signing keys](#identity-keys-and-signatures). Deleting an identity also needs `erasure:manage`, because it starts an identity-scope erasure |
 | `identities:sign` | Mint agent assertions and Web Bot Auth HTTP signatures as an identity. Tenant and identity keys (an identity key only for its own identity); platform and partner keys cannot hold it, but can grant it to the tenant and identity keys they mint |
 | `domains:read`, `domains:write` | Read, and add, update, verify, probe or remove domains |
-| `messages:read` | Threads, messages, raw MIME, deliveries |
-| `messages:send` | Send, reply, reply-all, forward, cancel |
-| `messages:write` | Labels, read state, re-run triage, resolve uncertain sends |
+| `messages:read` | Threads, messages (one at a time or up to 100 with `batch-get`), raw MIME, deliveries |
+| `messages:send` | Send, reply, reply-all, forward, cancel, calendar replies, and send drafts (with `drafts:read`); create, read and delete uploads (or with `drafts:write`) |
+| `messages:write` | Labels, read state and archiving, of a message, a thread or up to 100 messages (`batch-update`, with its atomic claim); re-run triage; resolve uncertain sends; screening feedback |
 | `attachments:read` | Attachment bytes and extracted text |
 | `search:read` | Keyword, semantic, hybrid search, contacts, related, wait |
 | `search:agentic` | Agentic search |
-| `quarantine:review` | See and release quarantined mail |
+| `quarantine:review` | See and release quarantined mail, and see mail still being screened |
 | `webhooks:read` | Read webhook endpoints and their deliveries |
 | `webhooks:manage` | Create, change, test, rotate and delete webhook endpoints, and replay. Includes `webhooks:read` |
+| `events:read` | Read the tenant's event log: `GET /v1/events`, durable event consumers, stream tokens and the WebSocket stream ([Event feed](#event-feed)). Each event is shown only when the key could read its subject: mail events need `messages:read`, quarantine and screening events `quarantine:review` too, and identity keys see only their own identity's events. Every key level |
 | `keys:manage` | API keys within the caller's scope. A partner key manages only tenant and identity keys of its own tenants |
 | `erasure:manage` | Erasure requests, legal holds, exports. A `tenant`-scope erasure request also needs `tenants:erase` |
 | `tenants:erase` | Delete the workspace: a `tenant`-scope erasure request, together with `erasure:manage`. Platform keys, partner keys for their own tenants, and tenant keys that the workspace owner minted in the console (or that descend from one); never admins or their keys ([Security › Who minted a key](../project/design/security.md#who-minted-a-key)) |
-| `suppressions:manage` | Suppressions and allow or block lists |
+| `suppressions:manage` | Suppressions, and allow or block lists of the tenant or of one identity |
 | `usage:read` | Plan, allowances and usage figures. Every tenant and identity key holds it implicitly for its own workspace, without listing it. Platform and partner keys must hold it explicitly and pass `tenant_id` |
 | `audit:read` | Audit log |
 | `policy:write` | Read the per-field limits of, and change, the tenant's policy through `GET` and `PATCH /v1/tenants/{tenant_id}/policy`, within the key level's rules: a tenant key may set free fields and lower lower-only fields under its ceilings ([Configuration › Who may change a field](configuration.md#who-may-change-a-field)). Platform, partner and tenant keys; never identity keys |
 | `accounts:request` | Request, list, read and close entries of the [service sign-up ledger](#service-accounts). Every key level |
 | `accounts:approve` | Approve, reject and delete service-ledger entries. Includes `accounts:request`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own request. Approval by an API key is also a decision reserved for people ([Approve](#post-v1identitiesidentity_idaccountsaccount_idapprove--accountsapprove)) |
+| `drafts:read` | List and read drafts and their attachments, and the tenant's queue of drafts awaiting approval, scheduled or failed ([Drafts](#drafts)). Every key level; the tenant queue needs a platform, partner or tenant key |
+| `drafts:write` | Create, update, request approval for and delete (cancel) drafts; create, read and delete uploads (or with `messages:send`). Includes `drafts:read`. Every key level |
+| `drafts:approve` | Approve and reject drafts. Includes `drafts:read`. Platform, partner and tenant keys; never identity keys, so an agent cannot approve its own mail. Approving by an API key is also a decision reserved for people: a key approves only while `PM_QUARANTINE_KEY_RELEASE` is `on` or `PM_CONSOLE` is `off`, or where the tenant's `drafts.key_approval` is `true`, which admits only a platform key or the tenant's own partner key; approving with `send: true` also needs `messages:send` |
 | `members:read` | List console members and pending invitations (tenant, partner and platform keys; every console role holds it) |
 | `members:manage` | Invite, revoke, change roles and remove console members (tenant, partner and platform keys). Includes `members:read` |
 | `partners:manage` | Create, list, read, update and delete partners, the integrators whose partner keys create tenants ([Partners](#partners)). Platform keys only |
 | `platform:ops` | Platform operations: signing-key rotation, the dead-letter queue, maintenance jobs, waitlist invitations, switches, mailbox restores and re-applied erasures (platform keys only) |
+| `metrics:read` | Pause-window rates and event counts ([Deliverability metrics](#deliverability-metrics)); the screening summary ([Screening](#screening)). Every key level; never implicit. An identity key reads rates for its own identity, its tenant and the domains its addresses use, and event counts for its own identity only |
+
+The upload routes take either `messages:send` or `drafts:write`: a key needs one of them, not both.
 
 Key levels limit which resources a key can reach, whatever its permissions. From widest to narrowest:
 
@@ -140,6 +155,11 @@ Key levels limit which resources a key can reach, whatever its permissions. From
 - A **tenant** key reaches its own tenant.
 - An **identity** key reaches its own identity. It also reaches the tenant's domains read-only with
   `domains:read`, and the tenant's webhook endpoints and deliveries read-only with `webhooks:read`.
+
+**Provisional agent sign-ups.** While a workspace is a provisional agent sign-up, every key of it acts
+with at most `identities:read`, `messages:read`, `messages:send`, `messages:write`, `attachments:read`,
+`search:read`, `events:read` and the implicit `usage:read`, whatever it lists; a route outside that set
+answers `403 permission_denied` with `details.reason = "signup_unverified"` ([Agent sign-up](#agent-sign-up)).
 
 A route or field that needs a higher key level than the caller's returns `403 scope_denied`: for example
 an identity key on tenant search, or a partner key on `PATCH /v1/tenants/{tenant_id}/billing` of one of
@@ -154,7 +174,7 @@ lists one its level cannot hold with `400 invalid_request` and
 |---|---|
 | `platform:ops`, `partners:manage` | platform |
 | `tenants:manage` | platform, partner |
-| `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve` | platform, partner, tenant (an identity key holds `usage:read` implicitly for its own workspace, but cannot list it) |
+| `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve`, `drafts:approve` | platform, partner, tenant (an identity key holds `usage:read` implicitly for its own workspace, but cannot list it) |
 | `tenants:erase` | platform, partner, and a tenant key minted by the workspace owner's console session or by a key descended from one (otherwise `details.reason = "permission_owner_only"`) |
 | `identities:sign` | tenant, identity (platform and partner keys may grant it without holding it) |
 | Every other permission | platform, partner, tenant, identity |
@@ -171,11 +191,12 @@ they use session cookies, OAuth state, unsubscribe tokens, or Stripe, SNS and li
 
 | Route | What it is | In `openapi.yaml` | Design |
 |---|---|---|---|
-| `/console/*`: the server-rendered console, including `/console/sign-in…` (link and code), `/console/sign-up`, `/console/waitlist`, `/console/workspaces/new`, `/console/oauth/{provider}/start`, `/console/oauth/{provider}/callback`, `/console/settings/security`, `/console/settings/notifications`, `/console/plan/return` and `/console/connect` | Console pages, sign-up and sign-in (session cookies) | No | [Console design](../project/design/console.md), [Cloud sign-up and sign-in](../project/design/cloud-signup.md) |
+| `/console/*`: the server-rendered console, including `/console/sign-in…` (link and code), `/console/sign-up`, `/console/waitlist`, `/console/workspaces/new`, `/console/oauth/{provider}/start`, `/console/oauth/{provider}/callback`, `/console/settings/security`, `/console/settings/notifications`, `/console/plan/return`, `/console/connect`, `/console/agent-signup/verify`, `/console/agent-signup/claim` and `/console/agent-signup/refuse` | Console pages, sign-up and sign-in (session cookies) | No | [Console design](../project/design/console.md), [Cloud sign-up and sign-in](../project/design/cloud-signup.md), [Agent self-sign-up](../project/design/agent-signup.md) |
 | `GET /console/notifications/unsubscribe?t={token}`, `POST /console/notifications/unsubscribe?t={token}` | Unsubscribe from a kind of notification email. `GET` shows a confirmation page with a one-click form; `POST` is the RFC 8058 one-click unsubscribe and turns that kind off for that person and workspace. The token `t` is the only authority: no session, no CSRF token or `Origin` check, served even with `PM_CONSOLE=off`. An expired or foreign token changes nothing | No | [Notifications](../project/design/notifications.md#5-the-emails) |
 | `/billing/stripe/webhook` | Stripe events (Stripe signature) | No | [Billing design](../project/design/billing.md) |
 | `POST /hooks/ses`, `POST /hooks/ses/inbound` | Amazon SES delivery events and inbound mail, through SNS (SNS signature) | Yes | [Signed links and provider hooks](#signed-links-and-provider-hooks) |
 | `GET /v1/links/{token}` | Signed downloads (link signature) | Yes | [Signed links and provider hooks](#get-v1linkstoken) |
+| `PUT /v1/links/{token}` | Send an upload's bytes (link signature) | Yes | [Uploads](#put-v1linkstoken) |
 
 **Two hosts.** `PM_CONSOLE_HOST` names the console's host and defaults to `PM_API_HOST`, so a deployment
 can keep one hostname. When the two differ, console paths (`/console/*`, the unsubscribe pair included)
@@ -203,11 +224,15 @@ Every error looks like this:
     "message": "This Idempotency-Key was used with a different request body.",
     "retryable": false,
     "fix": "Use a new Idempotency-Key for a different message, or resend the original body.",
+    "docs": "https://pylotamail.com/docs/reference/errors#code-idempotency_conflict",
     "request_id": "req_01J9Z4…",
     "details": { "original_message_id": "msg_01J9Z3…" }
   }
 }
 ```
+
+`docs` links to the code's entry on the deployment's published errors page (`PM_DOCS_URL`,
+[Configuration](configuration.md#variables)).
 
 The code catalogue is in [Errors](errors.md).
 
@@ -246,9 +271,12 @@ partner, and `tenant_id` and `identity_id` are `null`.
   "key_id": "key_01J9…", "name": "pylota-api", "level": "tenant", "mode": "live",
   "partner_id": null, "tenant_id": "ten_01J9…", "identity_id": null,
   "permissions": ["identities:read", "messages:send", "search:read"],
+  "mcp_tools": null,
   "expires_at": null
 }
 ```
+
+`mcp_tools` is the key's MCP tool list, or `null` for every allowed tool.
 
 ---
 
@@ -303,7 +331,7 @@ with `policy:write`.
   - `policy` is checked field by field, for the fields sent: a platform-only field, or a lower-only
     field above its ceiling, gets `403 scope_denied` with `details.field`
     ([Configuration › Who may change a field](configuration.md#who-may-change-a-field)). A partner key may
-    set `quarantine.key_release` here, at creation.
+    set `quarantine.key_release` and `drafts.key_approval` here, at creation.
   - A partner has at most `max_tenants` tenants that are not `erased` (default 25): the next creation
     gets `403 partner_tenant_limit` with `details.max_tenants`. Creations count in `RL_PARTNER` (10 a
     minute per partner, shared with invitations; [Rate limits](#rate-limits)).
@@ -322,7 +350,8 @@ Updatable: `name`, `timezone`, `policy` (deep merge; `null` resets a field to it
 (`active` | `suspended`). Suspension behaviour: FR-TEN-3. `partner_id` and `mode` never change. A tenant
 key cannot call this route (`403 permission_denied`: it can never hold `tenants:manage`).
 
-- **A partner key** updates only its own tenants, `policy.quarantine.key_release` included. Each policy
+- **A partner key** updates only its own tenants, `policy.quarantine.key_release` and
+  `policy.drafts.key_approval` included. Each policy
   field sent is checked by its class: platform-only fields get `403 scope_denied`, and a lower-only field
   may be set at most to min(deployment default, platform ceiling), otherwise `403 scope_denied` with
   `details.field` ([Configuration › Who may change a field](configuration.md#who-may-change-a-field)), so
@@ -358,12 +387,13 @@ merge, `null` resets a field, arrays replace) and checks each field sent by the 
   `details.reason = "above_ceiling"`, `details.ceiling` and `details.ceiling_source`
   ([J23](../project/edge-cases.md), [J26](../project/edge-cases.md));
 - a guard field (`send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`,
-  `quarantine.unsolicited_otp`) may only be tightened, unless API keys may take decisions reserved for
+  `quarantine.unsolicited_otp`, `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`,
+  `screening.deadline_seconds`) may only be tightened, unless API keys may take decisions reserved for
   people on this tenant (`PM_QUARANTINE_KEY_RELEASE=on`; or the tenant's `quarantine.key_release: true`, and
   then only for a platform key or the tenant's partner key, never a tenant or identity key);
   otherwise `403 permission_denied` with `details.field` and `details.reason = "person_required"`
   ([J25](../project/edge-cases.md));
-- platform-only fields and `quarantine.key_release` get `403 scope_denied` with `details.field` and
+- platform-only fields, `quarantine.key_release` and `drafts.key_approval` get `403 scope_denied` with `details.field` and
   `details.reason = "not_writable"` ([J24](../project/edge-cases.md), [J14](../project/edge-cases.md)).
 
 One refused field refuses the whole write. Concurrent writes never lose one another: a write that keeps
@@ -491,6 +521,7 @@ exactly as a platform key does:
 | `keys:manage` | Mint, list, rotate and revoke tenant and identity keys of its own tenants, granting them `identities:sign` when their agents sign (it cannot hold it itself). Never a partner or platform key (`404 key_not_found` for an existing one, `403 key_scope_exceeded` to mint one), and never a key wider than itself |
 | `tenants:erase`, `erasure:manage` | Delete one of its tenants (`POST /v1/erasure-requests` with `scope: "tenant"`), which [`DELETE /v1/partners/{partner_id}`](#delete-v1partnerspartner_id) needs first, and the other erasure scopes |
 | `webhooks:manage`, `webhooks:read` | Partner endpoints (`POST /v1/webhooks` makes one, with `scope: "partner"`), which receive only its own tenants' events, and its tenants' endpoints ([Webhooks](#webhooks)) |
+| `events:read` | Its tenants' event logs, one tenant per request with `tenant_id` ([Event feed](#event-feed)) |
 | `quarantine:review` | See and release its tenants' quarantined mail; release by key follows the tenant's `quarantine.key_release` ([Release](#post-v1identitiesidentity_idmessagesmessage_idrelease--quarantinereview)) |
 | `usage:read` | Read one of its tenants' usage, with `tenant_id` |
 | Every other tenant-level permission | The same as a platform key, on its own tenants: identities and their addresses and signing keys (not `identities:sign`), domains, mail, search, suppressions and lists, audit, members |
@@ -530,6 +561,7 @@ tenant's caps: with the default `tenant_daily_send_cap` of 5,000, at most 125,00
   "domain_id": "dom_01J9…",
   "client_id": "acme:bookings",
   "send_policy": { "daily_cap": 300 },
+  "retention": { "message_hours": null },
   "metadata": { "operator_id": "op_123" }
 }
 ```
@@ -537,6 +569,10 @@ tenant's caps: with the default `tenant_daily_send_cap` of 5,000, at most 125,00
 - `send_policy` (optional) sets the identity's own send policy at creation, as `PATCH` does later. For any
   key but a platform key, a `daily_cap` above the tenant's effective `identity_daily_send_cap` gets
   `403 scope_denied` with `details.field: "send_policy.daily_cap"`, and nothing is created.
+- `retention.message_hours` (optional, `null` or 1–8,760): each message of the identity, with its
+  attachments, index rows and drafts, is erased that many hours after it is stored, except under a legal
+  hold ([Parity additions § 7](../project/design/parity-additions.md#7-per-identity-message-retention-fr-prv-7)).
+  A number needs `erasure:manage` as well (`403 permission_denied`, `details.required: ["erasure:manage"]`).
 
 - `username`: stored lower case as `^[a-z0-9][a-z0-9._-]{0,23}$`. The request value is checked by the
   username rules, not by a schema pattern, so each failure has its own code: a reserved or confusable name
@@ -588,12 +624,18 @@ On a `deleting` or `deleted` identity this returns `404 identity_not_found` and 
 other write by identity ID except the legal-hold routes, which stay usable on a `deleting` identity
 ([Privacy § 6.5](../project/design/privacy.md#65-identity-scope-fr-idn-4)).
 
-Updatable: `display_name`, `purpose`, `owner`, `signature`, `metadata`, `send_policy`, and `status`
-(`active` | `paused`). Setting `status: "active"` on an identity paused for `abuse_threshold` needs a
+Updatable: `display_name`, `purpose`, `owner`, `signature`, `metadata`, `send_policy`, `retention`, and
+`status` (`active` | `paused`). Setting `status: "active"` on an identity paused for `abuse_threshold` needs a
 platform, partner or tenant key and is audit-logged; on a tenant a partner's key created it needs a
 platform key (`403 scope_denied`, [J17](../project/edge-cases.md)). A `send_policy.daily_cap` above the
 tenant's effective `identity_daily_send_cap` needs a platform key (`403 scope_denied` with
 `details.field: "send_policy.daily_cap"`); the same applies at creation.
+`send_policy.require_approval` (`never`, `new_recipients`, `external`, `always` or `null`) can only make
+the tenant's `drafts.require_approval` stricter; a looser value than the identity's current one gets
+`403 scope_denied` from an identity key and `403 permission_denied` (`person_required`) from a tenant
+key where people decide ([Drafts](#drafts)). Setting `retention.message_hours` where it was `null`, or
+lowering it, needs `erasure:manage` as well; raising it or setting `null` needs `identities:write` only and
+brings nothing back. Each change writes the audit row `identity.retention_update`.
 
 ### `DELETE /v1/identities/{identity_id}` — `identities:write` and `erasure:manage`
 
@@ -618,7 +660,9 @@ signing and its JWK Set return `404 identity_not_found`.
   "addresses": [ { "...": "Address objects" } ],
   "owner": { "name": "Sam Patel", "email": "sam@acmecarhire.example" },
   "signature": { "text": "…", "html": null },
-  "send_policy": { "daily_cap": 500, "auto_reply": "allowed", "require_known_recipient": true },
+  "send_policy": { "daily_cap": 500, "auto_reply": "allowed", "require_known_recipient": true,
+                   "require_approval": null },
+  "retention": { "message_hours": null },
   "metadata": { "operator_id": "op_123" },
   "client_id": "acme:bookings",
   "created_at": "…", "updated_at": "…"
@@ -1005,6 +1049,143 @@ it as untrusted text.
 
 ---
 
+## Agent sign-up
+
+Self-sign-up for agents on Pylota Mail Cloud, behind `PM_AGENT_SIGNUP` (FR-ASU,
+[Agent self-sign-up](../project/design/agent-signup.md)). One call without a key creates a provisional
+workspace, one inbox `agent.{username}@{platform domain}` and one identity key; the named human verifies
+with a six-digit code or a link; an unverified workspace is erased after 7 days. Until then every key of
+the workspace acts with the provisional permission set ([Permissions](#permissions)), and the inbox can
+email only that human, one recipient per message and 10 messages a UTC day.
+
+The five routes after `POST` act on **the calling key's own sign-up**: the sign-up of the key's tenant.
+They need a tenant or identity key of that tenant and no listed permission; any other tenant or identity
+key gets `404 signup_not_found`, and a platform or partner key `403 scope_denied`. `RL_API` and
+`RL_TENANT` apply as to every key.
+
+### `POST /v1/agent-signup` — no key
+
+The body may be at most 4,096 bytes (`413 payload_too_large`, `details.limit: 4096`).
+
+```json
+{
+  "username": "travel-planner",
+  "human_email": "sam@brightwell.example",
+  "agent_name": "Travel planner",
+  "source": "pylota-mail-python/1.2.0",
+  "accept_terms": true
+}
+```
+
+- `username` (required): lower-cased, then 2–32 characters matching `^[a-z0-9][a-z0-9-]{1,31}$`. It
+  becomes the workspace's slug and address suffix, so the inbox is `agent.{username}@{platform domain}`. It
+  is checked with the address-suffix rules of [`POST /v1/tenants`](#post-v1tenants) and is never released.
+- `human_email` (required): the address of the person responsible for the agent. Example and reserved
+  domains, disposable domains and addresses this deployment receives are refused, and its domain must be
+  able to receive mail.
+- `agent_name` (optional): 1–78 characters, no CR or LF; the identity's display name and the workspace's
+  name. Never written into system mail.
+- `source` (optional): 1–64 characters of `[A-Za-z0-9._/+-]`, for example the SDK and its version.
+- `accept_terms` (required, `true`): the caller accepts the Terms of Service, the Privacy Policy and the
+  Data Processing Addendum (`PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL`).
+
+`Idempotency-Key` is ignored and nothing is recorded: the answer holds a secret that a replay could not
+return. Returns `201`; the key's secret is shown in this answer only:
+
+```json
+{
+  "signup_id": "asu_01JA2…",
+  "state": "provisional",
+  "tenant_id": "ten_01JA2…",
+  "identity_id": "idn_01JA2…",
+  "address": "agent.travel-planner@pylotamail.com",
+  "key": { "id": "key_01JA2…", "secret": "pmk_live_7k2m9q4xa0bc_…" },
+  "human_email_hint": "s***@brightwell.example",
+  "expires_at": "2026-10-24T09:00:00Z",
+  "verification": { "email": "queued", "code_expires_at": "2026-10-18T09:00:00Z" },
+  "limits": { "recipients": "human_only", "daily_sends": 10 },
+  "next": "Ask s***@brightwell.example for the six-digit code from our email, then POST /v1/agent-signup/verify with this key."
+}
+```
+
+`verification.email` is `queued`, or `not_sent` when the system identity's submit refused the email. The
+first failing check decides the answer:
+
+1. Agent sign-up is closed (`PM_AGENT_SIGNUP` is `off`, `PM_SIGNUP` is not `open`, billing or the console
+   is off: `details.reason = "disabled"`), or paused by the operator's switch (`paused`):
+   `403 signup_closed`.
+2. `RL_SIGNIN`, keyed by the client network (`CF-Connecting-IP`; an IPv6 address by its /64 prefix):
+   `429 rate_limited` with `details.bucket = "signin"`.
+3. The body: `413 payload_too_large`; `400 invalid_request` for an unknown field, a wrong type, a value out
+   of bounds or `accept_terms` other than `true`.
+4. `username`: `400 address_reserved` (a reserved or confusable name, `details.field = "username"`),
+   `400 address_unsupported` (other non-ASCII) or `400 address_invalid` (the pattern).
+5. `human_email`: `400 address_invalid`, `400 address_unsupported` (a non-ASCII local part), or
+   `400 invalid_request` with `details.reason = "human_email_not_allowed"` (an example, disposable or hosted
+   address).
+6. The username, or one that folds to the same, is taken: `409 username_taken`.
+7. The human's mail domain cannot receive mail: `400 invalid_request` with `details.reason =
+   "no_mail_domain"`; `503 unavailable` with `details.reason = "dns_unavailable"` when DNS cannot be read.
+8. The person refused agent sign-ups, or an admission budget is spent: `429 signup_limit_reached` with
+   `details.scope` (`network`, `asn`, `human_email` or `deployment`), `details.resets_at` and `Retry-After`.
+
+### `GET /v1/agent-signup` — the sign-up's own tenant or identity key
+
+```json
+{
+  "signup_id": "asu_01JA2…", "state": "provisional", "tenant_id": "ten_01JA2…",
+  "identity_id": "idn_01JA2…", "address": "agent.travel-planner@pylotamail.com",
+  "human_email_hint": "s***@brightwell.example", "human_status": "delivered",
+  "replacements_left": 2, "expires_at": "2026-10-24T09:00:00Z",
+  "code": { "expires_at": "2026-10-18T09:00:00Z", "attempts_left": 10, "failures_left": 30,
+            "emails_left_this_hour": 2, "email": "queued" },
+  "permissions": ["identities:read", "messages:read", "messages:send", "messages:write",
+                  "attachments:read", "search:read", "events:read", "usage:read"],
+  "verified_at": null, "verified_via": null, "source": "pylota-mail-python/1.2.0",
+  "created_at": "2026-10-17T09:00:00Z"
+}
+```
+
+`state` is `provisional`, `verified`, `expired`, `abandoned` or `refused`. `permissions` is the key's
+effective set. `human_status` is `pending`, `delivered` or `bounced`. A verified sign-up has `verified_at`,
+`verified_via` (`code`, `link` or `claim`) and `code: null`. A sign-up that ended answers with its state
+until the erasure revokes the key, then `401 key_revoked`.
+
+### `POST /v1/agent-signup/verify` — the sign-up's own tenant or identity key
+
+`{ "code": "482913" }`. `Idempotency-Key` optional. Returns `200` with the sign-up, now `verified`; a
+sign-up that is already verified answers `200` with `"already_verified": true`. Errors:
+`409 signup_not_pending` (not provisional, or past its 7 days; `details.state`), `403 tenant_suspended`,
+`400 invalid_request` (not six digits), `422 signup_code_invalid` (`details.reason` is `wrong` with
+`attempts_left` and `failures_left`, `burned`, `locked`, `expired`, `superseded` or `none`) and
+`409 signup_cannot_verify` (`details.reason` is `workspace_limit`, `human_email_hosted` or
+`person_disabled`). A code has 10 attempts and lives 24 hours; a sign-up allows 30 wrong codes in all.
+
+### `POST /v1/agent-signup/resend` — the sign-up's own tenant or identity key
+
+No body. `Idempotency-Key` optional (a replay sends nothing). Issues and emails a new code and link, which
+makes the previous ones invalid, and returns `202` with the sign-up. Errors: `409 signup_not_pending`,
+`403 tenant_suspended`, `403 signup_closed` (`paused`), `409 signup_human_unreachable` (the human's address
+hard-bounced: replace the human), and `429 signup_limit_reached` (`details.scope` is `resend` after 3 code
+emails in an hour, or `human_email` or `deployment`).
+
+### `PUT /v1/agent-signup/human` — the sign-up's own tenant or identity key
+
+`{ "human_email": "sam.patel@brightwell.example" }`. `Idempotency-Key` optional. Replaces the named person,
+at most twice and only before verification, and emails the new person a new code and link; the old code
+and link stop working at once, and `expires_at` does not move. The same address as now is a resend. Returns
+`200` with the sign-up. Errors: those of resend, the `human_email` errors of `POST /v1/agent-signup`, and
+`422 signup_replace_limit` once both replacements are used.
+
+### `DELETE /v1/agent-signup` — the sign-up's own tenant or identity key
+
+Abandons a provisional sign-up, for example after its key leaked. Returns `202` with
+`{ "state": "abandoned", "erasure_request_id": "era_…" }`: the tenant-scope erasure has started, and its
+first step revokes the key. A sign-up that is not provisional gets `409 signup_not_pending` (a verified
+workspace is deleted by its owner). Budgets are not refunded and the username stays taken.
+
+---
+
 ## Domains
 
 ### `POST /v1/tenants/{tenant_id}/domains` — `domains:write`
@@ -1136,6 +1317,10 @@ Re-reads the expected records from the provider APIs and checks each against DNS
 - `purpose` is `ownership`, `mx`, `dkim`, `return_path`, `spf`, `dmarc` or `ns`.
 - `status` is one of `ok`, `missing`, `mismatch` or `unexpected`, where `unexpected` means an extra record
   that conflicts (for example a second SPF record).
+
+With `?format=bind` the same records come back as an RFC 1035 zone fragment (`text/plain`), with
+suggested records, records to remove and registrar nameservers as comments
+([Parity additions § 9](../project/design/parity-additions.md#9-zone-file-export-fr-dom-15)).
 
 ### `PATCH /v1/domains/{domain_id}` — `domains:write`
 
@@ -1277,8 +1462,8 @@ Filters: `label`, `category`, `needs_reply_gte` (0–1; the search operator `is:
 `is_unread`, `direction` (of the last message), `after`, `before`, `archived` (default `false`). Sorted
 by `last_at` descending.
 
-Threads are built from visible mail only: quarantined, hidden and throttled messages are never listed or
-counted here, whatever the key's permissions. A key with `quarantine:review` reaches them through the
+Threads are built from visible mail only: quarantined, screening, hidden and throttled messages are never
+listed or counted here, whatever the key's permissions. A key with `quarantine:review` reaches them through the
 message list with an explicit `status` filter (below), or the [quarantine list](#quarantine)
 (quarantined messages only).
 
@@ -1310,6 +1495,9 @@ carries `extracted_text` (quotes stripped) rather than the full `text`.
 { "labels_add": ["claims"], "labels_remove": [], "read": true, "archived": false }
 ```
 
+When the tenant's `events.labels_changed` is `true`, a change of labels emits `message.labels_changed`
+([Webhook events](events.md#messages)).
+
 ### `POST /v1/identities/{identity_id}/threads/{thread_id}/hold` — `erasure:manage`
 
 ```json
@@ -1331,13 +1519,17 @@ are listed only when the request filters on that status explicitly (`status=quar
 `200` with none of those messages, never `403`, as search treats `include_quarantined`
 ([Security design § 5.3](../project/design/security.md#53-cross-level-read-access)).
 
+`screening_status` (`pending`, `clear`, `suspect`, `unavailable`) filters on the message's screening record,
+inside the visibility rule. Messages still being screened (`status=screening`) are left out by default and
+listed only for that explicit filter from a key holding `quarantine:review`, as for quarantined mail.
+
 ### `GET /v1/identities/{identity_id}/messages/{message_id}` — `messages:read`
 
-`include` takes `html`, `headers` and `quoted`. A `quarantined`, `hidden` or `throttled` message is
-returned only to a key that holds `quarantine:review`; any other key gets `404 message_not_found`, as for
+`include` takes `html`, `headers` and `quoted`. A `quarantined`, `screening`, `hidden` or `throttled` message
+is returned only to a key that holds `quarantine:review`; any other key gets `404 message_not_found`, as for
 a message that does not exist ([Security](../project/design/security.md)). The same rule applies to its
 attachments, their extracted text, its raw MIME and re-running its triage. Reply, reply-all and forward
-need `quarantine:review` for a quarantined message and never accept a hidden or throttled one.
+need `quarantine:review` for a quarantined or screening message and never accept a hidden or throttled one.
 
 #### Message object
 
@@ -1356,23 +1548,33 @@ need `quarantine:review` for a quarantined message and never accept a hidden or 
   "html": null,
   "attachments": [
     { "id": "att_01J9…", "filename": "INV-88213.pdf", "content_type": "application/pdf",
-      "size": 48213, "disposition": "attachment", "text_status": "ready", "pages": 2, "risk": null }
+      "size": 48213, "disposition": "attachment", "text_status": "ready", "pages": 2, "risk": null,
+      "upload_id": null }
   ],
   "labels": ["invoice"],
   "kind": "normal",
+  "calendar": null,
   "trust": {
-    "verdict": "pass", "spf": "pass", "dkim": "pass", "dmarc": "pass", "arc": "none",
-    "known_sender": true, "quarantined": false, "spam_score": 0.02,
-    "automated": false, "flags": []
+    "verdict": "pass", "spf": "pass", "dkim": "pass", "dmarc": "pass", "arc": "pass",
+    "spf_domain": "mail.brightwell.example", "spf_aligned": true,
+    "dkim_domains": [
+      { "domain": "brightwell.example", "selector": "s1", "result": "pass", "aligned": true },
+      { "domain": "mailer.example", "selector": "k2", "result": "pass", "aligned": false }
+    ],
+    "dmarc_domain": "brightwell.example", "dmarc_policy": "reject", "dmarc_aligned_by": "dkim",
+    "arc_sealer": "google.com",
+    "known_sender": true, "quarantined": false, "spam_score": 0.02, "automated": false, "flags": []
   },
   "triage": {
     "status": "done", "category": "billing", "needs_reply": 0.15, "urgency": 1,
     "summary": "Brightwell invoice 88213 for AB12 CDE brake work, £412.80 inc VAT.",
     "language": "en", "risk_flags": [], "model": "@cf/openai/gpt-oss-20b", "version": 3, "run": 1
   },
+  "screening": null,
   "refs": [ { "kind": "uk_plate", "value": "AB12CDE" }, { "kind": "invoice", "value": "88213" } ],
   "rfc_message_id": "CAF8a…@mail.brightwell.example",
   "in_reply_to": null,
+  "draft_id": null,
   "deliveries": null,
   "flags": [],
   "metadata": {}
@@ -1385,7 +1587,33 @@ need `quarantine:review` for a quarantined message and never accept a hidden or 
   `thread_join_unverified` (a thread join without a valid token: a failed token, or `In-Reply-To` or
   `References` from a sender who is not a participant, [C9](../project/edge-cases.md)) and
   `shared_domain_sender` (the sender is another workspace's address on the shared platform domain,
-  [D12](../project/edge-cases.md)).
+  [D12](../project/edge-cases.md)), `steering_suspected` (screening judged that the message tries to
+  steer an agent) and `attachments_unscreened` (screening could not read the text of at least one
+  attachment, for example an image while `inbound.extract_image_text` is off or a file whose conversion
+  failed: treat those attachments' bytes as unscreened content).
+- `trust.verdict` is `pass`, `arc_rescued`, `fail`, `softfail`, `none`, `unaligned` or `unverified`.
+  `arc_rescued`: the message failed DMARC, and a trusted forwarder's ARC seal vouches that it passed when
+  the forwarder received it ([Parity additions § 6](../project/design/parity-additions.md#6-trusted-arc-sealers-fr-in-15)).
+  It is never quarantined for authentication and never releases a verification code.
+- `trust.spf_domain`, `spf_aligned`, `dkim_domains` (at most 10), `dmarc_domain`, `dmarc_policy`,
+  `dmarc_aligned_by` and `arc_sealer` say which domain each method checked and which aligned
+  ([Parity additions § 5](../project/design/parity-additions.md#5-authentication-detail-on-messages-fr-in-14)).
+- `screening` is the message's [screening record](../project/design/screening.md#3-the-model-and-the-state-machine)
+  (`status` `pending`, `clear`, `suspect` or `unavailable`; `mode`; `reason`; `signals[]`; `model`;
+  `started_at`; `deadline_at`; `completed_at`; `late`; `released_by`), or `null` when the message was not
+  screened. `status: "screening"` means the message is held until its verdict, at the latest at
+  `screening.deadline_at`.
+- `calendar` is the message's calendar object, or `null`: method, verification (`verified`,
+  `verified_by`, `reason`), `uid`, `sequence`, `dtstamp`, `recurrence_id`, `status`, `summary`,
+  `description` (an excerpt), `location`, `start` and `end` (UTC instants with the original `TZID` and
+  how it was resolved), `all_day`, `floating`, `ends_at`, `rrule` (validated, never expanded),
+  `exdates_count`, `organizer`, `attendees` (with `partstat`, `role`, `rsvp`, `is_self`), overrides,
+  `conference` (meeting links), `organized_here` and the `attachment_id` of the raw `.ics`. All its strings
+  are untrusted content. Alarms, attachments, images and extension properties are never included
+  ([Calendar invitations §2.9](../project/design/calendar-invitations.md#29-the-calendar-object)).
+- `draft_id` is the draft an outbound message was sent from, or `null`.
+- `attachments[].upload_id` is the upload the attachment was copied from; `null` for inline, inbound and
+  forwarded attachments. It stays after the upload is gone.
 - `triage.status` is `pending`, `done`, `skipped` or `failed`. `triage.version` is the triage logic
   version of the run that produced the record: a re-run keeps it on the same release and records the
   current one after an upgrade; `triage.run` counts completed runs
@@ -1422,11 +1650,82 @@ model inside a clearly delimited block, never as instructions.
 
 `labels_add`, `labels_remove`, `read`.
 
+When the tenant's `events.labels_changed` is `true`, a change of labels emits `message.labels_changed`
+([Webhook events](events.md#messages)).
+
+### `POST /v1/identities/{identity_id}/messages/batch-get` — `messages:read`
+
+```json
+{ "message_ids": ["msg_01JA4B1G7PW7X2M5N6P8R0T1YC", "msg_01JA4B2K9QW7X2M5N6P8R0T1YD", "msg_01JA4B3M2RW7X2M5N6P8R0T1YE"],
+  "extracted_text_bytes": 2048 }
+```
+
+```json
+{
+  "data": [
+    { "id": "msg_01JA4B1G7PW7X2M5N6P8R0T1YC", "thread_id": "thr_01JA…", "direction": "inbound", "status": "received",
+      "from": { "address": "jo@example.net", "name": "Jo Rivera" }, "subject": "Change of dates for BK-2291",
+      "extracted_text": "Could we move the pick-up to Friday…", "extracted_text_truncated": false,
+      "text": null, "html": null, "labels": ["booking"], "trust": { "verdict": "pass", "…": "…" }, "…": "…" }
+  ],
+  "not_found": ["msg_01JA4B3M2RW7X2M5N6P8R0T1YE"],
+  "remaining": [],
+  "truncated": false
+}
+```
+
+- `data` holds [Message objects](#message-object) in request order, built as
+  `GET …/messages/{message_id}` builds them, without `text`, `html` and `headers` (there is no `include`),
+  and with `extracted_text` cut at a UTF-8 character boundary to `extracted_text_bytes` (0–16,384,
+  default 2,048), with `extracted_text_truncated: true` when it was cut.
+- `not_found` lists, in request order, every ID that is not a message of this identity that the key may
+  see: missing, erased, of another identity, or `quarantined`, `hidden` or `throttled` without
+  `quarantine:review`. The answer is the same for each of them.
+- `remaining` and `truncated`: the serialised response body never exceeds 1,048,576 bytes. When the next
+  message would pass that budget, it and every later found message are listed in `remaining`, in request
+  order, and `truncated` is `true`; the client asks again for them. The first found message is always in
+  `data` (one message without `text` and `html` is far below the budget).
+
+### `POST /v1/identities/{identity_id}/messages/batch-update` — `messages:write`
+
+```json
+{ "message_ids": ["msg_01JA4B1G7PW7X2M5N6P8R0T1YC", "msg_01JA4B2K9QW7X2M5N6P8R0T1YD"],
+  "labels_add": ["claimed", "claimed-by-bookings"], "labels_remove": ["new"],
+  "read": true, "archived": false, "require_absent": ["claimed"] }
+```
+
+```json
+{ "updated": ["msg_01JA4B1G7PW7X2M5N6P8R0T1YC"], "unchanged": [],
+  "conflicts": ["msg_01JA4B2K9QW7X2M5N6P8R0T1YD"], "not_found": [],
+  "threads_archived": 0, "threads_unarchived": 0 }
+```
+
+- `labels_add`, `labels_remove`: labels as in `PATCH …/messages/{message_id}` (pattern
+  `^[a-z0-9][a-z0-9_:-]{0,63}$`), at most 64 each. `read` sets the read state. `archived` sets the
+  archived flag of each **thread** that holds a listed message, as the single-thread `PATCH` does.
+- `require_absent` (at most 10 labels) makes the change conditional per message: a message that carries
+  any of these labels when the transaction runs is not changed and is listed in `conflicts`. It is the
+  atomic claim that lets several agents share one inbox: `require_absent: ["claimed"]` with
+  `labels_add: ["claimed"]` lets exactly one of two racing callers take a message.
+- `updated`: messages this request changed (a label, the read state, or its thread's archived flag).
+  `unchanged`: messages found and allowed whose state already matched. `conflicts`: messages skipped by
+  `require_absent`. `not_found`: as for `batch-get`. Every listed ID appears in exactly one of the four.
+- `threads_archived` and `threads_unarchived` count the threads whose flag this request changed.
+- `Idempotency-Key` is optional, as on every other `POST`. The record is kept in the identity's mailbox and
+  written in the same transaction as the change, scoped per identity as for sends, so a retry after a lost
+  response replays the committed result (`Idempotent-Replayed: true`) and a claim the caller already made
+  reads as `updated`, not as a conflict. A second request with the same key waits for the first and
+  replays it ([Parity additions § 2.4](../project/design/parity-additions.md#24-concurrency-idempotency-and-failures)).
+
+A batch is checked once for scope and permission. IDs the key cannot see are in `not_found`, exactly as
+missing ones. `batch-update` is one transaction: with a message that would pass 64 labels nothing changes
+(`400 invalid_request`, `details.reason = "label_limit"`, `details.message_ids`).
+
 ### `GET /v1/identities/{identity_id}/messages/{message_id}/attachments/{attachment_id}` — `attachments:read`
 
 Returns the bytes with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and
 `Content-Security-Policy: sandbox`. The message's visibility is checked first: an attachment of a
-`quarantined`, `hidden` or `throttled` message is `404 message_not_found` without `quarantine:review`.
+`quarantined`, `screening`, `hidden` or `throttled` message is `404 message_not_found` without `quarantine:review`.
 Then attachments with a `risk` need `quarantine:review` too (`403 permission_denied`).
 
 ### `GET /v1/identities/{identity_id}/messages/{message_id}/attachments/{attachment_id}/text` — `attachments:read`
@@ -1445,9 +1744,27 @@ Query: `pages=1-3` (default: all, capped at 200 KB of text).
 Re-runs triage (FR-TRI-5). Returns `202` with no body. A `message.triaged` event follows, and the record
 then has a `run` one higher and the current release's `version` (the same one unless triage was
 upgraded since the last run). A message that ingest never triages (quarantined,
-hidden, throttled, a delivery report or read receipt, or a system-identity message) gets
-`409 triage_not_eligible` with `details.reason` (`quarantined` or `not_eligible`): release a quarantined
-message instead, which triages it. Outbound messages get `400 invalid_request`.
+hidden, throttled, a delivery report or read receipt, or a system-identity message), or a message still
+being screened (`details.reason = "screening"`), gets `409 triage_not_eligible` with `details.reason`
+(`quarantined`, `screening` or `not_eligible`): release a quarantined message instead, which triages it.
+Outbound messages get `400 invalid_request`.
+
+### `POST /v1/identities/{identity_id}/messages/{message_id}/feedback` — `messages:write`
+
+```json
+{ "verdict": "false_positive", "notes": "Our booking system's own confirmation format." }
+```
+
+Feedback on a screening verdict ([Screening hold §11](../project/design/screening.md#11-feedback)). `verdict` is
+`correct`, `false_positive`, `missed_threat`, `legitimate_instruction` or `spam`, and must fit the record's status;
+`notes` is optional, at most 500 characters. Returns `201` with the feedback object. At most 20 per message.
+Feedback never changes the message. Errors: `400 invalid_request` (`details.reason = "feedback_not_applicable"`
+for a verdict that does not fit), `404 message_not_found` (a quarantined or screening message without
+`quarantine:review`), `409 not_screened`, `409 screening_pending`, `422 feedback_limit_reached`.
+
+### `GET /v1/identities/{identity_id}/messages/{message_id}/feedback` — `messages:read`
+
+The message's feedback, oldest first: `{ "data": [ … ] }`.
 
 ### `POST /v1/identities/{identity_id}/messages/{message_id}/release` — `quarantine:review`
 
@@ -1455,7 +1772,10 @@ message instead, which triages it. Outbound messages get `400 invalid_request`.
 { "reason": "Known supplier, DKIM key rotated" }
 ```
 
-Moves a quarantined message to `received`, emits `message.released` and runs triage. Audit-logged
+Moves a quarantined message to `received`, emits `message.released` and, when the message was never evented as
+received, `message.received` with `released: true` (in that order, in one transaction), and runs triage. A
+message still being screened gets `409 not_quarantined` with `details.status = "screening"` and
+`details.deadline_at`. Audit-logged
 (`quarantine.release`, with the key). When `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud),
 every API key gets `403 permission_denied` and the release has to be done by a person in the console
 (FR-CON-6), unless the message's tenant has `policy.quarantine.key_release: true`: then a platform key, or
@@ -1474,7 +1794,8 @@ instead).
 
 ## Sending
 
-All four endpoints need `messages:send` and an `Idempotency-Key`. They return `202 Accepted` with the
+Send, reply, reply-all, forward and [calendar-reply](#post-v1identitiesidentity_idmessagesmessage_idcalendar-reply--messagessend)
+need `messages:send` and an `Idempotency-Key`. They return `202 Accepted` with the
 [Message object](#message-object) (`direction: "outbound"`, `status: "queued"`) plus `"deduplicated": false`.
 
 When the plan's `sends` allowance is spent, send, reply, reply-all and forward fail with
@@ -1547,6 +1868,13 @@ which only a dry run returns. A `200` always has `would_send: true`; each recipi
   (`details.reason`: `thread_rate` or `sender_rate`, with `details.retry_after`; [N35](../project/edge-cases.md)). A tenant or sending domain whose
   sending was paused automatically gets `409 sending_paused` (`details.scope`: `tenant` or `domain`,
   [G12](../project/edge-cases.md)).
+- **Approval required** ([Drafts](#drafts), FR-DRF-4). When the tenant's `drafts.require_approval`, or
+  the identity's stricter `send_policy.require_approval`, needs approval for these recipients, the send
+  is refused with `403 approval_required` (`details.reason`, `details.recipients`) and nothing is
+  stored: create the same message as a draft and send it; it waits for an approver.
+- **Expired messages.** A retry with the same `Idempotency-Key` and body after the message expired under
+  the identity's `retention.message_hours` gets `410 message_expired` (`details.message_id`,
+  `details.expired_at`) and nothing is sent; with another body, `409 idempotency_conflict`.
 - `thread_id` continues an existing thread without quoting. References are set from the thread.
 - `from_address` must be an `active` address of the identity, or a `retiring` one on a thread that
   already uses it (G7; with `thread_id`). Otherwise `400 invalid_request` with
@@ -1560,10 +1888,28 @@ which only a dry run returns. A `200` always has `would_send: true`; each recipi
   `Priority` `normal`, `non-urgent` or `urgent`, and `Sensitivity` `personal`, `private` or
   `company-confidential`; another value gets `400 invalid_request`. These checks run when the request
   arrives, so a bad header never becomes a later `rejected`. Everything else is set by the service.
-- Attachments: `content_base64`, `disposition` (`attachment` or `inline`) and `content_id` (for inline).
-  The total encoded message must fit the transport limit (5 MiB with Cloudflare) or the request fails with
-  `413 message_too_large`. When the tenant enables `large_attachments: "link"`, oversized attachments
-  become expiring signed links instead.
+- `calendar`: `{ "ics": "<iCalendar>", "attach_copy": true }` sends iMIP. `ics` is at most 262,144
+  bytes (`413 calendar_too_large`) and needs exactly one `METHOD`, one `UID`, a `DTSTAMP` in each
+  `VEVENT` and the structure RFC 5546 gives its method (`400 calendar_invalid` with
+  `details.reason`). For `PUBLISH`, `REQUEST`, `ADD`, `CANCEL` and `DECLINECOUNTER` the `ORGANIZER`
+  must be the address the message is sent from (`400 calendar_organizer_mismatch`, which names it),
+  and every recipient an `ATTENDEE` except for `PUBLISH`, which has none and may go to anyone; for `REPLY`, `REFRESH` and `COUNTER` the replying `ATTENDEE`
+  must be the `From` (`400 calendar_attendee_mismatch`) and the one recipient the `ORGANIZER`
+  (`400 calendar_recipient_mismatch` otherwise). `kind` must be `transactional`. Missing
+  `VTIMEZONE`s are added and extension properties other than `X-WR-TIMEZONE` removed (both listed in
+  `calendar.outbound`). A lower `SEQUENCE` than one this identity already sent for the `UID` gets
+  `409 calendar_sequence_stale`. A calendar message never falls back to the platform domain; on a
+  `cloudflare`-transport domain it gets `422 transport_unavailable` (`calendar_needs_raw_mime`) until
+  the raw send is available ([Calendar invitations §5](../project/design/calendar-invitations.md#5-outbound-sending-icalendar)).
+- Attachments: each item is either inline (`filename`, `content_type`, `content_base64`) or an upload
+  (`upload_id`, optional `filename`), with `disposition` (`attachment` or `inline`) and `content_id`
+  (for inline). An upload must be `ready` and belong to the sending identity (`404 upload_not_found`,
+  `409 upload_not_ready`, `410 upload_expired`). Every attachment is classified like inbound mail, and
+  one with a quarantining risk (also after a rename) gets `422 attachment_risky`. Attachments total at
+  most 26,214,400 decoded bytes; the encoded message must fit the transport limit (5 MiB with
+  Cloudflare) or the request fails with `413 message_too_large` (`details.reason` `attachments_total` or
+  `transport_limit`). When the tenant enables `large_attachments: "link"`, oversized attachments become
+  expiring signed links instead.
 
 ### `POST /v1/identities/{identity_id}/messages/{message_id}/reply`
 
@@ -1573,18 +1919,41 @@ which only a dry run returns. A `200` always has `would_send: true`; each recipi
 
 Replies to the sender of `message_id` (or its `Reply-To`, under the rules in
 [Sending](../guides/sending.md#who-a-reply-goes-to)). The subject gets one `Re:` prefix. The `From` is
-the address the counterparty wrote to. `In-Reply-To` and `References` are set.
+the address the counterparty wrote to. `In-Reply-To` and `References` are set. It also accepts
+`calendar`, as `send` does.
 
 ### `POST /v1/identities/{identity_id}/messages/{message_id}/reply-all`
 
 As `reply`, to the sender plus every `To`/`Cc` recipient except this identity's own addresses. BCC
-recipients of the original are never included ([A10](../project/edge-cases.md)).
+recipients of the original are never included ([A10](../project/edge-cases.md)). `calendar` is refused
+(`400 invalid_request`).
 
 ### `POST /v1/identities/{identity_id}/messages/{message_id}/forward`
 
 ```json
-{ "to": ["claims@insurer.example"], "text": "Forwarding the photos for claim 7781.", "include_attachments": true }
+{ "to": ["claims@insurer.example"], "text": "Forwarding the photos for claim 7781.", "include_attachments": true,
+  "attachments": [ { "upload_id": "upl_01JAC3Q7W9X2M5N6P8R0T1Y4ZB" } ] }
 ```
+
+`attachments` adds files, inline or from uploads, as for send; `include_attachments` keeps the
+original's. `calendar` is refused (`400 invalid_request`).
+
+### `POST /v1/identities/{identity_id}/messages/{message_id}/calendar-reply` — `messages:send`
+
+```json
+{ "partstat": "accepted", "comment": "Our driver will bring the car at 08:45.", "recurrence_id": null }
+```
+
+Answers a verified invitation (`method: "request"`) that names this identity as an attendee: an iTIP
+`REPLY` goes to the invitation's `ORGANIZER` only, from the attendee's address, in the invitation's
+thread. `partstat` is `accepted`, `declined` or `tentative`; `comment` at most 1,000 characters;
+`recurrence_id` (an RFC 3339 instant, a local time without offset for a floating invitation, or a date
+for an all-day one; `instance_zone_unknown` when the invitation's zone is unknown) answers one instance.
+`Idempotency-Key` is required, and `?dry_run=true` works as on sends. Returns `202` with the Message
+object. Refusals: `409 calendar_not_invitation`, `409 calendar_not_verified` (also for a quarantined
+invitation, release it first, or one in screening), `409 calendar_not_attendee`, `409 calendar_cancelled`,
+`409 calendar_superseded`, `409 calendar_event_past`, `409 calendar_attendee_address_unavailable`,
+and every send error ([Calendar invitations §6](../project/design/calendar-invitations.md#6-the-calendar-reply-route)).
 
 ### `POST /v1/identities/{identity_id}/messages/{message_id}/cancel` — `messages:send`
 
@@ -1617,6 +1986,271 @@ marks the message `failed` with reason `resolved_not_sent`, after which you may 
 | `canceled` | Cancelled while queued | yes |
 
 The message status is a roll-up. Per-recipient status is in `deliveries`.
+
+---
+
+## Drafts
+
+An agent writes an email as a draft, a person or the operator's system approves it when needed, and it
+is sent at once or at `send_at` through the same pipeline as every send. The design is
+[Drafts, approvals and scheduled send](../project/design/drafts.md).
+
+### `POST /v1/identities/{identity_id}/drafts` — `drafts:write`
+
+The body takes the fields of `POST …/messages` (`to`, `cc`, `bcc`, `subject`, `text`, `html`,
+`attachments`, `kind`, `thread_id`, `from_address`, `headers`, `unsubscribe`, `consent`, `labels`,
+`metadata`), or `in_reply_to` (with `reply_all`) or `forward_of` with the fields of reply or forward, plus
+`send_at`, `client_id` and `request_approval`. An attachment is inline (`content_base64`) or
+`{ "upload_id": "…" }`; a draft copies an upload's bytes when its revision is saved, so an upload reference
+gets `404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired` or `422 attachment_risky` here and
+on update, and attachments are classified and limited to 26,214,400 bytes in total as on a send. A draft
+with `in_reply_to` or `forward_of` also needs `messages:read`. The kind is fixed at creation. `client_id`
+makes the create idempotent (`200` with the existing draft, `409 client_id_conflict` for another body).
+Returns `201` with the [Draft object](#draft-object) and an `ETag`; an `Idempotency-Key` replay returns
+`201` again with `Idempotent-Replayed: true`. `Idempotency-Key` optional.
+
+### `GET /v1/identities/{identity_id}/drafts` · `GET …/drafts/{draft_id}` · `GET …/drafts/{draft_id}/attachments/{attachment_id}` — `drafts:read`
+
+List filters: `status` (one or a comma list), `draft_kind`, `label`, `thread_id`, `client_id`,
+`scheduled_after`, `scheduled_before`; newest first; items without `text` and `html`, with `preview`.
+A draft whose source is quarantined or in screening needs `quarantine:review`, on every route and in the
+tenant's queue. `GET` of one reply draft first stores a change in its resolved recipients as a new
+revision ([Drafts §2.4](../project/design/drafts.md#24-revision-etag-and-digest)).
+
+### `PATCH /v1/identities/{identity_id}/drafts/{draft_id}` — `drafts:write`
+
+Changes fields; `If-Match` makes a stale write fail with `409 draft_revision_mismatch`. Attachments
+change through `attachments_add` and `attachments_remove`, labels through `labels`, `labels_add`,
+`labels_remove`. Changing the content of a draft that was approved, pending or scheduled drops the
+approval and the schedule and asks for approval again (`draft.approval_requested`); changing only
+`send_at`, `labels` or `metadata` keeps them. `send_at` reschedules a scheduled draft, `null`
+unschedules it, and a time on a failed draft schedules it again. `409 draft_not_editable` while it is
+being sent, and once it is `sent` or `canceled`. `423 legal_hold` for a change of the content, `labels` or
+`metadata` of a draft under a legal hold.
+
+### `DELETE /v1/identities/{identity_id}/drafts/{draft_id}` — `drafts:write`
+
+Cancels the draft (`status: "canceled"`, content deleted); a scheduled draft is never sent afterwards.
+Returns `200`, also again on a `canceled` draft. A draft under a legal hold is canceled with its content
+kept until the hold ends. `409 draft_not_editable` while it is being sent or once sent.
+
+### `POST /v1/identities/{identity_id}/drafts/{draft_id}/send` — `messages:send` and `drafts:read`
+
+`Idempotency-Key` required. Body (optional): `send_at` (a time schedules; `null` sends now; left out
+uses the draft's future `send_at` or sends now), `revision` (when given, the draft must still be at it),
+`labels_add`, `labels_remove`. Returns `202` with the draft: `sent` with `message_id`, `scheduled`, or
+`pending_approval` when policy needs an approval it does not have. A refusal of the send pipeline
+answers its own error and leaves the draft as it was. `?dry_run=true` returns
+`{ would_send, outcome, approval_reason, send_at, recipients }` and changes nothing.
+
+### `POST /v1/identities/{identity_id}/drafts/{draft_id}/approve` — `drafts:approve`
+
+Body: `revision` (required), `digest` (optional), `send` (required), `note`, `on_behalf_of` (keys
+only: your own user's ID, 1–128 printable ASCII, no `@`). `send: true` also needs `messages:send` and
+sends now, or at a future `send_at`. A key may approve only where people decide is not required
+(`PM_QUARANTINE_KEY_RELEASE=on` or `PM_CONSOLE=off`), or where the tenant's `drafts.key_approval` is
+`true` and the key is a platform key or the tenant's own partner key; otherwise
+`403 permission_denied` (`person_required`); a key cannot approve content it wrote
+(`self_approval`). An `editing`, `pending_approval`, `approved`, `scheduled` or `failed` draft can be
+approved; a `scheduled` one stays scheduled. Returns `200` with the draft; a refused send shows
+`status: "failed"` and `failure`. Audit-logged.
+
+### `POST /v1/identities/{identity_id}/drafts/{draft_id}/reject` — `drafts:approve`
+
+Body: `reason` (required, at most 500 characters), `revision`, `on_behalf_of`. An `editing`,
+`pending_approval`, `approved`, `scheduled` or `failed` draft can be rejected. Returns `200` with the
+draft, `status: "rejected"` (also again on a `rejected` one). `409 draft_not_editable` while it is being
+sent; `409 draft_not_pending` once `sent` or `canceled`. Audit-logged.
+
+### `GET /v1/tenants/{tenant_id}/drafts` — `drafts:read`, tenant, partner or platform key
+
+The tenant's queue, oldest first: `status` (`pending_approval` by default, `scheduled`, `failed`),
+`identity_id`, `scheduled_after`, `scheduled_before`. Items hold IDs, status, kind, counts and times,
+never content.
+
+#### Draft object
+
+```json
+{ "id": "drf_01JA2B3C4D5E6F7G8H9J0K1M2N", "tenant_id": "ten_01J9…", "identity_id": "idn_01J9…",
+  "client_id": "pm:v1:draft:apv_8812", "draft_kind": "new", "kind": "transactional",
+  "status": "pending_approval", "revision": 3, "etag": "\"3-9f2c41ab\"", "digest": "9f2c41ab…",
+  "in_reply_to": null, "forward_of": null, "thread_id": null, "from_address": null,
+  "to": [ { "address": "jo@example.net", "name": "Jo Rivera" } ], "cc": [], "bcc": [],
+  "subject": "Your quote for the Golf, 14–16 November", "text": "Hi Jo, …", "html": null,
+  "attachments": [ { "id": "att_01JA…", "filename": "quote.pdf", "content_type": "application/pdf",
+    "disposition": "attachment", "content_id": null, "size": 48213, "sha256": "…", "source": "upload",
+    "upload_id": "upl_01JA…" } ],
+  "include_attachments": null, "calendar": null, "headers": {}, "unsubscribe": null, "consent": null,
+  "labels": ["quote"], "metadata": { "quote_id": "q_118" }, "send_at": null,
+  "approval": { "state": "requested", "reason": "new_recipients", "requested_at": "…",
+    "requested_by_key_id": "key_01J9…", "approved_revision": null, "approved_digest": null,
+    "approved_at": null, "approved_by_key_id": null, "approved_by_user_id": null, "on_behalf_of": null,
+    "note": null },
+  "send": { "origin": "api", "requested_at": "…", "requested_by_key_id": "key_01J9…",
+    "requested_by_user_id": null, "due_at": null, "labels_add": [], "labels_remove": [] },
+  "rejection": null, "failure": null, "message_id": null, "sent_at": null,
+  "created_by_key_id": "key_01J9…", "updated_by_key_id": "key_01J9…", "content_by_key_id": "key_01J9…",
+  "created_at": "…", "updated_at": "…",
+  "deduplicated": false }
+```
+
+- `id`: `drf_` + ULID.
+- `identity_id`, `tenant_id`: from the path and the key's scope, never from the body.
+- `client_id`: optional caller key for an idempotent create: 1–255 printable ASCII characters without `@`
+  (it appears in events, which hold no addresses), unique per identity.
+- `draft_kind`: `new`, `reply`, `reply_all` or `forward`, fixed at creation from `in_reply_to`,
+  `reply_all` and `forward_of` ([Drafts §2.2](../project/design/drafts.md#22-kinds-and-the-fields-each-takes)).
+- `kind`: the send kind, as on `POST …/messages`: `transactional` (default), `marketing` (new drafts only)
+  or `auto_reply` (reply drafts only).
+- `status`: `editing`, `pending_approval`, `approved`, `scheduled`, `sending`, `sent`, `failed`, `rejected`
+  or `canceled` ([Drafts §2.3](../project/design/drafts.md#23-states-and-who-moves-them)).
+- `revision`: starts at 1 and increases by one on every successful `PATCH`, and when a reply draft's
+  resolved recipients change ([Drafts §2.4](../project/design/drafts.md#24-revision-etag-and-digest)).
+- `etag`: the HTTP entity tag of the current revision
+  ([Drafts §2.4](../project/design/drafts.md#24-revision-etag-and-digest)).
+- `digest`: the content digest of the current revision, 64 hex characters; `null` once the content is
+  cleared.
+- `in_reply_to`, `forward_of`: the source message (`msg_`) of a reply or forward draft.
+- `thread_id`: the thread the message will join: the source's thread for replies and forwards, or the
+  `thread_id` given to a new draft; `null` for a new thread.
+- `from_address`, `to`, `cc`, `bcc`, `subject`, `text`, `html`, `headers`, `unsubscribe`, `consent`,
+  `include_attachments`, `calendar`: as on the send routes (`calendar` as in
+  [Calendar invitations §5](../project/design/calendar-invitations.md#5-outbound-sending-icalendar)), limited
+  per kind. `html` is kept exactly as written; it is sanitised only when shown in the console and when
+  the message row is stored.
+- `attachments`: `[{ id, filename, content_type, disposition, content_id, size, sha256, source, upload_id }]`:
+  `source` is `inline` (bytes given as base64) or `upload` (copied from an upload when the revision was
+  saved; `upload_id` records which); either way the draft holds its own copy.
+- `labels`: labels the sent message will carry (`^[a-z0-9][a-z0-9_:-]{0,63}$`, at most 64).
+- `metadata`: as on messages (16 keys, 512 bytes per value); copied to the message.
+- `send_at`: the time the draft should be sent, or `null` for "when sent". Setting it alone schedules
+  nothing ([Drafts §6](../project/design/drafts.md#6-scheduled-send)).
+- `approval`: `{ state, reason, requested_at, requested_by_key_id, approved_revision, approved_digest,
+  approved_at, approved_by_key_id, approved_by_user_id, on_behalf_of, note }`: `approved_digest` is the
+  digest the approval covers; `state` is `none`, `requested` or
+  `approved`; `reason` says why approval was requested (`requested` by the writer, or the policy level
+  `new_recipients`, `external`, `always`).
+- `send`: the pending or last send request: `{ origin, requested_at, requested_by_key_id,
+  requested_by_user_id, due_at, labels_add, labels_remove }`, `origin` = `api`, `approval` or `console`;
+  `null` when none.
+- `rejection`: `{ reason, note, rejected_at, rejected_by_key_id, rejected_by_user_id, on_behalf_of }`,
+  `reason` = `operator` or `expired`; `null` unless rejected.
+- `failure`: `{ reason, detail, failed_at, attempts }` while `failed` ([Errors › Draft failures](errors.md#draft-failures)).
+- `message_id`, `sent_at`: set when the draft became a message.
+- `created_by_key_id`, `updated_by_key_id`: the keys that created the draft and wrote its current revision
+  (`null` for a console write, which never edits content).
+- `content_by_key_id`: the key that last changed the content (the create, or a `PATCH` that changed the
+  digest); it may not approve the draft (`self_approval`).
+- `created_at`, `updated_at`: bookkeeping times.
+
+Every text field of a draft was written by an agent that mail may have steered: show it as untrusted
+content.
+
+---
+
+## Uploads
+
+An upload stages one file for one identity: create it with the file's name, type, size and SHA-256,
+`PUT` the bytes to its `upload_url`, then attach it by `upload_id` to sends, replies, reply-alls,
+forwards and drafts of the same identity until `expires_at`. Each message copies the bytes, so an
+upload can be reused and its expiry never changes a sent message. There is no download route. Pylota
+Mail never fetches attachments from URLs.
+
+The four routes below need **either** `messages:send` **or** `drafts:write`, at every key level within its
+scope (an identity key for its own identity). The design is [Uploads](../project/design/uploads.md).
+
+### `POST /v1/identities/{identity_id}/uploads` — `messages:send` or `drafts:write`
+
+```json
+{
+  "filename": "FNOL-7781.pdf",
+  "content_type": "application/pdf",
+  "size": 9437184,
+  "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+  "expires_in": 86400
+}
+```
+
+Returns `201` with the [upload](#upload-object), `pending`, with `upload_url`. `Idempotency-Key` is
+optional; a replay re-reads the upload and mints a new `upload_url`. In order:
+
+1. A missing or foreign identity is `404 identity_not_found`.
+2. Body: `filename` 1–255 bytes after sanitising, `content_type` a valid `type/subtype` of at most 127
+   bytes, `size` an integer 1–26,214,400, `sha256` 64 hexadecimal characters, `expires_in` 900–604,800
+   seconds (default 86,400). Each failure is `400 invalid_request` with `details.errors[]`.
+3. A suspended tenant is `403 tenant_suspended`; a paused identity `409 identity_paused` with
+   `details.reason`.
+4. While the workspace's `storage_gb` is at or over its allowance: `402 billing_limit`
+   (`details.feature = "storage_gb"`).
+5. The identity already has 100 live uploads (`pending`, `uploading`, `ready`), or their declared sizes
+   plus this one would pass 524,288,000 bytes: `422 upload_limit_reached` with `details.limit` (`count`
+   or `bytes`), `details.used` and `details.max`.
+6. `expires_at` is `created_at + expires_in`, capped by the tenant's `retention.message_days` and the
+   identity's `retention.message_hours` when they are set. The response shows the effective value.
+
+Then send the bytes with [`PUT /v1/links/{token}`](#put-v1linkstoken) to `upload_url`.
+
+### `GET /v1/identities/{identity_id}/uploads` · `GET …/uploads/{upload_id}` — `messages:send` or `drafts:write`
+
+The list returns the identity's uploads, newest first, with `limit`, `cursor` and an optional `status`
+filter. Tombstones (`rejected`, `expired`) are listed while they exist. Lists never carry `upload_url`.
+`GET` of one returns the upload; while it is `pending` or `uploading` it carries a freshly minted
+`upload_url`. A missing, foreign or deleted upload is `404 upload_not_found`. No route returns an upload's
+bytes; a sent message's attachments are read with
+[`GET …/attachments/{attachment_id}`](#get-v1identitiesidentity_idmessagesmessage_idattachmentsattachment_id--attachmentsread).
+
+### `DELETE /v1/identities/{identity_id}/uploads/{upload_id}` — `messages:send` or `drafts:write`
+
+Returns `204`. Deletes the upload and its bytes, in any state. A send that is attaching it at that moment
+makes the delete answer `409 upload_in_use` (retryable, `Retry-After: 5`); a `PUT` in progress loses its
+claim. A missing upload is `404 upload_not_found`. Messages and drafts that copied the upload keep their
+copies.
+
+#### Upload object
+
+```json
+{
+  "id": "upl_01JAC3Q7W9X2M5N6P8R0T1Y4ZB",
+  "identity_id": "idn_01J9Z4K8V4QW7X2M5N6P8R0T1Y",
+  "filename": "FNOL-7781.pdf",
+  "content_type": "application/pdf",
+  "size": 9437184,
+  "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+  "status": "pending",
+  "status_reason": null,
+  "sniffed_type": null,
+  "risk": null,
+  "scan_status": "skipped",
+  "use_count": 0,
+  "last_used_at": null,
+  "created_at": "2026-10-17T09:00:00Z",
+  "expires_at": "2026-10-18T09:00:00Z",
+  "upload_url": "https://mail.example.com/v1/links/bDE6YTp1cGxvYWQ6dGVuXzAxSjk…",
+  "upload_url_expires_at": "2026-10-17T10:00:00Z"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | `upl_` + ULID. This is the value a send passes as `attachments[].upload_id` |
+| `filename` | Sanitised as attachment filenames are (no path components, no control characters, at most 255 bytes). Untrusted content |
+| `content_type` | As declared: a valid `type/subtype`, at most 127 bytes |
+| `size` | Declared bytes, 1–26,214,400. The bytes must match it exactly |
+| `sha256` | Declared SHA-256 of the bytes, 64 hexadecimal characters; stored and returned lower case |
+| `status` | `pending` (no verified bytes yet), `uploading` (one `PUT` holds the claim), `ready` (the bytes have the declared size and SHA-256, were classified and carry no quarantining risk; only `ready` uploads can be attached), `rejected` (a quarantining risk, or the scanner said `infected`; the bytes are deleted) or `expired` |
+| `status_reason` | For `rejected`: `risk` or `infected`. For `expired`: `expired`, `too_many_attempts` or `object_missing`. Otherwise `null` |
+| `sniffed_type`, `risk` | Set when the bytes are classified; `risk` is one of the attachment risk values or `null` |
+| `scan_status` | `skipped` (no scanner configured), `clean`, `infected` or `error` |
+| `use_count`, `last_used_at` | Accepted messages that copied this upload, and when the last one did |
+| `expires_at` | When the upload and its bytes are deleted, whether or not it was used. A `rejected` or `expired` upload stays as a tombstone for 7 days, so a late attach gets `422 attachment_risky` or `410 upload_expired`, then `404 upload_not_found` |
+| `upload_url`, `upload_url_expires_at` | Present only in the create response and in `GET` of one upload while it is `pending` or `uploading`; `null` otherwise and never in lists. A new URL is minted on every such response, valid for at most one hour |
+
+**Attaching an upload.** On send, reply, reply-all and forward (and drafts), an attachment item has
+exactly one of `content_base64` and `upload_id`; neither or both is `400 invalid_request`
+(`details.errors[0].path = "attachments[{i}]"`). With `upload_id`, `filename` is optional (the upload's by
+default), `content_type` is not accepted, and `disposition` and `content_id` are as for inline items. An
+upload of another identity, of another tenant, or one that does not exist is `404 upload_not_found` with
+`details.index`, the same answer in every case.
 
 ---
 
@@ -1775,6 +2409,19 @@ message passed authentication (`verdict: pass`). See [E4](../project/edge-cases.
 and a code is released only while its entry is still approved. The handler polls
 the mailbox every second and keeps the sender domain registered for unsolicited-OTP detection while it
 waits; the full behaviour is in [Inbound › The `wait` handler](../project/design/inbound.md#the-wait-handler-e4).
+A message still being screened is never returned; it is returned once it is `received`.
+
+---
+
+## Screening
+
+### `GET /v1/identities/{identity_id}/screening/summary` · `GET /v1/tenants/{tenant_id}/screening/summary` — `metrics:read`
+
+Verdict counts, reasons, outcomes, feedback, and precision and recall from feedback, for records started in
+`from`–`to` (default the last 30 days, at most 92). The tenant route takes `identity_ids` and needs a tenant,
+partner or platform key (`403 scope_denied` for an identity key); it reports `partial` and `failed_identities`
+like tenant search, and refuses more than 100 identities without `identity_ids` (`422 scope_too_large`).
+See [Screening hold §12](../project/design/screening.md#12-summary-precision-and-recall-per-tenant).
 
 ---
 
@@ -1799,13 +2446,21 @@ Reads (`GET`) need `webhooks:read`; every other webhook route needs `webhooks:ma
 
 ```json
 { "url": "https://api.example.com/webhooks/mail", "events": ["message.received", "message.bounced"],
-  "identity_ids": null, "description": "Production API" }
+  "identity_ids": null, "description": "Production API",
+  "headers": { "X-Ingress-Token": "t0k_8f2k3m9q…" } }
 ```
 
 Returns `201` with the endpoint and `"secret": "whsec_…"`. **The secret is shown only once**: an
 idempotent replay returns the body with `"secret_replayed": false` instead ([Idempotency](#idempotency)).
-`events: ["*"]` subscribes to everything, including event types added later. An endpoint's `scope` says
-whose events it receives:
+`events: ["*"]` subscribes to every event type that is not opt-in, including types added later; the opt-in
+type `message.labels_changed` must be named.
+
+`headers` (optional) adds up to 10 static request headers to every delivery, values together at most
+4,096 bytes. Values are write-only: the endpoint shows `header_names` only. A refused name gets
+`400 header_not_allowed` (`details.reason = "webhook_header"`); too many or too long,
+`422 webhook_header_limit_reached` ([Parity additions § 8](../project/design/parity-additions.md#8-webhook-delivery-headers-fr-wh-7)).
+
+An endpoint's `scope` says whose events it receives:
 
 | `scope` | Created by | Receives |
 |---|---|---|
@@ -1823,9 +2478,9 @@ only.
 
 An endpoint is a way to read mail, so `webhooks:manage` alone is not enough for mail events
 ([J29](../project/edge-cases.md)): creating an endpoint, changing its `url` or `events`, or replaying to it
-needs `messages:read` as well when its `events` include `"*"`, any `message.*` type or
-`verification.received`, and `quarantine:review` as well when they include `"*"` or
-`message.quarantined`. Otherwise `403 permission_denied` with `details.required`.
+needs `messages:read` as well when its `events` include `"*"`, any `message.*` type,
+`verification.received` or `calendar.received`, and `quarantine:review` as well when they include `"*"`,
+`message.quarantined` or `message.screened`. Otherwise `403 permission_denied` with `details.required`.
 
 ### `GET /v1/webhooks` · `GET /v1/tenants/{tenant_id}/webhooks` · `GET|PATCH|DELETE /v1/webhooks/{webhook_id}`
 
@@ -1836,7 +2491,40 @@ endpoints by ID; any other endpoint is `404 webhook_not_found` to it.
 
 `PATCH` accepts `url`, `events`, `identity_ids`, `description` and `enabled`. A changed `url` disables the
 endpoint with `disabled_reason: "url_changed"` until a test delivery to the new URL succeeds
-(`POST …/test`), which re-enables it; `enabled: true` on such an endpoint gets `400 invalid_request`.
+(`POST …/test`), which re-enables it; `enabled: true` on such an endpoint gets `400 invalid_request`. A
+`url` on another host removes every custom header in the same update.
+
+### `PATCH /v1/webhooks/{webhook_id}/headers` — `webhooks:manage`
+
+```json
+{ "set": { "X-Ingress-Token": "t0k_new…" }, "remove": ["Authorization"] }
+```
+
+Returns `200` with the endpoint, whose `header_names` lists the names in their stored casing. Values are
+never returned, logged or exported.
+
+- **Names**: 1–64 characters matching `^[A-Za-z0-9][A-Za-z0-9-]*$`, compared case-insensitively. A name that
+  fails the pattern, or is one of the following, is refused with `400 header_not_allowed`
+  (`details.reason = "webhook_header"`, `details.name`): the forbidden request-header names of the Fetch
+  standard (`Accept-Charset`, `Accept-Encoding`, `Access-Control-Request-Headers`,
+  `Access-Control-Request-Method`, `Connection`, `Content-Length`, `Cookie`, `Cookie2`, `Date`, `DNT`,
+  `Expect`, `Host`, `Keep-Alive`, `Origin`, `Referer`, `Set-Cookie`, `TE`, `Trailer`, `Transfer-Encoding`,
+  `Upgrade`, `Via`) and every name starting `Proxy-` or `Sec-`, and `X-HTTP-Method`,
+  `X-HTTP-Method-Override` and `X-Method-Override`; the headers the service sets (`Content-Type`,
+  `Content-Encoding`, `User-Agent` and every name starting `webhook-`); names a receiver's proxy may trust
+  as the client's address (`Forwarded`, `X-Real-IP`, `True-Client-IP` and every name starting
+  `X-Forwarded-` or `CF-`, except `CF-Access-Client-Id` and `CF-Access-Client-Secret`); and every name
+  starting `X-Pylota-`. `Authorization` is allowed: a static bearer token is the main use. So are
+  `CF-Access-Client-Id` and `CF-Access-Client-Secret`, the two headers of a Cloudflare Access service token.
+- **Values**: 1–1,024 bytes of `0x20`–`0x7E`, not starting or ending with a space, otherwise
+  `400 invalid_request` (path `headers.{name}` or `set.{name}`).
+- **Counts**: at most 10 headers and 4,096 bytes of values per endpoint, after the change, otherwise
+  `422 webhook_header_limit_reached` (`details.limit`, `details.reason`: `count` or `bytes`).
+- The request needs at least one entry in `set` or `remove` (`400 invalid_request`); a name in both, in any
+  casing, or twice in `set` in different casings, is `400 invalid_request`; removing a name that is not set
+  changes nothing. `set` replaces a value atomically. After three concurrent changes won, the request gets
+  `409 request_in_progress`; retry. Every change writes the audit row `webhook.headers_update`, with names
+  only.
 
 ### `POST /v1/webhooks/{webhook_id}/rotate-secret`
 
@@ -1870,6 +2558,97 @@ older events are not queued. Returns `202` with `{ "queued": 42 }`.
 
 ---
 
+## Event feed
+
+Every event of a tenant, the same envelopes that webhooks deliver, in one ordered log per tenant
+([Event feed and live stream](../project/design/event-feed.md)). Every route needs `events:read`. Tenant and
+identity keys read their own tenant; platform and partner keys pass `tenant_id` (`400 invalid_request`
+without it, `404 tenant_not_found` for a tenant outside their scope). A tenant that is being erased has no
+feed (`404 tenant_not_found`). A key sees an event only when it could read its subject: mail events need
+`messages:read`, `message.quarantined` and `message.screened` also `quarantine:review`, and identity keys
+see only their own identity's events; types a key may not see are listed in `withheld_types`, never
+refused. Webhook endpoint filters do not apply. Responses carry `Cache-Control: no-store`.
+
+Positions follow the order in which events were appended, not `occurred_at`. Use each envelope's
+`sequence` to order events of one owner, and deduplicate on `event.id` across webhooks, the feed and the
+stream.
+
+### `GET /v1/events` — `events:read`
+
+Query: `tenant_id`; `after` (a cursor, `earliest` or `latest`; default `earliest`) or `since` (RFC 3339);
+`types` (comma-separated, at most 50: `*`, `message.*`, `message.received`); `identity_id`
+(comma-separated, at most 100); `limit` (1–500, default 100); `wait` (0–60 seconds, default 0).
+
+```json
+{ "data": [ { "cursor": "ec_…", "event": { "id": "evt_01JA…", "type": "message.received", "…": "…" } } ],
+  "next_cursor": "ec_…", "has_more": false, "withheld_types": [], "since_truncated": false }
+```
+
+`event` is the webhook envelope, byte for byte. `next_cursor` is never null; pass it as `after` to
+continue. A page can be empty with `has_more: true`: ask again at once. With `wait`, the request waits
+until a matching event is appended or the time is up. Cursors do not expire with age: a cursor behind the
+retained log (`retention.events_days`, or the log's size budget) gets `410 cursor_expired` with
+`details.oldest_cursor`. A `since` never expires, but when retention or the size budget already removed
+events appended after it, the page has `since_truncated: true`. At most 5 long polls per key and 20 per
+tenant at once (`429 rate_limited`, `details.bucket: "events_wait"`).
+
+### `POST /v1/event-consumers` · `GET /v1/event-consumers` · `GET|DELETE /v1/event-consumers/{consumer_id}` — `events:read`
+
+A durable consumer keeps a named position in the log for you.
+
+```json
+{ "name": "pylota-reconcile", "types": ["message.*"], "identity_ids": null, "start": "latest" }
+```
+
+Returns `201` with the consumer, or `200` with the existing one when the same key repeats the same name and
+filters; another key or other filters get `409 event_consumer_name_taken`. At most 20 per tenant
+(`422 event_consumer_limit_reached`). `types` that name events the key can never see get
+`403 permission_denied` with `details.required`. `start` is `latest` (default), `earliest` or a cursor.
+A consumer is bound to the key that created it. Identity keys list and get their own consumers; tenant,
+partner and platform keys list, get and delete every consumer of the tenant. Only the owner key reads its
+events, commits and resets it (below).
+
+```json
+{ "id": "evc_01JA…", "name": "pylota-reconcile", "tenant_id": "ten_01J9…", "owner_key_id": "key_01J9…",
+  "types": ["message.*"], "identity_ids": null, "committed_cursor": "ec_…", "committed_at": null,
+  "last_read_at": null, "positions_behind": 0, "state": "active", "created_at": "…", "updated_at": "…" }
+```
+
+### `GET /v1/event-consumers/{consumer_id}/events` · `POST …/commit` · `POST …/reset` — `events:read`, owner key
+
+`GET …/events` (`limit`, `wait`) returns the events after the committed position, as `GET /v1/events`, plus
+`committed_cursor`; until you commit, the same events come back. To work through a backlog, commit each
+page's `next_cursor` (also an empty page's) before reading the next, while `has_more` is true; a read takes
+no `after`. `POST …/commit { "cursor": "ec_…" }` acknowledges up to that cursor and only moves forward. When the position falls behind the retained log,
+these routes get `410 cursor_expired` (with `details.consumer_id`) until
+`POST …/reset { "to": "earliest" | "latest" | "ec_…" }` or `{ "since": "…" }`. Other keys get
+`403 permission_denied` (`details.reason: "consumer_owner_only"`), or `404 event_consumer_not_found` for an
+identity key.
+
+### `POST /v1/events/stream-tokens` — `events:read`
+
+Returns `201` with `{ "token", "expires_at", "url", "protocols" }`: a single-use token valid for 60 seconds,
+for a browser that cannot send `Authorization`. Mint it on your server and hand it to your page. At most 100
+live (unredeemed and unexpired) per tenant (`429 rate_limited`, `details.bucket: "stream_tokens"`).
+`Idempotency-Key` is ignored.
+
+### `GET /v1/events/stream` — `events:read`, WebSocket
+
+Upgrade with `Authorization: Bearer …`, or with the subprotocols `pylota-mail.events.v1` and
+`pylota-mail.token.{token}`. Never put a key or token in the URL (`400 invalid_request`,
+`details.reason: "credential_in_url"`). Send `{"type":"subscribe","after":"ec_…"}` (or `since`, or
+`consumer_id`) within 60 seconds; receive `subscribed`, `events`, `heartbeat` and `error` messages; send
+`ack` with a cursor (optional below 1,000 events per connection) and `{"type":"ping"}`. At most 100
+connections per tenant and 10 per key. Reconnect only after `1001`, `1006`, `1011`, `1012`, `1013`, `4408`
+or a code you do not know, retry `4429` after 30 seconds, reconcile after `4410`, and stop on every other
+close: after `4409` another connection holds your place, and reconnecting would replace it in turn. The
+protocol, the close codes and resuming without loss are in
+[Event feed › The WebSocket stream](../project/design/event-feed.md#7-the-websocket-stream); the close codes
+are also in [Errors › Stream close codes](errors.md#stream-close-codes). A `GET` without
+`Upgrade: websocket` gets `426 upgrade_required`.
+
+---
+
 ## Suppressions and lists — `suppressions:manage`
 
 ### `GET /v1/tenants/{tenant_id}/suppressions`
@@ -1898,6 +2677,36 @@ suppression needs `"confirm_complaint_removal": true` in the body and is audit-l
 - **Send-allow**: with `policy.send_allowlist_only`, only listed recipients are sent to; the others are
   `suppressed` with `policy: not_on_allowlist`.
 
+Entries can also belong to one identity; for that identity's mail its own entries override the tenant's of
+the same or a coarser granularity (an identity `@domain` entry never overrides a tenant entry for the exact
+address), and among the entries left block wins over allow
+([Parity additions § 3.1](../project/design/parity-additions.md#31-scopes-and-precedence)). List entries carry `scope` (`tenant` or `identity`) and `identity_id`. Each scope holds at most
+10,000 entries and a tenant 50,000 (`422 list_limit_reached`). A dry run's suppressed recipient carries
+`scope` beside `reason: "send_block"`.
+
+### `GET|PUT|DELETE /v1/identities/{identity_id}/lists/{direction}/{kind}/{entry}`
+
+`GET /v1/identities/{identity_id}/lists/{direction}/{kind}` lists the identity's entries, and
+`GET|PUT|DELETE /v1/identities/{identity_id}/lists/{direction}/{kind}/{entry}` reads, adds or updates, and
+removes one, all with `suppressions:manage`. `direction`, `kind`, `entry` and the bodies are those of the
+tenant routes. Platform, partner and tenant keys only: identity keys cannot hold `suppressions:manage`, so an
+agent can never change its own lists, and an identity key gets `403 permission_denied`
+(`details.required: ["suppressions:manage"]`).
+
+- `PUT` adds the entry, or updates its `note` when it exists, and answers `200` with it. `DELETE` answers
+  `204`, or `404 list_entry_not_found` for an entry that does not exist.
+- The list entry gains `scope` (`tenant` or `identity`) and `identity_id` (`null` for tenant scope). The
+  tenant routes are unchanged and read and write tenant-scope entries only.
+- The system identity: `404 identity_not_found` for every key but a platform key, which gets
+  `400 invalid_request` with `details.reason = "system_identity"` (its sign-in mail must never be filtered
+  by a list).
+
+```json
+{ "scope": "identity", "identity_id": "idn_01JA9K…", "direction": "send", "kind": "allow",
+  "entry": "seller.4471@marketplace.example", "note": "operator_approved_seller acq_01JA…",
+  "created_at": "2026-10-17T10:05:00Z" }
+```
+
 ---
 
 ## API keys — `keys:manage`
@@ -1907,7 +2716,7 @@ suppression needs `"confirm_complaint_removal": true` in the body and is audit-l
 ```json
 { "name": "bookings-agent", "level": "identity", "tenant_id": "ten_01J9…", "identity_id": "idn_01J9…",
   "permissions": ["messages:read", "messages:send", "search:read", "attachments:read", "identities:sign"],
-  "expires_at": "2027-10-09T00:00:00Z" }
+  "mcp_tools": null, "expires_at": "2027-10-09T00:00:00Z" }
 ```
 
 The new key's level, tenant, identity and permissions must all lie within the caller's own, otherwise
@@ -1923,6 +2732,13 @@ body with `"secret_replayed": false` instead ([Idempotency](#idempotency)).
   lowering their role, revokes their keys ([Members](#members)).
 - **Limits.** A tenant has at most 100 active (neither revoked nor expired) tenant and identity keys, and a
   partner at most 10 partner keys: the next mint gets `422 key_limit_reached` with `details.limit`.
+- **MCP tools.** `mcp_tools` (optional) lists the MCP tools the key may see, at most 64 distinct names.
+  It narrows what the key's permissions and level allow and never widens them. Absent or `null` means
+  every allowed tool; `[]` means none. An unknown name is `400 invalid_request` with
+  `details.reason = "unknown_mcp_tool"`; a tool the new key could not see with its permissions and level
+  is `details.reason = "mcp_tool_not_permitted"` (both with `details.tool`). Rotation keeps the list;
+  keys minted by this key do not inherit it. It limits MCP only: REST access follows the permissions
+  ([SDKs, skills and agent tooling §5.3](../project/design/sdk-and-skills.md#53-per-key-tool-allow-list)).
 
 - **Partner keys.** `level: "partner"` needs `partner_id` and no `tenant_id` or `identity_id`, and only
   a platform key may ask for it ([Partner keys](#partner-keys)); an unknown partner is
@@ -2016,12 +2832,20 @@ remains the request ends `completed_with_holds` and the tenant stays `erasing`
   "receipt": {
     "messages_deleted": 14, "attachments_deleted": 9, "r2_objects_deleted": 38,
     "fts_rows_deleted": 14, "refs_deleted": 51, "vectors_deleted": 63,
-    "events_deleted": 31, "identities_affected": ["idn_01J9…", "idn_01JA…"],
+    "events_deleted": 31, "log_events_deleted": 31, "drafts_deleted": 2, "uploads_deleted": 3,
+    "screenings_deleted": 3, "screening_feedback_deleted": 1, "list_entries_deleted": 0,
+    "identities_affected": ["idn_01J9…", "idn_01JA…"],
     "held": [ { "thread_id": "thr_01JA…", "reason": "PCN dispute WM12345678" } ],
-    "probe": { "keyword_hits": 0, "semantic_hits": 0 }
+    "probe": { "keyword_hits": 0, "semantic_hits": 0, "log_hits": 0 }
   }
 }
 ```
+
+In the receipt, `log_events_deleted` counts rows deleted from the tenant's event log, `drafts_deleted`
+draft rows, `uploads_deleted` upload rows, `screenings_deleted` and `screening_feedback_deleted` screening
+records and feedback deleted with their messages, `list_entries_deleted` the identity-scope allow and block
+entries an identity-scope erasure removes ([Parity additions § 3](../project/design/parity-additions.md#3-identity-scope-allow-and-block-lists-fr-out-17)),
+and `probe.log_hits` what the event-log probe still found (always 0 on success).
 
 `identity_id` is set for message, thread and identity scope, and `target_id` (the `msg_` or `thr_` ID) for
 message and thread scope; the counterparty address is never stored or returned. `deadline_at` is when
@@ -2113,7 +2937,8 @@ holds `usage:read` implicitly for its own tenant; platform and partner keys need
 ```
 
 `assertions` and `http_signatures` count the agent assertions and HTTP signatures made that day. They
-are counts only: signing is not metered against any plan allowance.
+are counts only: signing is not metered against any plan allowance. Event counts per hour, identity or
+domain are on `GET /v1/metrics/events`; rates on `GET /v1/metrics/rates`.
 
 ### `GET /v1/plans` — no auth
 
@@ -2152,12 +2977,13 @@ Audit rows cover administrative actions. These are every `action` value:
 - keys: `key.create`, `key.rotate`, `key.revoke`; identity signing keys `identity_key.create`, `identity_key.rotate`, `identity_key.revoke`; deployment signing keys `signing_key.rotate`;
 - partners: `partner.create`, `partner.update`, `partner.delete`;
 - tenants: `tenant.create` (with the `partner_id` when a partner key created it), `tenant.policy_update` (every policy write), `tenant.ramp_held`, `tenant.ramp_lifted`;
-- identities: `identity.create`, `identity.update` (a status change by a key or a person, with `details.from` and `details.to`), `identity.delete`, `identity.auto_pause`;
+- identities: `identity.create`, `identity.update` (a status change by a key or a person, with `details.from` and `details.to`), `identity.delete`, `identity.auto_pause`, `identity.retention_update`;
 - domains: `domain.create` (with any MX records `replace_mx` deleted), `domain.transport`, `domain.evict`;
 - service accounts: `account.request`, `account.approve`, `account.reject`, `account.close`, `account.delete`;
-- mail: `quarantine.release`, `message.cancel`, `message.resolve`, `suppression.remove` (only for a `complaint` suppression);
-- webhooks: `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.rotate_secret`, `webhook.replay`, `webhook.disable` (a creator left, [W47](../project/edge-cases.md));
-- privacy: `erasure.create`, `hold.set`, `hold.removed`, `hold.expired`, `export.delete`;
+- mail: `quarantine.release`, `message.cancel`, `message.resolve`, `message.batch_update`, `suppression.remove` (only for a `complaint` suppression), `draft.approve`, `draft.reject`, `screening.feedback`;
+- webhooks and events: `webhook.create`, `webhook.update`, `webhook.delete`, `webhook.rotate_secret`, `webhook.replay`, `webhook.disable` (a creator left, [W47](../project/edge-cases.md)), `webhook.headers_update`, `event_consumer.create`, `event_consumer.reset`, `event_consumer.delete`;
+- privacy: `erasure.create`, `hold.set`, `hold.removed`, `hold.expired`, `export.delete`, `retention.expire` (one row per identity and UTC day of per-identity expiry);
+- agent sign-up: `agent_signup.create`, `agent_signup.resend`, `agent_signup.human_replace`, `agent_signup.verify`, `agent_signup.abandon`, `agent_signup.refuse`, `agent_signup.expire`, `user.agent_signup_allow`;
 - people: `member.invite`, `member.invite_resend`, `member.invite_revoke`, `member.join`, `member.role_change`, `member.leave`, `member.remove`, `member.ownership_transfer`, `user.delete`, `user.notifications_resume`, `user.oauth_unlink`, `waitlist.invite`;
 - billing: `billing.checkout_started`, `billing.portal_opened`, `billing.downgrade_scheduled`, `billing.downgrade_cancelled`, `billing.mode_change`, `billing.plan_set`, `billing.plan_changed`, `billing.duplicate_cancelled`, `billing.dispute_opened`, `billing.dispute_closed`, `billing.refund_recorded`;
 - platform operations: `ops.switch`, `mailbox.restore`, `master_key.activated`, `master_key.resealed`;
@@ -2165,7 +2991,7 @@ Audit rows cover administrative actions. These are every `action` value:
 - reads of mail content by platform and partner keys: `mail.read`.
 
 Every request by a platform or partner key to a route that returns mail content (`GET …/threads/{thread_id}`,
-`GET …/messages`, `GET …/messages/{message_id}`, its `raw`, `attachments/{attachment_id}`,
+`GET …/messages`, `GET …/messages/{message_id}`, `POST …/messages/batch-get`, its `raw`, `attachments/{attachment_id}`,
 `attachments/{attachment_id}/text` and `related`, `GET …/quarantine`, `GET …/wait`,
 `POST …/identities/{identity_id}/search`, `POST /v1/tenants/{tenant_id}/search`, and the MCP tools that
 read the same) writes one `mail.read` row before the response, with `target_type` `message`, `thread` or `identity`,
@@ -2174,6 +3000,177 @@ read the same) writes one `mail.read` row before the response, with `target_type
 audit rows**: each send is recorded by its message, its events (`message.sent` and the delivery events)
 and its per-recipient delivery log. To review what a key sent, list the outbound messages of the
 identities it reaches for the period; request logs also carry the key ID for 7 days.
+
+---
+
+## Deliverability metrics
+
+Two read-only routes. `rates` shows how close an identity, a tenant or a domain is to an automatic
+sending pause, rule by rule, from the same state that decides the pause. `events` counts what happened
+to messages per hour or day. Plan allowances and metered units stay on `GET /v1/usage` and `GET /v1/usage/daily`
+([Usage and audit](#usage-and-audit)). The design is [Deliverability metrics](../project/design/metrics.md).
+
+### `GET /v1/metrics/rates` — `metrics:read`
+
+Every rule that can pause sending, or alert the operator, is one **window**:
+
+| `id` | Scope listed at | Counts | Window | Rule | Threshold (`threshold_source`) | Minimum outcomes | `action` |
+|---|---|---|---|---|---|---|---|
+| `identity_complaints` | identity | complained outcomes | the identity's last 1,000 outcomes; denominator always 1,000 | `gt` | `policy.abuse.complaint_rate_pause` (default 0.003) | – | `pause_identity` |
+| `identity_bounces` | identity | bounced outcomes | the identity's last 200 outcomes; denominator always 200 | `gt` | `policy.abuse.bounce_rate_pause` (default 0.05) | – | `pause_identity` |
+| `tenant_complaints_7d` | tenant | complained / outcomes | the 7 UTC days ending with the current day | `ge` | `policy.abuse.tenant_complaint_rate_pause` (default 0.001) | 500 | `pause_tenant` (`abuse_threshold`) |
+| `tenant_bounces_7d` | tenant | bounced / outcomes | as above | `ge` | `policy.abuse.tenant_bounce_rate_pause` (default 0.05) | 500 | `pause_tenant` (`abuse_threshold`) |
+| `domain_complaints_7d` | domain (tenant domains only) | complained / outcomes through the domain | the hourly windows of the 7 UTC days ending with the current day | `ge` | `policy.abuse.tenant_complaint_rate_pause` | 500 | `pause_domain` |
+| `domain_bounces_7d` | domain (tenant domains only) | bounced / outcomes through the domain | as above | `ge` | `policy.abuse.tenant_bounce_rate_pause` | 500 | `pause_domain` |
+| `burst_bounces_1h` | domain; also tenant, once per domain | bounced / outcomes through the domain | the current UTC hour | `gt` | 0.10 (`fixed`) | 200 | `pause_tenant` (`abuse_burst`) |
+| `burst_complaints_24h` | domain; also tenant, once per domain | complained / outcomes through the domain | the 24 UTC hours ending with the current hour | `gt` | 0.006 (`fixed`) | 1,000 | `pause_tenant` (`abuse_burst`) |
+| `alert_bounces_1h` | domain | bounced / outcomes through the domain | the current UTC hour | `gt` | 0.02 (`fixed`) | 50 | `operator_alert` (`bounce_rate:{tenant_id}:{domain_id}`) |
+| `alert_complaints_24h` | domain | complained / outcomes through the domain | the 24 UTC hours ending with the current hour | `gt` | 0.001 (`fixed`) | 200 | `operator_alert` (`complaint_rate:{tenant_id}:{domain_id}`) |
+
+Every window is relative to the UTC time it is evaluated at; thresholds are compared in parts per million,
+in integers, so the JSON a client reads and the decision cannot drift apart. Identity scope lists the two
+identity windows; tenant scope the two tenant windows and the two burst windows once for each domain that
+has outcomes in the last 24 UTC hours (for an identity key, `domain_id: null` on the burst windows of a
+domain none of its addresses use); domain scope all six domain windows for a tenant domain, and only the
+burst and alert windows for the platform domain
+([Deliverability metrics § 3.1](../project/design/metrics.md#31-the-windows)).
+
+Query: `scope` (`identity`, `tenant` or `domain`; default `identity` for an identity key, `tenant`
+otherwise), `identity_id` (identity scope; an identity key may omit it), `domain_id` (domain scope),
+`tenant_id` (required for platform and partner keys, as for `GET /v1/usage`; ignored otherwise). A missing
+`identity_id` or `domain_id` for its scope, or a parameter of another scope, is `400 invalid_request`.
+
+```json
+{
+  "scope": "identity",
+  "tenant_id": "ten_01J9Z4K8V4QW7X2M5N6P8R0T1Y",
+  "identity_id": "idn_01J9Z4M2P6R8T0V2X4Z6B8D0F2",
+  "domain_id": null,
+  "evaluated_at": "2026-10-17T09:12:44Z",
+  "exempt": false,
+  "sending": { "paused": false, "stops": [] },
+  "windows": [
+    {
+      "id": "identity_complaints",
+      "metric": "complaint_rate",
+      "action": "pause_identity",
+      "domain_id": null,
+      "window": { "kind": "last_outcomes", "size": 1000, "from": null, "to": null },
+      "comparison": "gt",
+      "threshold": 0.003,
+      "threshold_source": "policy.abuse.complaint_rate_pause",
+      "min_outcomes": null,
+      "outcomes": 640,
+      "events": 1,
+      "denominator": 1000,
+      "rate": 0.001,
+      "evaluated": true,
+      "tripped": false,
+      "headroom": 3,
+      "summary": "Pauses this identity above 0.3% complaints over its last 1,000 outcomes. Now 0.1% (1 of 1,000; 640 outcomes recorded). 3 more complaints pause it."
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `evaluated_at` | The `now` of the evaluation; every window is relative to it |
+| `exempt` | `true` only for the system identity, whose outcomes are recorded but never pause it, and which only platform keys can read. Its windows are returned with `tripped` computed and the summary "Exempt: never paused" |
+| `sending.paused` | Whether this scope itself is paused now (identity `status = "paused"`; tenant or domain `sending_paused_at` set) |
+| `sending.stops` | Every pause that stops sends from this scope now: `{ "scope", "id", "reason", "paused_at" }`. For an identity: its own pause, its tenant's, and that of each tenant domain one of its `active` or `retiring` addresses is on; for a domain: its own and its tenant's; for a tenant: its own |
+| `window.kind` | `last_outcomes` (`size`), `utc_days` (`from`, `to`: the first and last day's start, RFC 3339) or `utc_hours` (`from`, `to`: the first and last hour's start) |
+| `outcomes` | Outcomes in the window (for `last_outcomes`, rows present, at most `size`) |
+| `events` | Outcomes of the window's kind (complaints or bounces) in the window |
+| `denominator` | `size` for `last_outcomes` windows; `outcomes` for the others |
+| `rate` | `events / denominator`, rounded to 6 decimal places for display; `0` when the denominator is 0. Decisions use `events` and `denominator` |
+| `evaluated` | `false` while `outcomes` is below `min_outcomes`: the rule cannot trip yet |
+| `tripped` | The rule's predicate is true at `evaluated_at`. A tripped window of a scope that is not yet paused means the next counted outcome is decided against it |
+| `headroom` | The fewest further outcomes of the window's kind, recorded in a row with nothing else recorded, that would make the rule trip at `evaluated_at`; fewer further outcomes, of any kinds, cannot trip it at that instant; `0` when tripped; `null` when no number of them could trip it (a threshold of 1 with `gt`, or a threshold of 1 with `ge` once the window holds an outcome that is not of its kind) |
+| `summary` | One plain-English sentence built from the fields above, for a model or a person |
+
+**Headroom** is computed with the rule's own predicate over simulated outcomes (for a `last_outcomes`
+window the oldest rows drop out as new ones arrive), never with a separate formula. It describes one
+instant and moves both ways between reads: a delivered outcome never lowers it on a `last_outcomes` window
+or an `evaluated` one, but below a window's minimum it counts toward the minimum and can lower it by one
+(100 tenant outcomes with no complaint give headroom 400; after 399 deliveries, 1), and an hour or day
+rolling out of a window can lower or raise it. Read the windows just before a batch. A batch of `N`
+recipients cannot trip a `last_outcomes` or `evaluated` window when `N` is smaller than its headroom; a
+window with `evaluated: false` is not bounded by its headroom (each recipient's delivery and soft bounces
+count toward the minimum), and cannot trip while `(events + N) × 1,000,000` is below
+`threshold_ppm × min_outcomes` ([Deliverability metrics § 3.2](../project/design/metrics.md#32-get-v1metricsrates)).
+
+### `GET /v1/metrics/events` — `metrics:read`
+
+The mailbox counts these message events, by the domain of each count (inbound types: the identity's address
+the message was routed to; sent and delivery types: the domain of the `From` address, the platform domain
+when the message was `sent_via_fallback`; `suppressed` and `canceled`: the domain of `from_address` at
+submit):
+
+| Type | Counted when the mailbox appends | Unit |
+|---|---|---|
+| `received` | `message.received` without `reprocessed: true` | message |
+| `quarantined` | `message.quarantined` without `reprocessed: true` | message |
+| `sent` | `message.sent` | message |
+| `delivered` | `message.delivered` | recipient |
+| `deferred` | `message.deferred` | recipient event |
+| `bounced` | `message.bounced` | recipient |
+| `complained` | `message.complained` | recipient |
+| `rejected` | `message.rejected` | message event |
+| `failed` | `message.failed` | message |
+| `uncertain` | `message.uncertain` | message |
+| `suppressed` | `message.suppressed` | message |
+| `canceled` | `message.canceled` | message |
+
+Other events are not counted; new types may be added within `/v1`, so ignore unknown keys. **Counts and
+rates differ, by design**: `bounced` and `complained` here count every event, including first replies to
+strangers and outcomes of the system identity, which the rate windows leave out. Rates answer "how close is
+a pause"; event counts answer "what happened".
+
+Query: `scope` (as for rates), `identity_id`, `domain_id`, `tenant_id` (as for rates), `bucket` (`hour` or
+`day`, default `day`), `from` and `to` (RFC 3339; `from` is rounded down and `to` up to the bucket; `to`
+is exclusive), `types` (comma-separated, default all twelve), `identity_ids` (tenant and domain scope: at
+most 100, comma-separated). Defaults: `bucket=hour` covers the 24 hours ending with the current hour;
+`bucket=day` the 30 days ending with today.
+
+```json
+{
+  "scope": "tenant",
+  "tenant_id": "ten_01J9Z4K8V4QW7X2M5N6P8R0T1Y",
+  "identity_id": null,
+  "domain_id": null,
+  "bucket": "day",
+  "from": "2026-10-11T00:00:00Z",
+  "to": "2026-10-18T00:00:00Z",
+  "types": ["sent", "delivered", "bounced", "complained"],
+  "identities": 4,
+  "partial": false,
+  "failed_identities": [],
+  "data": [
+    { "start": "2026-10-11T00:00:00Z", "counts": { "sent": 141, "delivered": 137, "bounced": 2, "complained": 0 } },
+    { "start": "2026-10-12T00:00:00Z", "counts": { "sent": 0, "delivered": 0, "bounced": 0, "complained": 0 } }
+  ],
+  "totals": { "sent": 812, "delivered": 790, "bounced": 9, "complained": 1 }
+}
+```
+
+`data` has one entry per bucket in the range, zeros included, oldest first. In order:
+
+1. An identity key may use only identity scope (`403 scope_denied` otherwise).
+2. Rate limits: `RL_API` and `RL_SEARCH` (120 per 60 seconds per key), because tenant and domain scope
+   fan out like a tenant search.
+3. Range: `from < to` after rounding, else `400 invalid_request`. Hourly: at most 168 buckets, and `from`
+   no earlier than the current hour minus 191 hours. Daily: at most 92 buckets, and `from` no earlier than
+   today minus 91 days. Otherwise `400 query_range_too_wide` with `details.max_buckets`,
+   `details.requested_buckets` and `details.earliest`. A `to` in the future is allowed; its buckets are
+   zero. An unknown type is `400 invalid_request`.
+4. Identities: identity scope, the one identity; tenant scope, the tenant's active and paused identities;
+   domain scope, the tenant's identities with an address on the domain (every identity, for the platform
+   domain); narrowed by `identity_ids` (a foreign ID is `404 identity_not_found`). More than 100 is
+   `422 scope_too_large`: pass `identity_ids`, at most 100.
+5. Each mailbox is read with a deadline of 2,000 ms; an identity that errors or misses it is listed in
+   `failed_identities` and `partial` becomes `true`, and the response is still `200`.
+6. Counts are summed per bucket and type; `totals` covers the range.
 
 ---
 
@@ -2256,7 +3253,7 @@ Key material is never returned, by this or any other endpoint. See
 ### `GET /v1/platform/dlq`
 
 Dead-letter items, oldest first. Filters: `queue` (`pm-inbound`, `pm-outbound`, `pm-delivery-events`,
-`pm-webhooks`, `pm-index`), `status` (`open`, the default, or `redriven`), `tenant_id`, `cursor`,
+`pm-webhooks`, `pm-index`, `pm-screen`), `status` (`open`, the default, or `redriven`), `tenant_id`, `cursor`,
 `limit`.
 
 ```json
@@ -2333,8 +3330,10 @@ ciphertext carries one. Key material is never returned.
 
 ### `PUT /v1/platform/switches`
 
-`platform:ops`. `name` is `read_only`, `free_sending` or `emergency_prune`
-([Observability § 5.6](../project/design/observability.md#56-automatic-containment)):
+`platform:ops`. `name` is `read_only`, `free_sending`, `emergency_prune` or `agent_signup`
+([Observability § 5.6](../project/design/observability.md#56-automatic-containment)). `agent_signup off`
+stops new agent sign-ups, their resends and replacements, and their mail
+([Agent self-sign-up §13.2](../project/design/agent-signup.md#132-the-automatic-switch)):
 
 ```json
 { "name": "read_only", "state": "off", "reason": "rpc_owner_mismatch fixed in 1.0.3" }
@@ -2371,6 +3370,15 @@ Only a request that ended `completed` or `completed_with_holds` can be re-applie
 is `erased`: the new job erases the mailboxes of the identities in the source receipt's
 `identities_affected` and sweeps the tenant's objects and vectors, and the tenant stays `erased`.
 
+### `GET /v1/platform/agent-signups`
+
+`platform:ops`. The operator's view of agent sign-ups ([Agent self-sign-up §6.6](../project/design/agent-signup.md#66-get-v1platformagent-signups)).
+Filters: `state`, `created_after`, `network` (the 16-hex network hash shown in a row), `limit`, `cursor`.
+Newest first. Each row: `signup_id`, `tenant_id`, `state`, `address`, `human_email_hint`, `human_status`,
+`source`, `network`, `created_at`, `expires_at`, `verified_at`, `verified_via`. No clear address of a person
+is returned. Contain a sign-up with the existing tools: suspend its tenant, erase it, or turn the
+`agent_signup` switch off.
+
 ### `POST /v1/platform/waitlist/invite`
 
 ```json
@@ -2404,7 +3412,43 @@ and `Cache-Control: private, no-store`. `Content-Type` is `application/zip` for 
 attachment it is the sniffed type when it is on the safe list of
 [Security § 8.5](../project/design/security.md#85-serving-attachments-and-raw-mime), otherwise
 `application/octet-stream`. A bad, expired or unknown link, or a deleted target, returns
-`404 attachment_not_found` or `404 export_not_found`.
+`404 attachment_not_found` or `404 export_not_found`. An upload token gets `404 upload_not_found`.
+
+### `PUT /v1/links/{token}`
+
+Sends an upload's bytes to its `upload_url` ([Uploads](#uploads)). No API key: the token is a signed link
+for exactly one upload, whose size and SHA-256 were fixed at create, valid for at most one hour (never past
+the upload's `expires_at`).
+
+```http
+PUT /v1/links/bDE6YTp1cGxvYWQ6dGVuXzAxSjk… HTTP/1.1
+Host: mail.example.com
+Content-Type: application/octet-stream
+Content-Length: 9437184
+
+<9,437,184 bytes>
+```
+
+Returns `200` with the [upload](#upload-object), `ready`, `upload_url: null`. An `upload` token is accepted
+only by `PUT`, and attachment and export tokens only by `GET`: a token used with the other method, or a bad
+or expired one, answers `404` with the code of the token's own target, so a link never reveals why it
+failed. The request's `Content-Type` is ignored. Requests count against `RL_TENANT` of the token's tenant.
+In order:
+
+- a bad, expired or other-purpose token, or a deleted upload, identity or tenant: `404 upload_not_found`;
+- `429 rate_limited`; `403 tenant_suspended` or `403 partner_suspended`; `409 identity_paused`;
+- `Content-Length` missing or not the declared size: `400 upload_size_mismatch` (`details.reason =
+  "content_length"`, `details.expected`, `details.received`); a `Content-Encoding`: the same with
+  `"encoding"`;
+- another `PUT` holds the upload: `409 upload_in_progress` with `Retry-After`; an upload that is already
+  `ready` answers `200` without reading the body, so a retry after a lost response is a success;
+- a `rejected` upload, or bytes with a quarantining risk or that the scanner found infected:
+  `422 attachment_risky` (`details.risk` or `details.reason = "infected"`);
+- an expired upload: `410 upload_expired` (`details.reason`);
+- bytes whose SHA-256 is not the declared one: `400 upload_checksum_mismatch` (`details.expected`); a body
+  that ended early: `400 upload_size_mismatch` (`"incomplete"`). Nothing is stored. The tenth such failure
+  sets the upload `expired` (`too_many_attempts`);
+- a storage failure: `503 unavailable` (retryable, never counted against the client).
 
 ### `POST /hooks/ses`
 

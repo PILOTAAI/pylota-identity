@@ -138,7 +138,7 @@ pub struct SearchHit {
     pub score: f64,                         // 0.0..=1.0, 3 decimals in the response
     pub why: Vec<String>,                   // ≤ 8 entries
     pub attachment_hits: Vec<AttachmentHit>,// { attachment_id, filename, page: Option<u32> }
-    pub trust: HitTrust,                    // { verdict, known_sender, quarantined }
+    pub trust: HitTrust,                    // { verdict (arc_rescued included), known_sender, quarantined }
 }
 ```
 
@@ -456,14 +456,16 @@ Visibility predicate, used by every query in this page ([F7]):
 
 ```sql
 m.status NOT IN ('hidden','throttled')
-AND (m.status <> 'quarantined' OR :include_quarantined = 1)
+AND (m.status NOT IN ('quarantined','screening') OR :include_quarantined = 1)
 AND m.received_at <= :as_of
 ```
 
 `:include_quarantined` is 1 only when the request set `include_quarantined` (or used `is:quarantined`)
-**and** the key holds `quarantine:review`. Search therefore never returns `hidden` or `throttled` mail.
+**and** the key holds `quarantine:review`. `include_quarantined` with `quarantine:review` also shows messages
+still being screened ([Screening hold](screening.md)); `core::visibility` builds both lists. Search therefore
+never returns `hidden` or `throttled` mail.
 Message lists follow their own rule ([Security §5.3](security.md#53-cross-level-read-access)): they show
-`quarantined`, `hidden` and `throttled` mail only for an explicit `status` filter from a key holding
+`quarantined`, `screening`, `hidden` and `throttled` mail only for an explicit `status` filter from a key holding
 `quarantine:review`. The two rules agree: neither shows such mail by default, both need
 `quarantine:review`, and neither answers `403` when it is missing.
 
@@ -479,7 +481,7 @@ FROM fts
 JOIN messages m ON m.rowid = fts.rowid
 WHERE fts MATCH ?1
   AND m.status NOT IN ('hidden','throttled')
-  AND (m.status <> 'quarantined' OR ?3 = 1)
+  AND (m.status NOT IN ('quarantined','screening') OR ?3 = 1)
   AND m.received_at <= ?2
   AND (<filter.sql>)
 ORDER BY s DESC, msg_date DESC, m.rowid DESC
@@ -797,9 +799,10 @@ Mail Cloud every tenant shares the account, so each tenant gets a share:
 
 | Event | Job |
 |---|---|
-| Inbound message committed (any status; inbound enqueues one per stored message) | `Embed { reason: New }`; the consumer skips `quarantined`, `hidden` and `throttled` messages |
+| Inbound message committed (any status; inbound enqueues one per stored message) | `Embed { reason: New }`; the consumer skips `quarantined`, `screening`, `hidden` and `throttled` messages |
 | Outbound message committed (any status) | `Embed { reason: New }` |
 | Quarantined message released | `Embed { reason: Release }` |
+| Message screened clear (or delivered unavailable) ([Screening hold §7](screening.md#7-committing-a-verdict)) | `Embed { reason: New }` |
 | Attachment text written (`text_status = 'ready'`) | `Embed { reason: AttachmentText }`, queued by the mailbox after it rewrites the FTS row ([Inbound](inbound.md#attachment-text-extraction)) |
 | Outbound message canceled, or a message erased or purged | `DeleteVectors` with the message's vector IDs |
 
@@ -851,8 +854,8 @@ bytes, under the 64-byte limit.
 ### 6.3 Embed job
 
 1. The consumer calls the mailbox `index.source(message_id)`. The mailbox returns `Skip` if the
-   message no longer exists, its ID is in `erased_ids`, or its status is `hidden`, `throttled` or
-   `quarantined`. Otherwise it
+   message no longer exists, its ID is in `erased_ids`, or its status is `quarantined`, `screening`,
+   `hidden` or `throttled`. Otherwise it
    returns the subject, `extracted_text` (or `text`), `sender_domain`, direction, `verdict`, thread ID,
    message date, the attachment list with `text_r2_key`, and the existing chunk rows.
 2. The consumer reads attachment text from R2 and runs `chunk`.
@@ -887,7 +890,8 @@ bytes, under the 64-byte limit.
    ```
 
    `sent_at` is the clamped message date in Unix seconds. `sender_domain` is `messages.sender_domain`.
-   `verdict` is `messages.verdict`, or `"none"` when it is null (outbound). `kind` is `body` or
+   `verdict` is `messages.verdict` (`arc_rescued` included, [Parity additions §6](parity-additions.md#6-trusted-arc-sealers-fr-in-15)),
+   or `"none"` when it is null (outbound). `kind` is `body` or
    `attachment`. Nothing else is stored: no text, subject or address ([Data model §5](data-model.md#5-vectorize)).
    An upsert replaces any existing vector with the same ID in full (Vectorize client API, read
    2026-10-09).
@@ -938,7 +942,7 @@ SELECT COUNT(*) AS eligible,
              THEN 1
              ELSE 0 END) AS covered
 FROM messages m
-WHERE m.status NOT IN ('hidden','throttled','quarantined') AND m.received_at <= ?1;
+WHERE m.status NOT IN ('hidden','throttled','quarantined','screening') AND m.received_at <= ?1;
 ```
 
 `semantic_coverage = covered / eligible` (1.0 when `eligible = 0`), rounded to 3 decimals. The mailbox
@@ -1116,7 +1120,7 @@ re-embed costs roughly that rate times the token volume of the indexed text.
    ```
 
    The read-back applies every filter, but not the text clauses: a semantic hit does not have to
-   contain the words. Messages that are not returned (erased, quarantined, filtered) are dropped
+   contain the words. Messages that are not returned (erased, quarantined, screening, filtered) are dropped
    without error.
 6. **Score.** Semantic mode reports `score = max(0, cosine)`. The snippet is cut from the chunk's
    character range in its source text ([§5.5](#55-snippets)).
@@ -1499,8 +1503,8 @@ Execution rules:
   message; attachment text is cut to 6,000 characters per call.
 - A call identical to an earlier one (same name and canonical arguments) is not executed and returns
   `DUPLICATE_CALL: already run at step <n>; refine the query`.
-- Quarantined messages are visible only when the request set `include_quarantined` with
-  `quarantine:review`.
+- Quarantined messages, and messages still being screened, are visible only when the request set
+  `include_quarantined` with `quarantine:review`.
 - `contacts` runs the query of [§12.1](#121-contacts-search) with `limit` rows. At identity scope it
   reads the one mailbox. At tenant scope it fans out to the identities of [§10](#10-tenant-scope-fan-out)
   step 1 (never the system identity), with the same 20-in-flight limit and 900 ms deadline, and merges
@@ -1587,8 +1591,13 @@ pub struct EvidenceItem {
     pub texts_seen: Vec<String>,   // every untrusted string the planner saw for this message:
                                    // subject, from, snippets, bodies, attachment pages (unfenced)
     pub refs: Vec<String>,         // normalised reference values of the message
-    pub authenticated: bool,       // outbound, or inbound with verdict `pass`
-    pub steering_suspected: bool,  // § 11.9
+    pub auth: SourceAuth,          // Parity additions § 6.5
+    pub steering_suspected: bool,  // § 11.9, or the message's screening record is `suspect`
+}
+pub enum SourceAuth {
+    Authenticated,                 // outbound, or inbound with verdict `pass`
+    Rescued,                       // inbound with verdict `arc_rescued` (trusted ARC sealer)
+    Unauthenticated,               // every other verdict
 }
 pub struct Removal { pub index: usize, pub reason: RemovalReason, pub excerpt: String /* ≤ 120 chars */ }
 pub enum RemovalReason { NoCitation, CitationNotInEvidence, QuoteNotFound, UnsupportedReference, UntrustedSource }
@@ -1615,14 +1624,17 @@ Algorithm, per draft sentence in order:
    booking numbers, amounts; dates excluded) must appear in the `refs` of a cited message or, after
    normalisation, in its `texts_seen`. Otherwise remove (`UnsupportedReference`).
 7. **Source trust** ([F17](../edge-cases.md), [F18](../edge-cases.md)). If any cited message is
-   `steering_suspected`, or none of the cited messages is `authenticated`, remove (`UntrustedSource`). When
-   some cited messages are not authenticated, every quoted fragment of step 5 and every reference of step 6
-   must also be found in an **authenticated** cited message; one found only in unauthenticated ones removes
-   the sentence (`UntrustedSource`). Otherwise a forged message's claim ("pay the excess to account
+   `steering_suspected`, or every cited message is `Unauthenticated`, remove (`UntrustedSource`). A sentence
+   whose cited messages are all `Rescued`, or `Rescued` and `Unauthenticated`, is judged with the `Rescued` ones
+   standing in for authenticated sources, and is kept at most `partly_authenticated`
+   ([Parity additions §6.5](parity-additions.md#65-how-each-rule-treats-arc_rescued)). When some cited messages
+   are not `Authenticated`, every quoted fragment of step 5 and every reference of step 6 must also be found in
+   an `Authenticated` cited message, or, when none is cited, in a `Rescued` one; one found only in
+   `Unauthenticated` ones removes the sentence (`UntrustedSource`). Otherwise a forged message's claim ("pay the excess to account
    40991234") would survive by being cited next to the genuine thread message that holds the claim number. Mail that tried to steer the model,
    or whose sender cannot be shown, can still be read in `evidence`, but it cannot be restated as an
    answer. A kept sentence gets `citation_trust = authenticated` when every cited message is
-   authenticated, else `partly_authenticated`.
+   `Authenticated`, else `partly_authenticated`.
 8. Kept sentences are rendered `"<text> [msg_a][msg_b]"` and joined with single spaces into
    `answer.text`. `answer.sentences` holds the kept items with their citations and `citation_trust`.
 9. If sentences were removed, `confidence = model_confidence × kept / total`.
@@ -1639,15 +1651,20 @@ the planner, and the executor watches the model's own calls. Signals:
 
 | Signal | Detected when |
 |---|---|
-| `instruction_override` | Case-folded text matches patterns such as `ignore (all\|any\|previous\|prior\|the above) (instructions\|rules)`, `disregard … instructions`, `new instructions:`, `you must now`, `from now on you` |
-| `role_claim` | `you are (now )?(an?\|the) (assistant\|ai\|model\|agent\|chatbot)`, `as an ai`, `system prompt`, `developer message`, role markers (`<\|im_start\|>`, `### system`, `assistant:` at a line start) |
+| `instruction_override` | Case-folded text matches patterns such as `ignore (all\|any\|previous\|prior\|the above) (instructions\|rules)`, `disregard … instructions`, `new instructions:`, `you must now`, `from now on you`, and the German, French and Spanish forms `ignoriere (alle )?(vorherigen )?anweisungen`, `ignore[sz]? (toutes )?les instructions précédentes`, `ignora (todas )?las instrucciones anteriores` ([Screening hold §4.2](screening.md#42-signals-and-severity)) |
+| `role_marker` | Chat-template markers: `<\|im_start\|>`, `<\|system\|>`, `[INST]`, `### system`, and `system:` or `assistant:` at a line start |
+| `role_claim` | `you are (now )?(an?\|the) (assistant\|ai\|model\|agent\|chatbot)`, `as an ai`, `system prompt`, `developer message` |
 | `tool_mention` | A tool name (`search`, `read_thread`, `read_message`, `read_attachment_text`, `find_related`, `contacts`, `mail_send`, `mail_reply`, `mail_forward`) next to a verb such as `call`, `run`, `use`, `invoke` |
 | `fence_spoof` | `MAIL_CONTENT`, `END_MAIL_CONTENT` or a run of `‹‹‹` / `›››` produced by escaping |
 | `exfiltration` | `send (this\|the\|all\|it) to`, `forward (this\|everything) to`, `reply with (the\|your)` next to an address or URL |
 | `encoded_payload` | A base64-looking run of more than 200 characters |
 | `scope_probe` (from the executor) | A tool call with an unknown tool name, arguments rejected by `additionalProperties: false`, or an ID not in the evidence set |
 
-A message with at least one signal is marked `steering_suspected: true` in the evidence set and gets
+`scan` matches against `fold(text)`: NFKC, lower case, the UTS #39 skeleton and folded whitespace
+([Screening hold §4.1](screening.md#41-consumer-step-11a-the-steering-scan)). The fold and the signals are the
+same for every caller: search, triage and screening.
+
+A message with at least one signal, or whose screening record is `suspect`, is marked `steering_suspected: true` in the evidence set and gets
 a trace entry `{ "step": k, "action": "steering_suspected", "message_id": "msg_…", "signals": [ … ] }`.
 The message stays in the evidence set and is returned in `evidence` with `steering_suspected: true`
 (the facts in it may be real), but the verifier removes every answer sentence that cites it

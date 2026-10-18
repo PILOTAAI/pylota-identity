@@ -41,6 +41,14 @@ the console; never by an admin or a key an admin created. Creating a key that
 lists a permission its level cannot hold is refused with `400 invalid_request` and
 `details.reason: "permission_not_allowed_for_level"`. Creating a platform key also needs an explicit,
 non-empty `permissions` list (`400 invalid_request` without one): there is no implicit full set.
+`drafts:approve` cannot be held by identity keys, so an agent can never approve its own mail
+([Drafts](../project/design/drafts.md)). `events:read` (the event feed) and `metrics:read` (deliverability
+metrics) are never implicit: a key needs them listed.
+
+A key may also carry `mcp_tools`, the MCP tools it may see (`--mcp-tools` on `pmail keys create`). It
+shortens the tool list of an agent that has only an MCP client; it never widens the key, and the same key
+still reaches the REST API with all its permissions, so for an agent that can make HTTP requests the
+boundary is still the key's permissions ([SDKs, skills and agent tooling § 5.3](../project/design/sdk-and-skills.md#53-per-key-tool-allow-list)).
 
 ### Least privilege by use case
 
@@ -56,6 +64,10 @@ non-empty `permissions` list (`400 invalid_request` without one): there is no im
 | A privacy tool for data requests | `tenant` | `erasure:manage` |
 | Suppression and list management | `tenant` | `suppressions:manage` |
 | Dashboards | `tenant` or `platform` | `usage:read`, `audit:read` |
+| An agent whose mail a person approves first | `identity` | `messages:read`, `search:read`, `drafts:write` and no `messages:send`: it can only write drafts, and an approver sends them ([Sending › Drafts and approval](sending.md#drafts-approval-and-scheduled-send)) |
+| Your approval screen for drafts | `tenant` | `drafts:approve` and `messages:send` (a tenant key approves only on a deployment that lets API keys take decisions reserved for people, `PM_QUARANTINE_KEY_RELEASE=on` or `PM_CONSOLE=off`; `drafts.key_approval`, which only the operator or the workspace's partner sets, admits the partner's key, never the workspace's own) |
+| An event-feed consumer or a live dashboard | `tenant` | `events:read`, and the family permissions of the events it reads (for example `messages:read`) |
+| Deliverability dashboards | `tenant` | `metrics:read` |
 | An agent that signs up for third-party services | `identity` | What it otherwise needs, plus `accounts:request` and `search:read` (for `wait`) ([Service sign-up ledger](../project/design/service-accounts.md)) |
 | Your approval screen for service sign-ups | `tenant` | `accounts:approve` (approval by a key also needs the workspace to allow keys to take people's decisions) |
 | Policy automation for your own workspace | `tenant` | `policy:write` |
@@ -63,7 +75,7 @@ non-empty `permissions` list (`400 invalid_request` without one): there is no im
 | Deployment administration | `platform` | `tenants:manage`, `keys:manage` and what the task needs |
 
 Never give `quarantine:review`, `erasure:manage`, `keys:manage`, `suppressions:manage`, `policy:write`,
-`accounts:approve` or `tenants:manage` to an agent. Never give any mailbox permission to a public or customer-facing agent
+`accounts:approve`, `drafts:approve` or `tenants:manage` to an agent. Never give any mailbox permission to a public or customer-facing agent
 ([F2](../project/edge-cases.md)).
 
 ### What a partner key cannot change
@@ -248,6 +260,8 @@ What Pylota Mail does ([E1](../project/edge-cases.md), [F10](../project/edge-cas
   text and flagged ([B11](../project/edge-cases.md)).
 - Heuristics and the triage model raise `prompt_injection_suspected`, and other flags such as
   `payment_change_request` and `credential_request`.
+- Screening checks every message for text that tries to steer an agent; in `hold` mode such mail is kept
+  from agents until a verdict, and suspect mail is quarantined ([Screening](#screening)).
 - Trust metadata (`verdict`, `known_sender`, `display_name_spoof`, `lookalike_domain`,
   `reply_to_mismatch`) travels with every message.
 - Notification emails to people carry counts only, never a subject, sender, snippet or attachment name,
@@ -271,7 +285,9 @@ What you should do:
   `send_policy.require_known_recipient` on (the default), so it cannot write to an address it has never
   written to, even one that sent it mail first ([E2](../project/edge-cases.md)).
 - **Keep approvals on risky actions.** Payments, changes to bank details, sharing documents with a
-  new party and anything flagged by triage go to a person.
+  new party and anything flagged by triage go to a person. For mail itself, give an agent that reads
+  untrusted mail `drafts:write` without `messages:send`, or set `drafts.require_approval`, so a person
+  approves the exact text before it leaves ([Sending › Drafts and approval](sending.md#drafts-approval-and-scheduled-send)).
 - **Never act on links or attachments automatically.** Pylota Mail never fetches remote content in
   mail ([B7](../project/edge-cases.md)); your agents should not either.
 
@@ -307,6 +323,25 @@ the key holds `quarantine:review`. Mail stored `hidden` or `throttled` follows t
 - No agent should hold `quarantine:review`.
 
 See [Receiving › Quarantine](receiving.md#quarantine).
+
+## Screening
+
+Screening is a second gate for mail that tries to steer agents, after authentication and spam
+([Screening hold](../project/design/screening.md)). The tenant policy picks `off`, `monitor` (the default:
+mail is delivered at once and each message gets a screening record) or `hold` (mail waits in status
+`screening`, hidden like quarantined mail, until a verdict; suspect mail is quarantined as
+`steering_suspected`, and with the default `screening.on_unavailable: quarantine` mail that cannot be
+screened in time is quarantined too). `message.received` comes once per message, when it first becomes
+visible to agents. The three fields are guard fields: a workspace's own keys can tighten them, but only a
+person, the operator or the workspace's partner can loosen them.
+
+- Report wrong verdicts with `POST …/messages/{message_id}/feedback`; feedback measures screening and
+  changes nothing about the message.
+- Releasing screened mail is the same human decision as any release. No agent should hold
+  `quarantine:review`.
+- Screening reduces risk; it does not replace the rules above. Keep agent keys narrow and approvals on.
+
+See [Receiving › Screening](receiving.md#screening).
 
 ## Abuse controls
 

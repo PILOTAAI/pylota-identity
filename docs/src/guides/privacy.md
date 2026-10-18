@@ -42,9 +42,10 @@ under your own agreement with them.
 
 | Store | Holds | Jurisdiction applies |
 |---|---|---|
-| Durable Object SQLite (one per identity) | Threads, messages (text, sanitised HTML, extracted text), recipients, attachment metadata, labels, the keyword index, references, contacts, triage results, the send ledger, idempotency records, the event outbox, verification codes | Yes |
+| Durable Object SQLite (one per identity) | Threads, messages (text, sanitised HTML, extracted text), recipients, attachment metadata, labels, the keyword index, references, contacts, triage results, screening records and feedback, calendar objects, drafts, upload records, the send ledger, idempotency records, the event outbox, verification codes | Yes |
+| Durable Object SQLite (one per tenant, the event log) | The events of the tenant's identities for the event feed, consumers and the live stream: the same thin payloads as webhooks (IDs, a header summary, verdicts, triage and up to `policy.webhook_text_bytes` of extracted text), consumer names and positions, hashed stream tokens | Yes |
 | D1 | The control plane: tenants, identities, the address directory, domains, hashed API keys, identity signing keys (sealed) and tombstoned key IDs, webhook endpoints and delivery logs, suppressions (hashed), allow and block lists, jobs, erasure requests, the audit log, usage counts, console accounts, memberships, sessions and notification preferences | Yes |
-| R2 | Raw `.eml` files, attachments, extracted attachment text, composed outbound messages, subject-access exports | Yes |
+| R2 | Raw `.eml` files, attachments, extracted attachment text, composed outbound messages, draft attachments, uploaded files waiting to be sent (at most 7 days), subject-access exports | Yes |
 | Vectorize | One vector per chunk of message or attachment text, with filter fields: identity, thread, date, sender domain, direction, has-attachment, verdict and chunk kind. **Never text, subjects or addresses** | No documented option |
 | Queues | Pointers only, never content. Dead-letter queues keep items at most 14 days | – |
 | Amazon S3 (SES domains only) | Raw incoming mail, until Pylota Mail has taken it in. Encrypted at rest, no public access | Your SES region |
@@ -72,6 +73,26 @@ Each tenant's policy sets how long data is kept ([FR-PRV-2](../project/prd.md#61
 - **Held threads are never purged** by retention (see [Legal holds](#legal-holds)).
 - Shorter `raw_days` means less raw mail to protect, but you lose the ability to re-parse old messages
   if a parser bug is fixed later ([J3](../project/edge-cases.md)).
+- The event log keeps events for `events_days` too, counted from when they were logged.
+
+**Per-mailbox retention.** An identity can be shorter-lived than its workspace: set
+`retention.message_hours` (1 to 8,760 hours) when you create it or with `PATCH /v1/identities/{identity_id}`,
+and each message is erased that many hours after it is stored, with its attachments, extracted text, index
+rows, vectors, events (in the outbox and in the event feed's log) and drafts ([Parity additions § 7](../project/design/parity-additions.md#7-per-identity-message-retention-fr-prv-7)).
+A sent message leaves a content-free delivery record (a keyed hash of each recipient, the provider's message
+ID and the delivery status) for 30 days, so a bounce or spam complaint that arrives later still suppresses
+the address.
+When the workspace's `message_days` is also set, the shorter of the two applies. Setting or lowering it
+deletes mail sooner, so it needs `erasure:manage` as well as `identities:write`; raising it never brings
+back mail already erased. Held threads are skipped, as for every purge, and a daily audit row counts what
+expired.
+
+Expiry cannot recall copies that have already left the mailbox: webhook payloads already delivered (up to
+`policy.webhook_text_bytes` of extracted text), events your feed consumers already read, exports completed
+before the message expired (until their own 7-day expiry), the recipients' copies of mail you sent,
+Cloudflare's logs, and the 30-day D1 Time Travel and Durable Object recovery windows
+([Backups and residual retention](#backups-and-residual-retention)). A webhook delivery whose event expired
+before it succeeded is never delivered.
 
 Some data has a fixed lifetime regardless of policy:
 
@@ -181,6 +202,13 @@ recovery codes are stored encrypted.
 - Invitations that expired or were revoked are deleted 30 days after their expiry date.
 - A waitlist entry is written only when its confirmation link is used; an unused confirmation link
   expires after 10 minutes. Entries are deleted 30 days after the person was invited.
+
+**If an AI agent names you.** Where a deployment allows agent self-sign-up (off by default), an agent
+creates its own workspace and must name the person accountable for it
+([Agent self-sign-up](../project/design/agent-signup.md)). If an AI agent names you as the person responsible
+for it, we email you once with a code. If you do nothing, its inbox and your address are deleted within 7
+days. The link in that email stops agents naming you again. That refusal is kept only as a keyed hash of
+your address, like a suppression, and you can lift it under **Settings**.
 
 ## What agents and notifications disclose
 

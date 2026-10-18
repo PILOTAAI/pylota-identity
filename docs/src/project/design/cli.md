@@ -8,7 +8,15 @@ to FR-OPS-3, FR-CON-7 and FR-BILL-12, build plan milestone M16, the CLI half of 
 --method`, `domains update`, `domains probe`, `addresses test-forwarding`, `setup ses`), of FR-CON-8
 (M24: `waitlist invite`), of FR-KEY-4 (M5: `partners`, `keys create --level partner`) and of FR-IDN-6 to FR-IDN-8 (M25: `identity-keys`, `assertions`, `http-sign`,
 `keys rotate web_bot_auth`, [Agent signing keys](agent-keys.md#7-api-mcp-and-cli)), and the edge-case
-rows H5, J8, J9 and N30 in the [edge-case register](../edge-cases.md).
+rows H5, J8, J9 and N30 in the [edge-case register](../edge-cases.md). It also holds the client side of
+the commands that milestones M29 to M37 add ([ADR 0017](../adr/0017-agentmail-parity.md)): `drafts`
+([Drafts § 17.2](drafts.md#172-cli)), `events` ([Event feed § 15.2](event-feed.md#152-cli)), screening
+feedback and `screening summary` ([Screening hold § 21](screening.md#21-console-mcp-and-cli)),
+`calendar-reply` ([Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli)), `uploads`
+([Uploads § 13](uploads.md#13-mcp-and-cli)), `agent-signup` ([Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli)),
+`metrics` ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)), `--schema`, `--query`,
+`skills` and `mcp stdio` ([SDKs, skills and agent tooling § 6](sdk-and-skills.md#6-cli-additions)), and the
+batch, list, retention, webhook-header and zone-file flags of [Parity additions](parity-additions.md).
 
 Every command, flag and example is listed in the [CLI reference](../../reference/cli.md); this page
 decides how they behave.
@@ -16,7 +24,7 @@ decides how they behave.
 | | |
 |---|---|
 | Code | `crates/cli/` (package `pylota-mail-cli`, binary `pmail`) |
-| Depends on | `pylota-mail` (SDK), `pylota-mail-api-types`, `pylota-mail-core` (address validation, key format, DNS record parsing), `clap =4.6.7`, `reqwest =0.13.5`, `serde =1.0.229`, `serde_json =1.0.151`, `sha2 =0.11.0`, `hmac =0.13.0`, `base64 =0.23.1`, `ulid =3.0.0`; and, each pinned at build time: `tokio` (current-thread runtime that `reqwest` needs, CLI binary only), `toml`, `flate2`, `tar`, `minisign-verify`, `getrandom`, and the AWS credential loader used by `setup ses` ([§2.6](#26-aws-credentials)) |
+| Depends on | `pylota-mail` (SDK, with its `stream` feature for `events tail`), `pylota-mail-api-types`, `pylota-mail-core` (address validation, key format, DNS record parsing), `clap =4.6.7`, `reqwest =0.13.5`, `serde =1.0.229`, `serde_json =1.0.151`, `sha2 =0.11.0`, `hmac =0.13.0`, `base64 =0.23.1`, `ulid =3.0.0`, `jmespath =0.5.0` (`--query`), `utoipa =6.0.0` (the schemas of the CLI's own output structs, `--schema`), `tokio-tungstenite =0.30.0` (through the SDK's `stream` feature); and, each pinned at build time: `tokio` (current-thread runtime that `reqwest` needs, CLI binary only), `toml`, `flate2`, `tar`, `minisign-verify`, `getrandom`, and the AWS credential loader used by `setup ses` ([§2.6](#26-aws-credentials)) |
 | Never depends on | `pylota-mail-worker`, `pylota-mail-platform`, `worker` ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)) |
 | Related designs | [Rust workspace §8](rust-workspace.md#8-generated-wranglertoml) (the generated `wrangler.toml`), [Identities, addresses and domains](identity-domains.md) (platform domain onboarding), [Observability §7.2](observability.md#72-pmail-doctor) (doctor checks) and [§8.3](observability.md#83-listing-and-redriving) (`dlq`), [Security §6](security.md#62-rotation-procedures) (secrets and signing keys), [Search §7](search.md#7-index-lifecycle) (index generations), [Domains on any DNS host](domain-connections.md) (connection methods, `setup ses`), [Cloud sign-up §6.1](cloud-signup.md#61-before-launch-the-waitlist) (`waitlist invite`) |
 | External facts verified on 2026-10-09 | Cloudflare API reference pages for zones (list), DNS records (list), D1 (create, query), R2 (create bucket with `cf-r2-jurisdiction`, lifecycle `PUT` replaces the rule set), Queues (create, list), event subscriptions (create, list), Vectorize (index create, metadata index create and list), Email Routing (settings, `POST …/email/routing/dns`, catch-all `PUT`), Email Sending (subdomain create, update, DNS), Workers secrets; Wrangler 4 command reference for `deploy`, `secret put`, `secret bulk`, `versions upload`, `versions deploy`, `delete` and `queues subscription create` (flags `--source email.sending --zone-id --domain`); Cloudflare docs on version overrides (`Cloudflare-Workers-Version-Overrides`), gradual deployments with Durable Objects, deployment management (a Durable Object class change cannot be uploaded with `versions upload`), D1 migrations and D1 jurisdictions, Durable Object delete migrations, Email Sending event subscriptions (scoped to a zone apex or a verified sending subdomain), Email Service domain records; GitHub REST "Get a release by tag name" (`X-GitHub-Api-Version: 2026-03-10`); crates.io metadata of `minisign-verify`. The AWS facts behind `setup ses` (receiving regions, `GetAccount`, SNS `SignatureVersion`, SES quotas and pricing) are cited, read 2026-10-09, in [Domains on any DNS host §4.2](domain-connections.md#42-deployment-set-up-for-ses); AWS operation and field names not cited there are marked "verify at build time" |
@@ -31,6 +39,8 @@ crates/cli/src/
   resolve.rs           --identity, --tenant, --domain, --webhook arguments to IDs
   http.rs              SDK client construction, retries, idempotency keys, user agent
   sse.rs               server-sent events reader (ask)
+  schema.rs            --schema: each command's input, output and error schemas and exit codes (§23)
+  query.rs             --query: JMESPath over the JSON success document (§3.1)
   cloudflare/
     mod.rs             client: base URL, auth, envelope decoding, pagination, retries
     zones.rs dns.rs d1.rs r2.rs queues.rs vectorize.rs email_routing.rs email_sending.rs
@@ -52,6 +62,8 @@ crates/cli/src/
     messages.rs search.rs ask.rs triage.rs wait.rs quarantine.rs webhooks.rs keys.rs suppressions.rs
     lists.rs erasure.rs export.rs members.rs billing.rs usage.rs audit.rs mcp.rs
     identity_keys.rs assertions.rs http_sign.rs
+    drafts.rs events.rs screening.rs calendar_reply.rs uploads.rs agent_signup.rs metrics.rs
+    skills.rs mcp_stdio.rs
 ```
 
 `main.rs` builds a `#[tokio::main(flavor = "current_thread")]` runtime. Commands are `async fn
@@ -241,8 +253,8 @@ build time. There is no flag for a secret key, so none appears in the process li
 | Mode | Selected by | stdout | stderr |
 |---|---|---|---|
 | Human | default | Single objects as indented JSON; lists as aligned tables (columns per command, [§19](#19-command-to-endpoint-map)); progress commands as one line per step | Warnings, prompts, progress spinners (only when stderr is a terminal) |
-| JSON | `--json` | Exactly one JSON document per invocation, followed by a newline. The one exception is `--stream` (`ask --json --stream`), which prints NDJSON: one JSON document per line as events arrive ([§17](#17-ask)) | Nothing, except a fatal error before any request could be made, which is also printed to stdout as an error document |
-| Quiet | `--quiet` | Only the essential value: the new ID, the key or webhook secret, the search hit IDs, an assertion token, the signature headers of `http-sign`, or nothing | Errors only |
+| JSON | `--json`, or `--query` | Exactly one JSON document per invocation, followed by a newline. The exceptions are `ask --json --stream` ([§17](#17-ask)) and `events tail --json` ([§18.6](#186-events-tail)), which print NDJSON: one JSON document per line as events arrive | Nothing, except a fatal error before any request could be made, which is also printed to stdout as an error document |
+| Quiet | `--quiet` | Only the essential value: the new ID, the key or webhook secret, the search hit IDs, an assertion token, the signature headers of `http-sign`, event IDs for `events tail`, a string result of `--query` (without quotes), or nothing | Errors only |
 
 - In JSON mode the document is the API response body, unchanged (FR-CLI-1). List commands print
   `{ "data": [ … ], "next_cursor": … }`; with `--all` the CLI follows `next_cursor` (at most 10,000
@@ -254,6 +266,15 @@ build time. There is no flag for a secret key, so none appears in the process li
 - `--json` turns off every prompt. A command that needs an answer it was not given fails with exit 2
   and says which flag to pass. `--yes` answers "yes" to confirmations except `destroy`'s typed
   confirmation ([§11](#11-destroy)).
+- **`--query <expr>`** (`query.rs`, [SDKs, skills and agent tooling § 6.2](sdk-and-skills.md#62---query))
+  is a global flag taking a JMESPath expression; it implies `--json`. The expression is compiled when
+  arguments are parsed, and an invalid one is exit 2 (`cli_usage`) before any request
+  ([Y64](../edge-cases.md)). It applies to the success document after `--all` has assembled every page,
+  and to each line of `ask --json --stream`; the result is printed as one JSON document, and with
+  `--quiet` a string result is printed without quotes, through `output::terminal_safe` when stdout is a
+  terminal ([§3.2](#32-untrusted-text-in-a-terminal)). An error document is never filtered, and the exit
+  code is the command's, not the query's: an empty or `null` result exits 0.
+- **`--schema`** prints the command's schemas and exits before anything else runs ([§23](#23---schema)).
 - Colour is used only when stdout is a terminal and `NO_COLOR` is unset.
 
 ### 3.2 Untrusted text in a terminal
@@ -277,14 +298,17 @@ JSON mode prints strings exactly as the API returned them (JSON escaping makes t
   ```text
   error: idempotency_conflict (409): This Idempotency-Key was used with a different request body.
     fix: Use a new Idempotency-Key for a different message, or resend the original body.
+    docs: https://pylotamail.com/docs/reference/errors#code-idempotency_conflict
     request_id: req_01J9Z4…
   ```
 
+  The `docs` line is the envelope's `docs` link ([Parity additions § 10](parity-additions.md#10-a-documentation-link-in-errors-fr-api-3)),
+  printed after `fix`.
 - JSON mode prints the [error envelope](../../reference/errors.md) to stdout. Errors raised by the CLI
   itself use the same shape with CLI codes (`cli_usage`, `cli_config`, `cli_prerequisite`,
   `cli_cloudflare`, `cli_aws`, `cli_verification`, `cli_doctor_failed`, `cli_timeout`,
-  `cli_interrupted`, `cli_internal`), `retryable` set as for the matching exit code, and
-  `request_id: null`.
+  `cli_interrupted`, `cli_internal`, and `cli_outcome_unknown` from `mcp stdio`, [§22](#22-mcp-stdio)),
+  `retryable` set as for the matching exit code, and `request_id: null`.
 - A `404` without the service's envelope is reported as `upstream_not_found`, exit 9, never as "not
   found": it came from a proxy or a wrong host ([Errors](../../reference/errors.md)).
 - Cloudflare API failures print the step, the HTTP status and every `errors[].code` and `message`
@@ -299,20 +323,21 @@ JSON mode prints strings exactly as the API returned them (JSON escaping makes t
 |---|---|---|
 | 0 | `ok` | Success. Also a `doctor` run with only `pass` and `warn` lines |
 | 1 | `internal` | A bug in the CLI or an unexpected response shape |
-| 2 | `usage` | Invalid flags or arguments; a required answer missing in non-interactive mode; `keys create --level platform` without `--permissions` |
-| 3 | `config` | No URL or key; unreadable, invalid or insecure config file; failing `key_env`/`key_command`; missing `CLOUDFLARE_API_TOKEN` or account ID; no AWS credentials for `setup ses` or `destroy --include-ses`; `domains add` without `--local-token` answered `422 transport_unavailable` (the deployment, or the tenant's policy, lacks what the method needs: `details.reason` names it) or `422 cf_token_required` (the deployment has no `PM_CF_API_TOKEN`), [§18.1](#181-domains-add-without-pm_cf_api_token) |
-| 4 | `auth` | API `401` or `403` (any code) |
-| 5 | `not_found` | API `404` with a service error code |
-| 6 | `conflict` | API `409`, `410` or `423` |
-| 7 | `invalid` | API `400`, `413` or `422` |
+| 2 | `usage` | Invalid flags or arguments, an invalid `--query` expression; a required answer missing in non-interactive mode; `keys create --level platform` without `--permissions`; `mcp stdio` given `--key` |
+| 3 | `config` | No URL or key; unreadable, invalid or insecure config file; failing `key_env`/`key_command`; missing `CLOUDFLARE_API_TOKEN` or account ID; no AWS credentials for `setup ses` or `destroy --include-ses`; an invalid `PM_DOCS_URL` in the rendered file ([§7](#7-rendering-wranglertoml)); `domains add` without `--local-token` answered `422 transport_unavailable` (the deployment, or the tenant's policy, lacks what the method needs: `details.reason` names it) or `422 cf_token_required` (the deployment has no `PM_CF_API_TOKEN`), [§18.1](#181-domains-add-without-pm_cf_api_token). |
+| 4 | `auth` | API `401` or `403` (any code); `events tail` closed with `4401` or `4403`; `mcp stdio` refused at start |
+| 5 | `not_found` | API `404` with a service error code; `events tail` closed with `4404` |
+| 6 | `conflict` | API `409`, `410` or `423`; `events tail` closed with `4410` (it prints `details.oldest_cursor`) or `4409` (replaced by another connection); `skills generate` found a file someone edited, without `--force` |
+| 7 | `invalid` | API `400`, `413` or `422`; `events tail` closed with `4400`, `1008` or `1009` |
 | 8 | `limited` | API `402` (`billing_limit`) or `429` |
-| 9 | `unavailable` | API `5xx`, a network or TLS failure, or a `404` without the service envelope |
+| 9 | `unavailable` | API `5xx`, a network or TLS failure, or a `404` without the service envelope; `events tail` after 10 minutes of failed reconnects |
 | 10 | `cloudflare` | A Cloudflare API call or Wrangler run failed, or a prerequisite is missing (Node.js 22+, Wrangler) or not met (foreign MX records at the mail domain, `existing_mx`), during `setup`, `setup ses`, `deploy`, `upgrade`, `destroy`, `secrets`, `domains add --local-token` or `domains subscribe`. `doctor` never exits 10: a failed Cloudflare call is a failing check (exit 12) |
 | 11 | `verification` | A release signature or checksum did not verify; `webhooks verify` found no valid signature; `assertions verify` found the assertion invalid |
 | 12 | `doctor_failed` | `doctor` reported at least one `fail` |
 | 13 | `timeout` | `wait` returned `timed_out: true`; a polling step (health, erasure, SNS subscription confirmation) passed its deadline |
 | 14 | `aws` | During `setup ses` or `destroy --include-ses`: an AWS API call failed (including access denied), the AWS account is not ready (SES production access missing; the console steps are printed), or it holds another deployment's receipt rule or resources ([N31](../edge-cases.md)) |
 | 15 | `precondition` | A deployment state the command needs is not there: `secrets rotate-master` with an unfinished rotation and no `--resume`, or within 30 days of the previous re-seal without `--discard-previous`; `ops restore d1` while the deployment is not frozen |
+| 16 | `deliverability` | `metrics rates` found a tripped window or a sending pause in effect, so a script can gate a bulk send on it ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)) |
 | 130 | `interrupted` | SIGINT or Ctrl-C |
 
 Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI/pylota-mail/blob/main/AGENTS.md):
@@ -324,16 +349,24 @@ Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI
   `User-Agent: pmail/<version> (+https://github.com/PILOTAAI/pylota-mail)`.
 - Timeouts: connect 10 s; request 30 s; `wait` uses `timeout + 15` s; `ask` and streaming have no
   overall timeout but abort after 30 s without a byte (the server sends a keep-alive every 10 s).
-- **Idempotency keys.** Mail sends (`send`, `reply`, `reply-all`, `forward`) take
+- **Idempotency keys.** Mail sends (`send`, `reply`, `reply-all`, `forward`, `calendar-reply`) take
   `--idempotency-key`. When it is omitted, the CLI generates `pmail-<ulid>` and prints it to stderr in
   human mode (and includes it in a CLI-generated error document in JSON mode), so a person can rerun
-  the command with the same key after a network error. Every other `POST` gets a generated key per
-  invocation, so the CLI's own retries are safe. The exceptions are `assertions create` and
-  `http-sign`: their endpoints ignore the header and never record it, because each call mints a new
-  value and stores nothing, so the CLI sends none and a retry simply mints again.
+  the command with the same key after a network error. `drafts send` without `--idempotency-key` derives
+  `cli:{draft_id}:{revision}:{approval.state}` instead, so re-running the same command never sends twice
+  and sends once a person has approved the revision
+  ([Drafts § 17.2](drafts.md#172-cli)). Every other `POST` gets a generated key per invocation (one per
+  request when a command makes several, such as `messages label` over more than 100 IDs), so the CLI's
+  own retries are safe. The exceptions are the endpoints marked `x-idempotency: none` that the CLI calls:
+  `assertions create` and `http-sign`, whose endpoints mint a new value on each call and store nothing;
+  `events stream-token` (`POST /v1/events/stream-tokens`), which mints a single-use secret; and
+  `messages get` with more than one ID (`POST …/messages/batch-get`), which only reads. Those endpoints
+  ignore the header and never record it, so the CLI sends none and a retry simply asks again.
 - **Retries.** A request is retried at most 3 times when the error is retryable by
-  [Errors › How a client should retry](../../reference/errors.md#how-a-client-should-retry): network
-  errors and `5xx` with backoff 0.5 s, 1 s, 2 s plus up to 250 ms jitter; `429 rate_limited` after
+  [Errors › How a client should retry](../../reference/errors.md#how-a-client-should-retry): an envelope
+  with `retryable: true`, and a network error or a proxy `502`, `503` or `504` for a `GET`, a request with
+  an idempotency key or one of the endpoints above that store no result (a `PATCH`, `DELETE` or keyless
+  `PUT` is sent once), with backoff 0.5 s, 1 s, 2 s plus up to 250 ms jitter; `429 rate_limited` after
   `Retry-After` (at most 60 s; longer waits are reported, not slept). Retries reuse the same
   idempotency key. `409 request_in_progress` is retried after 1 s, at most 5 times.
 - Cursors are passed through; `--all` stops on `410 cursor_expired` with exit 6 and the items so far
@@ -463,7 +496,7 @@ Each step prints `created`, `exists`, `updated` or `skipped` with the resource a
 | 2 | D1 database `pylota-mail` | `GET /accounts/{a}/d1/database?name=pylota-mail` (filter parameter: verify at build time; otherwise list and match `name`); if absent `POST /accounts/{a}/d1/database` `{"name":"pylota-mail","jurisdiction":"eu"}` (no `jurisdiction` for `default`) | Found by name. If the existing database reports a different jurisdiction, stop: it cannot be moved ([Privacy](privacy.md#3-jurisdiction-and-residency)) |
 | 3 | R2 bucket `pylota-mail-blobs`, and the backup bucket with `--backup-bucket` | `GET /accounts/{a}/r2/buckets/pylota-mail-blobs` with header `cf-r2-jurisdiction: eu`; if `404`, `POST /accounts/{a}/r2/buckets` `{"name":"pylota-mail-blobs"}` with the same header (jurisdiction is a header, not a body field). The same two calls for `{PM_BACKUP_BUCKET}` when it is set, in the same jurisdiction | Found by name in the jurisdiction. A bucket of the same name in another jurisdiction is reported, not reused |
 | 4 | R2 lifecycle rules | `GET …/buckets/pylota-mail-blobs/lifecycle`, then `PUT …/lifecycle` with the existing rules plus `{"id":"pm-inbound-staging","enabled":true,"conditions":{"prefix":"inbound-staging/"},"deleteObjectsTransition":{"condition":{"type":"Age","maxAge":1296000}}}` (15 days, longer than the 14-day dead-letter retention, [J7](../edge-cases.md)) and `{"id":"pm-abort-multipart","enabled":true,"conditions":{"prefix":""},"abortMultipartUploadsTransition":{"condition":{"type":"Age","maxAge":86400}}}` (incomplete multipart uploads aborted after 1 day, [Privacy §9.1](privacy.md#91-job-steps)). Field names from the R2 lifecycle API reference (read 2026-10-10) | `PUT` replaces the whole rule set, so the CLI merges: other rules are kept, rules with these two ids are replaced. No `PUT` when they are already identical |
-| 5 | Queues | `GET /accounts/{a}/queues` (all pages); for each missing name `POST /accounts/{a}/queues` `{"queue_name": …}`. Dead-letter queues first: `pm-inbound-dlq`, `pm-outbound-dlq`, `pm-delivery-events-dlq`, `pm-webhooks-dlq`, `pm-index-dlq`, then `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index` | Found by name |
+| 5 | Queues | `GET /accounts/{a}/queues` (all pages); for each missing name `POST /accounts/{a}/queues` `{"queue_name": …}`. Dead-letter queues first: `pm-inbound-dlq`, `pm-outbound-dlq`, `pm-delivery-events-dlq`, `pm-webhooks-dlq`, `pm-index-dlq`, `pm-screen-dlq`, then `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index`, `pm-screen` ([Screening hold § 5.1](screening.md#51-queue)) | Found by name |
 | 6 | Vectorize index `pm-mail-chunks` | `GET /accounts/{a}/vectorize/v2/indexes/pm-mail-chunks`; if absent `POST /accounts/{a}/vectorize/v2/indexes` `{"name":"pm-mail-chunks","description":"pylota-mail generation=1 embed_model=@cf/baai/bge-m3","config":{"dimensions":1024,"metric":"cosine"}}`. Then `GET …/metadata_index/list` and, for each missing, `POST …/metadata_index/create` `{"propertyName": …, "indexType": …}` for `identity_id` string, `thread_id` string, `sent_at` number, `sender_domain` string, `direction` string, `has_attachment` boolean, `verdict` string, `kind` string ([Data model](data-model.md)) | Found by name. An existing index with other dimensions or metric stops setup. Metadata indexes are created before any vector is written, because vectors written earlier are not filterable ([Search §7.3](search.md#73-re-embed-job-embedding-model-change)) |
 | 7 | Email Routing on the mail domain | `GET /zones/{z}/email/routing`; if not enabled, delete foreign MX records when `--replace-mx` was accepted, then `POST /zones/{z}/email/routing/dns` `{"name": "{mail_domain}"}` (adds and locks the MX and SPF records); then `PATCH /zones/{z}/email/routing` `{"support_subaddress": true}` if it is not already `true` | Read first; each call only when the setting differs |
 | 8 | Ownership record | `GET /zones/{z}/dns_records?type=TXT&name.exact=_pylota-mail.{mail_domain}`; if absent, `POST /zones/{z}/dns_records` `{"type":"TXT","name":"_pylota-mail.{mail_domain}","content":"pm-verify={token}","ttl":1}` ([Identities, addresses and domains](identity-domains.md), step 4) | An existing `pm-verify=` value is reused as the token |
@@ -751,16 +784,19 @@ repository's template with `--from-source`). The output is the file in
    are written only when set: `PM_AI_GATEWAY`,
    `PM_SES_REGION`, `PM_SES_SNS_TOPIC_ARN`, `PM_SES_INBOUND_BUCKET`, `PM_SES_INBOUND_TOPIC_ARN`,
    `PM_SES_INBOUND_QUEUE_URL`, `PM_SES_RULE_SET`, `PM_CF_SUBDOMAIN_SETUP`, `PM_DAILY_SEND_QUOTA`,
-   `PM_BACKUP_BUCKET`, `PM_SCANNER_URL`, `PM_SECURITY_CONTACT`, and the other console, sign-up and
-   billing variables of [Configuration › Variables](../../reference/configuration.md#variables).
+   `PM_BACKUP_BUCKET`, `PM_SCANNER_URL`, `PM_SECURITY_CONTACT`, `PM_DOCS_URL`, and the other console,
+   sign-up (including `PM_AGENT_SIGNUP` and `PM_AGENT_SIGNUP_DAILY_CAP`) and billing variables of
+   [Configuration › Variables](../../reference/configuration.md#variables).
    The `[observability.traces]` table is preserved too: its `enabled` and `head_sampling_rate` keep
    their existing values, and the template's default (`enabled = false`) is written only when the table
    is missing. Staging sets `enabled = true` and `head_sampling_rate = 0.1` once, and `deploy` and
    `upgrade` keep it. Staging carries only synthetic mail ([Testing §10](testing.md#10-live-end-to-end-suite-live)).
 3. **Owned sections.** Bindings, Durable Object migrations, queues, cron triggers, limits and
    observability come from the template. They include the `Q_DELIVERY` producer (used only by
-   `POST /v1/platform/dlq/{dlq_id}/redrive` to republish dead-lettered delivery events), the six Durable
-   Object bindings including `NOTIFY` (class `Notifier`, [Notifications §8](notifications.md#8-notifier-object)),
+   `POST /v1/platform/dlq/{dlq_id}/redrive` to republish dead-lettered delivery events), the `Q_SCREEN`
+   producer and consumer of `pm-screen` ([Screening hold § 5.1](screening.md#51-queue)), the seven Durable
+   Object bindings including `NOTIFY` (class `Notifier`, [Notifications §8](notifications.md#8-notifier-object))
+   and `EVENTS` (class `TenantEvents`, [Event feed § 2](event-feed.md#2-the-tenantevents-object)),
    the seven rate-limit bindings including `RL_SIGNIN` (10 requests per 60 s per client IP,
    [Cloud sign-up §10](cloud-signup.md#10-abuse-and-safety-on-cloud)), `RL_SIGN` (600 signing calls
    per 60 s per identity, [Agent signing keys §6](agent-keys.md#6-permissions-limits-and-plans)) and
@@ -774,7 +810,10 @@ repository's template with `--from-source`). The output is the file in
 4. **Placeholders** `{…}` that remain after merging are an error naming the missing value.
 5. **Validation**: the result must parse as TOML; `PM_PLATFORM_DOMAIN`, `PM_API_HOST` and
    `PM_JURISDICTION` must equal the values in the D1 platform domain row once it exists (a mismatch
-   means the file was copied from another deployment: exit 3).
+   means the file was copied from another deployment: exit 3). A `PM_DOCS_URL` that is not `https`, has a
+   query or fragment, or is over 200 bytes is refused with exit 3 before anything is deployed, so `setup`
+   and `deploy` both refuse it; a trailing `/` is removed
+   ([Parity additions § 10.1](parity-additions.md#101-the-field), [Z79](../edge-cases.md)).
 6. The file is written atomically, mode `0644` (it holds no secrets).
 
 ## 8. `deploy`
@@ -1029,6 +1068,7 @@ Data sources:
 | `secrets` | `GET /accounts/{a}/workers/scripts/pylota-mail/secrets` (names only): `fail` when a required secret is missing, or when the slot named by `PM_MASTER_KEY_ACTIVE` (default `a`) has no secret; `warn` only while `master_key.remaining` in `GET /v1/platform/status` is above 0 (an unfinished master-key rotation, [§12.1](#121-secrets-rotate-master); `skip` for that part without a key holding `audit:read`) |
 | `observability` | The rendered file's `[observability]` table |
 | `worker.version`, `health` | `GET https://{api_host}/health` |
+| `agent_signup` | `GET /v1/platform/status` with the profile's key (a platform key with `audit:read`; `skip` without one): `skip` when `PM_AGENT_SIGNUP` is `off` in the rendered file; `warn` when it is `on` but `agent_signup.active` is `false` (the detail names `reason`), or when the `agent_signup` switch is `off` ([Agent self-sign-up § 21](agent-signup.md#21-observability)) |
 | `alerts` | `GET /v1/platform/status` with the profile's key (a platform key with `audit:read`; `skip` without one): `fail` on a firing page alert, on `alert_email: missing`, or when `frozen_since` is more than 4 hours ago; `warn` on a firing ticket alert |
 | `dlq` | D1 `SELECT queue, COUNT(*) AS n, MIN(first_seen_at) AS oldest FROM dlq_items WHERE redriven_at IS NULL GROUP BY queue` |
 | `quota` | Workers Analytics Engine SQL API (`POST /accounts/{a}/analytics_engine/sql`; verify at build time) over the `provider_quota_errors_total` points of the last 24 hours ([Observability §3](observability.md#3-metrics)). `warn` when `PM_DAILY_SEND_QUOTA` is unset in the rendered file, with the fix `pmail setup --daily-send-quota <n>` (or set it under `[vars]` and `pmail deploy`). The SQL API needs Account Analytics · Read on the token (Cloudflare's SQL API page, read 2026-10-09); when the call is refused for a missing permission, the check is `warn`, not `fail`, with the fix naming that permission ([Deploy to Cloudflare › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token)) |
@@ -1257,19 +1297,24 @@ through its own producer bindings.
 
 ## 15. `mcp config`
 
-`pmail mcp config [--client generic|claude-code|cursor] [--name pylota-mail]` prints configuration for
-the current profile's URL. It never prints a key; the configuration references an environment
-variable.
+`pmail mcp config [--client generic|claude-code|cursor|codex|claude-desktop|agent-sdk] [--name pylota-mail]`
+prints configuration for the current profile's URL. It never prints a key; the configuration references an
+environment variable (or, for `claude-desktop`, runs the local bridge of [§22](#22-mcp-stdio), which reads the
+key from the profile).
 
 | `--client` | Output |
 |---|---|
 | `generic` (default) | `{ "mcpServers": { "pylota-mail": { "url": "https://mail.example.com/mcp", "headers": { "Authorization": "Bearer ${PYLOTA_MAIL_KEY}" } } } }` |
 | `claude-code` | The command `claude mcp add --transport http pylota-mail https://mail.example.com/mcp --header "Authorization: Bearer $PYLOTA_MAIL_KEY"`, and the `.mcp.json` form with `"type": "http"` |
 | `cursor` | The `~/.cursor/mcp.json` form with `"Authorization": "Bearer ${env:PYLOTA_MAIL_KEY}"` |
+| `codex` | The `~/.codex/config.toml` block `[mcp_servers.pylota-mail]` with `url`, `bearer_token_env_var = "PYLOTA_MAIL_KEY"`, `enabled_tools` and `tool_timeout_sec = 90`, because Codex's default of 60 seconds is shorter than a `mail_wait` ([Y59](../edge-cases.md)) |
+| `claude-desktop` | The `claude_desktop_config.json` entry `{ "command": "pmail", "args": ["mcp", "stdio", "--profile", "<profile>"] }`, and the custom-connector values (URL, **No sign-in**, request header `authorization`) for organisations that have the request-header beta |
+| `agent-sdk` | A Claude Agent SDK `mcpServers` entry (`type: "http"`, `url`, `headers`) with `allowedTools` naming the key's tools one by one, never a wildcard |
 
-The client formats are documented in the [MCP reference](../../reference/mcp.md#connect-a-client). The
-command also prints which tools the current key would see (`GET /v1/me` permissions mapped through
-[MCP server §3](mcp.md#3-authentication-and-tool-filtering)).
+The client formats are documented in the [MCP reference](../../reference/mcp.md#connect-a-client), and each
+snippet was checked against the client's own page ([SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup)).
+The command also prints which tools the current key would see (`GET /v1/me` permissions and the key's
+`mcp_tools` list mapped through [MCP server §3](mcp.md#3-authentication-and-tool-filtering)).
 
 ## 16. `webhooks verify`
 
@@ -1346,10 +1391,67 @@ answered · confidence 0.86 · 3 steps · 2.8 s
 - **`wait`** prints the message (or `timed out`), and for `--kind verification` the code and link on
   their own lines so a script can read them with `--quiet`. `timed_out: true` is exit 13.
 - **`send`, `reply`, `reply-all`, `forward`**: `--text-file` and `--html-file` read bodies;
-  `--attach <path>` (repeatable) reads files, guesses the content type from the extension
-  (`application/octet-stream` otherwise) and base64-encodes them; the CLI refuses before sending when
-  the encoded total exceeds 5 MiB unless `--allow-large` (the tenant may have
-  `large_attachments: "link"`). Recipients take `Name <addr>` or `addr`.
+  `--attach <path>` (repeatable) reads files and guesses the content type from the extension
+  (`application/octet-stream` otherwise). A file of at most 1,048,576 bytes is base64-encoded and sent
+  inline; a larger one is uploaded first, as `uploads create` does, and attached by `upload_id`
+  ([Uploads § 13](uploads.md#13-mcp-and-cli)). At most 25 MiB per file and 25 MiB per message; the
+  tenant's `large_attachments` setting still decides what the send does with large files. `send` and `reply` take `--calendar-file <file.ics>` (an iCalendar file sent as iMIP, at most
+  256 KiB) with `--calendar-copy` (the default) or `--no-calendar-copy`, which leaves out the `invite.ics`
+  copy ([Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli)). Recipients take
+  `Name <addr>` or `addr`.
+- **`calendar-reply <message-id> --partstat accepted|declined|tentative`** answers a verified invitation
+  (`POST …/messages/{m}/calendar-reply`), with `--comment`, `--recurrence-id`, `--idempotency-key` and
+  `--dry-run`; it is a send, so its key rules are those of [§4](#4-http-behaviour-against-the-api). An
+  invitation that is not verified, or a method that cannot be answered, comes back as `422` (exit 7).
+  `messages get` prints a message's `calendar` object; `--json` returns it unchanged.
+- **`drafts create|list|get|update|send|approve|reject|delete`** follow [Drafts § 17.2](drafts.md#172-cli).
+  `drafts send` without `--idempotency-key` derives `cli:{draft_id}:{revision}:{approval.state}`
+  ([§4](#4-http-behaviour-against-the-api)).
+  `drafts list --tenant` reads the tenant's queue. `drafts approve` needs `--revision` (and takes
+  `--digest`), so a person approves exactly the text they read; where people decide
+  (`drafts.key_approval`), a key gets `403 permission_denied` (`person_required`), exit 4. A stale
+  revision is exit 6 (`409`); the draft limit is exit 7 (`422`). `drafts get --attachment <att_…> --out
+  <path>` writes the bytes as `messages attachment` does.
+- **`uploads create FILE`** computes the size and SHA-256 locally, creates the upload, `PUT`s the bytes to
+  `upload_url` (no API key; retried on `503` and `409 upload_in_progress` after `Retry-After`, at most 5
+  times) and prints the upload ID and `expires_at`. `uploads list|get|delete` read and delete uploads;
+  `get` prints a fresh `upload_url` while the upload is `pending` or `uploading`.
+- **`messages feedback <message-id> --verdict <v> [--notes <text>]`** reports on a screening verdict and
+  **`messages feedback-list`** reads the reports ([Screening hold § 21](screening.md#21-console-mcp-and-cli));
+  `messages list --status screening` and `--screening-status pending|clear|suspect|unavailable` filter by
+  screening. **`screening summary`** prints precision and recall for an identity, or for a tenant
+  (`--tenant`, optionally `--identity-ids`), over `--from` and `--to`. **`quarantine release`** on a message
+  still being screened gets `409 not_quarantined` (exit 6); wait for its verdict.
+- **`metrics rates`** prints one line per window (rule, threshold, now, headroom), tripped windows first,
+  and exits 16 when any window is tripped or any pause is in effect, so a script can gate a bulk send on it;
+  **`metrics events`** prints one row per bucket and a `partial` warning on stderr when the answer is
+  partial ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)). Without `--identity` or
+  `--domain` both send no `scope`, so the server's default applies (the key's own identity for an identity
+  key, the tenant otherwise).
+- **`agent-signup create --username U --human-email E --accept-terms`** calls `POST /v1/agent-signup`
+  without a key and writes the returned key into the profile named by `--profile` (else `default`), with
+  the config file's `0600` rules ([§2.1](#21-the-config-file)); it prints the key only with `--print-key`.
+  `agent-signup status|verify <code>|resend|set-human <email>|abandon` use that key; `abandon` asks for the
+  typed address, because it erases the workspace. `agent-signups list` is the platform listing
+  ([Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli)).
+- **`messages get <message-id>…`** with more than one ID calls `batch-get`; **`messages label
+  <message-id>…`** (`--add`, `--remove`, `--read|--unread`, `--archive|--unarchive`, `--require-absent`)
+  with more than one ID calls `batch-update` in requests of 100, each atomic, and says so when it splits,
+  because the command as a whole is not atomic; it exits 0 only when every request succeeds ([Parity additions § 2.7](parity-additions.md#27-interfaces-and-privacy)).
+- **`lists list|add|remove`** take `--identity <identity>` for identity-scope entries
+  (`…/identities/{id}/lists/…`), which override the tenant's entries for that identity's mail as
+  [Parity additions § 3.1](parity-additions.md#31-scopes-and-precedence) defines;
+  `--tenant` keeps the tenant scope.
+- **`identities create` and `identities update`** take `--message-hours <1-8760>` (erase each message that
+  many hours after it is stored; needs `erasure:manage`) or `--keep-messages` (sets `retention.message_hours`
+  to `null`) ([Parity additions § 7](parity-additions.md#7-per-identity-message-retention-fr-prv-7)).
+- **`webhooks create --header 'Name: value'`** (repeatable) sends `headers`; **`webhooks headers
+  <webhook-id> [--set 'Name: value']… [--set-stdin <name>] [--remove <name>]…`** calls
+  `PATCH /v1/webhooks/{id}/headers`. `--set-stdin` reads the value from standard input, so it stays out of
+  the shell history; values are write-only and never printed ([Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)).
+- **`domains records --format bind`** prints the records as a zone file
+  (`GET /v1/domains/{id}/records?format=bind`), for example
+  `pmail domains records dom_01JA9G6M2WW7X2M5N6P8R0T1YR --format bind > mail.acmecarhire.example.zone`.
 - **`keys create` and `webhooks create`** print the secret once. In human mode it is on its own line
   after the object, with "shown only once"; `--quiet` prints only the secret.
 - **`webhooks create --platform` and `--partner`** both call `POST /v1/webhooks`, whose endpoint scope
@@ -1382,6 +1484,9 @@ answered · confidence 0.86 · 3 steps · 2.8 s
   replaces it (a job over the wrong tenant is costly to undo); each repeated `--identity` is resolved to an ID ([§2.4](#24-resolving-names-to-ids));
   without `--identity`, `identity_ids` is `null` (every identity of the tenant). It prints the job;
   `jobs get <job_id>` prints its status and, once it ends, `result`.
+  **`jobs start event_log_rebuild --tenant <tenant>`** sends `{ "kind": "event_log_rebuild", "tenant_id" }`
+  only, as `JobCreateRequest` requires ([Event feed § 9.3](event-feed.md#93-rebuilding-a-log)); `--identity`,
+  `--after` or `--before` with it is exit 2 before any request.
 - **`waitlist invite --count N [--plan P]`** checks `N` is 1–500 before sending (exit 2 otherwise) and
   prints `Invited 50; 262 still waiting.` from `{ "invited", "waiting" }`
   ([Cloud sign-up §6.1](cloud-signup.md#61-before-launch-the-waitlist)).
@@ -1407,6 +1512,9 @@ answered · confidence 0.86 · 3 steps · 2.8 s
   `identities:sign` on a platform or partner key; `platform:ops` and `partners:manage` below platform
   level; `tenants:manage` on a tenant or identity key; and the tenant-only `members:read`,
   `members:manage`, `suppressions:manage`, `audit:read` and `usage:read` on an identity key. `--save-profile <name>` writes the new key into that profile.
+  `--mcp-tools <names>` sends `mcp_tools`, the MCP tools the key may see (comma-separated; an empty value
+  sends `[]`). It narrows the MCP surface only: the key still reaches the REST API with all its permissions
+  ([SDKs, skills and agent tooling § 5.3](sdk-and-skills.md#53-per-key-tool-allow-list)).
 - **Notification preferences** have no command: they belong to people, not keys, and are set only in the
   console ([Notifications §2](notifications.md#2-preferences)).
 
@@ -1645,6 +1753,37 @@ verdict. JSON: `{ "valid": true, "kid", "claims": { … } }` or `{ "valid": fals
 Signing by both commands shares the `RL_SIGN` limit of 600 calls a minute per identity; over it the API
 answers `429 rate_limited` (exit 8, after the retries of [§4](#4-http-behaviour-against-the-api)).
 
+### 18.6 `events tail`
+
+`pmail events tail [--tenant <tenant>] [--after <cursor> | --since <time> | --consumer <name|id>]
+[--types <pattern,…>] [--identity <identity>]… [--cursor-file <path>] [--transport stream|poll]` follows the
+tenant's event feed ([Event feed § 15.2](event-feed.md#152-cli)).
+
+- **Transport.** By default it opens `GET /v1/events/stream` with the `Authorization` header (the CLI is not
+  a browser, so it needs no stream token) and acknowledges each batch after printing it. `--transport poll`
+  uses the long poll, `GET /v1/events?wait=60`, for networks that block WebSockets.
+- **Output.** Human output is one line per event: time, type, identity, message ID and the subject, which is
+  untrusted and neutralised as in [§3.2](#32-untrusted-text-in-a-terminal). `--json` prints NDJSON, one
+  envelope per line ([§3.1](#31-modes)); `--quiet` prints event IDs.
+- **Cursor file.** `--cursor-file` is read at start, unless `--after` or `--since` is given, and written after
+  each printed batch: to a temporary file in the same directory, mode `0600`, then renamed over the old one.
+  A crash between printing and writing repeats that batch, so output is at least once and a reader
+  deduplicates on `event.id`. With `--consumer` the position is the consumer's and no file is needed; a
+  consumer `<name>` is resolved to its ID with one list call.
+- **Reconnects** follow [Event feed § 7.10](event-feed.md#710-resuming-without-loss): on `1001`, `1006`,
+  `1011`, `1012`, `1013`, `4408` or an unknown code, reconnect with backoff from 1 second doubling to 60
+  seconds (±50% jitter) and resume from the last written cursor or the newer heartbeat position; on `4429`,
+  retry after 30 seconds. Every other close ends the command with the exit code below.
+- **Exit codes** ([§3.4](#34-exit-codes)): `4410` → 6, printing `details.oldest_cursor` and the fix; `4409` → 6,
+  printing that another connection took this one's place, without reconnecting; `4401` or `4403` → 4;
+  `4404` → 5; `4400`, `1008` or `1009` → 7; 10 minutes of failed reconnects → 9. Ctrl-C writes the cursor
+  file and exits 130. A `since_truncated: true` answer to `--since` prints a warning on stderr and continues.
+
+`events list --all` follows `has_more` into one document; `events consumers read --commit` commits the page's
+`next_cursor` after printing it, also for an empty page with `has_more: true`, so repeated runs walk a backlog
+page by page ([Event feed § 6.2](event-feed.md#62-rules), rule 5); without `--commit` a second run prints the
+same page.
+
 ## 19. Command-to-endpoint map
 
 This is the command tree: every `pmail` command and what it calls. A command needs the permission of
@@ -1665,22 +1804,36 @@ have no command: they are set only in the console ([Notifications §2](notificat
 | `identities lookup` | `GET /v1/identities/lookup?address=` |
 | `addresses list\|add\|promote\|retire\|delete` | `GET\|POST /v1/identities/{id}/addresses`; `POST …/{adr}/promote`; `POST …/{adr}/retire`; `DELETE …/{adr}` |
 | `addresses test-forwarding` | `POST /v1/identities/{id}/addresses/{adr}/test-forwarding` (`identities:write`; [§18.3](#183-domains-update-domains-probe-and-addresses-test-forwarding)) |
-| `domains add\|list\|get\|records\|verify\|health\|reprove\|remove` | `POST /v1/tenants/{t}/domains` ([§18.2](#182-domains-add---method)); `GET /v1/tenants/{t}/domains`; `GET /v1/domains/{id}`; `GET …/records`; `POST …/verify`; `GET …/health`; `POST …/reprove`; `DELETE /v1/domains/{id}` |
+| `domains add\|list\|get\|records\|verify\|health\|reprove\|remove` | `POST /v1/tenants/{t}/domains` ([§18.2](#182-domains-add---method)); `GET /v1/tenants/{t}/domains`; `GET /v1/domains/{id}`; `GET …/records` (`--format bind`: `?format=bind`); `POST …/verify`; `GET …/health`; `POST …/reprove`; `DELETE /v1/domains/{id}` |
 | `domains update` | `PATCH /v1/domains/{id}` (`domains:write`; `--transport` needs a platform key) |
 | `domains probe` | `POST /v1/domains/{id}/probe` (`domains:write`) |
 | `domains add --local-token` | `POST /v1/tenants/{t}/domains`; on `422 cf_token_required`, the Cloudflare API and the D1 query API with the local token ([§18.1](#181-domains-add-without-pm_cf_api_token)) |
 | `domains subscribe` | `GET /v1/domains/{id}`; then the Cloudflare API, Wrangler and the D1 query API with the local token ([§18.4](#184-domains-subscribe)) |
 | `send`, `reply`, `reply-all`, `forward` | `POST /v1/identities/{id}/messages`; `POST …/messages/{m}/reply`; `…/reply-all`; `…/forward` |
+| `calendar-reply` | `POST /v1/identities/{id}/messages/{m}/calendar-reply` (`messages:send`; [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli)) |
 | `cancel`, `resolve` | `POST …/messages/{m}/cancel`; `POST …/messages/{m}/resolve` |
+| `drafts create\|list\|get\|update\|delete` | `POST /v1/identities/{id}/drafts`; `GET /v1/identities/{id}/drafts` or, with `--tenant`, `GET /v1/tenants/{t}/drafts`; `GET …/drafts/{d}` (`--attachment`: `GET …/drafts/{d}/attachments/{a}`); `PATCH …/drafts/{d}`; `DELETE …/drafts/{d}` (`drafts:read`, `drafts:write`; [Drafts § 17.2](drafts.md#172-cli)) |
+| `drafts send` | `POST …/drafts/{d}/send` (`messages:send` and `drafts:read`; the key is derived as in [§4](#4-http-behaviour-against-the-api)) |
+| `drafts approve\|reject` | `POST …/drafts/{d}/approve`; `POST …/drafts/{d}/reject` (`drafts:approve`, and `messages:send` for `approve --send`; platform, partner or tenant key, and where `drafts.key_approval` is `true` only a platform key or the tenant's own partner key) |
+| `uploads create` | `POST /v1/identities/{id}/uploads`, then `PUT` to the returned `upload_url` (`PUT /v1/links/{token}`, no key) (`messages:send` or `drafts:write`; [Uploads § 13](uploads.md#13-mcp-and-cli)) |
+| `uploads list\|get\|delete` | `GET /v1/identities/{id}/uploads`; `GET …/uploads/{u}`; `DELETE …/uploads/{u}` |
 | `threads list\|get\|label\|hold\|unhold` | `GET /v1/identities/{id}/threads`; `GET …/threads/{t}`; `PATCH …/threads/{t}`; `POST …/threads/{t}/hold`; `DELETE …/threads/{t}/hold` |
-| `messages list\|get\|raw\|attachment\|attachment-text\|label` | `GET …/messages`; `GET …/messages/{m}`; `GET …/raw`; `GET …/attachments/{a}`; `GET …/attachments/{a}/text`; `PATCH …/messages/{m}` |
+| `messages list\|get\|raw\|attachment\|attachment-text\|label` | `GET …/messages`; `GET …/messages/{m}` (more than one ID: `POST …/messages/batch-get`); `GET …/raw`; `GET …/attachments/{a}`; `GET …/attachments/{a}/text`; `PATCH …/messages/{m}` (more than one ID: `POST …/messages/batch-update`, in requests of 100) |
+| `messages feedback\|feedback-list` | `POST …/messages/{m}/feedback` (`messages:write`); `GET …/messages/{m}/feedback` (`messages:read`; [Screening hold § 11](screening.md#11-feedback)) |
+| `screening summary` | `GET /v1/identities/{id}/screening/summary` or, with `--tenant`, `GET /v1/tenants/{t}/screening/summary` (`--identity-ids` sends `identity_ids`) |
 | `search` | `POST /v1/identities/{id}/search` or `POST /v1/tenants/{t}/search` |
 | `ask` | `POST /v1/identities/{id}/search` or, with `--tenant`, `POST /v1/tenants/{t}/search` (`mode: agentic`, streamed; `search:read` and `search:agentic`; [§17](#17-ask)) |
 | `triage list\|rerun` | `GET /v1/identities/{id}/threads?category=&needs_reply_gte=` (threads with their roll-up); `POST …/messages/{m}/triage` |
 | `wait` | `GET /v1/identities/{id}/wait` |
 | `quarantine list\|release` | `GET /v1/identities/{id}/quarantine`; `POST …/messages/{m}/release` |
 | `webhooks create\|list\|get\|update\|delete\|rotate\|test\|deliveries\|replay` | `POST /v1/webhooks` (`--platform` with a platform key, `--partner` with a partner key) or `POST /v1/tenants/{t}/webhooks`; `GET` (both); `GET\|PATCH\|DELETE /v1/webhooks/{w}`; `POST …/rotate-secret`; `POST …/test`; `GET …/deliveries`; `POST …/replay` |
+| `webhooks headers` | `PATCH /v1/webhooks/{w}/headers` (`webhooks:manage`; [Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)) |
 | `webhooks verify` | none (offline, [§16](#16-webhooks-verify)) |
+| `events list` | `GET /v1/events` |
+| `events tail` | `GET /v1/events/stream` (or `GET /v1/events?wait=60` with `--transport poll`) ([§18.6](#186-events-tail)) |
+| `events consumers create\|list\|get\|delete` | `POST`, `GET /v1/event-consumers`, `GET`, `DELETE /v1/event-consumers/{consumer_id}` |
+| `events consumers read\|commit\|reset` | `GET …/{consumer_id}/events`, `POST …/commit`, `POST …/reset` |
+| `events stream-token` | `POST /v1/events/stream-tokens` |
 | `keys create\|list\|get\|revoke` | `POST /v1/keys` (`--level partner --partner <ptn_…>`: platform key only); `GET /v1/keys`; `GET /v1/keys/{k}`; `DELETE /v1/keys/{k}` |
 | `keys rotate key_…` | `POST /v1/keys/{k}/rotate` (`keys:manage`) |
 | `keys rotate thread\|link\|cursor\|web_bot_auth` | `POST /v1/platform/keys/{purpose}/rotate`, `?revoke_previous=true` with `--revoke-previous` (platform key, `platform:ops`; [§12.2](#122-signing-keys-keys-rotate-threadlinkcursorweb_bot_auth)) |
@@ -1692,7 +1845,7 @@ have no command: they are set only in the console ([Notifications §2](notificat
 | `assertions verify` | none with a key: `GET {iss}/.well-known/jwks/{sub}.json`, unauthenticated, through the SDK's `verify_assertion` ([§18.5](#185-identity-keys-assertions-and-http-sign)) |
 | `http-sign` | `POST /v1/identities/{id}/http-signatures` (`identities:sign`, tenant or identity key) |
 | `suppressions list\|add\|remove` | `GET\|POST /v1/tenants/{t}/suppressions`; `DELETE /v1/tenants/{t}/suppressions/{address}` |
-| `lists list\|add\|remove` | `GET /v1/tenants/{t}/lists/{direction}/{kind}`; `PUT …/{entry}`; `DELETE …/{entry}` |
+| `lists list\|add\|remove` | `GET /v1/tenants/{t}/lists/{direction}/{kind}`; `PUT …/{entry}`; `DELETE …/{entry}`; with `--identity`, the same under `/v1/identities/{id}/lists/{direction}/{kind}` (`suppressions:manage`; [Parity additions § 3.4](parity-additions.md#34-routes)) |
 | `erasure create\|get\|list` | `POST /v1/erasure-requests`; `GET /v1/erasure-requests/{id}`; `GET /v1/erasure-requests` |
 | `erasure retry` | `GET /v1/erasure-requests/{id}`, then `POST /v1/erasure-requests` with the same `tenant_id`, `scope`, `identity_id` and target (`--address` for counterparty scope) and reason `retry:{era_id}`; the API makes it a resumption of the failed request ([Privacy §6.1](privacy.md#61-request)) |
 | `erasure reapply` | `POST /v1/platform/erasure-requests/{id}/reapply` (platform key, `platform:ops`) |
@@ -1707,8 +1860,15 @@ have no command: they are set only in the console ([Notifications §2](notificat
 | `dlq list\|redrive` | `GET /v1/platform/dlq`; `POST /v1/platform/dlq/{dlq_id}/redrive` (platform key, `platform:ops`; [§13](#13-dlq)) |
 | `jobs start\|get` | `POST /v1/platform/jobs`; `GET /v1/platform/jobs/{job_id}` (platform key, `platform:ops`) |
 | `waitlist invite` | `POST /v1/platform/waitlist/invite` (platform key, `platform:ops`) |
+| `agent-signup create` | `POST /v1/agent-signup` (no key; [Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli)) |
+| `agent-signup status\|verify\|resend\|set-human\|abandon` | `GET /v1/agent-signup`; `POST /v1/agent-signup/verify`; `POST /v1/agent-signup/resend`; `PUT /v1/agent-signup/human`; `DELETE /v1/agent-signup` (the sign-up's own key) |
+| `agent-signups list` | `GET /v1/platform/agent-signups` (platform key; `--state`, `--since` as `created_after`, `--network`) |
+| `metrics rates` | `GET /v1/metrics/rates` (`metrics:read`; [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)) |
+| `metrics events` | `GET /v1/metrics/events` (`metrics:read`) |
 | `ops status\|switch\|freeze\|unfreeze\|restore` | [§20](#20-ops) |
 | `mcp config` | `GET /v1/me` |
+| `mcp stdio` | `GET /v1/me`, then `POST /mcp` ([§22](#22-mcp-stdio)) |
+| `skills generate\|list` | none (offline); `--for-current-key`: `GET /v1/me` ([§21](#21-skills)) |
 | `login`, `config show\|set` | `GET /v1/me` (`config set`: none) |
 | `setup`, `deploy`, `upgrade`, `doctor`, `destroy`, `secrets rotate-master` | Cloudflare API, Wrangler, GitHub, and the API as described above (`secrets rotate-master` also `GET /v1/platform/status`) (`doctor` also reads `/.well-known/*`; `destroy --include-ses` also the AWS APIs) |
 | `setup ses` | AWS APIs, Wrangler, the Cloudflare API and `/health` ([§6.9](#69-setup-ses)) |
@@ -1721,7 +1881,7 @@ runbook](observability.md#55-alert-email-and-the-external-heartbeat)). Built by 
 | Command | Calls | Credentials |
 |---|---|---|
 | `ops status` | `GET /v1/platform/status`; human output groups the freeze flag, switches, `alert_email`, firing alerts, `master_key` and capacity | platform key with `audit:read` |
-| `ops switch <name> on\|off [--reason <text>]` | `PUT /v1/platform/switches` with `{"name", "state", "reason"}` | platform key with `platform:ops` |
+| `ops switch <name> on\|off [--reason <text>]` | `PUT /v1/platform/switches` with `{"name", "state", "reason"}`. The names include `agent_signup`: `agent_signup off` stops new agent sign-ups and their mail ([Agent self-sign-up § 13](agent-signup.md#13-abuse-containment)) | platform key with `platform:ops` |
 | `ops freeze` / `ops unfreeze` | Sets `PM_FREEZE` to `on` / `off` under `[vars]` in `<dir>/wrangler.toml` (`freeze` also writes `PM_FREEZE_SINCE` with the current time; `unfreeze` removes it), then the code-deploy step of `deploy` with the deployed version's bundle (§8.6; a variable change only, no migration). Then polls `GET /health` until `frozen` matches, at most 120 s | Cloudflare token |
 | `ops restore d1 --at <T> …` | The steps of the restore runbook's step 3, with Wrangler `d1 export`, `d1 time-travel info`, `d1 time-travel restore` and `d1 execute --file` (all through the pinned Wrangler, §5) | Cloudflare token (D1 · Edit) |
 | `ops restore mailbox <identity> (--at <T> \| --bookmark <b>)` | `POST /v1/platform/identities/{identity_id}/restore` | platform key with `platform:ops` |
@@ -1752,6 +1912,97 @@ Rules for `ops restore d1`:
 Exit codes are those of §3.4; a Cloudflare or Wrangler failure in the middle is exit 10 with the step
 reached, and every step can be re-run.
 
+## 21. `skills`
+
+```text
+pmail skills generate [--output-dir <dir>] [--agent claude-code|codex|cursor|agents] [--for-current-key] [--force]
+pmail skills list [--output-dir <dir>]
+```
+
+The agent skills are compiled into this `pmail`, so the files it writes always match the binary's API
+version ([SDKs, skills and agent tooling § 4.5](sdk-and-skills.md#45-versioning-and-distribution)).
+
+- `--agent` picks the directory: `claude-code` → `./.claude/skills`; `codex`, `cursor` and `agents` →
+  `./.agents/skills`. `--output-dir` overrides it (for example `~/.agents/skills` for every project).
+- It writes `.pylota-mail-skills.json` (`cli_version`, the SHA-256 of every file written). A later run
+  replaces only files whose hash still matches; a file someone edited is left alone and reported, and the
+  command exits 6 unless `--force` ([Y63](../edge-cases.md)). Files of skills a newer version dropped are
+  removed only when unmodified.
+- `--for-current-key` calls `GET /v1/me`, maps the key's permissions and `mcp_tools` to tools as
+  [MCP server §3](mcp.md#3-authentication-and-tool-filtering) does, and writes only the skills whose tools the
+  key can use, plus `references/deployment.md` with the API URL. It never writes a key.
+- `skills list` prints the skills this binary carries and, with `--output-dir`, which of them are written,
+  unchanged or modified. Neither command needs a key or the network except `--for-current-key`.
+- JSON output: `{ "version", "written", "unchanged", "skipped_modified", "removed" }`.
+
+## 22. `mcp stdio`
+
+`pmail mcp stdio [--tools <names>] [--profile <name>] [--verbose]` is a local MCP server that forwards to the
+deployment's `/mcp`, for clients that run only local (stdio) servers and for Claude Desktop without the
+request-header beta ([SDKs, skills and agent tooling § 5.4](sdk-and-skills.md#54-the-stdio-bridge-pmail-mcp-stdio)).
+It is part of the signed `pmail` binary, so it needs no Node.js runtime and no package fetched at start-up.
+
+1. **Key.** From `PYLOTA_MAIL_KEY` or the profile (`key`, `key_env`, `key_command`), never from `--key`, which
+   this command refuses with exit 2, so the key never sits in a client's configuration file or the process
+   list. At start it calls `GET /v1/me`; a `401` or `403` writes the error to stderr (never the key) and exits
+   4 before reading stdin ([Y57](../edge-cases.md)).
+2. **Framing.** It reads newline-delimited JSON-RPC from stdin and writes only MCP messages to stdout, one per
+   line with no embedded newline, as the stdio transport requires. Logs go to stderr only with `--verbose`:
+   method, tool, status and duration, never arguments.
+3. **Forwarding.** Each request is a `POST` to `{url}/mcp` with `Authorization`, `Content-Type:
+   application/json` and `Accept: application/json, text/event-stream`. A request whose `_meta` carries
+   `io.modelcontextprotocol/protocolVersion` gets `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`
+   and `prompts/get`, `Mcp-Name` built from the body (the `=?base64?…?=` form for non-ASCII names); a legacy
+   request gets the `MCP-Protocol-Version` negotiated by `initialize`
+   ([MCP server §2.2–2.3](mcp.md#22-modern-era)) ([Y58](../edge-cases.md)). A JSON answer is written as one
+   line; an event-stream answer is written one line per JSON-RPC message, keep-alive comments dropped.
+   Notifications get `202` and write nothing. Requests run concurrently through one stdout writer.
+4. **Cancellation.** `notifications/cancelled` aborts the in-flight HTTP request of that ID, which closes its
+   stream. The notification is also forwarded for legacy sessions.
+5. **Narrowing.** `--tools a,b,c` removes every other tool from `tools/list` results and answers `tools/call`
+   for them with `-32602 Unknown tool` locally. It can only narrow what the key sees ([Y56](../edge-cases.md)).
+6. **Failures.** `initialize`, `server/discover`, `ping`, `tools/list`, `prompts/list` and `prompts/get` are
+   retried once on a network error, a `5xx` or a `429` with `Retry-After` of at most 10 seconds. `tools/call`
+   is **never** retried by the bridge: when the connection drops before the result arrives, it answers with a
+   tool result, `isError: true`, whose text is the envelope with code `cli_outcome_unknown`
+   (`retryable: true`, `request_id: null`, and the fix "The tool may have run. Retry the same call with the
+   same idempotency_key; a replay returns the original result."), so the model sees it and the key decides
+   ([Y55](../edge-cases.md)). A body over 7 MiB is refused locally with the `payload_too_large` envelope.
+7. **End.** EOF on stdin lets in-flight requests finish, then exits 0.
+
+## 23. `--schema`
+
+A global flag. `pmail <command> --schema` prints one JSON document describing the command and exits 0. It
+reads no configuration, needs no key and makes no request ([Y65](../edge-cases.md);
+[SDKs, skills and agent tooling § 6.1](sdk-and-skills.md#61---schema)).
+
+```json
+{
+  "schema_version": 1,
+  "cli_version": "1.4.0",
+  "command": "send",
+  "summary": "Send a new email",
+  "endpoint": { "method": "POST", "path": "/v1/identities/{identity_id}/messages", "operation_id": "sendMessage" },
+  "idempotency": "required",
+  "input": { "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+             "properties": { "identity": { "type": "string", "x-flag": "--identity" }, "…": {} },
+             "required": ["to", "subject"] },
+  "output": { "$schema": "https://json-schema.org/draft/2020-12/schema", "…": "the --json success document" },
+  "error": { "…": "the error envelope" },
+  "exit_codes": [0, 2, 3, 4, 5, 6, 7, 8, 9, 130]
+}
+```
+
+- `input` comes from the command's `clap` definition (`crates/cli/src/schema.rs`): each flag and positional
+  becomes a property with its type, `enum` (possible values), `default`, `x-flag`, `x-env` and whether it
+  repeats (`array`); global flags are included.
+- `output` is the OpenAPI response schema for commands that are one API call, and the `utoipa` schema of the
+  CLI's own output struct for the others (`setup`, `deploy`, `doctor`, `webhooks verify`, `skills generate`).
+  `error` is the envelope with the CLI codes of [§3.3](#33-errors).
+- `pmail --schema` prints the index: every command with its summary and endpoint.
+- `cli::schema::y65_offline_and_valid` validates every document against the JSON Schema 2020-12 meta-schema
+  and every `--json` output produced by the CLI test suite against its command's `output`.
+
 ## Tests
 
 | Test | Proves | Covers |
@@ -1774,7 +2025,7 @@ reached, and every step can be re-run.
 | `cli::setup::owner_email` | The default tenant is created with the owner; `--no-console` writes `PM_CONSOLE = "off"` | FR-CON-7 |
 | `cli::setup::billing_off` | Setup writes no `PM_BILLING`; the default tenant reports `billing: disabled` | FR-BILL-12 |
 | `cli::setup::secrets_never_written` | Generated secrets reach Wrangler only on stdin and appear in no file, argument or log unless `--print-secrets` | FR-OPS-1, [I5] |
-| `cli::setup::renders_optional_settings` | The rendered file has the `Q_DELIVERY` producer, the `NOTIFY` Durable Object binding (class `Notifier`), seven rate-limit bindings including `RL_SIGNIN`, `RL_SIGN` and `RL_PARTNER` (an older file gets an ID for each missing one), `PM_WEB_BOT_AUTH = "off"`, `PM_IDENTITY_KEY_OVERLAP_DAYS` and `PM_NOTIFICATIONS`, `PM_CONSOLE_HOST` (the API host, or `--console-host` with a second Custom Domain) and `PM_SIGNUP = "closed"`; `--daily-send-quota` writes `PM_DAILY_SEND_QUOTA`; `--backup-bucket` creates the bucket in the jurisdiction and binds it as `BACKUP` | FR-OPS-1, FR-CON-8 |
+| `cli::setup::renders_optional_settings` | The rendered file has the `Q_DELIVERY` producer, the `Q_SCREEN` producer and the `pm-screen` consumer with its dead-letter queue, the `NOTIFY` Durable Object binding (class `Notifier`), the `EVENTS` Durable Object binding (class `TenantEvents`, with its `new_sqlite_classes` migration), seven rate-limit bindings including `RL_SIGNIN`, `RL_SIGN` and `RL_PARTNER` (an older file gets an ID for each missing one), `PM_WEB_BOT_AUTH = "off"`, `PM_IDENTITY_KEY_OVERLAP_DAYS` and `PM_NOTIFICATIONS`, `PM_CONSOLE_HOST` (the API host, or `--console-host` with a second Custom Domain) and `PM_SIGNUP = "closed"`; `--daily-send-quota` writes `PM_DAILY_SEND_QUOTA`; `--backup-bucket` creates the bucket in the jurisdiction and binds it as `BACKUP` | FR-OPS-1, FR-CON-8 |
 | `cli::setup::ses_idempotent_rerun` | Against a recorded AWS fake, every resource of §6.9 is created once and a second run reports `exists` for all and deploys nothing; an existing active rule set is never deactivated; both SNS topics end with `SignatureVersion = 2`; the HTTPS subscriptions come after the deploy | FR-DOM-8, FR-DOM-9 |
 | `cli::setup::ses_region_check` | A region that cannot receive is exit 2; a region outside the EU and the UK under `PM_JURISDICTION = "eu"` is exit 2 without `--allow-non-eu` and accepted with it, and `eu-west-2` (London) is accepted without it; no production access is exit 14 with the console steps and nothing created; Essentials prints a warning | FR-DOM-8, [N30] |
 | `cli::setup::ses_policy_and_key` | The IAM policy JSON is printed before it is applied and needs a confirmation or `--yes`; the access key reaches Wrangler only on stdin, appears in no file, argument, output or log, and is not created again when `PM_SES_ACCESS_KEY_ID` exists | FR-DOM-8, [I5] |
@@ -1801,7 +2052,7 @@ reached, and every step can be re-run.
 | `cli::ops::freeze_unfreeze` | `ops freeze` writes `PM_FREEZE = "on"`, redeploys the deployed bundle with no migration and waits for `/health` to report `frozen`; `ops unfreeze` reverses it; a re-run is a no-op | §20 |
 | `cli::erasure::retry` | `erasure retry` resubmits the stored scope and target with reason `retry:{era_id}`; a counterparty retry without `--address` is exit 2 | §19 |
 | `cli::dlq::j8_list_redrive` | `list` passes `queue`, `status` and `tenant_id` to `GET /v1/platform/dlq`; `redrive` posts once per item and reports partial failures; no Cloudflare, D1 or Queues call is made | FR-OPS-4, [J8] |
-| `cli::jobs::start_get` | `jobs start` builds the job body (repeated `--identity` resolved to `identity_ids`; `--tenant` required) and `jobs get` reads it back | [J3] |
+| `cli::jobs::start_get` | `jobs start` builds the job body (repeated `--identity` resolved to `identity_ids`; `--tenant` required) and `jobs get` reads it back; `jobs start event_log_rebuild` sends `kind` and `tenant_id` only, and with `--identity`, `--after` or `--before` exits 2 | [J3], [Event feed § 9.3](event-feed.md#93-rebuilding-a-log) |
 | `cli::waitlist::invite` | `--count` outside 1–500 is exit 2 before any request; the result prints `invited` and `waiting` | FR-CON-8 |
 | `cli::domains::local_token_apex` | Without `--local-token`, `422 cf_token_required` and `422 transport_unavailable` are exit 3 and no Cloudflare call is made; with it, the local prerequisites are checked first (another method or a subdomain is exit 2, no token or account ID exit 3), then on `cf_token_required` an apex `cloudflare_zone` is onboarded with the local token and registered through the D1 query API, found by account ID and database name, with `method` and `inbound` set; the Worker hook mints its monitor and emits `domain.created` | FR-DOM-1, [H5] |
 | `cli::domains::add_methods` | Each `--method` with its flags produces the body of §18.2; a flag for another method is exit 2; the SMTP password comes only from stdin and appears in no argument or output; the records table prints `name` and `host` | FR-DOM-7, FR-DOM-11, [N17] |
@@ -1817,6 +2068,24 @@ reached, and every step can be re-run.
 | `cli::http_sign::headers_and_errors` | Prints the four headers as `Name: value` lines in order, or the response with `--json`; `--component` adds only `@method`, `@path` or `@query`; `422 web_bot_auth_disabled` is exit 7 and `403 policy_denied` exit 4 | FR-IDN-8, [O9], [O13] |
 | `cli::webhooks::verify` | Valid signatures, rotation overlap (two signatures), tampered body, old timestamp | FR-WH-2 |
 | `cli::ask::render_stream` | Recorded SSE streams for each status render as specified; `--json` prints the `done` data; `--tenant` posts to `POST /v1/tenants/{t}/search` with `mode: agentic`, and an identity key gets exit 4 | FR-SRCH-3 |
+| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | [Drafts § 17.2](drafts.md#172-cli) |
+| `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of [§18.6](#186-events-tail), never reconnecting after `4400`, `4409`, `1008` or `1009` | [Event feed § 15.2](event-feed.md#152-cli), [R64](../edge-cases.md), [R68](../edge-cases.md) |
+| `cli::screening::commands` | `messages feedback`, `messages feedback-list`, the screening filters of `messages list` and `screening summary` against recorded API fakes | [Screening hold § 21](screening.md#21-console-mcp-and-cli) |
+| `cli::calendar::reply_and_send_flags` | `pmail calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli) |
+| `cli::uploads::create_and_attach` | Against recorded fakes: `pmail uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `pmail send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | [Uploads § 13](uploads.md#13-mcp-and-cli) |
+| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli) |
+| `cli::agent_signup::create_writes_profile` | `pmail agent-signup create` writes the key into the named profile with mode `0600` and prints it only with `--print-key`; the other subcommands map to their routes | [Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli) |
+| `cli::mcp_stdio::y55_no_tools_call_retry` | A dropped connection during `tools/call` gives one `isError` result with `cli_outcome_unknown` and no second request; `tools/list` is retried once | [Y55](../edge-cases.md), FR-SDK-13 |
+| `cli::mcp_stdio::y56_tools_flag_narrows` | `--tools` removes tools from `tools/list` and answers `-32602` for them locally; a name the key cannot see stays hidden | [Y56](../edge-cases.md), FR-SDK-13 |
+| `cli::mcp_stdio::y57_key_never_on_stdout` | `--key` is exit 2; a bad key is exit 4 before stdin is read; captured stdout and stderr never contain the key | [Y57](../edge-cases.md), FR-SDK-13 |
+| `cli::mcp_stdio::y58_headers_and_cancel` | Modern and legacy requests carry the headers of [§22](#22-mcp-stdio); `notifications/cancelled` aborts that request; every stdout line parses as one JSON-RPC message | [Y58](../edge-cases.md), FR-SDK-13 |
+| `cli::mcp::y59_client_snippets` | `pmail mcp config --client` prints the five forms of [SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup) for the profile's URL, never a key; the Codex form has `tool_timeout_sec = 90`; the tool list applies `mcp_tools` | [Y59](../edge-cases.md), FR-SDK-13 |
+| `cli::schema::y65_offline_and_valid` | `--schema` works with no config, key or network; every document validates against the 2020-12 meta-schema; every `--json` output of the CLI suite validates against its command's `output` | [Y65](../edge-cases.md), FR-SDK-14 |
+| `cli::query::y64_query_rules` | Invalid expressions exit 2 before any request; errors are unfiltered; `null` results exit 0; `--all` documents are queried whole; NDJSON lines are queried one by one; the JMESPath compliance suite passes | [Y64](../edge-cases.md), FR-SDK-14 |
+| `cli::skills::y63_generate_no_clobber` | A modified file is kept and reported with exit 6, replaced with `--force`; dropped skills' unmodified files are removed; the manifest records hashes | [Y63](../edge-cases.md), FR-SDK-14 |
+| `cli::skills::generate_for_key` | `--for-current-key` writes only the skills whose tools the key can use and `references/deployment.md` without a key | FR-SDK-14 |
+| `cli::messages::z12_label_many_chunks` | `messages label` with 250 IDs sends requests of 100, 100 and 50, prints the notice that the change is atomic per request only, and exits 0 only when all three succeed | [Parity additions § 2.7](parity-additions.md#27-interfaces-and-privacy), [Z12](../edge-cases.md) |
+| `cli::setup::z79_docs_url_validated` | `pmail setup` and `pmail deploy` refuse an invalid `PM_DOCS_URL` (exit 3) | [Parity additions § 10.1](parity-additions.md#101-the-field), [Z79](../edge-cases.md) |
 | `cli::landing_examples` | The landing-page examples run verbatim against the workerd harness and the recorded Cloudflare fake | M16 |
 
 [E1]: ../edge-cases.md

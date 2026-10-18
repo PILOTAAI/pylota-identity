@@ -32,7 +32,12 @@ itself wrong ([Decision records](../adr/index.md#when-to-write-one)).
 | [Rust workspace and platform](rust-workspace.md) | The Cargo workspace, crate boundaries and allowed dependencies, exact dependency pins, the release profile, wasm32 constraints, the `platform` trait set (clock, randomness, D1, Durable Objects, R2, Queues, Workers AI, Vectorize, email, rate limits, DNS-over-HTTPS, HTTP), the `wasm-bindgen` externs that fill `workers-rs` gaps, the generated `wrangler.toml`, the `xtask` commands, the CI pipeline and the Rust SDK (FR-SDK-1). |
 | [Data model](data-model.md) | Every D1 table, every Durable Object SQLite table, R2 keys and the Vectorize index. It is the source of truth for migrations. The other designs refer to its tables and columns by name. |
 | [Inbound pipeline](inbound.md) | The `email()` handler (normalisation, directory lookup, reject codes, the R2 write before acknowledgement), the `pm-inbound` consumer (MIME parsing under caps, sanitising, text derivation, quote and signature stripping, hidden-text removal, reference extraction, automation classification, the authentication verdict, spam score, quarantine), the `IdentityMailbox.ingest` transaction, attachment safety and text extraction, DSN routing, re-parsing and test-mode loopback. |
+| [Screening hold for agent-steering mail](screening.md) | The screening gate on inbound mail: policy, the steering scan and severity, quarantine rule 6a, the `pm-screen` job and classifier, the deadline alarm and backstop, verdict commits, late content, visibility, release, feedback, the per-tenant summary, events and Pylota's use (FR-SCR-1–12). |
+| [Calendar invitations](calendar-invitations.md) | Reading, bounding and verifying inbound iCalendar (iMIP, iTIP) into the message's `calendar` object, time-zone resolution, the `calendar.received` event, threading by `UID`, iMIP sends from caller-supplied objects with organizer binding and the stale-sequence guard, and the `calendar-reply` route. No calendar store. |
 | [Outbound and safe retries](outbound.md) | The send path from request to transport: the idempotency fingerprint and reservation, the ordered policy pipeline with its error codes, message composition (From, Reply-To with thread token, threading headers, signature and disclosure, marketing headers, attachments), the thread lock, the `MailTransport` trait and its implementations, the classification of every transport outcome, delivery events and status roll-up, suppressions, abuse auto-pause, uncertain-send reconciliation, cancel and resolve, SES specifics and the outbound Message-ID strategy. |
+| [Drafts, approvals and scheduled send](drafts.md) | Drafts in the identity's mailbox with revisions and etags, the content-free D1 index, the approval policy and approval bound to a digest of the content, person-only approval where only people may release quarantine, sending through the one send pipeline with the key `draft:{draft_id}:{revision}`, scheduled send on the mailbox alarm with its watchdog, attachments, the sources of replies and forwards, privacy, events, the console's drafts pages, MCP and the CLI (FR-DRF-1–14). |
+| [Uploads](uploads.md) | Staging a file once per identity: the create route and the signed `PUT` to the Worker, streaming into R2 with the declared size and SHA-256 verified, classification and scanning, attaching by `upload_id` to sends and drafts, expiry, limits, erasure, MCP and the CLI. Not a file store (FR-UPL-1–12). |
+| [Deliverability metrics](metrics.md) | `GET /v1/metrics/rates`: every window that can pause sending, with its threshold, counts and headroom, computed in `TenantQuota` by the function that decides the pauses; `GET /v1/metrics/events`: hourly and daily event counts that each mailbox writes with its events; visibility, the console, MCP and the CLI (FR-MET-1–10). |
 | [Threading](threading.md) | The thread token's exact byte layout and verification, key rotation, the thread resolution order, Message-ID normalisation, subject normalisation, forwarded messages, participants, and which address a reply is sent from (including fallback-pinned threads). |
 | [Identities, addresses and domains](identity-domains.md) | The identity and address state machines (promote, retire, rollback, retirement, tombstones), username validation with reserved and confusable detection, domain kinds and their onboarding against the Cloudflare and SES APIs, the `DomainMonitor` health state machine, fallback, domain removal, and the Cloudflare API token permissions. |
 | [Domains on any DNS host](domain-connections.md) | The six connection methods and the `kind`, `inbound` and `transport` each one fixes; SES in both directions for domains at any DNS host (deployment set-up, the SNS push plus SQS backstop with the `ses_ingest` ledger, retired and unknown recipients); `send_only` forwarding; `smtp_relay` with its alignment probe; zone creation for dedicated domains; delegated subdomains; health checks per method, cost, and spikes S10–S12. |
@@ -40,18 +45,22 @@ itself wrong ([Decision records](../adr/index.md#when-to-write-one)).
 | [Search](search.md) | The query language and its typed parse tree, keyword search (FTS5, references, trigram fallback), semantic search (chunking, embeddings, Vectorize), hybrid fusion and reranking, agentic search with deterministic citation verification, facets, cursors, tenant fan-out and the index lifecycle. |
 | [Triage](triage.md) | Deterministic rules, the model call with fenced untrusted content, output schema validation, categories and risk flags, the thread roll-up and re-runs. |
 | [Webhooks and events](webhooks.md) | The transactional outbox and its dispatch alarm, the event envelope and payload builders, endpoint resolution, Standard Webhooks signing and secret storage, the SSRF-guarded HTTP client, the retry schedule, delivery logs, dead letters, auto-disable and replay. |
+| [Event feed and live stream](event-feed.md) | The per-tenant event log (`TenantEvents`), its cursors and visibility, `GET /v1/events` with long poll, durable consumers, the WebSocket stream (handshake, stream tokens, protocol, flow control, close codes, revalidation, hibernation), failure handling, erasure, MCP `mail_events` and the CLI. |
 | [MCP server](mcp.md) | The Streamable HTTP endpoint at `/mcp`, authentication, tool definitions and their mapping to REST, permission filtering and the `mail_search_strategy` prompt. |
 | [CLI and setup](cli.md) | The `pmail` command tree, `setup` and `deploy` (resource creation, bundle verification, `wrangler.toml` rendering), `doctor`, profiles and output formats. |
+| [SDKs, skills and agent tooling](sdk-and-skills.md) | The TypeScript SDK `@pylotahq/mail`, built in its own repository from this design (a generated layer over `openapi.yaml`, retries with the same key and bytes, typed outcomes, webhook verification, event and stream helpers, packaging and publishing), agent skills and plugins checked against the contract, MCP annotations, client hints and the per-key tool allow-list, `pmail mcp stdio`, the CLI's `--schema`, `--query` and `pmail skills generate`, and the framework guides (FR-SDK-2–15). |
 | [Security](security.md) | The threat model, key handling (the four key levels, partner keys included), tenant and partner isolation, secrets and their single purposes, SSRF and content-safety rules, and the attack test suite. |
 | [Privacy and erasure](privacy.md) | Jurisdiction, retention sweeps, erasure jobs per scope with receipts and probes, legal holds and subject-access export. |
 | [Console and workspaces](console.md) | The server-rendered console at `/console`: passwordless sign-in, sessions and CSRF, workspaces, members, roles and invitations, and the console's pages. |
 | [Cloud sign-up, sign-in and first run](cloud-signup.md) | Hostnames for Pylota Mail Cloud, `PM_SIGNUP` and the waitlist, Google and GitHub sign-in, TOTP two-step verification and recovery codes, where people land after sign-in, the Overview and its first-run checklist, the Checkout return, and Cloud abuse controls. |
 | [Workspace policy](workspace-policy.md) | Who may write a tenant's policy and how: the four writers, the field classes with platform and partner ceilings, the guard fields and the decisions reserved for people, the compare-and-set write with its audit row and `tenant.policy_updated` event, `GET` and `PATCH /v1/tenants/{tenant_id}/policy`, and the console's policy page (FR-TEN-4). |
 | [Service sign-up ledger](service-accounts.md) | The per-identity ledger of third-party accounts: requests, approval as a decision reserved for people, close and delete, the match rule that ties a verification email to an approved entry, quarantine rule 4a and the `wait` check, events, retention and erasure, and the console's accounts page (FR-IDN-10). |
+| [Agent self-sign-up](agent-signup.md) | Agent self-sign-up behind `PM_AGENT_SIGNUP`: the provisional workspace, the permission and policy overlays, verification by code, link or claim, refusal, expiry with erasure and the abuse controls (FR-ASU). |
 | [Plans, metering and billing](billing.md) | The plan catalog, allowances and atomic holds in `TenantQuota`, `402 billing_limit`, the usage API, and Stripe checkout, portal and webhooks. |
 | [Notifications and usage alerts](notifications.md) | Email to the people behind the agents: usage alerts, new-mail notifications, the daily "needs a person" email and account emails; per-person preferences, the per-tenant `Notifier` Durable Object (coalescing, schedules, caps), one-click unsubscribe, and bounces. |
 | [Observability and SLOs](observability.md) | Structured logs without content, metrics, alerts, SLOs, dead-letter handling through the platform API, and the runbooks. |
-| [Testing](testing.md) | The test layers (`core::`, `conf::`, `it::`, `live::`), the conformance corpus, the workerd harness, fakes, fuzzing, quality gates and the cross-tenant attack suite. |
+| [Parity additions](parity-additions.md) | Nine additions to existing designs: batch message reads and updates, identity-scope allow and block lists, opt-in label events, authentication detail on messages, trusted ARC sealers, per-identity message retention, webhook delivery headers, zone-file export and a documentation link in every error (FR-IN-13–15, FR-OUT-17, FR-WH-6, FR-WH-7, FR-PRV-7, FR-DOM-15, FR-API-3). |
+| [Testing](testing.md) | The test layers (`core::`, `conf::`, `it::`, `live::`, and `ts::` for the TypeScript SDK), the conformance corpus, the workerd harness, fakes, fuzzing, quality gates and the cross-tenant attack suite. |
 
 ## Shared conventions
 
@@ -91,6 +100,7 @@ impl ErrorCode {
     pub const fn http_status(self) -> u16;     // from the errors.md tables
     pub const fn retryable(self) -> bool;      // from the errors.md tables, never decided at call sites
     pub const fn default_fix(self) -> &'static str;
+    pub const fn anchor(self) -> &'static str; // "code-" + the code: its anchor on the errors page
 }
 
 pub struct ApiError {
@@ -99,6 +109,8 @@ pub struct ApiError {
     pub fix: Option<String>,                   // overrides default_fix when more specific
     pub details: Option<serde_json::Value>,
 }
+// Serialised with `docs` = "{PM_DOCS_URL}/reference/errors#" + code.anchor(), added by the serialiser in
+// crates/worker/src/errors.rs, never by a call site (FR-API-3, Parity additions § 10).
 ```
 
 - `core` returns domain errors (`AddressError`, `PolicyError`, `QueryError`, …). Each has one
@@ -157,7 +169,8 @@ callback throws, and forbids `BEGIN`/`SAVEPOINT` inside `sql.exec()`
    its events to the object's `outbox` table inside the transaction (section 6).
 5. **One alarm, many purposes.** An object has a single alarm. Each object keeps its pending wake-ups in
    `meta` under `alarm:{purpose}` (for example `alarm:outbox`, `alarm:check`, `alarm:claim`,
-   `alarm:dispatch`, `alarm:maintenance`; [Data model](data-model.md) lists each object's keys). After each transaction it sets
+   `alarm:dispatch`, `alarm:maintenance`, `alarm:drafts`, `alarm:draft_index`, `alarm:screen`, `alarm:expiry`, `alarm:log_erase`;
+   [Data model](data-model.md) lists each object's keys). After each transaction it sets
    the alarm to the earliest pending wake-up if that is earlier than the current alarm. Every mailbox has
    a daily `alarm:maintenance` that deletes expired `idempotency` rows, `rate_windows` older than 48 hours,
    `verifications` past `expires_at` or 1 hour past `consumed_at`, `outbox` rows past the tenant's `events_days`, unpins quiet
@@ -179,7 +192,9 @@ callback throws, and forbids `BEGIN`/`SAVEPOINT` inside `sql.exec()`
 ### 5. Internal Durable Object RPC
 
 Durable Objects are called with a typed request enum over `fetch` to the stub. There is no other
-entry point into an object.
+entry point into an object. The one exception is `TenantEvents`, which also accepts a WebSocket upgrade at
+`GET https://do.internal/stream` with the envelope in `X-PM-Rpc`, and the three hibernation handlers
+([Event feed § 2.3](event-feed.md#23-requests)).
 
 ```rust
 // crates/worker/src/rpc.rs
@@ -212,11 +227,19 @@ pub enum MailboxRequest {
     WaitPoll(WaitQuery),                     // inbound.md › The wait handler: one poll, every 1 s
     EmitEvent(EmitEvent),                    // identity.* events written after a D1 change
     GetEvents(GetEvents),                    // webhooks.md delivery and replay
-    // Read, search, triage, label and erasure operations are added by their designs.
+    CreateDraft(CreateDraftInput), UpdateDraft(UpdateDraftInput), DeleteDraft(DraftRef),
+    GetDraft, ListDrafts, ListDraftsByIds,   // drafts.md
+    SendDraft(SendDraftInput),               // drafts.md: a draft becomes a message through the Submit path
+    ApproveDraft(DecisionInput), RejectDraft(DecisionInput),
+    DraftsDue,                               // drafts.md: the watchdog wakes the mailbox for overdue drafts
+    // Read, search, triage, label and erasure operations are added by their designs, and so are those of
+    // screening, uploads, event counts and retention (screening.md, uploads.md, metrics.md,
+    // parity-additions.md).
 }
 pub struct InitMailbox {
     pub created_at: i64,               // identities.created_at; written to meta.created_at
     pub created_event: EmitEvent,      // identity.created, built by the handler from the rows its D1 batch wrote
+    pub message_hours: Option<u32>,    // retention.message_hours of an identity created with it (parity-additions.md § 7.2)
 }
 pub struct EmitEvent {
     pub event_id: String,              // evt_…, derived from the rpc_intents row (section 9), so a re-sent call
@@ -230,9 +253,10 @@ pub struct EmitEvent {
 // The object appends the event to its outbox (webhooks.md › Appending) with Some(event_id), so the same
 // event_id is stored once and its sequence is taken once.
 
-// DomainRequest, JobRequest, QuotaRequest, SesControlRequest (domain-connections.md § 4.8) and
-// NotifierRequest (notifications.md § 3) follow the same pattern, and each starts with an
-// `Init` variant that stores the owner in the object's `meta` (QuotaRequest: outbound.md › TenantQuota).
+// DomainRequest, JobRequest, QuotaRequest, SesControlRequest (domain-connections.md § 4.8),
+// NotifierRequest (notifications.md § 3) and EventsRequest (event-feed.md § 2.3) follow the same pattern,
+// and each starts with an `Init` variant that stores the owner in the object's `meta` (QuotaRequest:
+// outbound.md › TenantQuota).
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -249,7 +273,7 @@ pub enum RpcResult<T> { Ok(T), Err(ApiErrorBody) }
   public handler has already checked scope against D1 before calling, so a mismatch is always a bug.
 - An object that has no owner yet accepts only `Init`. An object marked `erased = '1'` refuses
   everything with `identity_not_found`.
-- The caller's default deadline is 10 seconds (`Ingest` and `Submit`: 30 seconds). The object checks
+- The caller's default deadline is 10 seconds (`Ingest`, `Submit`, `CreateDraft` and `UpdateDraft`: 30 seconds). The object checks
   `deadline_ms` before starting a transaction and returns `timeout` if it has passed.
 
 ### 6. Transactional outbox
@@ -275,8 +299,9 @@ the same effect as once:
 | `pm-inbound` | `message_id` (allocated in `email()`) | `ingest` deduplicates on `raw_sha256` and returns the stored message; post-commit steps (R2 attachment writes, index jobs) are idempotent by key |
 | `pm-outbound` | `message_id` | The transport claim (`BeginTransport`) admits one transport call per message; a repeat finds the message no longer `queued` and acks |
 | `pm-delivery-events` | provider `eventId` | Stored in `deliveries.provider_event_ids_json`; a repeat is a no-op |
-| `pm-webhooks` | `(endpoint_id, event_id, attempt)` | Unique index on `webhook_deliveries`; a repeat attempt number is skipped |
+| `pm-webhooks` | `(endpoint_id, event_id, attempt)` | Unique index on `webhook_deliveries`; a repeat attempt number is skipped; a `Fanout` appends to the tenant's event log with `INSERT OR IGNORE` on the event ID |
 | `pm-index` | job kind + target + version | Each job checks the target's status (`chunks.status`, `attachments.text_status`, triage version) before working |
+| `pm-screen` | `message_id` | `ScreenLoad` answers `Skip` once the record is decided; commits are guarded by `status = 'pending'`; the model cap counts a message once per day |
 
 Rules for every consumer:
 
@@ -325,6 +350,7 @@ Each such call is therefore written down first, in the D1 table `rpc_intents`
 | Identity updated, paused or resumed (M6) | `mailbox` · `emit_event` | `MailboxRequest::EmitEvent` with `identity.updated`, `identity.paused` or `identity.resumed` |
 | Tenant suspended or resumed (`handlers/tenants.rs`; M6 adds this to the M5 handler) | one `mailbox` · `emit_event` per identity paused or resumed, inserted with `INSERT … SELECT` from `identities` | `identity.paused` (`reason: tenant_suspended`) or `identity.resumed` |
 | Identity key created, rotated or revoked (`handlers/identity_keys.rs`, M25) | `mailbox` · `emit_event` | `identity.key_created`, `identity.key_rotated` or `identity.key_revoked` |
+| Identity retention set or cleared (`handlers/identities.rs`, M37) | `mailbox` · `set_retention` | `MailboxRequest::SetRetention { message_hours, version }`, `version` = `identities.updated_at`; the mailbox ignores an older version ([Parity additions § 7.2](parity-additions.md#72-how-the-mailbox-learns-it)) |
 
 1. **Write.** The intent's `id` is deterministic (`{request_id}:{target_id}:{op}`, or
    `{request_id}:{identity_id}:{event_type}`), and `body_json` holds the request. An event's ID is derived
@@ -350,7 +376,9 @@ Each such call is therefore written down first, in the D1 table `rpc_intents`
    and an event is emitted exactly once into the outbox, from where delivery is at least once (section 6).
 
 The `Notifier` is not in this table: it is minted by the every-minute cron for any tenant still at
-`notify_do_id = ''` ([Notifications](notifications.md#8-notifier-object)). Tests:
+`notify_do_id = ''` ([Notifications](notifications.md#8-notifier-object)). Nor is `TenantEvents`: the same
+cron mints it for any tenant still at `events_do_id = ''`, and its first caller initialises it, because a
+queued append that waits loses nothing ([Event feed § 2.1](event-feed.md#21-identity-and-lifecycle)). Tests:
 `it::intents::j21_init_retried` and `it::intents::j21_identity_event_retried`
 ([Identities and domains › Tests](identity-domains.md#tests), [J21](../edge-cases.md)).
 
@@ -363,7 +391,7 @@ updated before the build continues.
 
 | Spike | Must prove | Pass criteria | Fallback | Affects |
 |---|---|---|---|---|
-| **S1** Bindings smoke | From Rust with `worker` 0.8.7, through the `platform::export_worker!` entry glue (which replaces `#[event]` and `#[durable_object]`, see [Rust workspace](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)): receive an email event and read `from`, `to`, headers and the raw stream; send with the `send_email` binding's structured `send()` including `replyTo`, `headers` (`In-Reply-To`, `References`, `Auto-Submitted`, `X-*`) and attachments (`attachment` and `inline` with `contentId`); produce and consume Queues with `delay_seconds` and `retry_with_options`, and confirm that `Message::timestamp()` is unchanged across retries; DO SQLite with the `transactionSync` extern (a thrown error rolls back) and alarms; D1 `batch`; a multi-statement request to the D1 query API (`POST /accounts/{a}/d1/database/{id}/query`); and the response of the local `wrangler dev` email endpoint to a `setReject` ([Testing §6.4](testing.md#64-injecting-inbound-mail)); and one live send to two recipients, one of which a test domain refuses with `550` at `RCPT`, to see whether `send()` answers `E_DELIVERY_FAILED` and whether the other recipient still receives the message ([Outbound › Transport outcome classification](outbound.md#transport-outcome-classification)) | Every call works from Rust. The returned `messageId` is captured. The `E_DELIVERY_FAILED` behaviour for several recipients is recorded in the outbound design; until it is, such an answer makes the send `uncertain` (`provider_outcome_unknown`), never `rejected`. A rolled-back transaction leaves no rows. A multi-statement D1 query-API request is atomic: when its last statement fails, none of the earlier statements' rows remain | Raw MIME send (`EmailMessage`) built with `mail-builder` for any missing structured field. If the entry glue cannot replace the macros: an ADR allowing exactly one file, `crates/worker/src/entry.rs`, to use them ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)). If the D1 query API is not atomic: every migration file is made re-runnable and a CI lint enforces it ([CLI and setup §8.5](cli.md#85-d1-migrations)). **`transactionSync` has no fallback; this is an accepted risk.** The planned path is a `wasm-bindgen` call to `ctx.storage.transactionSync`, which Cloudflare documents with no restriction on the calling method beyond a SQLite-backed object ([SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), read 2026-10-09), so any JS method of the class, including the glue's, may call it. If S1 shows otherwise, the build stops and an ADR is written before M4 continues. The owner accepted this risk on 2026-10-09 | [Rust workspace](rust-workspace.md), [Outbound](outbound.md), [CLI and setup](cli.md#85-d1-migrations) |
+| **S1** Bindings smoke | From Rust with `worker` 0.8.7, through the `platform::export_worker!` entry glue (which replaces `#[event]` and `#[durable_object]`, see [Rust workspace](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)): receive an email event and read `from`, `to`, headers and the raw stream; send with the `send_email` binding's structured `send()` including `replyTo`, `headers` (`In-Reply-To`, `References`, `Auto-Submitted`, `X-*`) and attachments (`attachment` and `inline` with `contentId`); produce and consume Queues with `delay_seconds` and `retry_with_options`, and confirm that `Message::timestamp()` is unchanged across retries; DO SQLite with the `transactionSync` extern (a thrown error rolls back) and alarms; D1 `batch`; a multi-statement request to the D1 query API (`POST /accounts/{a}/d1/database/{id}/query`); and the response of the local `wrangler dev` email endpoint to a `setReject` ([Testing §6.4](testing.md#64-injecting-inbound-mail)); and one live send to two recipients, one of which a test domain refuses with `550` at `RCPT`, to see whether `send()` answers `E_DELIVERY_FAILED` and whether the other recipient still receives the message ([Outbound › Transport outcome classification](outbound.md#transport-outcome-classification)); and a raw `EmailMessage` send of a calendar message (`multipart/alternative` with `text/plain` and `text/calendar; method=REQUEST; charset=UTF-8`) to two arbitrary recipients: whether it is accepted, whether one `EmailMessage` can carry several envelope recipients, whether the `text/calendar` part and its `method` parameter arrive unchanged, and whether Cloudflare keeps the composed `Message-ID` ([Calendar invitations §5.6](calendar-invitations.md#56-transports)) | Every call works from Rust. The returned `messageId` is captured. The `E_DELIVERY_FAILED` behaviour for several recipients is recorded in the outbound design; until it is, such an answer makes the send `uncertain` (`provider_outcome_unknown`), never `rejected`. A rolled-back transaction leaves no rows. A multi-statement D1 query-API request is atomic: when its last statement fails, none of the earlier statements' rows remain | Raw MIME send (`EmailMessage`) built with `mail-builder` for any missing structured field. If the entry glue cannot replace the macros: an ADR allowing exactly one file, `crates/worker/src/entry.rs`, to use them ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)). If the D1 query API is not atomic: every migration file is made re-runnable and a CI lint enforces it ([CLI and setup §8.5](cli.md#85-d1-migrations)). **`transactionSync` has no fallback; this is an accepted risk.** The planned path is a `wasm-bindgen` call to `ctx.storage.transactionSync`, which Cloudflare documents with no restriction on the calling method beyond a SQLite-backed object ([SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), read 2026-10-09), so any JS method of the class, including the glue's, may call it. If S1 shows otherwise, the build stops and an ADR is written before M4 continues. The owner accepted this risk on 2026-10-09. Calendar sends on the `cloudflare` transport stay refused with `422 transport_unavailable` (`calendar_needs_raw_mime`); with one recipient per raw send, they are limited to one recipient (`calendar_single_recipient`). | [Rust workspace](rust-workspace.md), [Outbound](outbound.md), [CLI and setup](cli.md#85-d1-migrations), [Calendar invitations](calendar-invitations.md) |
 | **S2** Inbound failure semantics | What the sending MTA sees when `email()` throws, versus `setReject` (documented as a permanent error); which `Authentication-Results` headers reach the handler | Throwing yields a 4xx temporary failure and the sender retries. The exact SMTP reply text for both cases is recorded. Record which `Authentication-Results` authserv-id Cloudflare stamps on delivered mail (setup later writes it to `PM_TRUSTED_AUTHSERV_ID`, [Inbound › Authentication verdict](inbound.md#authentication-verdict)) | **Throw only.** The handler keeps its in-handler R2 retries (three attempts) and then throws, as designed, whatever the sender is shown; the spike result records the observed reply in [Inbound](inbound.md#interface). There is no `forward()` to a backup address: setup registers no Email Routing destination address ([Identities and domains › Cloudflare API token](identity-domains.md#cloudflare-api-token-permissions)), so none exists to forward to | [Inbound](inbound.md#the-email-handler) |
 | **S3** FTS5 in DO SQLite | `content='', contentless_delete=1`, the `trigram` tokenizer, `bm25()` with six column weights, `DELETE FROM fts WHERE rowid = ?`, and renaming an FTS5 table (for the index swap in [Search](search.md)) | All work on the deployed runtime, not only on local workerd | External-content table `fts_docs` ([Data model](data-model.md)); disable trigram and rely on reference normalisation plus semantic fallback; without rename, the swap rebuilds `fts` in place | [Data model](data-model.md), [Search](search.md) |
 | **S4** Wasm budget | Bundle size, cold start, CPU time and peak memory when parsing and verifying a 25 MiB message and a 40 MB message from the SES source ([N5](../edge-cases.md)), and `mail-auth` verdict parity on the corpus | Compressed bundle ≤ 10 MiB (NFR-SEC-2), cold start under 1 s, both messages parsed under 128 MB peak and inside the CPU limit, DKIM and DMARC verdicts equal the reference implementation on every corpus message | Write attachments to R2 before parsing bodies; move heavy features behind cargo features; switch the release profile to `opt-level = "z"` | [Rust workspace](rust-workspace.md#4-release-profile), [Inbound](inbound.md) |

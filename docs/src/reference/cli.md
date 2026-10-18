@@ -127,7 +127,9 @@ These work with every command.
 | `--key <key>` | `PYLOTA_MAIL_KEY` | API key |
 | `--profile <name>` | `PYLOTA_MAIL_PROFILE` | Profile in the config file |
 | `--account-id <id>` | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID, for the [commands that use your Cloudflare token](#commands-that-use-your-cloudflare-token). Falls back to the profile's `account_id` |
-| `--json` | – | Print exactly one JSON document on stdout: the API response, or the command's result, or the error envelope. The one exception is `--stream` (`ask --json --stream`), which prints NDJSON, one JSON document per line. Turns off every prompt |
+| `--json` | – | Print exactly one JSON document on stdout: the API response, or the command's result, or the error envelope. The exceptions are `ask --json --stream` and `events tail --json`, which print NDJSON, one JSON document per line. Turns off every prompt |
+| `--query <expr>` | – | A JMESPath expression applied to the JSON success document; implies `--json`. Never applied to errors; never changes the exit code |
+| `--schema` | – | Print the command's input, output and error schemas and exit codes as JSON, then exit. Needs no configuration, key or network |
 | `--quiet` | – | Print only the essential value (a new ID, a secret, hit IDs) and errors |
 | `--yes` | – | Answer yes to confirmations (not to `destroy`'s typed confirmation) |
 | `--verbose` | – | Log each HTTP request's method, path, status and duration to stderr (never bodies or keys) |
@@ -141,8 +143,24 @@ Colour is used only when stdout is a terminal, and never when `NO_COLOR` is set.
 - **Human** (the default): single objects print as indented JSON; lists print as tables; operator
   commands print one line per step.
 - **`--json`**: exactly one JSON document, the API's response body unchanged. Lists print
-  `{ "data": [ … ], "next_cursor": … }`; add `--all` to follow every page into one document. The one
-  exception is `--stream`, which prints NDJSON ([`ask`](#ask)).
+  `{ "data": [ … ], "next_cursor": … }`; add `--all` to follow every page into one document. The
+  exceptions are `ask --json --stream` ([`ask`](#ask)) and `events tail --json`
+  ([`events tail`](#events-tail)), which print NDJSON.
+- **`--query <expr>`**: a [JMESPath](https://jmespath.org/) expression applied to the success document,
+  after `--all` has assembled every page, and to each line of `ask --json --stream`. The result is printed
+  as one JSON document; with `--quiet`, a string result is printed without quotes. An invalid expression is
+  exit 2 before any request. An error document is never filtered, and the exit code is the command's, not
+  the query's: an empty or `null` result exits 0.
+- **`--schema`**: `pmail <command> --schema` prints one JSON document describing the command (its
+  endpoint, idempotency, `input` from its flags, `output` and `error` schemas, and its exit codes) and
+  exits 0, reading no configuration and making no request. `pmail --schema` prints the index of every
+  command.
+
+```bash
+pmail messages list --identity bookings@acme.example.com --all \
+  --query "data[?triage.needs_reply > \`0.7\`].{id: id, from: from.address}"
+pmail send --schema
+```
 - **`--quiet`**: one value per line, for scripts.
 
 Text that comes from email (subjects, names, snippets, bodies, filenames, answers) is untrusted. In
@@ -151,7 +169,7 @@ zero-width characters as markers such as `<U+202E>`, so a message cannot rewrite
 output keeps the text exactly as the API returned it.
 
 Errors print the API's error envelope: in human mode as `error: <code> (<status>): <message>` with its
-`fix` and `request_id` on stderr; with `--json` as the envelope on stdout.
+`fix`, then `docs: <url>`, and `request_id` on stderr; with `--json` as the envelope on stdout.
 
 ## Exit codes
 
@@ -173,6 +191,7 @@ Errors print the API's error envelope: in human mode as `error: <code> (<status>
 | 13 | Timed out: `wait` returned nothing, or a polling step passed its deadline |
 | 14 | `setup ses` or `destroy --include-ses`: an AWS API call failed, or the AWS account has no SES production access |
 | 15 | A precondition is not met: `secrets rotate-master` with an unfinished rotation (use `--resume`) or within 30 days of the last re-seal (use `--discard-previous`), or `ops restore d1` while the deployment is not frozen |
+| 16 | `metrics rates`: a deliverability window is tripped or a sending pause is in effect |
 | 130 | Interrupted (Ctrl-C) |
 
 ## Naming identities and tenants
@@ -192,7 +211,8 @@ Errors print the API's error envelope: in human mode as `error: <code> (<status>
 
 ## Mail commands that send
 
-`send`, `reply`, `reply-all` and `forward` need an idempotency key. Pass one with `--idempotency-key`;
+`send`, `reply`, `reply-all`, `forward` and `calendar-reply` need an idempotency key (`drafts send`
+derives its own, [Drafts](#drafts)). Pass one with `--idempotency-key`;
 derive it from your task (`bk-2291-confirm`) and reuse it if you run the command again for the same
 message. If you leave it out, `pmail` generates one (`pmail-<id>`) and reuses it for its own retries. In
 human mode it prints the key to stderr; with `--json` the key appears only in the error document, if the
@@ -252,7 +272,8 @@ then accepted. If a step fails, fix the cause and run the same command again. Th
 [CLI and setup design](../project/design/cli.md#63-steps).
 
 Setup performs the first deploy itself, so `pmail deploy` run straight after it finds nothing to change
-and exits 0.
+and exits 0. An invalid `PM_DOCS_URL` in `deploy/wrangler.toml` (not `https`, a query or fragment, over 200
+bytes) is refused.
 
 Billing stays off on a self-hosted deployment, and sign-up stays closed (`PM_SIGNUP = "closed"` is
 written into `deploy/wrangler.toml`, with `PM_CONSOLE_HOST`, so you can see both). People join as the
@@ -338,6 +359,7 @@ pmail deploy [--version <v>] [--from-source [--source-dir <path>]] [--gradual] [
 | `--force` | off | Deploy even when nothing changed |
 
 Right after `pmail setup`, `deploy` has nothing to do and exits 0: setup performed the first deploy.
+An invalid `PM_DOCS_URL` (not `https`, a query or fragment, over 200 bytes) is refused.
 `deploy` refuses a release whose signature or checksum does not match (exit 11); there is no option
 to skip the check. Operator settings under `[vars]` in `deploy/wrangler.toml` (for example
 `PM_TRUSTED_AUTHSERV_ID`) are kept. Changing `PM_EMBED_MODEL` there starts a background re-embed on the
@@ -506,7 +528,7 @@ returned.
 pmail dlq list [--queue <name>] [--status open|redriven] [--tenant <tenant>] [--limit <n>] [--all]
 ```
 
-`--queue` is one of `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index`.
+`--queue` is one of `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index`, `pm-screen`.
 `--status` defaults to `open`. Items are kept for 14 days.
 
 ```bash
@@ -573,20 +595,25 @@ pmail keys rotate web_bot_auth
 ### `jobs start`
 
 Starts a maintenance job over one tenant: `reparse` (parse messages again from the raw MIME, for
-example after a parser fix), `reembed` (chunk and embed them again into the vector index) or
-`reindex` (rebuild the keyword index).
+example after a parser fix), `reembed` (chunk and embed them again into the vector index), `reindex`
+(rebuild the keyword index) or `event_log_rebuild` (rebuild the tenant's event log in a new epoch, which
+resets every cursor and consumer of the tenant:
+[Event feed § 9.3](../project/design/event-feed.md#93-rebuilding-a-log)).
 
 ```text
 pmail jobs start reparse|reembed|reindex --tenant <tenant> [--identity <identity>]… [--after <time>]
                  [--before <time>]
+pmail jobs start event_log_rebuild --tenant <tenant>
 ```
 
 `--tenant` is required: neither the profile's `tenant` nor the default tenant stands in for it, because a
 job over the wrong tenant is costly to undo. Without `--identity`, the job covers every identity of the
-tenant. It prints the job with its ID.
+tenant. `event_log_rebuild` takes the tenant only: `--identity`, `--after` or `--before` with it is exit 2.
+It prints the job with its ID.
 
 ```bash
 pmail jobs start reparse --tenant brightwell --after 2026-09-01
+pmail jobs start event_log_rebuild --tenant brightwell
 ```
 
 ### `jobs get`
@@ -631,11 +658,12 @@ pmail ops status
 Sets a deployment-wide switch (`PUT /v1/platform/switches`, a platform key with `platform:ops`).
 `read_only` refuses writes from every key but platform keys and holds outbound sends; `free_sending off`
 stops sends from workspaces on the Free plan or still in the send ramp; `emergency_prune` shortens the
-retention of event and delivery logs to 7 days. The automatic containment rules set these switches too
+retention of event and delivery logs to 7 days; `agent_signup off` stops new agent sign-ups and their mail
+([Agent sign-up](#agent-sign-up)). The automatic containment rules set these switches too
 ([Observability › Automatic containment](../project/design/observability.md#56-automatic-containment)).
 
 ```text
-pmail ops switch read_only|free_sending|emergency_prune on|off [--reason <text>]
+pmail ops switch read_only|free_sending|emergency_prune|agent_signup on|off [--reason <text>]
 ```
 
 ### `ops freeze` and `ops unfreeze`
@@ -723,14 +751,81 @@ configuration reads `PYLOTA_MAIL_KEY` from the environment. It also lists the to
 would see.
 
 ```text
-pmail mcp config [--client generic|claude-code|cursor] [--name <server-name>]
+pmail mcp config [--client generic|claude-code|claude-desktop|cursor|codex|agent-sdk] [--name <server-name>]
 ```
+
+`claude-desktop` prints the [`mcp stdio`](#mcp-stdio) bridge block for `claude_desktop_config.json`, `codex`
+the `~/.codex/config.toml` block, and `agent-sdk` the Claude Agent SDK snippet. The tool list it prints for
+the current key also applies the key's `mcp_tools`.
 
 ```bash
 pmail mcp config --client claude-code
 ```
 
 See [MCP server › Connect a client](mcp.md#connect-a-client).
+
+---
+
+## Agent tooling
+
+### `mcp stdio`
+
+A local (stdio) MCP server that forwards every request to the deployment's `/mcp`, for clients that run
+only local servers, such as Claude Desktop without request headers. It is part of the `pmail` binary, so it
+needs no Node.js and fetches nothing at start-up.
+
+```text
+pmail mcp stdio [--tools <names>] [--profile <name>] [--verbose]
+```
+
+- The key comes from `PYLOTA_MAIL_KEY` or the profile (`key`, `key_env`, `key_command`), never from `--key`,
+  which this command refuses (exit 2), so the key never sits in a client's configuration file or the
+  process list. At start it calls `GET /v1/me`; a `401` or `403` writes the error to stderr and exits 4
+  before reading stdin.
+- It reads newline-delimited JSON-RPC from stdin and writes only MCP messages to stdout, one per line. Logs
+  go to stderr only with `--verbose`: method, tool, status and duration, never arguments.
+- `--tools a,b,c` hides every other tool and answers calls to them with `-32602 Unknown tool`. It can only
+  narrow what the key sees.
+- `tools/call` is never retried by the bridge: when the connection drops before the result arrives, it
+  answers with a tool error `cli_outcome_unknown` (retryable) telling the model to retry the same call with
+  the same `idempotency_key`. Listing and `initialize` are retried once on a network error, a `5xx` or a
+  short `429`. A body over 7 MiB is refused locally with `payload_too_large`.
+- End of input lets requests in flight finish, then exits 0.
+
+```json
+{ "mcpServers": { "pylota-mail": { "command": "pmail", "args": ["mcp", "stdio", "--profile", "agents"] } } }
+```
+
+### `skills generate`
+
+Writes the agent skills compiled into this `pmail`: Markdown that teaches a coding agent safe sending,
+untrusted mail, verification codes, drafts, search and events.
+
+```text
+pmail skills generate [--output-dir <dir>] [--agent claude-code|codex|cursor|agents] [--for-current-key] [--force]
+```
+
+- `--agent` picks the directory: `claude-code` → `./.claude/skills`; `codex`, `cursor` and `agents` →
+  `./.agents/skills`. `--output-dir` overrides it (for example `~/.agents/skills` for every project).
+- It writes `.pylota-mail-skills.json` with the CLI version and the SHA-256 of every file written. A later
+  run replaces only files whose hash still matches; a file someone edited is left alone and reported, and
+  the command exits 6 unless `--force`. Files of skills a newer version dropped are removed only when
+  unmodified.
+- `--for-current-key` calls `GET /v1/me` and writes only the skills whose tools the key can use, plus
+  `references/deployment.md` with the API URL. It never writes a key.
+- `--json` prints `{ "version", "written", "unchanged", "skipped_modified", "removed" }`.
+
+```bash
+pmail skills generate --agent claude-code --for-current-key
+```
+
+### `skills list`
+
+Lists the skills compiled into this `pmail`, and which of them are written in the output directory.
+
+```text
+pmail skills list [--output-dir <dir>]
+```
 
 ---
 
@@ -903,6 +998,7 @@ pmail partners delete ptn_01JA2B3C4D5E6F7G8H9J0K1M2N --yes
 pmail identities create --username <name> --display-name <name> [--purpose <tag>]
                         [--owner-name <name>] [--owner-email <email>] [--signature-text <text>]
                         [--domain <domain>] [--client-id <id>] [--metadata <key=value>]… [--tenant <tenant>]
+                        [--message-hours <1-8760> | --keep-messages]
 ```
 
 | Flag | Meaning |
@@ -912,6 +1008,7 @@ pmail identities create --username <name> --display-name <name> [--purpose <tag>
 | `--owner-name`, `--owner-email` | The accountable human. An identity cannot send without one (`identity_owner_required`) |
 | `--domain` | Create the primary address on a healthy tenant domain instead of the platform domain |
 | `--client-id` | Makes the create idempotent for your own provisioning |
+| `--message-hours` | Erase each message that many hours after it is stored (needs `erasure:manage`); `--keep-messages` sets `null` |
 
 With a platform key and no `--tenant`, the identity is created in the profile's `tenant`, else in the
 default tenant. A partner key needs `--tenant` or the profile's `tenant`.
@@ -947,9 +1044,12 @@ pmail identities get bookings@acme.example.com
 pmail identities update <identity> [--display-name <name>] [--purpose <tag>] [--owner-name <name>]
                         [--owner-email <email>] [--signature-text <text>] [--metadata <key=value>]…
                         [--daily-cap <n>] [--auto-reply allowed|denied] [--require-known-recipient true|false]
+                        [--message-hours <1-8760> | --keep-messages]
 ```
 
 `--daily-cap`, `--auto-reply` and `--require-known-recipient` set the identity's `send_policy`.
+`--message-hours` erases each message that many hours after it is stored (setting it, or lowering it,
+needs `erasure:manage`); `--keep-messages` sets `null`.
 
 ```bash
 pmail identities update bookings.acme@agents.example \
@@ -1193,10 +1293,16 @@ pmail domains probe brightwell.example
 ### `domains records`
 
 Re-reads the expected DNS records and checks each against DNS (`ok`, `missing`, `mismatch`,
-`unexpected`).
+`unexpected`). `--format bind` prints them as an RFC 1035 zone fragment instead, with suggested records,
+records to remove and registrar nameservers as comments.
+
+```text
+pmail domains records <domain> [--format json|bind]
+```
 
 ```bash
 pmail domains records dom_01JA9G6M2WW7X2M5N6P8R0T1YR
+pmail domains records dom_01JA9G6M2WW7X2M5N6P8R0T1YR --format bind > mail.acmecarhire.example.zone
 ```
 
 ### `domains verify`
@@ -1257,14 +1363,16 @@ pmail send --identity <identity> --to <recipient>… --subject <text>
            [--cc <recipient>]… [--bcc <recipient>]… [--attach <file>]… [--kind transactional|marketing|auto_reply]
            [--thread <thread-id>] [--from-address <address>] [--label <label>]… [--header <"X-Name: value">]…
            [--metadata <key=value>]… [--unsubscribe-url <url>] [--unsubscribe-mailto <address>]
-           [--consent-basis <basis> --consent-recorded-at <time>] [--allow-large] [--idempotency-key <key>]
+           [--consent-basis <basis> --consent-recorded-at <time>] [--allow-large]
+           [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-copy] [--idempotency-key <key>]
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--to`, `--cc`, `--bcc` | `addr@example.net` or `"Name <addr@example.net>"`; repeat the flag or separate with commas. At most 10 in total by default (policy) |
 | `--text`, `--html` | At least one is required. Text is derived from HTML when missing |
-| `--attach` | Attach a file (repeatable). `pmail` refuses before sending when the message would exceed 5 MiB, unless `--allow-large` (for tenants that turn large attachments into links) |
+| `--attach` | Attach a file. Repeatable. Files up to 1 MiB are sent inline; larger files are uploaded first (`pmail uploads create`) and attached by ID. At most 25 MiB per file and 25 MiB per message. `pmail` refuses before sending when the message would exceed 5 MiB, unless `--allow-large` (for tenants that turn large attachments into links) |
+| `--calendar-file` | An iCalendar file to send as iMIP (at most 256 KiB); `--no-calendar-copy` leaves out the `invite.ics` copy |
 | `--kind` | `marketing` needs `--unsubscribe-url` or `--unsubscribe-mailto` and the consent flags |
 | `--thread` | Continue an existing thread |
 | `--header` | Only `X-` names matching `^X-[A-Za-z0-9_-]+$`, and `Importance` (`high`, `normal`, `low`), `Priority` (`normal`, `non-urgent`, `urgent`), `Sensitivity` (`personal`, `private`, `company-confidential`), `Keywords`, `Comments`, `Organization`, names matched case-insensitively; checked by the API (`400 header_not_allowed` for a name, `400 invalid_request` for a value) |
@@ -1286,7 +1394,8 @@ Replies to the sender of a message, from the address they wrote to, in the same 
 
 ```text
 pmail reply <message-id> --identity <identity> (--text <text> | --text-file <file>) [--html …]
-            [--attach <file>]… [--kind transactional|auto_reply] [--idempotency-key <key>]
+            [--attach <file>]… [--kind transactional|auto_reply]
+            [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-copy] [--idempotency-key <key>]
 ```
 
 ```bash
@@ -1318,6 +1427,23 @@ pmail forward msg_01JB2C3D4EW7X2M5N6P8R0T1YM --identity compliance@acme.example.
   --idempotency-key claim-7781-photos-fwd
 ```
 
+### `calendar-reply`
+
+Answers a verified calendar invitation that names the identity as an attendee: an iTIP `REPLY` goes to the
+organizer only, from the attendee's address, in the invitation's thread. An invitation that is not
+verified, quarantined, cancelled, superseded or past, or that does not name the identity, is refused
+(exit 6).
+
+```text
+pmail calendar-reply <message-id> --identity <identity> --partstat accepted|declined|tentative
+                     [--comment <text>] [--recurrence-id <time-or-date>] [--idempotency-key <key>] [--dry-run]
+```
+
+```bash
+pmail calendar-reply msg_01JA9B2C3D4EW7X2M5N6P8R0T0 --identity maintenance.acme@agents.example \
+  --partstat accepted --idempotency-key brightwell-mot-accept
+```
+
 ### `cancel`
 
 Cancels a send that is still `queued`. Otherwise exit 6 (`not_cancelable`).
@@ -1337,6 +1463,75 @@ pmail resolve <message-id> --identity <identity> --outcome sent|not_sent
 
 ```bash
 pmail resolve msg_01JA5D9X2KW7X2M5N6P8R0T1YJ --identity bookings@acme.example.com --outcome not_sent
+```
+
+---
+
+## Drafts
+
+Drafts that an agent writes, a person or the operator's system approves, and the mailbox sends at once or
+at `--send-at` ([API › Drafts](api.md#drafts)). `create`, `update` and `delete` need `drafts:write`; `list`
+and `get` need `drafts:read`; `send` needs `messages:send` and `drafts:read`; `approve` and `reject` need
+`drafts:approve`, which identity keys cannot hold.
+
+```text
+pmail drafts create --identity <identity> [--to <addr>]… [--cc <addr>]… [--bcc <addr>]… [--subject <s>]
+                    [--text <s> | --text-file <path>] [--html-file <path>] [--attach <path>]… [--upload <upload_id>]…
+                    [--in-reply-to <msg_id> [--reply-all] | --forward-of <msg_id>] [--label <l>]…
+                    [--send-at <rfc3339>] [--request-approval] [--client-id <id>]
+pmail drafts list (--identity <identity> | --tenant <tenant>) [--status <s>[,<s>…]] [--label <l>]
+                  [--thread <thr_id>] [--scheduled-after <t>] [--scheduled-before <t>] [--limit <n>] [--all]
+pmail drafts get <draft_id> --identity <identity> [--attachment <att_id> --out <path>]
+pmail drafts update <draft_id> --identity <identity> [--if-match <etag>] [the create options]
+                    [--remove-attachment <att_id>]… [--unschedule] [--request-approval]
+pmail drafts send <draft_id> --identity <identity> [--send-at <rfc3339> | --now] [--dry-run]
+                  [--idempotency-key <key>]
+pmail drafts approve <draft_id> --identity <identity> --revision <n> [--digest <hex>]
+                     (--send | --no-send) [--note <text>] [--on-behalf-of <id>]
+pmail drafts reject <draft_id> --identity <identity> --reason <text> [--revision <n>]
+pmail drafts delete <draft_id> --identity <identity> [--yes]
+```
+
+`pmail drafts send` without `--idempotency-key` reads the draft and derives a key from its ID, revision and
+approval state (`cli:{draft_id}:{revision}:{approval.state}`), so re-running the same command never sends
+twice, and re-running it after a person approved the revision sends it: a run answered `pending_approval`
+recorded its key under the state `none` or `requested`, and the approval changes the state to `approved`.
+`list --tenant` reads the tenant's queue. `approve` where people decide exits 4
+(`403 permission_denied`, `person_required`); a stale revision exits 6 (`409`); the draft limit exits 7
+(`422`).
+
+```bash
+pmail drafts create --identity bookings@acme.example.com --to jo@example.net \
+  --subject "Your quote for the Golf, 14–16 November" --text-file quote.txt --request-approval \
+  --client-id quote-q118
+pmail drafts list --tenant acme --status pending_approval
+pmail drafts approve drf_01JA2B3C4D5E6F7G8H9J0K1M2N --identity bookings@acme.example.com --revision 3 --send
+```
+
+---
+
+## Uploads
+
+Files staged once for an identity and attached by ID ([API › Uploads](api.md#uploads)). Need
+`messages:send` or `drafts:write`.
+
+```text
+pmail uploads create <file> [--identity <identity>] [--filename <name>] [--content-type <type>] [--expires-in <seconds>]
+pmail uploads list [--identity <identity>] [--status <status>]
+pmail uploads get <upload-id> [--identity <identity>]
+pmail uploads delete <upload-id> [--identity <identity>]
+```
+
+`create` reads the file, computes its size and SHA-256 locally, creates the upload, `PUT`s the bytes
+(retrying the `PUT` on `503` and `409 upload_in_progress` after `Retry-After`, at most 5 times), and
+prints the upload ID and `expires_at`. The content type defaults to the file extension's
+(`application/octet-stream` when unknown). `send`, `reply` and `forward` with `--attach` upload files over
+1 MiB themselves.
+
+```bash
+pmail uploads create FNOL-7781.pdf --identity claims@acme.example.com
+pmail drafts create --identity claims@acme.example.com --to claims@insurer.example \
+  --subject "Claim 7781" --text "Photos attached." --upload upl_01JAC3Q7W9X2M5N6P8R0T1Y4ZB
 ```
 
 ---
@@ -1395,8 +1590,12 @@ pmail threads hold thr_01JA5C2H8QW7X2M5N6P8R0T1YB --identity compliance@acme.exa
 
 ```text
 pmail messages list --identity <identity> [--thread <thread-id>] [--direction inbound|outbound]
-                    [--status <status>] [--label <label>] [--after <time>] [--before <time>] [--all]
+                    [--status <status>] [--screening-status pending|clear|suspect|unavailable] [--label <label>]
+                    [--after <time>] [--before <time>] [--all]
 ```
+
+`--status screening` lists messages still held by screening, for a key holding `quarantine:review`;
+`--screening-status` filters on the screening record's verdict.
 
 ```bash
 pmail messages list --identity bookings@acme.example.com --direction outbound --status bounced
@@ -1405,8 +1604,10 @@ pmail messages list --identity bookings@acme.example.com --direction outbound --
 ### `messages get`
 
 ```text
-pmail messages get <message-id> --identity <identity> [--include quoted,html,headers]
+pmail messages get <message-id>… --identity <identity> [--include quoted,html,headers]
 ```
+
+More than one ID calls `batch-get`. The output includes the message's screening record and calendar object.
 
 ```bash
 pmail messages get msg_01JA5C2H8RW7X2M5N6P8R0T1YE --identity bookings@acme.example.com
@@ -1450,11 +1651,36 @@ pmail messages attachment-text msg_01JA4B1G7PW7X2M5N6P8R0T1YC att_01JA4B1G7QW7X2
 ### `messages label`
 
 ```text
-pmail messages label <message-id> --identity <identity> [--add <label>]… [--remove <label>]… [--read | --unread]
+pmail messages label <message-id>… --identity <identity> [--add <label>]… [--remove <label>]…
+                     [--read | --unread] [--archive | --unarchive] [--require-absent <label>]…
 ```
+
+More than one ID calls `batch-update` in requests of 100; each request is atomic, the whole command is not
+(it says so when it splits). `--require-absent` skips messages that already carry the label and lists them
+as conflicts: with `--add claimed --require-absent claimed`, exactly one of two racing callers takes a
+message.
 
 ```bash
 pmail messages label msg_01JA4B1G7PW7X2M5N6P8R0T1YC --identity bookings@acme.example.com --add invoice
+```
+
+### `messages feedback` and `messages feedback-list`
+
+Feedback on a message's screening verdict, and the feedback given so far. `feedback` needs
+`messages:write`, `feedback-list` `messages:read`; a quarantined or screening message also needs
+`quarantine:review`. Feedback never changes the message.
+
+```text
+pmail messages feedback <message-id> --identity <identity> --verdict <correct|false_positive|missed_threat|legitimate_instruction|spam> [--notes <text>]
+pmail messages feedback-list <message-id> --identity <identity>
+```
+
+A message that was not screened, or whose verdict is still pending, exits 6; the twenty-first feedback on a
+message exits 7.
+
+```bash
+pmail messages feedback msg_01JA4B1G7PW7X2M5N6P8R0T1YC --identity bookings@acme.example.com \
+  --verdict false_positive --notes "Our booking system's own confirmation format."
 ```
 
 ---
@@ -1575,7 +1801,8 @@ pmail quarantine list --identity bookings@acme.example.com
 Moves a quarantined message into the mailbox and triages it. Needs `quarantine:review`; audit-logged.
 Where `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud), it works only with a platform or partner
 key on a tenant whose policy has `quarantine.key_release: true`; elsewhere the API answers `403 permission_denied` (exit 4) and a person
-releases in the console.
+releases in the console. A message still being screened gets `409 not_quarantined` (exit 6); wait for its
+verdict.
 
 ```text
 pmail quarantine release <message-id> --identity <identity> --reason <text>
@@ -1586,6 +1813,20 @@ pmail quarantine release msg_01JA8H7N3XW7X2M5N6P8R0T1YS --identity bookings@acme
   --reason "Known supplier, DKIM key rotated"
 ```
 
+### `screening summary`
+
+Screening verdicts, reasons, outcomes, feedback, and precision and recall from feedback, for one identity
+or a tenant, over at most 92 days (default the last 30). Needs `metrics:read`; `--tenant` needs a tenant,
+partner or platform key, and `--identity-ids` when the tenant has more than 100 identities.
+
+```text
+pmail screening summary (--identity <identity> | --tenant <tenant> [--identity-ids <id,…>]) [--from <time>] [--to <time>]
+```
+
+```bash
+pmail screening summary --tenant acme --from 2026-09-17
+```
+
 ---
 
 ## Webhooks
@@ -1594,10 +1835,12 @@ pmail quarantine release msg_01JA8H7N3XW7X2M5N6P8R0T1YS --identity bookings@acme
 
 ```text
 pmail webhooks create --url <https-url> --events <type,…> [--identity-ids <id,…>] [--description <text>]
-                      [--tenant <tenant> | --platform | --partner]
+                      [--tenant <tenant> | --platform | --partner] [--header 'Name: value']…
 ```
 
-`--events '*'` subscribes to every event type, including future ones. `--platform` creates a
+`--events '*'` subscribes to every event type that is not opt-in, including future ones; name
+`message.labels_changed` to receive it. `--header` adds a static request header to every delivery (at most
+10; values are write-only). `--platform` creates a
 platform-wide endpoint (platform keys). `--partner` creates a partner endpoint (partner keys), which
 receives only the events of the partner's own tenants. The signing secret (`whsec_…`) is printed once.
 
@@ -1688,6 +1931,78 @@ export WEBHOOK_SECRET=whsec_…
 pmail webhooks verify --secret-env WEBHOOK_SECRET --headers headers.txt --body body.json
 ```
 
+### `webhooks headers`
+
+Sets or removes an endpoint's custom delivery headers. Values are write-only: the output lists the header
+names only. `--set-stdin <name>` reads that header's value from stdin, so it never appears in the process
+list. A URL change to another host removes every custom header.
+
+```text
+pmail webhooks headers <webhook-id> [--set 'Name: value']… [--set-stdin <name>] [--remove <name>]…
+```
+
+```bash
+op read "op://vault/ingress/token" | pmail webhooks headers whk_01JA9J8P4YW7X2M5N6P8R0T1YT --set-stdin X-Ingress-Token
+```
+
+---
+
+## Events
+
+Read the tenant's event log: the same envelopes webhooks deliver, in append order
+([API › Event feed](api.md#event-feed)). Every command needs `events:read`; platform and partner keys pass
+`--tenant`.
+
+```text
+pmail events list [--tenant <tenant>] [--after <cursor> | --since <time>] [--types <pattern,…>]
+                  [--identity <identity>]… [--limit <1-500>] [--wait <0-60>] [--all]
+pmail events tail [--tenant <tenant>] [--after <cursor> | --since <time> | --consumer <name|id>]
+                  [--types <pattern,…>] [--identity <identity>]… [--cursor-file <path>]
+                  [--transport stream|poll]
+pmail events consumers create <name> [--tenant <tenant>] [--types <pattern,…>] [--identity <identity>]…
+                  [--start earliest|latest|<cursor>]
+pmail events consumers list|get|delete [<name|id>] [--tenant <tenant>]
+pmail events consumers read <name|id> [--limit <n>] [--wait <0-60>] [--commit]
+pmail events consumers commit <name|id> --cursor <cursor>
+pmail events consumers reset <name|id> (--to earliest|latest|<cursor> | --since <time>)
+pmail events stream-token [--tenant <tenant>]
+```
+
+`events list --all` follows `has_more` into one document; `consumers read --commit` commits the page's
+`next_cursor` after printing it. A consumer read always starts at the committed position, so without
+`--commit` a second `read` prints the same page; with it, repeated runs walk a backlog page by page. A
+consumer `<name>` is resolved to its ID with one list call.
+
+```bash
+pmail events list --tenant acme --types 'message.*' --after latest --wait 30
+pmail events consumers create pylota-reconcile --tenant acme --types 'message.*'
+pmail events consumers read pylota-reconcile --tenant acme --commit
+pmail events stream-token --tenant acme
+```
+
+### `events tail`
+
+Streams events over the WebSocket with the `Authorization` header and acknowledges each batch after
+printing it; `--transport poll` uses the long poll (`wait=60`) for networks that block WebSockets. Human
+output is one line per event (time, type, identity, message ID, and the subject, which is untrusted and
+neutralised); `--json` prints NDJSON, one envelope per line; `--quiet` prints event IDs.
+
+- **`--cursor-file`** is read at start (unless `--after` or `--since` is given) and written after each
+  printed batch: to a temporary file in the same directory, mode `0600`, then renamed. A crash between
+  printing and writing repeats that batch, so output is at least once. With `--consumer` the position is
+  the consumer's, and no file is needed.
+- **Reconnects** resume from the last cursor with backoff, so nothing appended after it is lost. Only the
+  closes that a later attempt can survive reconnect (`1001`, `1006`, `1011`–`1013`, `4408`, and `4429`
+  after 30 seconds); every other close ends the command. A position behind the retained log (close
+  `4410`) exits 6 and prints `details.oldest_cursor` with the fix; `4409` (another `tail` on the same
+  consumer, or an 11th connection of the key, took this one's place) exits 6 without reconnecting, so two
+  copies never replace each other in a loop; `4401` or `4403` exits 4; `4404` exits 5; `4400`, `1008` or
+  `1009` exits 7; 10 minutes of failed reconnects exits 9; Ctrl-C writes the cursor file and exits 130.
+
+```bash
+pmail events tail --tenant acme --types 'message.*' --cursor-file ~/.local/state/pylota-mail/acme.cursor
+```
+
 ---
 
 ## API keys
@@ -1698,7 +2013,7 @@ pmail webhooks verify --secret-env WEBHOOK_SECRET --headers headers.txt --body b
 pmail keys create --level platform|partner|tenant|identity --name <name> [--partner <partner_id>]
                   [--tenant <tenant>] [--identity <identity>]
                   [--permissions <permission,…>] [--expires-at <time> | --expires-in <duration>]
-                  [--save-profile <name>]
+                  [--mcp-tools <names>] [--save-profile <name>]
 ```
 
 | Flag | Meaning |
@@ -1707,6 +2022,7 @@ pmail keys create --level platform|partner|tenant|identity --name <name> [--part
 | `--partner` | With `--level partner` (required there, and refused with any other level): the partner the key acts for. Only a platform key can create a partner key |
 | `--permissions` | Comma-separated ([API › Permissions](api.md#permissions)). Required at every level: a platform key has no implicit full set, and `--level platform` without it is refused (exit 2) with the list of permissions a platform key may hold |
 | `--expires-in` | For example `90d` |
+| `--mcp-tools` | Comma-separated MCP tools the key may see (at most 64), narrowing what its permissions allow; an empty value sends `[]` (no tools). It limits MCP only: REST follows the permissions |
 | `--save-profile` | Also store the new key in this CLI profile |
 
 The new key cannot exceed your own key's level, tenant, identity or permissions. Some permissions are
@@ -2014,12 +2330,14 @@ pmail suppressions remove jo@example.net --tenant acme
 ### `lists list`, `lists add` and `lists remove`
 
 Allow and block lists for receiving and sending. `<direction>` is `receive` or `send`; `<kind>` is
-`allow` or `block`; an entry is `user@example.com` or `@example.com`.
+`allow` or `block`; an entry is `user@example.com` or `@example.com`. With `--identity` the entry belongs to
+that identity and overrides the tenant's entries for its mail as
+[Parity additions § 3.1](../project/design/parity-additions.md#31-scopes-and-precedence) defines.
 
 ```text
-pmail lists list <direction> <kind> [--tenant <tenant>]
-pmail lists add <direction> <kind> <entry> [--tenant <tenant>]
-pmail lists remove <direction> <kind> <entry> [--tenant <tenant>]
+pmail lists list <direction> <kind> [--tenant <tenant>] [--identity <identity>]
+pmail lists add <direction> <kind> <entry> [--tenant <tenant>] [--identity <identity>]
+pmail lists remove <direction> <kind> <entry> [--tenant <tenant>] [--identity <identity>]
 ```
 
 ```bash
@@ -2231,29 +2549,119 @@ pmail audit --tenant acme --action quarantine.release
 
 ---
 
+## Deliverability metrics
+
+Need `metrics:read` ([API › Deliverability metrics](api.md#deliverability-metrics)). An identity key reads
+its own identity's windows and counts, its tenant's windows and those of the domains its addresses use.
+
+```text
+pmail metrics rates [--identity <identity> | --domain <domain>] [--tenant <tenant>] [--json]
+pmail metrics events [--identity <identity> | --domain <domain>] [--tenant <tenant>] [--bucket hour|day]
+                     [--from <time>] [--to <time>] [--types sent,delivered,…] [--identity-ids <id,…>] [--json]
+```
+
+`--identity` sends `scope=identity` and `--domain` sends `scope=domain`. Without either, the command sends
+no `scope` and the server's default applies: the key's own identity for an identity key, the tenant for
+every other key (`--tenant` names the tenant as everywhere else).
+`rates` prints one line per window (rule, threshold, now, headroom) with tripped windows first, and exits 16
+when a window is tripped or a pause is in effect, so a script can gate a bulk send on it. `events` prints a
+table, one row per bucket, and a `partial` warning on stderr when the response is partial.
+
+```bash
+pmail metrics rates --identity bookings@acme.example.com
+pmail metrics events --bucket day --from 2026-10-01 --types sent,delivered,bounced,complained
+```
+
+---
+
+## Agent sign-up
+
+An agent signs up for its own workspace on Pylota Mail Cloud, and its human verifies it
+([API › Agent sign-up](api.md#agent-sign-up)). `create` needs no key; the other `agent-signup` commands act
+on the sign-up of the profile's key.
+
+### `agent-signup create`
+
+Calls `POST /v1/agent-signup` without a key and writes the returned key into the profile (with the config
+file's `0600` rules), printing it only with `--print-key`.
+
+```text
+pmail agent-signup create --username <name> --human-email <email> [--agent-name <name>] [--source <text>]
+                          --accept-terms [--profile <name>] [--print-key]
+```
+
+```bash
+pmail agent-signup create --username travel-planner --human-email sam@brightwell.example \
+  --agent-name "Travel planner" --accept-terms --profile travel-planner
+```
+
+### `agent-signup status`, `verify`, `resend`, `set-human` and `abandon`
+
+```text
+pmail agent-signup status
+pmail agent-signup verify <code>
+pmail agent-signup resend
+pmail agent-signup set-human <email>
+pmail agent-signup abandon
+```
+
+`status` shows the sign-up's state, the human's masked address and the code's attempts left. `verify` takes
+the six-digit code the human received; a wrong code exits 7 (`422 signup_code_invalid`). `resend` emails a
+new code (at most 3 an hour). `set-human` replaces the human, at most twice before verification. `abandon`
+erases the provisional workspace; it asks you to type the inbox's address first.
+
+```bash
+pmail agent-signup verify 482913 --profile travel-planner
+```
+
+### `agent-signups list`
+
+Platform keys with `platform:ops`. Lists agent sign-ups, newest first, without any person's clear address.
+
+```text
+pmail agent-signups list [--state provisional|verified|expired|abandoned|refused] [--since <time>]
+                         [--network <hash>]
+```
+
+`--since` is the earliest creation time, RFC 3339 or a date
+([Naming identities and tenants](#naming-identities-and-tenants)); `--network` takes the 16-hex network
+hash shown in a row and lists only that network's sign-ups.
+
+```bash
+pmail agent-signups list --state provisional --since 2026-10-16
+pmail agent-signups list --since 2026-10-17T09:00:00Z --network 3f9a0c1d2e4b5a69
+```
+
+---
+
 ## Commands at a glance
 
 ```text
 Deployment   setup · setup ses · deploy · upgrade · doctor · destroy · secrets rotate-master
 Platform     dlq list|redrive · keys rotate thread|link|cursor|web_bot_auth · jobs start|get · waitlist invite
-             ops status|switch|freeze|unfreeze · ops restore d1|mailbox|reconcile|cleanup
+             ops status|switch|freeze|unfreeze · ops restore d1|mailbox|reconcile|cleanup · agent-signups list
 Profiles     login · config show|set · mcp config
+Agents       mcp stdio · skills generate|list · agent-signup create|status|verify|resend|set-human|abandon
 Tenants      tenants create|list|get|update|suspend|resume
 Partners     partners create|list|get|update|delete
 Identities   identities create|list|get|update|pause|resume|delete|lookup
 Addresses    addresses list|add|promote|retire|delete|test-forwarding
 Domains      domains add|list|get|update|records|verify|probe|health|reprove|subscribe|remove
-Sending      send · reply · reply-all · forward · cancel · resolve
+Sending      send · reply · reply-all · forward · calendar-reply · cancel · resolve
+Drafts       drafts create|list|get|update|send|approve|reject|delete
+Uploads      uploads create|list|get|delete
 Reading      threads list|get|label|hold|unhold · messages list|get|raw|attachment|attachment-text|label
-Search       search · ask · wait · triage list|rerun · quarantine list|release
-Webhooks     webhooks create|list|get|update|delete|rotate|test|deliveries|replay|verify
+             messages feedback|feedback-list
+Search       search · ask · wait · triage list|rerun · quarantine list|release · screening summary
+Webhooks     webhooks create|list|get|update|delete|rotate|test|deliveries|replay|verify|headers
+Events       events list|tail|stream-token · events consumers create|list|get|delete|read|commit|reset
 Keys         keys create|list|get|revoke|rotate
 Signing      identity-keys list|create|rotate|revoke · assertions create|verify · http-sign
 Lists        suppressions list|add|remove · lists list|add|remove
 Privacy      erasure create|get|list|retry|reapply · export create|get
 Members      members list|invite|remove · invitations revoke
 Billing      plans list · billing get|set
-Usage        usage · usage daily · audit
+Usage        usage · usage daily · audit · metrics rates|events
 ```
 
 Members, invitations, plans and billing can also be managed in the console. Notification preferences
