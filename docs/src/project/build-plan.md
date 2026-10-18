@@ -1529,12 +1529,13 @@ files, each reviewed by that file's owner:
 | `consumers/webhooks.rs` (M8) | The append step before endpoint resolution, its age-based retry, and the Notifier hand-off reading step 1's payloads |
 | `handlers/keys.rs`, `handlers/tenants.rs`, `handlers/partners.rs` (M5) | The best-effort `ForgetKeys` and `CloseStreams` calls after revocation and suspension |
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `EraseMessages` after each `EraseRows` batch, `EraseIdentity`, `CloseStreams` and `Erase` in tenant erasure, `Probe`, the receipt fields; `Purge` in the tenant retention job's `events` step |
+| `mailbox/erase.rs` (M14), `mailbox/expiry.rs` (M37) | `erased_ids.log_erased_at` and the `log_erase` alarm purpose, which sends `EraseMessages` for what every `EraseRows` deleted, tenant retention and per-identity expiry included (§11.3). If M37 lands first, M30 adds the purpose and runs `it::events::retention_and_expiry_reach_log` against expiry |
 | `mcp/tools.rs` (M15) | `mail_events`, with its rows in M15's table test |
 | `crates/cli` (M16) | `pmail events …` |
 | `console/pages/webhooks.rs` (M21) | The event consumers and streams section |
 | `crons/` (M17 and M26's minting loop) | Minting `events_do_id` for rows at `''` |
 
-**Implements:** FR-EVT-1 to FR-EVT-11 and edge rows R1–R64
+**Implements:** FR-EVT-1 to FR-EVT-11 and edge rows R1–R69
 ([Event feed and live stream](design/event-feed.md)).
 
 **Tasks:**
@@ -1557,9 +1558,9 @@ files, each reviewed by that file's owner:
 
 **Acceptance:**
 
-- Edge rows R1–R64, with the tests named in the register (`core::events::*`, `it::events::*`,
+- Edge rows R1–R69, with the tests named in the register (`core::events::*`, `it::events::*`,
   `it::stream::*`, `it::mcp::events_tool`, `cli::events::tail_resume_and_exit_codes`,
-  `live::events::stream_through_deploy`).
+  `sdk::events::stream_close_rules`, `live::events::stream_through_deploy`).
 - The ten routes join `it::security::cross_tenant_matrix`; `sdk::coverage::every_operation` passes with the
   new operations.
 - M8's suites (`it::webhooks::*`) pass unchanged, and `it::webhooks::notifier_handoff_never_blocks` reads
@@ -1589,7 +1590,7 @@ in other milestones' files, each reviewed by that file's owner:
 
 | File | Hook |
 |---|---|
-| `core/src/injection.rs` (M2, M10, M12) | `role_marker`, the confusable fold, the added patterns |
+| `core/src/injection.rs` (M2, M10, M12) | `role_marker`, the confusable fold, the added patterns, every pattern compiled through the fold |
 | `consumers/inbound.rs` (M7) | Step 11a; `IngestInput.screening`; post-commit step 4a |
 | `mailbox/ingest.rs` (M7) | Rule 6a, step 15a, the `received_evented_at` writes, events |
 | `mailbox/read.rs` (M7) | Every visibility predicate from `core::visibility`; release: `received_evented_at`, `message.received` (`released: true`), `released_by` on the record; `409 not_quarantined` details |
@@ -1598,7 +1599,7 @@ in other milestones' files, each reviewed by that file's owner:
 | `search/*` (M10, M11) | Predicates from `core::visibility`; `include_quarantined` covers `screening`; evidence `steering_suspected` from the record |
 | `triage/*` (M12) | `409 triage_not_eligible` reason `screening` |
 | `webhooks/payloads.rs`, `handlers/webhooks.rs`, `consumers/webhooks.rs` (M8, M26) | `message_screened` builder; `data.screening`, `released`, `rescreened`; J29 row; the Notifier hand-off without `message.released` |
-| `quota/mod.rs` (M5 stub, M12) | `CountScreenModel` |
+| `quota/mod.rs` (M5 stub, M12) | `CountScreenModel` with the sender sub-cap (`screen_sender:{h}`); `CountScreenFailure` on the default tenant (`screen_fail`) |
 | `deploy/wrangler.toml.tmpl`, `crates/worker/src/lib.rs` (M5) | `Q_SCREEN`, the `pm-screen` consumer and `pm-screen-dlq`. If M5 has already merged, M31 adds them; the rule that one milestone owns each change still holds |
 | `jobs/erasure.rs`, `mailbox/erase.rs`, `mailbox/export.rs` (M14) | Receipt counts; export fields |
 | `policy/*`, `core/src/policy.rs` (M5, M21) | The three guard fields and their tightening rules |
@@ -1607,11 +1608,11 @@ in other milestones' files, each reviewed by that file's owner:
 | `console/pages/{quarantine.rs, thread.rs, policy.rs}` (M21) | §21 |
 | `crates/conformance/screening/` | The labelled steering set: at least 400 messages (200 steering across body, quoted history, filenames, attachment text, hidden text and five languages; 200 look-alike legitimate messages), synthetic, on reserved domains |
 
-**Implements:** FR-SCR-1 … FR-SCR-12, edge rows T1–T58, and the cross-tenant suite's four new routes (NFR-SEC-1).
+**Implements:** FR-SCR-1 … FR-SCR-12, edge rows T1–T61, and the cross-tenant suite's four new routes (NFR-SEC-1).
 
 **Acceptance:**
 
-- Every edge row T1–T58 with the tests named in the register.
+- Every edge row T1–T61 with the tests named in the register.
 - The `core::screening::*`, `core::injection::t52_confusable_fold`, `core::policy::t34_screening_guard_fields` and
   `core::visibility::hidden_statuses` tests; `conf::screening::*`.
 - `it::screening::t17_hidden_everywhere` passes with every read route of the router table and every MCP tool
@@ -1910,7 +1911,7 @@ rows of section Z.
 7. Webhook headers (§8): the columns and sealed entry, create and `PATCH …/headers`, delivery, host-change
    clearing.
 8. Retention (§7): the identity field, the `set_retention` intent, `mailbox/expiry.rs`, the idempotency stub,
-   the daily receipt, the alert.
+   the delivery stub (§7.13), the daily receipt, the alert.
 9. Zone export (§9): `core::zonefile::render` and the `format` parameter.
 
 **Files:** as the Code row of [Parity additions](design/parity-additions.md). One migration, `migrations/d1/00NN_parity_additions.sql` only if
@@ -1926,6 +1927,7 @@ reviewed by that file's owner:
 | `crates/core/src/auth.rs`, `trust.rs` (M2, M7) | `arc_rescue`, the trust detail fields, `auth_json` keys |
 | `handlers/wait.rs` (M7), `accounts` gate (M27) | `arc_rescued` is not `pass` for releases and the ledger match |
 | `handlers/send.rs`, `consumers/outbound.rs`, `mailbox/idempotency.rs` (M9) | Identity-scope send entries at step 6 and composition step 1; the expired stub in the reservation |
+| `consumers/delivery.rs`, `ApplyDeliveryEvent` in the mailbox (M9) | The `delivery_stubs` lookup after reconciliation, its transitions and `metric_counts`, and the answer with the stub's `first_reply` and `domain_id` (§7.13) |
 | `webhooks/payloads.rs`, `consumers/webhooks.rs`, `handlers/webhooks.rs`, `webhooks/client.rs` (M8) | The `labels_changed` builder, `OPT_IN_EVENT_TYPES`, headers on delivery, `PATCH …/headers`, host-change clearing |
 | `search/citations.rs` (M11), `triage/rules.rs` (M12) | The `Rescued` evidence state; rule 13 |
 | `handlers/domains.rs` (M13, M23) | `format=bind` |
@@ -1936,15 +1938,15 @@ reviewed by that file's owner:
 | `crates/cli/src/commands/*` (M16) | The commands of the page |
 | `console/pages/*` (M21) | Inbox retention and lists, ARC wording, webhook header names, zone download |
 | `crates/core/src/sealed.rs` (M17 Foundation) | `webhook_endpoints.headers_sealed`, with its case in `it::secrets::master_key_rotation` |
-| `drafts` (M29), event feed (M30) | Draft expiry and `beyond_retention` (M29); feed entries of label events and of expired messages (M30). If M29 or M30 lands after M37, that milestone adds its hook and runs the M37 test named for it |
+| `drafts` (M29), event feed (M30) | Draft expiry and `beyond_retention` (M29); feed entries of label events and of expired messages through the mailbox's `log_erase` purpose (M30, R65 and R66). If M29 or M30 lands after M37, that milestone adds its hook and runs the test named for it (`it::drafts::z61_drafts_expire`, `it::events::retention_and_expiry_reach_log`, `it::events::label_event_erasure`) |
 
 **Implements:** FR-IN-13, FR-IN-14, FR-IN-15, FR-OUT-17, FR-WH-6, FR-WH-7, FR-PRV-7, FR-DOM-15, FR-API-3, and edge
-rows Z1–Z80.
+rows Z1–Z81.
 
 **Acceptance:**
 
 - Every test of [Parity additions § 15](design/parity-additions.md#15-tests), by row: Z1–Z12 (batch), Z13–Z23
-  (lists), Z24–Z29 and Z80 (label events), Z30–Z32 (trust detail), Z33–Z46 (ARC), Z47–Z63 (retention), Z64–Z71 (webhook
+  (lists), Z24–Z29 and Z80 (label events), Z30–Z32 (trust detail), Z33–Z46 (ARC), Z47–Z63 and Z81 (retention), Z64–Z71 (webhook
   headers), Z72–Z76 (zone export), Z77–Z79 (docs links).
 - The new routes (seven operations) and the changed ones join `it::security::cross_tenant_matrix`;
   `sdk::coverage::every_operation` passes with the new operations; `it::mcp::input_schemas_plain_objects` passes.

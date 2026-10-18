@@ -1286,7 +1286,10 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --       expiry:{YYYY-MM-DD}  that UTC day's expiry counts, flushed to the audit log by maintenance
 --       draft_index_backoff  consecutive failed draft_index writes to D1 (Drafts § 9.3)
 --       draft_att:{attachment_id}  an inline draft attachment written to R2 and not yet committed (Drafts § 7)
---       screen_freeze_seen  '1' when the screen alarm ran during PM_FREEZE; cleared by the first run after it
+--       screen_freeze_seen  '1' when the screen alarm ran during PM_FREEZE; cleared by whatever first applies
+--                       the extension after it (Screening § 6.1)
+--       events_do_id    the tenant's TenantEvents ID, read once from D1 by the log_erase purpose
+--       log_erase_backoff  consecutive failed log_erase calls; 30 s doubled, at most 5 minutes (Event feed § 11.3)
 --       screen_hour     {"h": "YYYY-MM-DDTHH", "n": hold-mode verdicts, "u": of them unavailable, "r": 0|1}
 --                       for the screening_unavailable condition (Screening § 22); replaced when the UTC hour
 --                       changes; "r" = 1 once the condition was reported in that hour
@@ -1294,7 +1297,8 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --                       sends, claims and approval expiry) and draft_index (Drafts § 6.2, § 9.3); screen (the
 --                       earliest deadline_at of a pending screenings row, Screening § 6.1); uploads (the
 --                       earliest upload expiry, tombstone purge or object-delete retry, Uploads § 5.3); expiry
---                       (per-identity retention, Parity additions § 7.4). Thread locks expire lazily and
+--                       (per-identity retention, Parity additions § 7.4); log_erase (erased_ids rows not yet
+--                       sent to the event log, Event feed § 11.3). Thread locks expire lazily and
 --                       reconciliation is event-driven, so neither has an alarm.
 -- parser_version is a column of messages (and a core constant), not a meta key.
 
@@ -1388,11 +1392,12 @@ CREATE TABLE IF NOT EXISTS messages (
                                                            -- body_truncated, display_name_spoof,
                                                            -- lookalike_domain, reply_to_mismatch,
                                                            -- shared_domain_sender, sender_suppressed,
-                                                           -- body_redacted, dsn_untrusted, steering_suspected. The
+                                                           -- body_redacted, dsn_untrusted, steering_suspected,
+                                                           -- attachments_unscreened. The
                                                            -- API returns the trust ones (hidden_text,
                                                            -- display_name_spoof, lookalike_domain, reply_to_mismatch,
                                                            -- thread_join_unverified, shared_domain_sender,
-                                                           -- steering_suspected) in
+                                                           -- steering_suspected, attachments_unscreened) in
                                                            -- trust.flags, the rest in flags. Every row stays within
                                                            -- the 1,900,000-byte budget of Inbound › Storage caps
   read                INTEGER NOT NULL DEFAULT 0,
@@ -1524,10 +1529,26 @@ CREATE TABLE IF NOT EXISTS idempotency (
 );
 CREATE INDEX IF NOT EXISTS idempotency_draft ON idempotency(draft_id) WHERE draft_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS delivery_stubs (                -- content-free delivery state of an outbound message
+  provider_message_id TEXT NOT NULL,                       -- that per-identity expiry deleted, so late bounces and
+  address_hash        TEXT NOT NULL,                       -- complaints still suppress and count (Parity additions
+  message_id          TEXT NOT NULL,                       -- § 7.13). address_hash: hex HMAC-SHA256(PM_HASH_KEY,
+  recipient_domain    TEXT NOT NULL,                       -- normalised recipient); recipient_domain for
+  domain_id           TEXT,                                -- metric_counts; domain_id and first_reply for
+  status              TEXT NOT NULL,                       -- RecordOutcome; status and provider_event_ids_json as on
+  first_reply         INTEGER NOT NULL,                    -- deliveries. Written by EraseRows (mode Expiry), read
+  provider_event_ids_json TEXT NOT NULL DEFAULT '[]',      -- by ApplyDeliveryEvent; deleted at expires_at by the
+  sent_at             INTEGER NOT NULL,                    -- daily maintenance, by counterparty erasure of the
+  expires_at          INTEGER NOT NULL,                    -- address, and with the mailbox. expires_at = sent_at
+  PRIMARY KEY (provider_message_id, address_hash)          -- + 30 days
+);
+
 CREATE TABLE IF NOT EXISTS erased_ids (                    -- message IDs an erasure deleted (I10): writers that
   message_id TEXT PRIMARY KEY,                             -- finish after the erasure see them and delete what they
-  erased_at  INTEGER NOT NULL                              -- wrote; ingest refuses them. Rows older than 7 days are
-);                                                         -- deleted by the daily maintenance
+  erased_at  INTEGER NOT NULL,                             -- wrote; ingest refuses them. Rows older than 7 days are
+                                                           -- deleted by the daily maintenance, once log_erased_at is set
+  log_erased_at INTEGER                                    -- NULL until the alarm purpose log_erase has sent the ID
+);                                                         -- to the tenant's event log (Event feed § 11.3)
 
 CREATE TABLE IF NOT EXISTS outbox (                        -- transactional event outbox
   seq          INTEGER PRIMARY KEY,                        -- per-identity event sequence
@@ -1730,8 +1751,9 @@ CREATE TABLE IF NOT EXISTS rate_windows (                  -- inbound volume cap
   `idempotency` rows, and the uploads its messages were copied from, are deleted in the same transaction
   ([Drafts § 13.2](drafts.md#132-erasure), [Uploads § 9](uploads.md#9-privacy)). See [Privacy and erasure](privacy.md).
 - **Parity additions are in schema v1.** `drafts`, `draft_sync`, `screenings`, `screening_feedback`,
-  `uploads`, `metric_counts`, `messages.draft_id`, `received_evented_at`, `calendar_json` and
-  `calendar_uid_hash`, `attachments.upload_id` and `idempotency.draft_id` are part of mailbox schema v1,
+  `uploads`, `metric_counts`, `delivery_stubs`, `messages.draft_id`, `received_evented_at`, `calendar_json` and
+  `calendar_uid_hash`, `attachments.upload_id`, `idempotency.draft_id` and `erased_ids.log_erased_at` are part
+  of mailbox schema v1,
   because no mailbox has been built from these documents yet. A deployment whose mailboxes already run a v1
   without them needs a schema v2 migration, which rebuilds `messages` to widen its `CHECK` constraints and is
   designed with its own ADR before it is taken ([Screening § 14](screening.md#14-storage)).
@@ -1845,7 +1867,8 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --   tm:{msg}                the day (YYYY-MM-DD) on which CountTriageModel counted this message, so a
 --                           redelivered triage job is counted once; deleted after 2 days by the daily alarm
 --   sm:{msg}                the day on which CountScreenModel counted this message; deleted after 2 days by
---                           the daily alarm (Screening § 5.2)
+--                           the daily alarm (Screening § 5.2). The sender sub-cap counts on the counter
+--                           screen_sender:{h} below
 --   tz                      the time zone the daily caps use now (IANA); tz_next {zone, from}: a changed
 --                           tenants.timezone, applied from `from` = the next local midnight of tz
 CREATE TABLE IF NOT EXISTS counters (
@@ -1854,7 +1877,9 @@ CREATE TABLE IF NOT EXISTS counters (
                                                            -- daily caps: sends, sends:idn_..., agentic,
                                                            --   triage_model (the AI cap of Triage § 12),
                                                            --   screen_model (the screening model cap,
-                                                           --   Screening § 5.2),
+                                                           --   Screening § 5.2), screen_sender:{h} (its
+                                                           --   sender sub-cap, h = 16 hex characters of the
+                                                           --   sender key's HMAC; deleted after 2 days),
                                                            --   warned:{metric}:{80|100} (sends caps only);
                                                            -- usage: usage:{inbound|outbound|sends|triage|
                                                            --   search|agentic|ai_neurons|assertions|
@@ -1875,12 +1900,14 @@ CREATE TABLE IF NOT EXISTS counters (
                                                            --   sysmail:signup:{recipient|human|network|asn|deployment}:{key}
                                                            --   (per UTC day); asu:{outcomes|bounced|complained}
                                                            --   (CountSignupOutcome, per UTC hour, pruned after
-                                                           --   48 hours; Agent self-sign-up § 13.3)
+                                                           --   48 hours; Agent self-sign-up § 13.3); screen_fail
+                                                           --   (CountScreenFailure, per UTC hour, pruned after
+                                                           --   48 hours; Screening § 22)
   window TEXT NOT NULL,                                    -- YYYY-MM-DD: the tenant's time zone (tz above) for
                                                            -- daily caps, UTC for usage:* (flushed to usage_daily),
                                                            -- for the outcome counters and for sysmail:*;
                                                            -- YYYY-MM-DDTHH (UTC hour) for inbound_hour, the
-                                                           -- per-domain outcome counters and asu:*
+                                                           -- per-domain outcome counters, asu:* and screen_fail
   value  INTEGER NOT NULL,
   PRIMARY KEY (metric, window)
 );
@@ -1995,11 +2022,19 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --   floor_seq          the highest position removed by retention or by the size budget (0 if none). A cursor
 --                      below it has expired. Erasure never raises it
 --   floor_reason       retention | size_limit: why floor_seq last moved
+--   floor_appended_at  the largest appended_at that retention or the size budget removed (0 if none); a
+--                      since at or before it reports since_truncated (Event feed § 5.2)
 --   payload_bytes      sum of length(envelope_json) over the events rows, kept in the same transaction as
 --                      every insert and delete
+--   log_bytes          sum of length(envelope_json) + 1024 over the events and staged_appends rows: the
+--                      size budget's measure (Event feed § 2.5), kept in the same transactions as payload_bytes
 --   last_appended_at   appended_at of the newest row; appended_at never decreases
+--   backfilling        '1' from a rebuild's reset until its backfill finishes (Event feed § 9.3); live appends
+--                      are staged meanwhile
+--   backfill_at        when the backfill last appended (or the reset ran); read by the maintenance alarm
 --   erased             '1' after EventsRequest::Erase (tenant erasure): every later request gets tenant_not_found
---   alarm:maintenance  daily, and at once when the size budget is passed (Event feed § 2.6)
+--   alarm:maintenance  daily, hourly while backfilling, and at once when the size budget is passed
+--                      (Event feed § 2.6)
 --   alarm:revalidate   every 60 s while a WebSocket is attached (Event feed § 7.7)
 CREATE TABLE IF NOT EXISTS events (
   seq           INTEGER PRIMARY KEY,                       -- log position: head_seq + 1 at append
@@ -2017,6 +2052,19 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_identity ON events(identity_id, seq) WHERE identity_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS events_message ON events(message_id) WHERE message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS events_appended ON events(appended_at);
+CREATE TABLE IF NOT EXISTS event_messages (                -- the messages an event lists in data.messages[]
+  message_id TEXT NOT NULL,                                -- (message.labels_changed), so erasure finds it
+  seq        INTEGER NOT NULL REFERENCES events(seq) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, seq)
+);
+CREATE TABLE IF NOT EXISTS staged_appends (                -- live appends held while a rebuild backfills
+  event_id      TEXT PRIMARY KEY,                          -- (Event feed § 9.3); emptied when the backfill finishes
+  identity_id   TEXT,
+  message_ids   TEXT NOT NULL,                             -- JSON array: message_id and data.messages[] IDs
+  occurred_at   INTEGER NOT NULL,
+  staged_at     INTEGER NOT NULL,
+  envelope_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS consumers (                     -- durable consumers (Event feed § 6)
   id                TEXT PRIMARY KEY,                      -- evc_
   name              TEXT NOT NULL UNIQUE,                  -- unique per tenant: one object per tenant
@@ -2037,8 +2085,8 @@ CREATE INDEX IF NOT EXISTS consumers_owner ON consumers(owner_key_id);
 CREATE TABLE IF NOT EXISTS stream_tokens (                 -- single-use stream tokens (Event feed § 7.2)
   token_hash  TEXT PRIMARY KEY,                            -- hex SHA-256 of the token's 32 random bytes
   key_id      TEXT NOT NULL,                               -- the minting key: the stream acts as this key
-  expires_at  INTEGER NOT NULL                             -- minted + 60 s; deleted on redemption or by the
-                                                           -- maintenance alarm
+  expires_at  INTEGER NOT NULL                             -- minted + 60 s; deleted on redemption, by the next
+                                                           -- mint once expired, or by the maintenance alarm
 );
 CREATE TABLE IF NOT EXISTS erased_refs (                   -- refuses late appends of erased data (R57, R58)
   ref        TEXT PRIMARY KEY,                             -- msg_… or idn_…

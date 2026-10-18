@@ -327,7 +327,7 @@ JSON mode prints strings exactly as the API returned them (JSON escaping makes t
 | 3 | `config` | No URL or key; unreadable, invalid or insecure config file; failing `key_env`/`key_command`; missing `CLOUDFLARE_API_TOKEN` or account ID; no AWS credentials for `setup ses` or `destroy --include-ses`; an invalid `PM_DOCS_URL` in the rendered file ([§7](#7-rendering-wranglertoml)); `domains add` without `--local-token` answered `422 transport_unavailable` (the deployment, or the tenant's policy, lacks what the method needs: `details.reason` names it) or `422 cf_token_required` (the deployment has no `PM_CF_API_TOKEN`), [§18.1](#181-domains-add-without-pm_cf_api_token). |
 | 4 | `auth` | API `401` or `403` (any code); `events tail` closed with `4401` or `4403`; `mcp stdio` refused at start |
 | 5 | `not_found` | API `404` with a service error code; `events tail` closed with `4404` |
-| 6 | `conflict` | API `409`, `410` or `423`; `events tail` closed with `4410` (it prints `details.oldest_cursor`); `skills generate` found a file someone edited, without `--force` |
+| 6 | `conflict` | API `409`, `410` or `423`; `events tail` closed with `4410` (it prints `details.oldest_cursor`) or `4409` (replaced by another connection); `skills generate` found a file someone edited, without `--force` |
 | 7 | `invalid` | API `400`, `413` or `422`; `events tail` closed with `4400`, `1008` or `1009` |
 | 8 | `limited` | API `402` (`billing_limit`) or `429` |
 | 9 | `unavailable` | API `5xx`, a network or TLS failure, or a `404` without the service envelope; `events tail` after 10 minutes of failed reconnects |
@@ -1483,6 +1483,9 @@ answered · confidence 0.86 · 3 steps · 2.8 s
   replaces it (a job over the wrong tenant is costly to undo); each repeated `--identity` is resolved to an ID ([§2.4](#24-resolving-names-to-ids));
   without `--identity`, `identity_ids` is `null` (every identity of the tenant). It prints the job;
   `jobs get <job_id>` prints its status and, once it ends, `result`.
+  **`jobs start event_log_rebuild --tenant <tenant>`** sends `{ "kind": "event_log_rebuild", "tenant_id" }`
+  only, as `JobCreateRequest` requires ([Event feed § 9.3](event-feed.md#93-rebuilding-a-log)); `--identity`,
+  `--after` or `--before` with it is exit 2 before any request.
 - **`waitlist invite --count N [--plan P]`** checks `N` is 1–500 before sending (exit 2 otherwise) and
   prints `Invited 50; 262 still waiting.` from `{ "invited", "waiting" }`
   ([Cloud sign-up §6.1](cloud-signup.md#61-before-launch-the-waitlist)).
@@ -1766,15 +1769,19 @@ tenant's event feed ([Event feed § 15.2](event-feed.md#152-cli)).
   A crash between printing and writing repeats that batch, so output is at least once and a reader
   deduplicates on `event.id`. With `--consumer` the position is the consumer's and no file is needed; a
   consumer `<name>` is resolved to its ID with one list call.
-- **Reconnects** follow [Event feed § 7.10](event-feed.md#710-resuming-without-loss): on any close except
-  `4401`, `4403` and `4404`, reconnect with backoff from 1 second doubling to 60 seconds (±50% jitter) and
-  resume from the last written cursor or the newer heartbeat position.
-- **Exit codes** ([§3.4](#34-exit-codes)): `4410` → 6, printing `details.oldest_cursor` and the fix; `4401` or
-  `4403` → 4; `4404` → 5; `4400`, `1008` or `1009` → 7; 10 minutes of failed reconnects → 9. Ctrl-C writes
-  the cursor file and exits 130.
+- **Reconnects** follow [Event feed § 7.10](event-feed.md#710-resuming-without-loss): on `1001`, `1006`,
+  `1011`, `1012`, `1013`, `4408` or an unknown code, reconnect with backoff from 1 second doubling to 60
+  seconds (±50% jitter) and resume from the last written cursor or the newer heartbeat position; on `4429`,
+  retry after 30 seconds. Every other close ends the command with the exit code below.
+- **Exit codes** ([§3.4](#34-exit-codes)): `4410` → 6, printing `details.oldest_cursor` and the fix; `4409` → 6,
+  printing that another connection took this one's place, without reconnecting; `4401` or `4403` → 4;
+  `4404` → 5; `4400`, `1008` or `1009` → 7; 10 minutes of failed reconnects → 9. Ctrl-C writes the cursor
+  file and exits 130. A `since_truncated: true` answer to `--since` prints a warning on stderr and continues.
 
 `events list --all` follows `has_more` into one document; `events consumers read --commit` commits the page's
-`next_cursor` after printing it.
+`next_cursor` after printing it, also for an empty page with `has_more: true`, so repeated runs walk a backlog
+page by page ([Event feed § 6.2](event-feed.md#62-rules), rule 5); without `--commit` a second run prints the
+same page.
 
 ## 19. Command-to-endpoint map
 
@@ -2044,7 +2051,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::ops::freeze_unfreeze` | `ops freeze` writes `PM_FREEZE = "on"`, redeploys the deployed bundle with no migration and waits for `/health` to report `frozen`; `ops unfreeze` reverses it; a re-run is a no-op | §20 |
 | `cli::erasure::retry` | `erasure retry` resubmits the stored scope and target with reason `retry:{era_id}`; a counterparty retry without `--address` is exit 2 | §19 |
 | `cli::dlq::j8_list_redrive` | `list` passes `queue`, `status` and `tenant_id` to `GET /v1/platform/dlq`; `redrive` posts once per item and reports partial failures; no Cloudflare, D1 or Queues call is made | FR-OPS-4, [J8] |
-| `cli::jobs::start_get` | `jobs start` builds the job body (repeated `--identity` resolved to `identity_ids`; `--tenant` required) and `jobs get` reads it back | [J3] |
+| `cli::jobs::start_get` | `jobs start` builds the job body (repeated `--identity` resolved to `identity_ids`; `--tenant` required) and `jobs get` reads it back; `jobs start event_log_rebuild` sends `kind` and `tenant_id` only, and with `--identity`, `--after` or `--before` exits 2 | [J3], [Event feed § 9.3](event-feed.md#93-rebuilding-a-log) |
 | `cli::waitlist::invite` | `--count` outside 1–500 is exit 2 before any request; the result prints `invited` and `waiting` | FR-CON-8 |
 | `cli::domains::local_token_apex` | Without `--local-token`, `422 cf_token_required` and `422 transport_unavailable` are exit 3 and no Cloudflare call is made; with it, the local prerequisites are checked first (another method or a subdomain is exit 2, no token or account ID exit 3), then on `cf_token_required` an apex `cloudflare_zone` is onboarded with the local token and registered through the D1 query API, found by account ID and database name, with `method` and `inbound` set; the Worker hook mints its monitor and emits `domain.created` | FR-DOM-1, [H5] |
 | `cli::domains::add_methods` | Each `--method` with its flags produces the body of §18.2; a flag for another method is exit 2; the SMTP password comes only from stdin and appears in no argument or output; the records table prints `name` and `host` | FR-DOM-7, FR-DOM-11, [N17] |
@@ -2061,7 +2068,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::webhooks::verify` | Valid signatures, rotation overlap (two signatures), tampered body, old timestamp | FR-WH-2 |
 | `cli::ask::render_stream` | Recorded SSE streams for each status render as specified; `--json` prints the `done` data; `--tenant` posts to `POST /v1/tenants/{t}/search` with `mode: agentic`, and an identity key gets exit 4 | FR-SRCH-3 |
 | `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | [Drafts § 17.2](drafts.md#172-cli) |
-| `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of [§18.6](#186-events-tail) | [Event feed § 15.2](event-feed.md#152-cli), [R64](../edge-cases.md) |
+| `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of [§18.6](#186-events-tail), never reconnecting after `4400`, `4409`, `1008` or `1009` | [Event feed § 15.2](event-feed.md#152-cli), [R64](../edge-cases.md), [R68](../edge-cases.md) |
 | `cli::screening::commands` | `messages feedback`, `messages feedback-list`, the screening filters of `messages list` and `screening summary` against recorded API fakes | [Screening hold § 21](screening.md#21-console-mcp-and-cli) |
 | `cli::calendar::reply_and_send_flags` | `pmail calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli) |
 | `cli::uploads::create_and_attach` | Against recorded fakes: `pmail uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `pmail send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | [Uploads § 13](uploads.md#13-mcp-and-cli) |

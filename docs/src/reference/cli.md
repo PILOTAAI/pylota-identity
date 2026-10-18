@@ -595,20 +595,25 @@ pmail keys rotate web_bot_auth
 ### `jobs start`
 
 Starts a maintenance job over one tenant: `reparse` (parse messages again from the raw MIME, for
-example after a parser fix), `reembed` (chunk and embed them again into the vector index) or
-`reindex` (rebuild the keyword index).
+example after a parser fix), `reembed` (chunk and embed them again into the vector index), `reindex`
+(rebuild the keyword index) or `event_log_rebuild` (rebuild the tenant's event log in a new epoch, which
+resets every cursor and consumer of the tenant:
+[Event feed § 9.3](../project/design/event-feed.md#93-rebuilding-a-log)).
 
 ```text
 pmail jobs start reparse|reembed|reindex --tenant <tenant> [--identity <identity>]… [--after <time>]
                  [--before <time>]
+pmail jobs start event_log_rebuild --tenant <tenant>
 ```
 
 `--tenant` is required: neither the profile's `tenant` nor the default tenant stands in for it, because a
 job over the wrong tenant is costly to undo. Without `--identity`, the job covers every identity of the
-tenant. It prints the job with its ID.
+tenant. `event_log_rebuild` takes the tenant only: `--identity`, `--after` or `--before` with it is exit 2.
+It prints the job with its ID.
 
 ```bash
 pmail jobs start reparse --tenant brightwell --after 2026-09-01
+pmail jobs start event_log_rebuild --tenant brightwell
 ```
 
 ### `jobs get`
@@ -1964,7 +1969,9 @@ pmail events stream-token [--tenant <tenant>]
 ```
 
 `events list --all` follows `has_more` into one document; `consumers read --commit` commits the page's
-`next_cursor` after printing it. A consumer `<name>` is resolved to its ID with one list call.
+`next_cursor` after printing it. A consumer read always starts at the committed position, so without
+`--commit` a second `read` prints the same page; with it, repeated runs walk a backlog page by page. A
+consumer `<name>` is resolved to its ID with one list call.
 
 ```bash
 pmail events list --tenant acme --types 'message.*' --after latest --wait 30
@@ -1984,10 +1991,13 @@ neutralised); `--json` prints NDJSON, one envelope per line; `--quiet` prints ev
   printed batch: to a temporary file in the same directory, mode `0600`, then renamed. A crash between
   printing and writing repeats that batch, so output is at least once. With `--consumer` the position is
   the consumer's, and no file is needed.
-- **Reconnects** resume from the last cursor with backoff, so nothing appended after it is lost. A
-  position behind the retained log (close `4410`) exits 6 and prints `details.oldest_cursor` with the fix;
-  `4401` or `4403` exits 4; `4404` exits 5; `4400`, `1008` or `1009` exits 7; 10 minutes of failed
-  reconnects exits 9; Ctrl-C writes the cursor file and exits 130.
+- **Reconnects** resume from the last cursor with backoff, so nothing appended after it is lost. Only the
+  closes that a later attempt can survive reconnect (`1001`, `1006`, `1011`–`1013`, `4408`, and `4429`
+  after 30 seconds); every other close ends the command. A position behind the retained log (close
+  `4410`) exits 6 and prints `details.oldest_cursor` with the fix; `4409` (another `tail` on the same
+  consumer, or an 11th connection of the key, took this one's place) exits 6 without reconnecting, so two
+  copies never replace each other in a loop; `4401` or `4403` exits 4; `4404` exits 5; `4400`, `1008` or
+  `1009` exits 7; 10 minutes of failed reconnects exits 9; Ctrl-C writes the cursor file and exits 130.
 
 ```bash
 pmail events tail --tenant acme --types 'message.*' --cursor-file ~/.local/state/pylota-mail/acme.cursor

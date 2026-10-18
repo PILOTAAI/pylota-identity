@@ -1280,7 +1280,9 @@ feature.
   yields the typed server-sent events of [Search §11.11](search.md#1111-streaming).
 - **Event feed.** The `events` module covers every event-feed and consumer route; the `stream` feature adds
   `EventStream`, which implements [Event feed § 7.10](event-feed.md#710-resuming-without-loss): reconnect
-  with backoff, resume, acknowledgements, a ping every 30 seconds, dead after 90 seconds of silence.
+  with backoff, resume, acknowledgements, a ping every 30 seconds, dead after 90 seconds of silence; it ends
+  with `EventStreamError::Closed` on the closes that must not be retried (`4400`, `4401`, `4403`, `4404`,
+  `4409`, `1008`, `1009`) and `EventStreamError::Gap` on `4410`.
 - **Fixtures.** The SDK writes each decoded `sdks/fixtures/` exchange as canonical JSON next to it
   (`*.canonical.json`, committed; the fixture test fails when one is stale), and releases ship the
   directory for `ts::fixtures::rust_parity` in the SDK repository, so the Rust and TypeScript SDKs cannot

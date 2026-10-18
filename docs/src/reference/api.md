@@ -1587,8 +1587,10 @@ need `quarantine:review` for a quarantined or screening message and never accept
   `thread_join_unverified` (a thread join without a valid token: a failed token, or `In-Reply-To` or
   `References` from a sender who is not a participant, [C9](../project/edge-cases.md)) and
   `shared_domain_sender` (the sender is another workspace's address on the shared platform domain,
-  [D12](../project/edge-cases.md)), and `steering_suspected`: screening judged that the message tries to
-  steer an agent.
+  [D12](../project/edge-cases.md)), `steering_suspected` (screening judged that the message tries to
+  steer an agent) and `attachments_unscreened` (screening could not read the text of at least one
+  attachment, for example an image while `inbound.extract_image_text` is off or a file whose conversion
+  failed: treat those attachments' bytes as unscreened content).
 - `trust.verdict` is `pass`, `arc_rescued`, `fail`, `softfail`, `none`, `unaligned` or `unverified`.
   `arc_rescued`: the message failed DMARC, and a trusted forwarder's ARC seal vouches that it passed when
   the forwarder received it ([Parity additions § 6](../project/design/parity-additions.md#6-trusted-arc-sealers-fr-in-15)).
@@ -2579,15 +2581,16 @@ Query: `tenant_id`; `after` (a cursor, `earliest` or `latest`; default `earliest
 
 ```json
 { "data": [ { "cursor": "ec_…", "event": { "id": "evt_01JA…", "type": "message.received", "…": "…" } } ],
-  "next_cursor": "ec_…", "has_more": false, "withheld_types": [] }
+  "next_cursor": "ec_…", "has_more": false, "withheld_types": [], "since_truncated": false }
 ```
 
 `event` is the webhook envelope, byte for byte. `next_cursor` is never null; pass it as `after` to
 continue. A page can be empty with `has_more: true`: ask again at once. With `wait`, the request waits
 until a matching event is appended or the time is up. Cursors do not expire with age: a cursor behind the
 retained log (`retention.events_days`, or the log's size budget) gets `410 cursor_expired` with
-`details.oldest_cursor`. At most 5 long polls per key and 20 per tenant at once (`429 rate_limited`,
-`details.bucket: "events_wait"`).
+`details.oldest_cursor`. A `since` never expires, but when retention or the size budget already removed
+events appended after it, the page has `since_truncated: true`. At most 5 long polls per key and 20 per
+tenant at once (`429 rate_limited`, `details.bucket: "events_wait"`).
 
 ### `POST /v1/event-consumers` · `GET /v1/event-consumers` · `GET|DELETE /v1/event-consumers/{consumer_id}` — `events:read`
 
@@ -2601,8 +2604,9 @@ Returns `201` with the consumer, or `200` with the existing one when the same ke
 filters; another key or other filters get `409 event_consumer_name_taken`. At most 20 per tenant
 (`422 event_consumer_limit_reached`). `types` that name events the key can never see get
 `403 permission_denied` with `details.required`. `start` is `latest` (default), `earliest` or a cursor.
-A consumer is bound to the key that created it. Identity keys list their own consumers; tenant, partner
-and platform keys list, read and delete every consumer of the tenant.
+A consumer is bound to the key that created it. Identity keys list and get their own consumers; tenant,
+partner and platform keys list, get and delete every consumer of the tenant. Only the owner key reads its
+events, commits and resets it (below).
 
 ```json
 { "id": "evc_01JA…", "name": "pylota-reconcile", "tenant_id": "ten_01J9…", "owner_key_id": "key_01J9…",
@@ -2613,8 +2617,9 @@ and platform keys list, read and delete every consumer of the tenant.
 ### `GET /v1/event-consumers/{consumer_id}/events` · `POST …/commit` · `POST …/reset` — `events:read`, owner key
 
 `GET …/events` (`limit`, `wait`) returns the events after the committed position, as `GET /v1/events`, plus
-`committed_cursor`; until you commit, the same events come back. `POST …/commit { "cursor": "ec_…" }`
-acknowledges up to that cursor and only moves forward. When the position falls behind the retained log,
+`committed_cursor`; until you commit, the same events come back. To work through a backlog, commit each
+page's `next_cursor` (also an empty page's) before reading the next, while `has_more` is true; a read takes
+no `after`. `POST …/commit { "cursor": "ec_…" }` acknowledges up to that cursor and only moves forward. When the position falls behind the retained log,
 these routes get `410 cursor_expired` (with `details.consumer_id`) until
 `POST …/reset { "to": "earliest" | "latest" | "ec_…" }` or `{ "since": "…" }`. Other keys get
 `403 permission_denied` (`details.reason: "consumer_owner_only"`), or `404 event_consumer_not_found` for an
@@ -2624,7 +2629,8 @@ identity key.
 
 Returns `201` with `{ "token", "expires_at", "url", "protocols" }`: a single-use token valid for 60 seconds,
 for a browser that cannot send `Authorization`. Mint it on your server and hand it to your page. At most 100
-unredeemed per tenant (`429 rate_limited`, `details.bucket: "stream_tokens"`). `Idempotency-Key` is ignored.
+live (unredeemed and unexpired) per tenant (`429 rate_limited`, `details.bucket: "stream_tokens"`).
+`Idempotency-Key` is ignored.
 
 ### `GET /v1/events/stream` — `events:read`, WebSocket
 
@@ -2633,7 +2639,10 @@ Upgrade with `Authorization: Bearer …`, or with the subprotocols `pylota-mail.
 `details.reason: "credential_in_url"`). Send `{"type":"subscribe","after":"ec_…"}` (or `since`, or
 `consumer_id`) within 60 seconds; receive `subscribed`, `events`, `heartbeat` and `error` messages; send
 `ack` with a cursor (optional below 1,000 events per connection) and `{"type":"ping"}`. At most 100
-connections per tenant and 10 per key. The protocol, the close codes and resuming without loss are in
+connections per tenant and 10 per key. Reconnect only after `1001`, `1006`, `1011`, `1012`, `1013`, `4408`
+or a code you do not know, retry `4429` after 30 seconds, reconcile after `4410`, and stop on every other
+close: after `4409` another connection holds your place, and reconnecting would replace it in turn. The
+protocol, the close codes and resuming without loss are in
 [Event feed › The WebSocket stream](../project/design/event-feed.md#7-the-websocket-stream); the close codes
 are also in [Errors › Stream close codes](errors.md#stream-close-codes). A `GET` without
 `Upgrade: websocket` gets `426 upgrade_required`.

@@ -959,7 +959,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   consumer commands.
 - **FR-EVT-10** Message, thread, counterparty, identity and tenant erasure **must** remove the log's copies
   of erased data, consumers and streams, report `log_events_deleted` and a zero `log_hits` probe, keep the
-  events of held threads, and refuse a late append of erased data.
+  events of held threads, and refuse a late append of erased data. Message retention and per-identity expiry
+  **must** remove the log's copies of the messages they delete, including their entries in events that list
+  several messages.
 - **FR-EVT-11** The service **must** measure the time from outbox commit to log append (target: p95 at most
   10 seconds), append failures, consumers behind, stream connections and close codes, and alert when appends
   fail or lag.
@@ -979,7 +981,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   classifier: a decisive deterministic signal or a model judgement of steering **must** give `suspect` (status
   `quarantined`, reason `steering_suspected` in `hold` mode); no signal **must** give `clear` (status `received`,
   with `message.received` emitted then and not before); no verdict **must** give `unavailable`, handled by
-  `screening.on_unavailable` (`quarantined` with reason `screening_unavailable`, or `received`).
+  `screening.on_unavailable` (`quarantined` with reason `screening_unavailable`, or `received`), except that
+  an `unavailable` the mail itself can cause (`model_cap`, `invalid_output`) **must** always be held. A message
+  with an attachment whose text was not scanned **must** carry the trust flag `attachments_unscreened`.
 - **FR-SCR-4** Every held message **must** reach a final status by its deadline, enforced by the mailbox's alarm
   and an independent backstop timer. Screening **must not** depend on triage being enabled and **must not** change
   triage's advisory role (FR-TRI-3).
@@ -1004,10 +1008,11 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   erasure scope, and erasure receipts **must** count them.
 - **FR-SCR-11** Screening **must never** be charged to a plan allowance. Its model calls **must** be bounded by the
   tenant's daily model cap and `RL_AI`; a reached cap **must** give `unavailable` unless the deterministic scan is
-  decisive.
+  decisive. One sender domain **must not** be able to spend more than a tenth of the cap, and triage and agentic
+  search **must not** be able to spend screening's share of `RL_AI`.
 - **FR-SCR-12** The service **must** record verdict counts by reason, unavailable rates, deadline misses and
-  latency, and **must** alert the operator when a tenant's held mail becomes unavailable at volume or a hold
-  outlives its deadline.
+  latency, and **must** alert the operator when a tenant's held mail becomes unavailable at volume, when model
+  failures reach the deployment as a whole, or when a hold outlives its deadline.
 
 ### 6.19 Calendar invitations
 

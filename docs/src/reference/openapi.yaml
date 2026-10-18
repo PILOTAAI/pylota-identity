@@ -7200,7 +7200,8 @@ paths:
         it could read; other types the request covers are listed in `withheld_types`, never refused.
         `next_cursor` is never `null`: pass it as `after` to continue. A page can be empty with
         `has_more: true`: ask again at once. Cursors do not expire with age; a cursor behind the retained log
-        gets `410 cursor_expired` with `details.oldest_cursor`. At most 5 long polls per key and 20 per tenant
+        gets `410 cursor_expired` with `details.oldest_cursor`. A `since` never expires; `since_truncated`
+        says when events appended after it were already removed. At most 5 long polls per key and 20 per tenant
         at once (`429 rate_limited`, `details.bucket = "events_wait"`). A tenant being erased has no feed
         (`404 tenant_not_found`). Responses carry `Cache-Control: no-store`.
       x-required-permission: ['events:read']
@@ -7250,8 +7251,10 @@ paths:
         subprotocols `pylota-mail.events.v1` and `pylota-mail.token.{token}` (a stream token); never in the URL
         (`400 invalid_request`, `details.reason = "credential_in_url"`). Send `subscribe` within 60 seconds;
         then receive `subscribed`, `events`, `heartbeat` and `error` messages, and send `ack` and `ping`. At
-        most 100 connections per tenant and 10 per key. The message protocol and close codes are in
-        `docs/src/project/design/event-feed.md` § 7.
+        most 100 connections per tenant and 10 per key. Reconnect only after close `1001`, `1006`, `1011`,
+        `1012`, `1013`, `4408` or an unknown code; retry `4429` after 30 seconds; reconcile after `4410`; stop
+        on every other close (after `4409` another connection holds this one's place). The message protocol
+        and close codes are in `docs/src/project/design/event-feed.md` § 7.
       security: [{apiKey: []}, {streamToken: []}]
       x-required-permission: ['events:read']
       x-key-levels: [platform, partner, tenant, identity]
@@ -7279,9 +7282,9 @@ paths:
       summary: Mint a single-use stream token
       description: >-
         A single-use token valid for 60 seconds, for a browser that cannot send `Authorization` on a
-        WebSocket. Mint it on your server and hand it to your page. At most 100 unredeemed per tenant
-        (`429 rate_limited`, `details.bucket = "stream_tokens"`). `Idempotency-Key` is ignored: each call mints
-        a new secret.
+        WebSocket. Mint it on your server and hand it to your page. At most 100 live (unredeemed and
+        unexpired) per tenant; expired tokens stop counting (`429 rate_limited`,
+        `details.bucket = "stream_tokens"`). `Idempotency-Key` is ignored: each call mints a new secret.
       x-required-permission: ['events:read']
       x-key-levels: [platform, partner, tenant, identity]
       x-permission-notes: Platform and partner keys must pass `tenant_id`. The token carries the minting key's identity and visibility.
@@ -7439,7 +7442,7 @@ paths:
       summary: Get a durable event consumer
       x-required-permission: ['events:read']
       x-key-levels: [platform, partner, tenant, identity]
-      x-permission-notes: Identity keys read only their own consumers (another one is `404 event_consumer_not_found`); tenant, partner and platform keys read every consumer of the tenant.
+      x-permission-notes: Identity keys get only their own consumers (another one is `404 event_consumer_not_found`); tenant, partner and platform keys get every consumer of the tenant. Reading its events, commit and reset stay with the owner key.
       x-rate-limit-buckets: [api]
       x-idempotency: none
       responses:
@@ -7489,8 +7492,10 @@ paths:
       summary: Read the events after a consumer's committed position
       description: >-
         The events after the committed position, as `listEvents` returns them, plus `committed_cursor`. Until
-        you commit, the same events come back. When the position falls behind the retained log, this route
-        gets `410 cursor_expired` (with `details.consumer_id`) until the consumer is reset.
+        you commit, the same events come back: to work through a backlog, commit each page's `next_cursor`
+        (an empty page's too) before reading the next, while `has_more` is true. There is no `after`. When the
+        position falls behind the retained log, this route gets `410 cursor_expired` (with
+        `details.consumer_id`) until the consumer is reset.
       x-required-permission: ['events:read']
       x-key-levels: [platform, partner, tenant, identity]
       x-permission-notes: >-
@@ -13768,7 +13773,9 @@ components:
               description: >-
                 Model-backed triage runs per day in the tenant's time zone. Past it, triage is rules-only
                 (`model: "rules"`) until the next local midnight. It applies whatever the billing mode, so an
-                `exempt` workspace still has a ceiling on model spend ([D13]).
+                `exempt` workspace still has a ceiling on model spend ([D13]). Screening counts its own calls
+                against the same number on a separate counter, at most a tenth of it per sender domain; a
+                screening verdict past it is `unavailable` with reason `model_cap` and always held.
             categories:
               type: [array, 'null']
               maxItems: 20
@@ -13996,7 +14003,9 @@ components:
               default: quarantine
               description: >-
                 `quarantine` (no verdict by the deadline holds the message as `screening_unavailable`) or
-                `deliver`. Guard field; `quarantine` is the stricter value.
+                `deliver`. `deliver` applies only to `model_unavailable`, `ai_rate_limited` and
+                `deadline_exceeded`; `model_cap` and `invalid_output`, which the mail itself can cause, are
+                always held. Guard field; `quarantine` is the stricter value.
             deadline_seconds:
               type: integer
               minimum: 30
@@ -16119,7 +16128,10 @@ components:
         the thread ([C9]); a `wait` with `kind=reply` does not match it. `shared_domain_sender`: the sender is
         an address on the shared platform domain that belongs to another workspace ([D12]).
         `steering_suspected`: screening judged that the message tries to steer an agent.
-      enum: [hidden_text, display_name_spoof, lookalike_domain, reply_to_mismatch, thread_join_unverified, shared_domain_sender, steering_suspected]
+        `attachments_unscreened`: screening could not read the text of at least one attachment (an image
+        while `inbound.extract_image_text` is off, a file whose conversion failed, text still pending at the
+        verdict); treat those attachments' bytes as unscreened content.
+      enum: [hidden_text, display_name_spoof, lookalike_domain, reply_to_mismatch, thread_join_unverified, shared_domain_sender, steering_suspected, attachments_unscreened]
     Trust:
       type: object
       description: Authentication and trust metadata (FR-IN-4), with the domain each method checked and whether it aligned (FR-IN-14).
@@ -16307,6 +16319,10 @@ components:
       enum: [pending, clear, suspect, unavailable]
     ScreeningReason:
       type: string
+      description: >-
+        A service code, never model text. With status `unavailable` in hold mode, `model_cap` and
+        `invalid_output` always hold the message as `screening_unavailable`; `deadline_exceeded`,
+        `model_unavailable` and `ai_rate_limited` follow the tenant's `screening.on_unavailable`.
       enum: [rules, model, late_signal, model_clear, nothing_to_screen, deadline_exceeded, model_unavailable, invalid_output, ai_rate_limited, model_cap, test_forced]
     ScreeningSignal:
       type: object
@@ -18507,7 +18523,7 @@ components:
           $ref: '#/components/schemas/Event'
     EventFeedPage:
       type: object
-      required: [data, next_cursor, has_more, withheld_types]
+      required: [data, next_cursor, has_more, withheld_types, since_truncated]
       properties:
         data:
           type: array
@@ -18522,6 +18538,12 @@ components:
           description: Event types the request covers that this key may not see; left out, never refused.
           items:
             type: string
+        since_truncated:
+          type: boolean
+          description: >-
+            `true` only on a request with `since` when retention or the size budget had already removed
+            events appended at or after that time, so the page does not start where the client asked. Erasure
+            never sets it. Always `false` on consumer reads, which take no `since`.
         committed_cursor:
           description: Only on consumer reads.
           $ref: '#/components/schemas/EventCursor'
@@ -21513,7 +21535,9 @@ components:
         rescreened:
           type: boolean
           const: true
-          description: Present only when a late signal moved a delivered message back to quarantine.
+          description: >-
+            Present only when a late signal moved a delivered message back to quarantine. A re-parse that is
+            also such a late signal emits one `message.quarantined` with both `reprocessed` and `rescreened`.
     MessageReleasedData:
       type: object
       required: [message, released_by_key_id, released_by_user_id, reason]

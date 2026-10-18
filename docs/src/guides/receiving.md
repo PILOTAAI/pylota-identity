@@ -200,7 +200,7 @@ classifier decides the unclear ones. The tenant policy chooses one of three mode
 |---|---|
 | `off` | No screening |
 | `monitor` (default) | Mail is `received` at once, as without screening; each message gets a screening record and a `message.screened` event, so you can see what screening would have held |
-| `hold` | Mail that passes the other quarantine rules waits in status `screening` until a verdict, at most `screening.deadline_seconds` (default 120). A clear verdict makes it `received`; a suspect one quarantines it as `steering_suspected`. When no verdict can be reached in time, `screening.on_unavailable` decides: `quarantine` (the default, fail closed) or `deliver` |
+| `hold` | Mail that passes the other quarantine rules waits in status `screening` until a verdict, at most `screening.deadline_seconds` (default 120). A clear verdict makes it `received`; a suspect one quarantines it as `steering_suspected`. When no verdict can be reached in time, `screening.on_unavailable` decides: `quarantine` (the default, fail closed) or `deliver`. A reached daily model cap and a classifier answer that stays invalid are always held, because the mail itself can cause them |
 
 - **`status: "screening"`** is hidden exactly like `quarantined`: lists, search, MCP tools and `wait` leave it
   out, and a key without `quarantine:review` never sees it. `messages list --status screening` shows it to a
@@ -209,6 +209,9 @@ classifier decides the unclear ones. The tenant policy chooses one of three mode
   without a hold, after a clear verdict, or after a release (`released: true`). A consumer that reacts only to
   `message.received` therefore never sees held mail and never misses released mail. Every message and event
   carries the `screening` object.
+- **Attachments screening could not read** (an image while `inbound.extract_image_text` is off, a file whose
+  conversion failed) do not hold a message; it carries the trust flag `attachments_unscreened`. Treat those
+  attachments as unscreened content before you hand their bytes to a model that can act.
 - **Feedback.** Tell Pylota Mail whether a verdict was right with
   `POST …/messages/{message_id}/feedback` (`messages:write`; `correct`, `false_positive`, `missed_threat`,
   `legitimate_instruction` or `spam`), or `pmail messages feedback`. Feedback changes nothing about the

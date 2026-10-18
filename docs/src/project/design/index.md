@@ -169,7 +169,7 @@ callback throws, and forbids `BEGIN`/`SAVEPOINT` inside `sql.exec()`
    its events to the object's `outbox` table inside the transaction (section 6).
 5. **One alarm, many purposes.** An object has a single alarm. Each object keeps its pending wake-ups in
    `meta` under `alarm:{purpose}` (for example `alarm:outbox`, `alarm:check`, `alarm:claim`,
-   `alarm:dispatch`, `alarm:maintenance`, `alarm:drafts`, `alarm:draft_index`, `alarm:screen`, `alarm:expiry`;
+   `alarm:dispatch`, `alarm:maintenance`, `alarm:drafts`, `alarm:draft_index`, `alarm:screen`, `alarm:expiry`, `alarm:log_erase`;
    [Data model](data-model.md) lists each object's keys). After each transaction it sets
    the alarm to the earliest pending wake-up if that is earlier than the current alarm. Every mailbox has
    a daily `alarm:maintenance` that deletes expired `idempotency` rows, `rate_windows` older than 48 hours,

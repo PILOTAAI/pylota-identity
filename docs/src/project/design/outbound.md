@@ -898,7 +898,11 @@ row, as [Agent self-sign-up §13.3](agent-signup.md#133-outcomes-of-sign-up-mail
 In one mailbox transaction:
 
 1. **Find the message:** `SELECT rowid, id, status FROM messages WHERE direction = 'outbound' AND provider_message_id = ?1`.
-   None → try [reconciliation](#uncertain-sends-and-reconciliation-fr-dlv-4); still none → `NotFound`.
+   None → try [reconciliation](#uncertain-sends-and-reconciliation-fr-dlv-4); still none → the
+   `delivery_stubs` row of a message that per-identity expiry deleted, by `provider_message_id` and the
+   recipient's keyed hash, which takes steps 3 and 4 on its own row and answers as the message would have,
+   with no `message.*` event ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events));
+   none → `NotFound`.
 2. **Find the delivery:** `SELECT status, provider_event_ids_json FROM deliveries WHERE message_rowid = ?1 AND address = ?2`
    (recipient normalised). No row (an address we did not send to) → `Duplicate`.
 3. **Deduplicate:** `event_id` already in `provider_event_ids_json` → `Duplicate` (with the `outcome`
@@ -1411,10 +1415,15 @@ pub enum QuotaRequest {
                                                      // Triage § 1.1 step 6: one model-backed triage for the
                                                      // tenant's day, counted once per ref (message ID)
                                                      // → Ok | CapReached (triage runs rules-only)
-    CountScreenModel { tz: String, cap: u32, r#ref: String },
+    CountScreenModel { tz: String, cap: u32, sender: String, r#ref: String },
                                                      // Screening § 5.2 step 7: one model-backed screening for the
                                                      // tenant's day, counted once per ref (message ID) on screen_model
-                                                     // → Ok | CapReached (the verdict becomes unavailable, model_cap)
+                                                     // and on screen_sender:{h}, the sender's tenth of the cap
+                                                     // → Ok { used } | CapReached { scope: Tenant | Sender }
+                                                     //   (the verdict becomes unavailable, model_cap, always held)
+    CountScreenFailure { at: i64 },                  // default tenant only: one screening verdict unavailable for
+                                                     // model_unavailable or invalid_output, per UTC hour
+                                                     // (screen_fail) → { count } (Screening § 22)
     CountSignupOutcome { outcome: Outcome, at: i64, event_id: String },
                                                      // default tenant only: agent sign-up outcomes per UTC hour
                                                      // (asu:*), idempotent by event ID → SignupOutcomeAnswer

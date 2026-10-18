@@ -12,7 +12,7 @@ the error envelope of [Errors](../../reference/errors.md).
 | | |
 |---|---|
 | Requirements | FR-IN-13, FR-IN-14, FR-IN-15, FR-OUT-17, FR-WH-6, FR-WH-7, FR-PRV-7, FR-DOM-15, FR-API-3 (this page, [§13](#13-functional-requirements)); they extend FR-IN-4, FR-IN-5, FR-IN-10, FR-IN-11, FR-OUT-4, FR-OUT-13, FR-OUT-16, FR-WH-1, FR-WH-2, FR-WH-4, FR-PRV-2, FR-PRV-3, FR-PRV-4, FR-DOM-3, FR-API-2, FR-SRCH-13 |
-| Edge cases | [Z1](../edge-cases.md)–[Z80](../edge-cases.md) ([§14](#14-edge-cases)) |
+| Edge cases | [Z1](../edge-cases.md)–[Z81](../edge-cases.md) ([§14](#14-edge-cases)) |
 | Code | Batch: `crates/api-types/src/messages/batch.rs`, `crates/worker/src/handlers/messages_batch.rs`, `mailbox/read.rs` (`BatchGet`, `BatchUpdate`). Lists: `crates/core/src/lists.rs` (precedence, pure), `handlers/lists.rs`, `consumers/inbound.rs` (step 12), `handlers/send.rs` (step 6), `consumers/outbound.rs` (composition step 1). Label events: `webhooks/payloads.rs` (`labels_changed`), `mailbox/read.rs`, `consumers/webhooks.rs` (opt-in filter). Authentication detail and ARC: `crates/core/src/auth.rs` (`arc_rescue`, `trust_detail`), `crates/core/src/trust.rs`, `consumers/inbound.rs` (steps 7 and 12), `mailbox/ingest.rs`. Retention: `handlers/identities.rs`, `mailbox/expiry.rs` (new), `mailbox/erase.rs`, `mailbox/idempotency.rs`, `crons/intents.rs`. Webhook headers: `handlers/webhooks.rs`, `webhooks/{client.rs, headers.rs}` (new), `crates/core/src/webhook_headers.rs` (name and value rules, pure), `crates/core/src/sealed.rs`. Zone export: `crates/core/src/zonefile.rs` (pure), `handlers/domains.rs`. Docs link: `crates/api-types/src/errors.rs`, `crates/worker/src/errors.rs`, `xtask/src/docs_check.rs`. Console: `console/pages/{inboxes.rs, threads.rs, webhooks.rs, domains.rs}`. MCP: `mcp/tools.rs`. CLI: `crates/cli/src/commands/{messages.rs, lists.rs, identities.rs, webhooks.rs, domains.rs}` |
 | Tables | D1: `sender_lists` gains `identity_id` (in the primary key); `identities` gains `message_hours`; `webhook_endpoints` gains `headers_sealed`, `header_names_json`, `headers_version`; `rpc_intents.op` gains `set_retention`. Mailbox: `messages.verdict` gains `arc_rescued`; new `meta` keys `retention_message_hours`, `retention_version`, `alarm:expiry`, `expiry_backoff`, `expiry:{YYYY-MM-DD}`; `auth_json` gains `spf.aligned` and `arc.{sealer, sealer_trusted, aar, rescue}`; `idempotency` rows of expired messages become stubs, and `idempotency.operation` gains `batch_update` ([Data model](data-model.md)) |
 | Contracts | Routes `POST …/messages/batch-get` (`messages:read`), `POST …/messages/batch-update` (`messages:write`), `GET\|PUT\|DELETE /v1/identities/{identity_id}/lists/{direction}/{kind}[/{entry}]` (`suppressions:manage`), `PATCH /v1/webhooks/{webhook_id}/headers` (`webhooks:manage`), `GET /v1/domains/{domain_id}/records?format=bind` (`domains:read`); identity field `retention.message_hours`; webhook fields `headers` (write-only) and `header_names`; message `trust` fields `spf_domain`, `spf_aligned`, `dkim_domains`, `dmarc_domain`, `dmarc_policy`, `dmarc_aligned_by`, `arc_sealer`; verdict value `arc_rescued`; error field `docs`; event `message.labels_changed` (opt-in); policy fields `inbound.trusted_arc_sealers` (platform-only) and `events.labels_changed` (free); variable `PM_DOCS_URL`; error codes `422 list_limit_reached`, `422 webhook_header_limit_reached`, `410 message_expired`, and new `details.reason` values of `400 invalid_request` and `400 header_not_allowed`; audit actions `message.batch_update`, `identity.retention_update`, `retention.expire`, `webhook.headers_update` |
@@ -845,10 +845,15 @@ draft expires `message_hours` after its last change (`updated_at`), except a dra
 hold (its thread, source message or sent message in a held thread), a `scheduled` draft before its fire
 ([Drafts § 13.1](drafts.md#131-retention)) and a `sending` one. For a draft, expiry deletes what the drafts'
 retention purge deletes: the row, its `idempotency` and outbox rows, its attachment objects, and its
-`draft_sync` row, replaced by a `delete` one so the D1 index follows. Expiry keeps, as tenant retention
-does: `contacts`, `rate_windows`, suppressions, `event_index` rows (IDs and types only, pruned after
-`events_days`) and audit rows. The one difference from `EraseRows` is the idempotency row of an outbound message
-([§7.6](#76-a-retried-send-never-sends-twice)).
+`draft_sync` row, replaced by a `delete` one so the D1 index follows.
+The event log's copies of the message's events go too:
+`EraseRows` leaves the deleted IDs pending in `erased_ids`, and the mailbox's `log_erase` purpose sends them
+to the tenant's `TenantEvents` ([Event feed § 11.3](event-feed.md#113-erasure)), so a `message.received` with
+its extracted text is not readable through the feed after the message expired. Expiry keeps, as tenant
+retention does: `contacts`, `rate_windows`, suppressions, `event_index` rows (IDs and types only, pruned after
+`events_days`) and audit rows. The two differences from `EraseRows` are the idempotency row of an outbound
+message ([§7.6](#76-a-retried-send-never-sends-twice)) and its delivery stub
+([§7.13](#713-late-delivery-events)).
 
 ### 7.4 The expiry alarm
 
@@ -866,7 +871,8 @@ The mailbox does the work itself, with its own alarm, through the same steps ten
    2 vectors  deleteByIds(vector IDs from chunks)                ─ error ─▶ back-off, stop
    3 objects  delete every R2 key of the batch, BLOBS then BACKUP ─ error ─▶ back-off, stop
    4 commit   one transaction: re-check each row is still due and not held, EraseRows(mode: Expiry),
-              erased_ids, add the counts to meta['expiry:{YYYY-MM-DD}']
+              erased_ids (pending for the event log, alarm:log_erase = now), delivery stubs (§ 7.13),
+              add the counts to meta['expiry:{YYYY-MM-DD}']
    5 re-arm   100 rows planned → alarm:expiry = now (the next slice);
               else the next due received_at + H or draft updated_at + H, but not before now + 60 s
  back-off: alarm:expiry = now + 30 s × 2^(n − 1), at most 5 minutes (meta.expiry_backoff, cleared by a success)
@@ -950,7 +956,8 @@ expires on the same clock, so a person must release it before then.
 
 Copies outside the mailbox are not recalled: webhook payloads already delivered (up to
 `policy.webhook_text_bytes` of `extracted_text`), copies the event feed's consumers received
-([Event feed](event-feed.md); the feed's own copies of the message's events go wherever erasure sends them),
+([Event feed](event-feed.md); the log's own copies of the message's events are deleted with the message,
+[Event feed § 11.3](event-feed.md#113-erasure)),
 exports completed before the message expired (until their own 7-day expiry), the recipients' copies of
 outbound mail, Cloudflare's logs and the 30-day D1 Time Travel and Durable Object recovery windows
 ([Privacy § 11](privacy.md#11-what-remains-after-deletion)). A delivery of an event whose outbox row expired
@@ -983,6 +990,8 @@ receipt covers what was left, and the pending day's counts are lost with the mai
 | Drafts ([Drafts](drafts.md)) | A draft expires `message_hours` after its last change; scheduling a draft whose `send_at` is after that time is refused (`400 invalid_request`, `details.reason = "beyond_retention"`) |
 | Notifications | A pending new-mail count can include a message that expired before the email went; the email never names it |
 | Suspended tenant, paused identity | Expiry continues: it deletes, it never sends |
+| Late bounces and complaints | Applied to the expired message's delivery stub: the address is still suppressed and the outcome still counted ([§7.13](#713-late-delivery-events)) |
+| Event feed | The log's copies of the expired message's events, including its entries in label events, are deleted through the mailbox's `log_erase` purpose ([Event feed § 11.3](event-feed.md#113-erasure)) |
 
 ### 7.11 Limits
 
@@ -992,6 +1001,7 @@ receipt covers what was left, and the pending day's counts are lost with the mai
 | Erasure after due time | ≤ 15 minutes while dependencies answer (target); alert at 1 hour overdue |
 | Expiry slice | 100 messages or 20 seconds; the next slice at once |
 | Kept idempotency stub | Until the original key's 30 days end |
+| Kept delivery stub | 30 days after the send |
 
 ### 7.12 Interfaces
 
@@ -1001,6 +1011,56 @@ receipt covers what was left, and the pending day's counts are lost with the mai
   ([Workspace policy § 6](workspace-policy.md#6-the-console-page)).
 - **CLI.** `pmail identities create|update <identity> --message-hours <n>`, and `--keep-messages` for `null`.
 - **MCP.** None: an agent never changes retention.
+
+### 7.13 Late delivery events
+
+`ApplyDeliveryEvent` finds an outbound message by `provider_message_id`
+([Outbound › Applying an event](outbound.md#applying-an-event-to-a-message)); when it is missing, the event
+is retried for 900 seconds and then acked as orphaned, and the consumer's suppression (step 5) and
+`RecordOutcome` (step 6) use only what the mailbox answers. Hard bounces arrive within minutes, but late
+bounces and complaints arrive hours or days after the send. Without more, a 1-hour `message_hours` (which any
+key holding `erasure:manage` may set) would turn them into orphans: complainers and hard-bounced addresses
+never suppressed, the identity, tenant, domain and burst pauses ([Outbound › Abuse auto-pause](outbound.md#abuse-auto-pause-fr-dlv-3))
+blind to them, and `metric_counts` short. On Cloud that harms the shared Cloudflare account.
+
+**The stub.** In `mode: Expiry`, `EraseRows` turns each delivery of an outbound message that has a
+`provider_message_id` into one `delivery_stubs` row, in the same transaction, before the message row goes:
+
+```sql
+CREATE TABLE IF NOT EXISTS delivery_stubs (     -- mailbox schema v1; Parity additions § 7.13
+  provider_message_id TEXT NOT NULL,
+  address_hash        TEXT NOT NULL,            -- hex HMAC-SHA256(PM_HASH_KEY, normalised recipient)
+  message_id          TEXT NOT NULL,            -- the expired msg_, for source_message_id of a suppression
+  recipient_domain    TEXT NOT NULL,            -- lower-case A-label, for metric_counts
+  domain_id           TEXT,                     -- the sending domain the delivery used (RecordOutcome)
+  status              TEXT NOT NULL,            -- deliveries.status at expiry, then moved by later events
+  first_reply         INTEGER NOT NULL,         -- deliveries.first_reply (RecordOutcome counted)
+  provider_event_ids_json TEXT NOT NULL DEFAULT '[]',  -- the last 20, as on deliveries
+  sent_at             INTEGER NOT NULL,         -- the message's received_at
+  expires_at          INTEGER NOT NULL,         -- sent_at + 30 days; deleted by the daily maintenance
+  PRIMARY KEY (provider_message_id, address_hash)
+);
+```
+
+It holds no subject, body, display name or clear address. **Applying an event to a stub.** When step 1 of
+[Applying an event](outbound.md#applying-an-event-to-a-message) finds no message and reconciliation finds
+none, the mailbox looks up `delivery_stubs` by `provider_message_id` and the keyed hash of the event's
+recipient; with no row the answer stays `NotFound`. With a row it applies steps 3 and 4 to the stub
+(deduplication on `provider_event_ids_json`, the same transition table), writes `metric_counts` for
+`bounced` or `complained` with `recipient_domain`, emits no `message.*` event (the message is gone, and the
+event would carry the recipient's address again), and answers `Applied { outcome, suppress }` or
+`Duplicate { … }` exactly as from the message, with the stub's `first_reply` and `domain_id`. The consumer
+then suppresses the address (reason `hard_bounce` or `complaint`, `source_message_id` = the stub's
+`message_id`, so `suppression.created` is still emitted by this mailbox) and calls `RecordOutcome`, so the
+abuse windows and pauses see the outcome.
+
+**Lifetime.** 30 days after the send, the window in which providers report complaints and in which the
+idempotency stub also lives (§7.6). A message that expired without a `provider_message_id` (never submitted,
+or `uncertain` and never reconciled) leaves no stub: no event can name it. A stub identifies a recipient by
+keyed hash only, so counterparty erasure deletes every stub whose `address_hash` matches the target (both
+target forms of [Privacy § 4.1](privacy.md#41-mailbox-operations-used-by-jobs) compare that hash), and
+identity and tenant erasure remove stubs with the mailbox; a message or thread erasure finds no expired
+message and leaves its stubs to their 30 days (Z81).
 
 ## 8. Webhook delivery headers (FR-WH-7)
 
@@ -1449,6 +1509,7 @@ service (`S`) except where marked.
 | Z78 | An `ErrorCode` without an anchor in `errors.md`; an anchor for no code; the built page | `cargo xtask docs-check` fails for the first two; every anchor is an element `id` in the built `errors.html` | S | `core::errors::z78_every_code_has_anchor`, `live::docs::z78_anchor_resolves` |
 | Z79 | `PM_DOCS_URL` set to `http://…`, to a URL with a query, or with a trailing slash | `pmail setup` and `pmail deploy` refuse the first two; the Worker uses the default and logs `docs_url_invalid` once per isolate; a trailing slash is removed | S | `cli::setup::z79_docs_url_validated`, `it::errors::z77_docs_in_every_envelope` |
 | Z80 | A message erased (any scope) or expired while a `message.labels_changed` outbox row lists it with two other messages; and while a row lists only it | The first row keeps the two other entries and is delivered without the erased one; the second row is deleted and counted in `events_deleted`; nothing of the erased message is delivered afterwards | S | `it::label_events::z80_erasure_trims_events` |
+| Z81 | A complaint arrives 2 hours after a send from an identity with `message_hours: 1`, after the message expired; a hard bounce the same way; the same event again; an outbound message that expired without a provider message ID; an event 31 days after the send; a counterparty erasure of the recipient | `ApplyDeliveryEvent` answers from the delivery stub: the address is suppressed (`complaint`, `hard_bounce`), `RecordOutcome` counts the outcome (not for a first reply) and `metric_counts` counts it, with no `message.*` event; the repeat is `Duplicate`; with no provider ID, or after 30 days, there is no stub and the event is orphaned as before; the erasure deletes the stub | S | `it::retention::z81_late_delivery_events` |
 
 ## 15. Tests
 
@@ -1514,6 +1575,7 @@ service (`S`) except where marked.
 | `it::drafts::z61_drafts_expire` | Draft expiry and the `beyond_retention` refusal (runs once M29 has landed) | §7.10, Z61 |
 | `it::retention::z62_reply_to_expired_thread` | Threading after expiry | §7.10, Z62 |
 | `it::retention::z63_storage_and_states` | Storage roll-up after expiry; expiry while paused or suspended | §7.10, Z63 |
+| `it::retention::z81_late_delivery_events` | On a 1-hour identity, a complaint and a hard bounce 2 hours after the send suppress the address, reach `RecordOutcome` (an abuse pause fires at its threshold) and `metric_counts`, and emit no `message.*` event; a repeat is `Duplicate`; no stub without a provider ID or after 30 days; the stub holds no clear address or content; counterparty erasure removes it | §7.13, Z81, FR-PRV-7 |
 | `it::webhooks::z64_headers_write_only` | Values never leave the seal; the keyed fingerprint | §8.1, §8.3, Z64 |
 | `it::webhooks::z65_headers_patch` | `PATCH …/headers` rules, the compare-and-swap, the limits | §8.2, §8.3, Z65, Z67 |
 | `core::webhook_headers::z66_name_rules` | Name and value rules, the full refused list, `Authorization`, `CF-Access-Client-Id` and `CF-Access-Client-Secret` allowed while every other `CF-` name is refused | §8.2, Z66, Z67 |
@@ -1557,7 +1619,7 @@ rows of section Z.
 7. Webhook headers (§8): the columns and sealed entry, create and `PATCH …/headers`, delivery, host-change
    clearing.
 8. Retention (§7): the identity field, the `set_retention` intent, `mailbox/expiry.rs`, the idempotency stub,
-   the daily receipt, the alert.
+   the delivery stub (§7.13), the daily receipt, the alert.
 9. Zone export (§9): `core::zonefile::render` and the `format` parameter.
 
 **Files:** as the page's Code row. One migration, `migrations/d1/00NN_parity_additions.sql` only if
@@ -1573,6 +1635,7 @@ reviewed by that file's owner:
 | `crates/core/src/auth.rs`, `trust.rs` (M2, M7) | `arc_rescue`, the trust detail fields, `auth_json` keys |
 | `handlers/wait.rs` (M7), `accounts` gate (M27) | `arc_rescued` is not `pass` for releases and the ledger match |
 | `handlers/send.rs`, `consumers/outbound.rs`, `mailbox/idempotency.rs` (M9) | Identity-scope send entries at step 6 and composition step 1; the expired stub in the reservation |
+| `consumers/delivery.rs`, `ApplyDeliveryEvent` in the mailbox (M9) | The `delivery_stubs` lookup after reconciliation, its transitions and `metric_counts`, and the answer with the stub's `first_reply` and `domain_id` (§7.13) |
 | `webhooks/payloads.rs`, `consumers/webhooks.rs`, `handlers/webhooks.rs`, `webhooks/client.rs` (M8) | The `labels_changed` builder, `OPT_IN_EVENT_TYPES`, headers on delivery, `PATCH …/headers`, host-change clearing |
 | `search/citations.rs` (M11), `triage/rules.rs` (M12) | The `Rescued` evidence state; rule 13 |
 | `handlers/domains.rs` (M13, M23) | `format=bind` |
@@ -1583,15 +1646,15 @@ reviewed by that file's owner:
 | `crates/cli/src/commands/*` (M16) | The commands of the page |
 | `console/pages/*` (M21) | Inbox retention and lists, ARC wording, webhook header names, zone download |
 | `crates/core/src/sealed.rs` (M17 Foundation) | `webhook_endpoints.headers_sealed`, with its case in `it::secrets::master_key_rotation` |
-| `drafts` (M29), event feed (M30) | Draft expiry and `beyond_retention` (M29); feed entries of label events and of expired messages (M30). If M29 or M30 lands after M37, that milestone adds its hook and runs the M37 test named for it |
+| `drafts` (M29), event feed (M30) | Draft expiry and `beyond_retention` (M29); feed entries of label events and of expired messages through the mailbox's `log_erase` purpose (M30, R65 and R66). If M29 or M30 lands after M37, that milestone adds its hook and runs the test named for it (`it::drafts::z61_drafts_expire`, `it::events::retention_and_expiry_reach_log`, `it::events::label_event_erasure`) |
 
 **Implements:** FR-IN-13, FR-IN-14, FR-IN-15, FR-OUT-17, FR-WH-6, FR-WH-7, FR-PRV-7, FR-DOM-15, FR-API-3, and edge
-rows Z1–Z80.
+rows Z1–Z81.
 
 **Acceptance:**
 
 - Every test of [§15](#15-tests), by row: Z1–Z12 (batch), Z13–Z23
-  (lists), Z24–Z29 and Z80 (label events), Z30–Z32 (trust detail), Z33–Z46 (ARC), Z47–Z63 (retention), Z64–Z71 (webhook
+  (lists), Z24–Z29 and Z80 (label events), Z30–Z32 (trust detail), Z33–Z46 (ARC), Z47–Z63 and Z81 (retention), Z64–Z71 (webhook
   headers), Z72–Z76 (zone export), Z77–Z79 (docs links).
 - The new routes (seven operations) and the changed ones join `it::security::cross_tenant_matrix`;
   `sdk::coverage::every_operation` passes with the new operations; `it::mcp::input_schemas_plain_objects` passes.

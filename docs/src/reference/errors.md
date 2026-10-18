@@ -210,7 +210,7 @@ idempotency key to retry with when the request had one
 | 422 | <a id="code-key_limit_reached"></a>`key_limit_reached` | no | `POST /v1/keys` for a tenant that already has 100 active (neither revoked nor expired) tenant and identity keys, or for a partner that already has 10 partner keys (`details.limit`). Revoke keys you no longer use ([J22](../project/edge-cases.md)) |
 | 422 | <a id="code-web_bot_auth_disabled"></a>`web_bot_auth_disabled` | no | Signed HTTP requests are turned off on this deployment (`PM_WEB_BOT_AUTH=off`, the default): `POST …/http-signatures`, and rotating the `web_bot_auth` key with `POST /v1/platform/keys/web_bot_auth/rotate` ([O9](../project/edge-cases.md)) |
 | 402 | <a id="code-billing_limit"></a>`billing_limit` | no | A plan allowance is spent (`details`: `feature`, `granted`, `used`, `resets_at`, `upgrade_url`). Nothing was stored: upgrade or add a top-up, then retry with the **same** `Idempotency-Key` |
-| 429 | <a id="code-rate_limited"></a>`rate_limited` | yes | A per-key or per-identity rate limit (including signing: 600 assertions and HTTP signatures a minute per identity), the limit for all keys of one tenant or of one partner together (`details.bucket` is `tenant` or `partner`), or the per-domain limit of `verify` and `probe` (one a minute). On the event feed, `details.bucket` is `events_wait` (concurrent long polls), `stream_tokens` (unredeemed stream tokens) or `streams` (stream connections); on `POST /v1/agent-signup`, `signin` (`RL_SIGNIN`, per client network). Has `Retry-After` |
+| 429 | <a id="code-rate_limited"></a>`rate_limited` | yes | A per-key or per-identity rate limit (including signing: 600 assertions and HTTP signatures a minute per identity), the limit for all keys of one tenant or of one partner together (`details.bucket` is `tenant` or `partner`), or the per-domain limit of `verify` and `probe` (one a minute). On the event feed, `details.bucket` is `events_wait` (concurrent long polls), `stream_tokens` (live stream tokens: unredeemed and unexpired) or `streams` (stream connections); on `POST /v1/agent-signup`, `signin` (`RL_SIGNIN`, per client network). Has `Retry-After` |
 | 429 | <a id="code-daily_cap_reached"></a>`daily_cap_reached` | yes | A daily cap; `details.cap` says which: `identity` or `tenant` (the send caps of tenant policy, the tenant one lowered by the new-workspace ramp), `invitations` (a tenant's 50 invitation emails a day), `shared_domain` (the deployment's shared-domain breaker, for the rest of the UTC day) or `billing_dispute` (the workspace's payment is disputed; sends stay stopped until the dispute closes). `details.resets_at` says when it resets, `null` for `billing_dispute` |
 | 429 | <a id="code-agentic_budget_exhausted"></a>`agentic_budget_exhausted` | yes | The tenant's daily agentic-search budget is spent |
 | 429 | <a id="code-upstream_rate_limited"></a>`upstream_rate_limited` | yes | A provider's rate limit stopped the request before anything changed. Cloudflare refused to create a zone with error 1105 (too many attempts to add a domain), for `nameservers` or `delegated_subdomain`: `Retry-After` and `details.retry_after` are `10800` (3 hours). Or the deployment's Amazon SES control-plane budget (one call per second, shared by every domain) had no slot within 5 seconds, for a domain create, `PATCH` or removal that calls SES: `Retry-After` is the wait, usually a few seconds |
@@ -241,25 +241,28 @@ The WebSocket event stream (`GET /v1/events/stream`) ends with a close code. Bef
 the stream sends an `error` message with the full envelope, because a close reason is limited to 123 bytes;
 the reason is the code word below. The private codes are 4000 plus the matching HTTP status. The service
 never sends 1005, 1006 or 1015; a client sees 1006 when a connection drops without a Close frame
-([Event feed › Close codes](../project/design/event-feed.md#78-close-codes)).
+([Event feed › Close codes](../project/design/event-feed.md#78-close-codes)). A client reconnects only on
+`1001`, `1006`, `1011`, `1012`, `1013`, `4408` and codes it does not know, retries `4429` after 30 seconds,
+reconciles after `4410`, and stops on every other code
+([Event feed › Resuming without loss](../project/design/event-feed.md#710-resuming-without-loss)).
 
 | Code | Reason | When | The client |
 |---|---|---|---|
 | 1000 | `normal` | The client closed the connection | – |
 | 1001 | (set by the runtime) | A deploy or a runtime update: "Code updates disconnect all WebSockets" ([Durable Objects › WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)) | Resumes after 1–5 seconds, with jitter |
 | 1006 | (seen, never sent) | The connection dropped | Resumes with backoff |
-| 1008 | `policy_violation` | A binary or non-JSON frame, more than 100 messages in 10 seconds, or more than 10 errors | Fixes the client |
-| 1009 | `message_too_big` | A client message over 16 KiB | Fixes the client |
+| 1008 | `policy_violation` | A binary or non-JSON frame, more than 100 messages in 10 seconds, or more than 10 errors | Stops and fixes the client; never reconnects on its own |
+| 1009 | `message_too_big` | A client message over 16 KiB | Stops and fixes the client; never reconnects on its own |
 | 1011 | `internal_error` | An unexpected failure in the object | Resumes with backoff |
 | 1012 | `service_restart` | The service closes connections on purpose, for a change that needs fresh connections | Resumes after 5–30 seconds, with jitter |
 | 1013 | `try_again_later` | Validation impossible for 180 seconds (D1 unavailable), or the object overloaded | Resumes after 30–60 seconds, with jitter |
-| 4400 | `bad_request`, `subscribe_timeout` | An invalid `subscribe`, or none within 60 seconds | Fixes its `subscribe` |
+| 4400 | `bad_request`, `subscribe_timeout` | An invalid `subscribe`, or none within 60 seconds | Stops and fixes its `subscribe`; never reconnects on its own |
 | 4401 | `unauthenticated`, `key_revoked`, `key_expired` | A missing, used, expired or unknown stream token; or the key was revoked, expired or deleted | Gets a new key or token; never retries with the same |
 | 4403 | `tenant_suspended`, `partner_suspended` | A suspension | Stops; a person must act |
 | 4404 | `tenant_not_found`, `identity_not_found`, `consumer_deleted` | The tenant is being erased, the identity key's identity is deleted, or the subscribed consumer was deleted | Stops |
 | 4408 | `slow_consumer` | The window stayed full for 60 seconds | Resumes from its last processed cursor, and sends acks |
-| 4409 | `replaced` | The key opened an 11th connection, or another connection subscribed to the same consumer | Does not reconnect from both places |
-| 4410 | `cursor_expired`, `log_reset` | The subscribe position or the consumer is behind the retained log, or the log was rebuilt | Reconciles the gap, then resumes from `details.oldest_cursor` or resets its consumer |
+| 4409 | `replaced` | The key opened an 11th connection, or another connection subscribed to the same consumer | Stops and reports it: a newer connection holds its place, and reconnecting would replace that one in turn |
+| 4410 | `cursor_expired`, `log_reset` | The subscribe position or the consumer is behind the retained log, the connection fell behind it while open, or the log was rebuilt | Reconciles the gap, then resumes from `details.oldest_cursor` or resets its consumer |
 | 4429 | `too_many_connections` | Token path only: the tenant already has 100 connections | Retries after 30 seconds |
 
 ## Send failures after `202`

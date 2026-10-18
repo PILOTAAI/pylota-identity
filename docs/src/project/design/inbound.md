@@ -947,9 +947,9 @@ can name anyone.
 | `hidden_text` ([B11](../edge-cases.md)) | [Hidden text](#hidden-text-b11) |
 
 These are stored in `flags_json`; the API returns `hidden_text`, `display_name_spoof`,
-`lookalike_domain`, `reply_to_mismatch`, `thread_join_unverified`, `shared_domain_sender` and
-`steering_suspected` (set by screening, [Screening hold §7](screening.md#7-committing-a-verdict)) as
-`trust.flags` and the rest as message `flags`.
+`lookalike_domain`, `reply_to_mismatch`, `thread_join_unverified`, `shared_domain_sender`,
+`steering_suspected` and `attachments_unscreened` (both set by screening, [Screening hold §7](screening.md#7-committing-a-verdict))
+as `trust.flags` and the rest as message `flags`.
 
 **Spam score** (`spam_score`, 0–1, FR-IN-4). The consumer computes a base from deterministic signals and
 `ingest` applies the sender adjustments, then clamps to [0, 1]:
@@ -1200,7 +1200,8 @@ pub enum IngestOutcome {
     Stored { message_id: String, thread_id: String, status: String, duplicate: bool,
              stored_raw_r2_key: String,            // the stored message's raw key (a duplicate's differs)
              attachments: Vec<AttachmentToStore>, suppress: Vec<SuppressionRequest>,
-             screen_job: bool },                   // true when a pending screenings row was written
+             screen_job: bool },                   // true when the message's screenings row is pending
+                                                   // (written now, or found by a duplicate, step 2)
     Backscatter,                                   // an unmatched DSN: nothing written (D4)
 }                                                  // an untrusted DSN (D11) is Stored, hidden, with no state change
 pub struct AttachmentToStore { pub attachment_id: String, pub part_index: u32, pub r2_key: String,
@@ -1218,8 +1219,10 @@ transaction that stores it):
    WHERE raw_sha256 = ?1 AND direction = 'inbound' LIMIT 1;
    ```
 
-   Found → return `Stored { duplicate: true, … }` with that message's attachments and, for a stored
-   DSN, its suppression requests recomputed from `automated_json.dsn`. No event, no counters.
+   Found → return `Stored { duplicate: true, … }` with that message's attachments, `screen_job` true when
+   its `screenings` row is still `pending` (so post-commit step 4a sends a `ScreenJob` that a failed send
+   lost), and, for a stored DSN, its suppression requests recomputed from `automated_json.dsn`. No event, no
+   counters.
 3. **Duplicate by Message-ID ([B3](../edge-cases.md))**, only when `message_id_synthetic = 0`:
 
    ```sql
@@ -1679,7 +1682,9 @@ message's refs and FTS rows, and
 matches attachments to existing rows by `(sha256, part order)` so attachment IDs never change. Thread
 membership is never changed. A message whose new decision would quarantine it (for example a newly
 detected risk) moves from `received` to `quarantined`; a re-parse never releases a message. The outbox
-gets `message.received` or `message.quarantined` again with `data.reprocessed = true`, and
+gets `message.received` or `message.quarantined` again with `data.reprocessed = true` (one of the two: when
+the new parse's steering scan also moves the message back to quarantine, the single `message.quarantined`
+carries `rescreened: true` too, after a `message.screened`; [Screening hold §8](screening.md#8-late-content)), and
 `calendar.received` again with `reprocessed: true` when the calendar object changed. A re-parse of a
 message that is still `screening` answers `Busy` and is retried after 60 s; the new parse's steering scan
 follows [Screening hold §8](screening.md#8-late-content).

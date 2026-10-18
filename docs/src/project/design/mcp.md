@@ -721,7 +721,7 @@ Title "Read mail events". Description:
 
 - `identity` is an identity ID or address, resolved as for the other tools; an identity key uses its own.
 - Output: the page of [Event feed § 5.2](event-feed.md#52-response-and-rules), `{ data: [{ cursor, event }],
-  next_cursor, has_more, withheld_types }`. Each event's `data.extracted_text` is cut to 4,000 characters
+  next_cursor, has_more, withheld_types, since_truncated }`. Each event's `data.extracted_text` is cut to 4,000 characters
   (its `extracted_text_truncated` becomes `true`); when the result is still over 96 KB, items are dropped
   from the end and `next_cursor` becomes the cursor of the last item kept, never the page's own, so no
   event is skipped; `truncated: true` is set ([§4.2](#42-output-and-size-budgets)).

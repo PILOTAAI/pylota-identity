@@ -46,6 +46,7 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | `IdentityMailbox.outbox` | Event payloads: message summaries, addresses, up to 64 KB of extracted text | Webhook dispatch and replay | `retention.events_days` (default 30), counted from `occurred_at`, once dispatched | Retention job; erasure deletes events referencing erased messages |
 | `TenantEvents` Durable Object (one per tenant) | Event envelopes: message summaries, addresses, up to 64 KB of extracted text; durable consumer names and key IDs; stream-token hashes; erased message and identity IDs for 7 days | The event feed, consumers and the WebSocket stream ([Event feed](event-feed.md)) | `retention.events_days` after the append, within a 6 GB budget; tokens 60 s | Tenant retention job (`Purge`); every erasure scope (section 6); tenant erasure deletes the object's storage |
 | `IdentityMailbox.idempotency` | Response bodies of sends (recipients, subject summary) | Safe retries | 30 days | Hygiene step of the retention job; erasure |
+| `IdentityMailbox.delivery_stubs` | Keyed hashes of recipient addresses, recipient domains, provider message IDs and delivery statuses of outbound messages that per-identity expiry deleted; no content and no clear address | Late bounces and complaints still suppress and count ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events)) | 30 days after the send | Daily maintenance; counterparty erasure of the address; identity and tenant erasure (`WipeAll`) |
 | `IdentityMailbox.verifications` | Verification codes and links | `wait` | 24 hours | Hygiene step; erasure (cascade) |
 | `IdentityMailbox.rate_windows` | Sender addresses in hourly windows | Inbound throttle, token brute-force limits | 48 hours ([Design conventions §4](index.md#4-durable-object-transactions), daily maintenance) | Hygiene step; counterparty erasure deletes the counterparty's rows (section 6.4); identity and tenant erasure |
 | `IdentityMailbox.chunks` | Character offsets only | Semantic index bookkeeping | As the message | Cascade with the message row |
@@ -261,7 +262,7 @@ per call.
 | `PurgeRaw { message_ids }` | Sets `raw_r2_key = NULL` (the raw endpoint then returns `410 raw_expired`) |
 | `PurgeEvents { cutoff_ms }`, `Hygiene { now_ms }` | Deletes dispatched outbox rows older than the cutoff; expired `idempotency`, `verifications`, `rate_windows`. `Hygiene` also purges drafts by [Drafts §13.1](drafts.md#131-retention) and expires pending approvals, and runs the uploads expiry sweep as a backstop ([Uploads §9](uploads.md#9-privacy)) |
 | `ErasurePlan { target, after_rowid, limit }` | `{ messages: [{ rowid, id, thread_id, r2_keys, vector_ids, uploads: [{ id, r2_key }] }], drafts: [{ id, r2_keys }], held: [{ thread_id, reason }], next_after_rowid }`. `uploads` lists the still-existing uploads the message's attachments were copied from (`attachments.upload_id`, [Uploads §9](uploads.md#9-privacy)); `drafts` the drafts the target erases ([Drafts §13.2](drafts.md#132-erasure)) |
-| `EraseRows { rowids, counterparty, draft_ids, upload_ids, mode }` | Deletes the rows (section 6.2) and returns counts and the deleted message IDs. `mode` is `Erasure` (requests and tenant retention) or `Expiry` (per-identity expiry, section 5.5), which keeps a content-free idempotency stub |
+| `EraseRows { rowids, counterparty, draft_ids, upload_ids, mode }` | Deletes the rows (section 6.2) and returns counts and the deleted message IDs, which it also leaves pending in `erased_ids` for the event log. `mode` is `Erasure` (requests and tenant retention) or `Expiry` (per-identity expiry, section 5.5), which keeps a content-free idempotency stub and, for outbound messages, a content-free delivery stub |
 | `ProbeKeyword { target }` | Number of messages still matching the target |
 | `CountAll` | Counts per table, used before a wipe (`drafts`, `uploads`, `screenings` and `screening_feedback` included, for the receipt) |
 | `WipeAll` | `delete_all()`, then writes a three-row tombstone `meta` (`erased = '1'`, `tenant_id`, `identity_id`) so the object refuses every later request with `identity_not_found` |
@@ -295,7 +296,7 @@ once per day for control-plane tables.
 |---|---|---|
 | 1 | `plan` | Reads the tenant's effective `retention` policy and fixes the cutoffs: `raw_cutoff = now − raw_days`, `message_cutoff = now − message_days` (skipped when `null`), `events_cutoff = now − events_days`. The system identity (`is_system = 1`, default tenant only) always uses `raw_days = 7` and `message_days = 30`, whatever the policy says, because its mailbox holds sign-in, invitation and notification mail addressed to people ([Identities › The system identity](identity-domains.md#the-system-identity)) |
 | 2 | `raw` | For each identity (cursor `identity_id:rowid`), `RetentionPlan` for raw cutoff → delete `raw.eml` and `out/{msg}.eml` objects → `PurgeRaw`. Objects are deleted before the column is cleared, so a crash leaves no unreferenced object |
-| 3 | `messages` | Only when `message_days` is set: for each identity, `RetentionPlan` for message cutoff → `deleteByIds` for the vector IDs → delete every R2 key of the batch → `EraseRows` |
+| 3 | `messages` | Only when `message_days` is set: for each identity, `RetentionPlan` for message cutoff → `deleteByIds` for the vector IDs → delete every R2 key of the batch → `EraseRows`, whose deleted IDs the mailbox's `log_erase` purpose then deletes from the tenant's event log, so the log keeps no event of a message that retention removed ([Event feed § 11.3](event-feed.md#113-erasure)) |
 | 4 | `events` | For each identity, `PurgeEvents { events_cutoff }`. In D1, in batches (section 6.12): `DELETE FROM event_index WHERE rowid IN (SELECT rowid FROM event_index WHERE tenant_id = ?1 AND occurred_at < ?2 LIMIT 1000)`, repeated until it deletes nothing, and the same for `webhook_deliveries.created_at`; then `EventsRequest::Purge { appended_before: events_cutoff }` on the tenant's `TenantEvents` object, repeated until it reports done, its count added to the audit row as `log_events_deleted` ([Event feed §11.2](event-feed.md#112-retention)) |
 | 5 | `hygiene` | For each identity, `Hygiene` (which also purges drafts and sweeps expired uploads, section 4.1). Expire exports: `exports` rows past `expires_at` → delete the ZIP object → status `expired` |
 | 6 | `holds` | For each identity, `ActiveHolds`, which clears holds whose `until` has passed (audit `hold.expired`, section 8). For an identity still `deleting` whose latest identity-scope erasure request is `completed_with_holds`, an answer of 0 creates the continuation: an identity-scope request with reason `hold_released:{era_id}` and `resumes_id` = that request, audit-logged (`erasure.create`; section 6.5) |
@@ -389,8 +390,15 @@ mail is gone within hours whatever the rest of the workspace keeps (FR-PRV-7). W
   `received_at`, except a message in a thread under an active legal hold (until the hold ends, section 8) and
   an outbound message still `queued` or with a transport claim younger than 5 minutes. Expiry deletes what
   `EraseRows` deletes (section 6.2), the message's R2 objects in `BLOBS` and `BACKUP` and its vectors, and
-  writes `erased_ids`; a draft expires `message_hours` after its last change. It keeps what tenant retention
-  keeps: `contacts`, `rate_windows`, suppressions, `event_index` rows and audit rows.
+  writes `erased_ids`; a draft expires `message_hours` after its last change. The event log's copies of the
+  message's events go too, through the mailbox's `log_erase` purpose
+  ([Event feed § 11.3](event-feed.md#113-erasure)). It keeps what tenant retention keeps: `contacts`,
+  `rate_windows`, suppressions, `event_index` rows and audit rows.
+- **Late bounces and complaints still count.** Each delivery of an expired outbound message with a provider
+  message ID becomes a content-free `delivery_stubs` row (keyed recipient hash, provider message ID, status,
+  `first_reply`, sending domain) for 30 days after the send, so a complaint or hard bounce that arrives after
+  the message expired still suppresses the address and reaches `RecordOutcome`, the abuse pauses and
+  `metric_counts`, with no message event ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events)).
 - **The expiry alarm.** The mailbox does the work itself (`alarm:expiry`, `mailbox/expiry.rs`), with no
   `JobRunner`: in slices of at most 100 messages or 20 seconds it plans the due rows, deletes their vectors and
   R2 objects, then in one transaction re-checks each row and runs `EraseRows` with `mode: Expiry`. A failure
@@ -477,10 +485,13 @@ In one transaction per batch, for each message rowid:
    the entry is removed with `json_remove`, the row is deleted when no entry is left, and the count of deleted
    rows goes to `events_deleted` ([Parity additions §4.3](parity-additions.md#43-rules), rule 8).
 4. `DELETE FROM idempotency WHERE message_id = ?1`. Per-identity expiry (`mode: Expiry`, section 5.5) keeps
-   the row instead, as a stub without content, until its own `expires_at`.
+   the row instead, as a stub without content, until its own `expires_at`, and turns each delivery of an
+   outbound message that has a `provider_message_id` into a `delivery_stubs` row before step 2 deletes it
+   ([Parity additions § 7.13](parity-additions.md#713-late-delivery-events)).
 5. Update the thread's counters and `participants_json`; delete a thread left with no messages.
-6. For a counterparty target, also: delete the `contacts` row for the address, and remove the address
-   from `participants_json` of every surviving thread.
+6. For a counterparty target, also: delete the `contacts` row for the address, remove the address
+   from `participants_json` of every surviving thread, and delete the `delivery_stubs` rows whose
+   `address_hash` is the target's keyed hash.
 7. Delete the drafts of the plan ([Drafts §13.2](drafts.md#132-erasure)): the draft row, its `draft_sync` row
    (writing a `delete` row), its `idempotency` rows and its outbox rows; count `drafts_deleted`.
 8. Delete the `uploads` rows the plan lists for the batch's messages; their objects were deleted before the
@@ -489,7 +500,10 @@ In one transaction per batch, for each message rowid:
 Counts returned per batch: messages, attachments, FTS rows (rows deleted from `fts`; `fts_tri` rows are
 deleted alongside and not counted), refs, outbox events, screening records and screening feedback (counted
 before the delete, because a cascade reports no count), drafts and uploads; and the IDs of the messages
-deleted, which the job passes to the event log (sections 6.3 and 6.4).
+deleted, which an erasure job passes to the event log (sections 6.3 and 6.4). The same transaction writes
+those IDs to `erased_ids` with `log_erased_at = NULL` and sets `alarm:log_erase = now`, in every mode, so the
+mailbox itself deletes the log's copies after tenant retention and per-identity expiry too, and repeats an
+erasure job's call that was lost ([Event feed § 11.3](event-feed.md#113-erasure)).
 
 ### 6.3 Message and thread scope
 

@@ -13,7 +13,7 @@ the CLI, and how Pylota uses all of it.
 | | |
 |---|---|
 | Requirements | FR-EVT-1 … FR-EVT-11 (this page); FR-WH-1, FR-WH-4 (the same thin payloads), FR-IN-11 (`wait` keeps verification release), FR-PRV-2, FR-PRV-4, FR-KEY-4, NFR-SEC-1 |
-| Edge cases | [R1](../edge-cases.md)–[R64](../edge-cases.md) (this page, section 19) |
+| Edge cases | [R1](../edge-cases.md)–[R69](../edge-cases.md) (this page, section 19) |
 | Code | `crates/core/src/events/{mod.rs, cursor.rs, visibility.rs, filter.rs, stream.rs, token.rs}` (cursors, the visibility table, filter patterns, the stream protocol, the flow-control window, close codes and the stream-token format; pure); `crates/api-types/src/events/feed.rs`; `crates/worker/src/events/{mod.rs, object.rs (the TenantEvents Durable Object), log.rs, consumers.rs, stream.rs, tokens.rs, schema/}`; `handlers/events.rs`; the append step in `consumers/webhooks.rs`; the log steps in `jobs/erasure.rs` and `jobs/retention.rs`; `jobs/event_log_rebuild.rs`; `mcp/tools.rs` (`mail_events`); `console/pages/webhooks.rs` (the events section); `crates/platform/src/cf/{glue.rs, hibernation.rs}` and `crates/platform/src/fakes/hibernation.rs`; `crates/sdk/src/events.rs` (feature `stream`); `crates/cli/src/commands/events.rs` |
 | Tables | The `TenantEvents` object's SQLite tables `meta`, `events`, `consumers`, `stream_tokens` and `erased_refs` ([§2.2](#22-schema)); D1 `tenants.events_do_id`; D1 `jobs.kind` value `event_log_rebuild`; the erasure receipt fields `log_events_deleted` and `probe.log_hits` |
 | Contracts | `GET /v1/events`, `GET /v1/events/stream` (WebSocket), `POST /v1/events/stream-tokens`, `POST` and `GET /v1/event-consumers`, `GET` and `DELETE /v1/event-consumers/{consumer_id}`, `GET /v1/event-consumers/{consumer_id}/events`, `POST /v1/event-consumers/{consumer_id}/commit` and `…/reset`; the permission `events:read`; the stream subprotocol `pylota-mail.events.v1` and the close codes of [§7.8](#78-close-codes); `410 cursor_expired` (extended), `404 event_consumer_not_found`, `409 event_consumer_name_taken`, `422 event_consumer_limit_reached`, `426 upgrade_required`, and `429 rate_limited` with `details.bucket` `events_wait`, `stream_tokens` or `streams`; no new event types and no new policy fields (`retention.events_days` now also governs the log) |
@@ -106,7 +106,9 @@ endpoint) belong to no tenant and are in no log; platform and partner endpoints 
 
 - **Before webhooks.** An event of a tenant that reaches the fan-out is in the tenant's log before any
   `Deliver` for it is queued. The exceptions are the events §2.4 does not append (no tenant, the system
-  identity, a payload already gone, a tenant being erased), which are listed with their reasons.
+  identity, a payload already gone, a tenant being erased), which are listed with their reasons. While a
+  rebuild backfills, the event is staged in the log object instead and gets its position when the
+  backfill finishes ([§9.3](#93-rebuilding-a-log)).
 - **Once per log.** Each `evt_` ID is stored at most once per log epoch, whatever the queue redelivers.
 - **No gaps behind a cursor.** A reader that resumes from a cursor receives every event appended after it,
   in log order, until retention removes it. Erasure removes events without invalidating any cursor.
@@ -154,11 +156,18 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 --   floor_seq          the highest position removed by retention or by the size budget (0 if none). A cursor
 --                      below it has expired. Erasure never raises it
 --   floor_reason       retention | size_limit: why floor_seq last moved
+--   floor_appended_at  the largest appended_at that retention or the size budget removed (0 if none); a
+--                      since at or before it reports since_truncated (section 5.2)
 --   payload_bytes      sum of length(envelope_json) over the events rows, kept in the same transaction as
 --                      every insert and delete
+--   log_bytes          sum of length(envelope_json) + 1024 over the events and staged_appends rows: the
+--                      size budget's measure (section 2.5), kept in the same transactions as payload_bytes
 --   last_appended_at   appended_at of the newest row; appended_at never decreases
+--   backfilling        '1' from a rebuild's reset until its backfill finishes (section 9.3); live appends
+--                      are staged meanwhile
+--   backfill_at        when the backfill last appended (or the reset ran); read by the maintenance alarm
 --   erased             '1' after EventsRequest::Erase (tenant erasure): every later request gets tenant_not_found
---   alarm:maintenance  daily, and at once when the size budget is passed (section 2.6)
+--   alarm:maintenance  daily, hourly while backfilling, and at once when the size budget is passed (section 2.6)
 --   alarm:revalidate   every 60 s while a WebSocket is attached (section 7.7)
 
 CREATE TABLE IF NOT EXISTS events (
@@ -177,6 +186,21 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_identity ON events(identity_id, seq) WHERE identity_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS events_message ON events(message_id) WHERE message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS events_appended ON events(appended_at);
+
+CREATE TABLE IF NOT EXISTS event_messages (                -- the messages an event lists in data.messages[]
+  message_id TEXT NOT NULL,                                -- (message.labels_changed), so erasure finds it
+  seq        INTEGER NOT NULL REFERENCES events(seq) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, seq)
+);
+
+CREATE TABLE IF NOT EXISTS staged_appends (                -- live appends held while a rebuild backfills
+  event_id      TEXT PRIMARY KEY,                          -- (section 9.3); emptied when the backfill finishes
+  identity_id   TEXT,
+  message_ids   TEXT NOT NULL,                             -- JSON array: message_id and data.messages[] IDs
+  occurred_at   INTEGER NOT NULL,
+  staged_at     INTEGER NOT NULL,
+  envelope_json TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS consumers (                     -- durable consumers (section 6)
   id                TEXT PRIMARY KEY,                      -- evc_
@@ -199,8 +223,8 @@ CREATE INDEX IF NOT EXISTS consumers_owner ON consumers(owner_key_id);
 CREATE TABLE IF NOT EXISTS stream_tokens (                 -- single-use stream tokens (section 7.2)
   token_hash  TEXT PRIMARY KEY,                            -- hex SHA-256 of the token's 32 random bytes
   key_id      TEXT NOT NULL,                               -- the minting key: the stream acts as this key
-  expires_at  INTEGER NOT NULL                             -- minted + 60 s; deleted on redemption or by the
-                                                           -- maintenance alarm
+  expires_at  INTEGER NOT NULL                             -- minted + 60 s; deleted on redemption, by the next
+                                                           -- mint once expired, or by the maintenance alarm
 );
 
 CREATE TABLE IF NOT EXISTS erased_refs (                   -- refuses late appends of erased data (R57, R58)
@@ -232,12 +256,14 @@ pub enum EventsRequest {
     RedeemStreamToken { token_hash: String },
     CloseStreams { selector: StreamSelector, code: u16, reason: String },   // § 7.7
     ForgetKeys { key_ids: Vec<String> },    // a revoked key: its consumers and streams
-    EraseMessages { message_ids: Vec<String> },                             // § 11.3, at most 1,000 IDs
+    EraseMessages { message_ids: Vec<String>, source: EraseSource },       // § 11.3, at most 1,000 IDs;
+                                            // source: Job (an erasure job) | Mailbox (its log_erase purpose)
     EraseIdentity { identity_id: String, keep_thread_ids: Vec<String> },
     Erase,                                  // tenant erasure: delete_all, then meta.erased
     Probe { message_ids: Vec<String>, identity_id: Option<String> },        // the erasure probe
     Purge { appended_before: i64 },         // the tenant retention job's events step
     Reset,                                  // event_log_rebuild only: a new epoch (§ 9.3)
+    FinishBackfill,                         // event_log_rebuild only: appends the staged live events (§ 9.3)
     Stats,                                  // console and doctor: counts, consumers, connections
 }
 pub struct ReaderScope { pub key_id: String, pub level: Level, pub identity_id: Option<String>,
@@ -283,20 +309,27 @@ three hibernation handlers are its other entry points ([§7.9](#79-hibernation-a
 
 1. Owner check. `meta.erased = '1'` → `tenant_not_found`. No owner → `not_initialised` (§2.1).
 2. One `transaction_sync`, for each item in the given order:
-   - `index_fields = core::events::index_fields(envelope_json)` gives `type`, `identity_id`, `message_id`
-     and `thread_id`. `message_id` follows the outbox's erasure rule (`data.message_id`, else
-     `data.message.id`, [Privacy § 6.2](privacy.md#62-what-eraserows-deletes)), so every event that names a
-     message is found by erasure; an event family that names a message must put its ID in one of those
-     two places;
+   - `index_fields = core::events::index_fields(envelope_json)` gives `type`, `identity_id`, `message_id`,
+     `thread_id` and `listed_message_ids`. `message_id` follows the outbox's erasure rule
+     (`data.message_id`, else `data.message.id`, [Privacy § 6.2](privacy.md#62-what-eraserows-deletes)), and
+     `listed_message_ids` holds each `data.messages[].message_id` (`message.labels_changed`, which names up
+     to 100 messages and no single one), so every event that names a message is found by erasure; an event
+     family that names a message must put its ID in one of those three places;
    - an item whose `message_id` or `identity_id` is in `erased_refs` is refused, except `identity.deleted`,
-     which holds only IDs;
-   - `INSERT OR IGNORE INTO events (seq, event_id, type, identity_id, message_id, thread_id, occurred_at,
-     appended_at, envelope_json) VALUES (head_seq + 1, …)`; when a row was inserted (`changes() = 1`),
-     `head_seq += 1`, `payload_bytes += length(envelope_json)` and `last_appended_at = appended_at`, with
-     `appended_at = max(now, last_appended_at)`;
-   - write `head_seq`, `payload_bytes` and `last_appended_at` to `meta`.
-3. Answer `{ appended, duplicates, refused, head_seq }`.
-4. After the commit: if `payload_bytes` passed the size budget, set `alarm:maintenance = now`; then push the
+     which holds only IDs. An item with `listed_message_ids` in `erased_refs` has those entries removed
+     from `data.messages` with `json_remove`, exactly as `EraseRows` trims the outbox row, and is refused
+     when no entry is left;
+   - while `meta.backfilling = '1'` and the call is not the backfill's own, the item goes to
+     `staged_appends` instead (`INSERT OR IGNORE`, `staged_at = now`, no position; [§9.3](#93-rebuilding-a-log));
+   - otherwise `INSERT OR IGNORE INTO events (seq, event_id, type, identity_id, message_id, thread_id,
+     occurred_at, appended_at, envelope_json) VALUES (head_seq + 1, …)`; when a row was inserted
+     (`changes() = 1`), one `event_messages` row per listed message ID, `head_seq += 1`,
+     `payload_bytes += length(envelope_json)`, `log_bytes += length(envelope_json) + 1024` and
+     `last_appended_at = appended_at`, with `appended_at = max(now, last_appended_at)`;
+   - write `head_seq`, `payload_bytes`, `log_bytes` and `last_appended_at` to `meta`.
+3. Answer `{ appended, staged, duplicates, refused, head_seq }`. A staged item counts as accepted: the
+   consumer goes on with endpoint resolution, as after an append.
+4. After the commit: if `log_bytes` passed the size budget, set `alarm:maintenance = now`; then push the
    new rows to the attached WebSockets ([§7.5](#75-sending-and-flow-control)). A failed send changes
    nothing: the log already holds the event.
 
@@ -311,18 +344,28 @@ ID.
   sends `EventsRequest::Purge { appended_before: events_cutoff }`. Because `appended_at` never decreases
   with `seq`, the rows older than the cutoff are a prefix of the log. The object deletes them in transactions
   of at most 2,000 rows (`DELETE FROM events WHERE seq IN (SELECT seq FROM events WHERE appended_at < ?1
-  ORDER BY seq LIMIT 2000)`), lowers `payload_bytes`, raises `floor_seq` to the highest deleted position
-  with `floor_reason = 'retention'`, and repeats until nothing is left before the cutoff or the call has
-  spent 20 seconds, answering the count and whether it finished; the job step calls again until it has.
-  Retention counts from `appended_at`, which follows `occurred_at` by seconds unless a dead-letter redrive
-  appended the event late, and then by at most the 14 days a dead-letter item is kept.
-- **Size budget.** A tenant's log keeps at most 6,000,000,000 bytes of envelopes (`payload_bytes`). Above
-  that, the maintenance alarm deletes the oldest rows, in the same transactions of 2,000, until
-  `payload_bytes` is at most 5,000,000,000, with `floor_reason = 'size_limit'`, and reports the
-  `event_log_size` condition. The budget is a Pylota Mail choice: it leaves 40% of the object's 10 GB for
-  indexes, page slack and the other tables. At the default `webhook_text_bytes` of 16 KB an inbound event
-  is about 18 KB, so the budget holds about 330,000 of them: 11,000 a day for 30 days. A workspace that
-  receives more keeps a shorter feed, and readers behind the new floor get `410 cursor_expired` with
+  ORDER BY seq LIMIT 2000)`), lowers `payload_bytes` and `log_bytes`, raises `floor_seq` to the highest
+  deleted position with `floor_reason = 'retention'` and `floor_appended_at` to the largest deleted
+  `appended_at`, and repeats until nothing is left before the cutoff or the call has spent 20 seconds,
+  answering the count and whether it finished; the job step calls again until it has. Retention counts from
+  `appended_at`, which follows `occurred_at` by seconds unless a dead-letter redrive appended the event
+  late, and then by at most the 14 days a dead-letter item is kept. A rebuild's backfill appends with
+  `appended_at = occurred_at` ([§9.3](#93-rebuilding-a-log)), so its rows leave on the same day as their
+  outbox copies.
+- **Size budget.** A tenant's log keeps at most 6,000,000,000 bytes of `log_bytes`: each row counts its
+  envelope plus 1,024 bytes for the row's other columns, its four index entries and its `event_messages`
+  rows, so a log of small events cannot outgrow the object through per-row overhead that envelope bytes
+  alone would not show. Above the budget, the maintenance alarm deletes the oldest rows, in the same
+  transactions of 2,000, until `log_bytes` is at most 5,000,000,000, with `floor_reason = 'size_limit'`
+  and `floor_appended_at` raised as retention does, and reports the `event_log_size` condition. The budget
+  and the 1,024-byte charge are Pylota Mail choices: the Durable Objects limits page states 10 GB per
+  object but not what counts towards it (read 2026-10-18), so 4 GB stay free for page slack, free pages
+  and the other tables, and the maintenance alarm also reads the database size (`Sql::database_size`,
+  `ctx.storage.sql.databaseSize`) and reports `event_log_size` when it passes 8,000,000,000 bytes even
+  while `log_bytes` is under budget, so an estimate that proves low is seen before the object is full. At
+  the default `webhook_text_bytes` of 16 KB an inbound event is about 18 KB, so the budget holds about
+  315,000 of them: 10,500 a day for 30 days; at 500 bytes an event it holds about 3,900,000. A workspace
+  that receives more keeps a shorter feed, and readers behind the new floor get `410 cursor_expired` with
   `details.reason = "size_limit"`.
 - **Not by holds.** Retention and the budget remove events whatever legal holds say, as the outbox does:
   an event is a copy, and the held message itself stays in the mailbox ([§11.4](#114-legal-holds)).
@@ -332,7 +375,9 @@ ID.
 One alarm with two purposes ([Design § 4, rule 5](index.md#4-durable-object-transactions)):
 
 - **`alarm:maintenance`**, daily, and at once when an append passes the size budget: delete expired
-  `stream_tokens` rows and `erased_refs` rows older than 7 days; apply the size budget; check the owners of
+  `stream_tokens` rows and `erased_refs` rows older than 7 days; apply the size budget and read the
+  database size (§2.5); finish a backfill whose `backfill_at` is 1 hour old (its rebuild job failed,
+  [§9.3](#93-rebuilding-a-log); while `backfilling` is set the purpose runs hourly); check the owners of
   the consumers against D1 (`SELECT id FROM api_keys WHERE id IN (SELECT value FROM json_each(?1)) AND
   revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?2)`) and delete the consumers whose owner key
   is not returned, closing that key's streams; write one `event_log_payload_bytes` point and one
@@ -447,7 +492,7 @@ Authorization: Bearer pmk_live_…
 |---|---|
 | `tenant_id` | Required for platform and partner keys; optional for tenant and identity keys, and then it must be their own tenant |
 | `after` | A cursor, `earliest` or `latest`. Default `earliest`. Not with `since` |
-| `since` | RFC 3339. Start with the first event appended at or after this time (`events_appended` index). Before the oldest retained event, it starts at the oldest; it is a time, not a position the client held, so it never expires. A time in the future gets `400 invalid_request` (path `since`) |
+| `since` | RFC 3339. Start with the first event appended at or after this time (`events_appended` index). Before the oldest retained event, it starts at the oldest; it is a time, not a position the client held, so it never expires, and when retention or the size budget has already removed events appended at or after it (`since` ≤ `floor_appended_at`), the page says so with `since_truncated: true`. A time in the future gets `400 invalid_request` (path `since`) |
 | `types` | Comma-separated type patterns ([§4](#4-who-sees-which-events)). Default `*` |
 | `identity_id` | One or more identity IDs, comma-separated, at most 100. Identity keys: their own identity only |
 | `limit` | 1–500, default 100 |
@@ -466,7 +511,8 @@ Authorization: Bearer pmk_live_…
   ],
   "next_cursor": "ec_eyJ2IjoxLCJ0IjoidGVuXzAxSjku…",
   "has_more": false,
-  "withheld_types": []
+  "withheld_types": [],
+  "since_truncated": false
 }
 ```
 
@@ -508,7 +554,10 @@ again. In order:
    `has_more: true` when the window held only rows the reader may not see; the client asks again at once.
 7. **Wait** when `data` is empty, `has_more` is false and `wait` > 0 ([§5.3](#53-long-poll)).
 8. **Answer** `200` with `Cache-Control: no-store`. `next_cursor` is never null and never behind an event
-   already returned.
+   already returned. `since_truncated` is `true` only on a request with `since` at or before
+   `floor_appended_at`: events appended after that time were removed by retention or the size budget
+   before the client asked, so a reader that needs them reconciles some other way, as after a `410`.
+   Erasure never sets it.
 
 ### 5.3 Long poll
 
@@ -601,7 +650,13 @@ POST /v1/event-consumers
 5. **Reads redeliver until committed.** `GET …/events` always starts at `committed_seq`, with the
    consumer's filters and the owner key's visibility of the moment. Reading twice without a commit
    returns the same events. There is no lease: one reader per consumer, and a client that wants parallel
-   readers creates several consumers with disjoint filters.
+   readers creates several consumers with disjoint filters. **To page through a backlog, commit each page.**
+   A client processes a page, commits its `next_cursor` (also for an empty page with `has_more: true`,
+   whose `next_cursor` is the end of the scan window), and reads again while `has_more` is true; a client
+   that reads again without committing gets the same page and never reaches the head. A consumer read
+   takes no `after` (decision): the server-kept position is the point of a consumer, and a client that
+   wants to hold its own position reads `GET /v1/events` with a cursor instead. Committing a page before
+   reading the next keeps delivery at least once, because the client commits only what it has processed.
 6. **Commit moves forward only.** `UPDATE consumers SET committed_seq = ?2, committed_at = ?3, updated_at =
    ?3 WHERE id = ?1 AND committed_seq < ?2 AND epoch = ?4`, after the cursor passed §3. A cursor at or below
    the committed position changes nothing and answers `200` with the consumer, so a retried commit is safe.
@@ -727,9 +782,11 @@ or drop):
   handshake. The token is spent whether or not the upgrade then succeeds.
 - **Bound to the minting key.** The stream acts with that key's scope and permissions and is revalidated
   every 60 seconds (§7.7), so a token never grants more than its key and dies with it.
-- **At most 100 unredeemed tokens per tenant**; the 101st mint gets `429 rate_limited` with
-  `details.bucket = "stream_tokens"` and `Retry-After: 60`. A suspended tenant's mint gets
-  `403 tenant_suspended`, because its streams are refused (§7.7).
+- **At most 100 live tokens per tenant** (unredeemed and not expired). The mint transaction first deletes
+  the tenant's expired rows (`DELETE FROM stream_tokens WHERE expires_at <= ?now`), then counts the rest,
+  so abandoned tokens stop counting 60 seconds after they were minted; the 101st live token gets
+  `429 rate_limited` with `details.bucket = "stream_tokens"` and `Retry-After: 60`. A suspended tenant's
+  mint gets `403 tenant_suspended`, because its streams are refused (§7.7).
 - **Never logged, echoed or put in a URL.** `Sec-WebSocket-Protocol` joins the request headers that are never
   written to logs ([Security § 12](security.md#12-logging-rules)).
 - **Intended use.** The integrator's server, which holds the API key, mints one token per browser connection
@@ -758,7 +815,7 @@ connection, the next problem closes it with `1008`.
 
 | `type` | Fields |
 |---|---|
-| `subscribed` | `connection_id`, `cursor` (the start position), `types`, `identity_ids`, `withheld_types`, `consumer_id`, `window` (`{ "events": 1000, "bytes": 8388608 }`) |
+| `subscribed` | `connection_id`, `cursor` (the start position), `types`, `identity_ids`, `withheld_types`, `consumer_id`, `window` (`{ "events": 1000, "bytes": 8388608 }`), `since_truncated` (as in §5.2, for a `since` subscription) |
 | `events` | `events`: at most 100 items and 1 MiB, in log order, each `{ "cursor", "event" }` with the envelope bytes as in §5.2; `next_cursor` |
 | `heartbeat` | `cursor` (the connection's position: the last event sent, or the last position scanned), `at` |
 | `error` | `error`: the [error envelope](../../reference/errors.md) (`code`, `message`, `retryable`, `fix`, `request_id`, `details`) |
@@ -768,7 +825,7 @@ connection, the next problem closes it with `1008`.
 C: {"type":"subscribe","after":"ec_eyJ2Ijox…","types":["message.*"]}
 S: {"type":"subscribed","connection_id":"wsc_01JA…","cursor":"ec_eyJ2Ijox…","types":["message.*"],
     "identity_ids":null,"withheld_types":["message.quarantined"],"consumer_id":null,
-    "window":{"events":1000,"bytes":8388608}}
+    "window":{"events":1000,"bytes":8388608},"since_truncated":false}
 S: {"type":"events","events":[{"cursor":"ec_…","event":{"id":"evt_01JA…","type":"message.received",…}}],
     "next_cursor":"ec_…"}
 C: {"type":"ack","cursor":"ec_…"}
@@ -783,6 +840,12 @@ S: close 4401 key_revoked
 
 - **Order.** The object sends in log order from the connection's position and never skips: backlog first,
   then each new append. A live event is never sent ahead of backlog.
+- **Never past the floor silently.** Before each read for a connection, the object compares its position
+  with `floor_seq`. A connection that retention or the size budget overtook (a slow or long-paused reader)
+  gets `error` (`cursor_expired`, with `details.reason` = `floor_reason`, `details.oldest_cursor` and, on a
+  consumer-bound connection, `details.consumer_id`) and is closed with `4410`, exactly as a `subscribe`
+  behind the floor is. Reading on from the new floor would skip the removed events without a word, which
+  §6.2 rule 7 forbids for consumers and the stream promises no differently.
 - **Window.** At most 1,000 events or 8 MiB of envelopes sent and not acknowledged. The connection keeps an
   in-flight list of at most 32 entries `(last_seq, events, bytes)`, one per `events` message; when the list
   is full, its two oldest entries merge. An acknowledgement drops the entries whose `last_seq` is at or below
@@ -885,18 +948,18 @@ connection drops without one.
 | 1000 | `normal` | The client closed the connection | – |
 | 1001 | (set by the runtime) | A deploy or a runtime update: "Code updates disconnect all WebSockets" ([Durable Objects › WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)) | Resumes after 1–5 seconds, with jitter |
 | 1006 | (seen, never sent) | The connection dropped | Resumes with backoff |
-| 1008 | `policy_violation` | A binary or non-JSON frame, more than 100 messages in 10 seconds, or more than 10 errors | Fixes the client |
-| 1009 | `message_too_big` | A client message over 16 KiB | Fixes the client |
+| 1008 | `policy_violation` | A binary or non-JSON frame, more than 100 messages in 10 seconds, or more than 10 errors | Stops and fixes the client; never reconnects on its own |
+| 1009 | `message_too_big` | A client message over 16 KiB | Stops and fixes the client; never reconnects on its own |
 | 1011 | `internal_error` | An unexpected failure in the object | Resumes with backoff |
 | 1012 | `service_restart` | The service closes connections on purpose, for a change that needs fresh connections | Resumes after 5–30 seconds, with jitter |
 | 1013 | `try_again_later` | Validation impossible for 180 seconds (D1 unavailable), or the object overloaded | Resumes after 30–60 seconds, with jitter |
-| 4400 | `bad_request`, `subscribe_timeout` | An invalid `subscribe`, or none within 60 seconds | Fixes its `subscribe` |
+| 4400 | `bad_request`, `subscribe_timeout` | An invalid `subscribe`, or none within 60 seconds | Stops and fixes its `subscribe`; never reconnects on its own |
 | 4401 | `unauthenticated`, `key_revoked`, `key_expired` | A missing, used, expired or unknown stream token; or the key was revoked, expired or deleted | Gets a new key or token; never retries with the same |
 | 4403 | `tenant_suspended`, `partner_suspended` | A suspension | Stops; a person must act |
 | 4404 | `tenant_not_found`, `identity_not_found`, `consumer_deleted` | The tenant is being erased, the identity key's identity is deleted, or the subscribed consumer was deleted | Stops |
 | 4408 | `slow_consumer` | The window stayed full for 60 seconds | Resumes from its last processed cursor, and sends acks |
-| 4409 | `replaced` | The key opened an 11th connection, or another connection subscribed to the same consumer | Does not reconnect from both places |
-| 4410 | `cursor_expired`, `log_reset` | The subscribe position or the consumer is behind the retained log, or the log was rebuilt | Reconciles the gap, then resumes from `details.oldest_cursor` or resets its consumer |
+| 4409 | `replaced` | The key opened an 11th connection, or another connection subscribed to the same consumer | Stops and reports it: a newer connection holds its place, and reconnecting would replace that one in turn |
+| 4410 | `cursor_expired`, `log_reset` | The subscribe position or the consumer is behind the retained log, the connection fell behind it while open, or the log was rebuilt | Reconciles the gap, then resumes from `details.oldest_cursor` or resets its consumer |
 | 4429 | `too_many_connections` | Token path only: the tenant already has 100 connections | Retries after 30 seconds |
 
 ### 7.9 Hibernation and what workers-rs 0.8.7 provides
@@ -972,12 +1035,18 @@ The log is the source of truth, and the stream only sends what the log holds, in
 position. So a client:
 
 1. processes each `events` message, then persists its `next_cursor` (or sends `ack`, with a consumer);
-2. on any close except `4401`, `4403` and `4404`, reconnects with exponential backoff (1 second doubling to
-   60 seconds, ±50% jitter) and subscribes with `after` = its last processed cursor (or the latest heartbeat
-   position, if that is newer), or with its `consumer_id`;
+2. on `1001`, `1006`, `1011`, `1012`, `1013` or `4408`, and on a code this version does not know,
+   reconnects with exponential backoff (1 second doubling to 60 seconds, ±50% jitter, and at least the
+   delay §7.8 gives the code) and subscribes with `after` = its last processed cursor (or the latest
+   heartbeat position, if that is newer), or with its `consumer_id`; on `4429` it retries after 30 seconds;
 3. on `4410`, reconciles the gap through the API and resumes from `details.oldest_cursor`, or resets its
    consumer;
-4. deduplicates on `event.id`, because events after the saved cursor may arrive again.
+4. on `4400`, `1008` or `1009` (the client is wrong), `4401`, `4403` or `4404` (the key, the tenant or the
+   consumer can no longer stream) and `4409` (another connection took its place), stops and reports the
+   close to its caller: reconnecting cannot succeed, and after `4409` it would close the newer connection
+   in turn, so two clients sharing one consumer or a key's eleven connections would replace each other
+   forever;
+5. deduplicates on `event.id`, because events after the saved cursor may arrive again.
 
 Events appended while the client was away wait in the log; nothing between the saved cursor and the
 reconnect is lost.
@@ -992,7 +1061,7 @@ reconnect is lost.
 | Two creates of one consumer name | One object transaction checks the name, the filters, the owner and the cap of 20, then inserts: exactly one consumer, and `422` only when 20 exist |
 | Concurrent commits, or a commit racing a consumer-bound stream's ack | Both are `committed_seq < ?new` updates, so the position only moves forward |
 | A commit sent before a reset and arriving after it | It can move the position forward again; a client resets and commits from one place, in order |
-| Two connections on one consumer | The newer one wins; the older is closed with `4409` |
+| Two connections on one consumer | The newer one wins; the older is closed with `4409` and does not reconnect (§7.10), so the two never replace each other in a loop |
 | A stream token used twice at once | `DELETE … RETURNING` in the object: one handshake redeems it, the other gets `4401` |
 | A retried `POST …/commit` or `…/reset` | Commit is idempotent by position; reset sets an explicit position; `Idempotency-Key` is optional on both |
 | A retried `POST /v1/event-consumers` | Idempotent by name, owner and filters (§6.2 rule 2) |
@@ -1036,20 +1105,33 @@ A tenant's log is derived data. If it must be rebuilt (the object is damaged, or
 to backfill a tenant's events from before M30), a platform key starts the job `event_log_rebuild`
 (`POST /v1/platform/jobs` with `{ "kind": "event_log_rebuild", "tenant_id": … }`, `platform:ops`):
 
-1. `reset`: `EventsRequest::Reset` writes a new `epoch` and `cursor_secret`, deletes every `events` and
-   `stream_tokens` row, sets `head_seq`, `floor_seq` and `payload_bytes` to 0, and marks every consumer
-   `reset_required` (its `epoch` no longer matches). Every stream is closed with `4410` (`log_reset`), and
-   every old cursor now gets `410 cursor_expired` with `details.reason = "log_reset"`.
+1. `reset`: `EventsRequest::Reset` writes a new `epoch` and `cursor_secret`, deletes every `events`,
+   `event_messages`, `staged_appends` and `stream_tokens` row, sets `head_seq`, `floor_seq`,
+   `floor_appended_at`, `payload_bytes` and `log_bytes` to 0, sets `backfilling = '1'`, and marks every
+   consumer `reset_required` (its `epoch` no longer matches). Every stream is closed with `4410`
+   (`log_reset`), and every old cursor now gets `410 cursor_expired` with `details.reason = "log_reset"`.
 2. `backfill`: pages the tenant's `event_index` rows still inside `retention.events_days`, oldest
-   `occurred_at` first, reads each payload from its owner (`GetEvents`, or `payload_json` for platform
-   events), skips what §2.4 skips, and appends in that order with `appended_at = occurred_at` (kept
-   non-decreasing), so retention removes backfilled events on time. The step's cursor is the last
-   `(occurred_at, id)` appended.
-3. `receipt`: counts in `jobs.result_json` (`appended`, `skipped` by reason).
+   `(occurred_at, id)` first, reads each payload from its owner (`GetEvents`, or `payload_json` for platform
+   events), skips what §2.4 skips, and appends in that order through `Append { backfill: true }`, with
+   `appended_at = occurred_at` (non-decreasing, because the pages are in that order), so retention removes
+   each backfilled event on the day its outbox copy goes. The step's cursor is the last `(occurred_at, id)`
+   appended; the step ends when a page comes back empty.
+3. `finish`: `EventsRequest::FinishBackfill` appends the `staged_appends` rows in `staged_at` order, with
+   `appended_at = max(staged_at, last_appended_at)`, by the same `INSERT OR IGNORE` (an event the backfill
+   already reached keeps its backfilled position), in transactions of 2,000, deleting each staged row as it
+   goes and clearing `backfilling` with the last one.
+4. `receipt`: counts in `jobs.result_json` (`appended`, `staged`, `skipped` by reason).
 
-Events dispatched while the job runs are appended by the consumer as usual and deduplicated by ID if the
-backfill reaches them too. The log is never restored with point-in-time recovery; it is rebuilt
-([§11.5](#115-restores)).
+**Live events during a rebuild.** While `backfilling` is set, the consumer's appends are staged, not
+positioned (§2.4): the object answers them at once, so webhooks are not delayed, and nothing is pushed to
+streams or returned by reads until `finish`. Appending them at once instead would give them positions and
+`appended_at = now` among the backfilled rows, and every later backfilled row would then have to take
+`now` too, to keep `appended_at` non-decreasing, and outlive its outbox copy by up to `events_days`.
+Staged rows count in `log_bytes`, and erasure requests and the probe treat them as rows
+([§11.3](#113-erasure)). A rebuild job that fails leaves `backfilling` set; the maintenance alarm runs
+`FinishBackfill` itself once `backfill_at` is 1 hour old, so a failed job never hides live
+events for longer, and the operator restarts the rebuild ([Job failed](observability.md#job-failed)). The
+log is never restored with point-in-time recovery; it is rebuilt ([§11.5](#115-restores)).
 
 ## 10. Security
 
@@ -1108,33 +1190,64 @@ The same personal data as the owners' outboxes: message summaries (addresses, na
 triage, and up to `policy.webhook_text_bytes` of extracted text (at most 64 KB). Never raw MIME, attachment
 bytes or verification values. Consumers hold names and key IDs; stream tokens are hashes; `erased_refs` holds
 message and identity IDs for 7 days. Connection state lives in attachments only while the socket is open
-("If either side closes the connection, attachments are lost", WebSockets page, read 2026-10-17).
+("If either side closes the connection, attachments are lost", WebSockets page, read 2026-10-17). The log's
+copy of a message's events lives no longer than the outbox's: every path that deletes a message from its
+mailbox (erasure, `retention.message_days` and per-identity `message_hours`) deletes its log rows too
+([§11.3](#113-erasure)).
 
 ### 11.2 Retention
 
 - Events: `retention.events_days` (1–365, default 30) counted from `appended_at` (§2.5), so an event can stay
   in the log longer than in its outbox only when a dead-letter redrive appended it late, and then by at most
-  the 14 days a dead-letter item is kept. The size budget can only shorten this.
-- Stream tokens: 60 seconds; deleted on redemption or by the daily maintenance.
+  the 14 days a dead-letter item is kept; backfilled events keep `appended_at = occurred_at`
+  ([§9.3](#93-rebuilding-a-log)). The size budget can only shorten this, and so does the deletion of the
+  message an event names, by `retention.message_days` or by the identity's `message_hours`
+  ([§11.3](#113-erasure)), which can remove a `message.received` with its extracted text an hour after
+  arrival although `events_days` is 30.
+- Stream tokens: 60 seconds; deleted on redemption, by the next mint once expired, or by the daily
+  maintenance.
 - `erased_refs`: 7 days.
 - Consumers: until deleted, until their owner key is revoked or expires, or until their identity or tenant is
   erased.
 
 ### 11.3 Erasure
 
-Every scope removes the log's copies, with receipt counts:
+Every scope removes the log's copies, with receipt counts, and so do the two retention paths that delete
+messages:
 
 | Scope | In the log | Job step |
 |---|---|---|
 | Message, thread ([Privacy § 6.3](privacy.md#63-message-and-thread-scope)) | After each `EraseRows` batch, `EventsRequest::EraseMessages` with the message IDs the batch deleted: their rows are deleted and the IDs go into `erased_refs` | `erase_mailbox` |
 | Counterparty ([Privacy § 6.4](privacy.md#64-counterparty-scope-i1)) | The same, after each batch of each identity | `erase_mailboxes` |
+| Tenant message retention ([Privacy § 5.2](privacy.md#52-steps-of-a-tenant-retention-job), step 3) | `EraseMessages` with the IDs each `EraseRows` batch deleted, sent by the mailbox (below) | `messages` |
+| Per-identity expiry ([Privacy § 5.5](privacy.md#55-per-identity-expiry)) | The same, after each expiry slice commits; the mailbox's own alarm runs it, with no job | the mailbox's `expiry` alarm |
 | Identity ([Privacy § 6.5](privacy.md#65-identity-scope-fr-idn-4)) | `EventsRequest::EraseIdentity { identity_id, keep_thread_ids }`, with the held threads of the receipt: deletes the identity's rows except those whose `thread_id` is held, deletes the consumers its keys own, closes its keys' streams with `4404`, and puts the identity ID into `erased_refs`. The identity's keys were already revoked in step `init`, so revalidation has closed their streams within 60 seconds | `scrub_control_plane` |
 | Tenant ([Privacy § 6.6](privacy.md#66-tenant-scope)) | `stop_routing` sends `CloseStreams { All, 4404 }`, and from then on the consumer appends nothing (the tenant is `erasing`) and the feed answers `404`. `delete_d1_rows`, beside the `TenantQuota` and `Notifier` deletes, sends `EventsRequest::Erase`: count the rows, `delete_all()`, then `meta.erased = '1'` | `stop_routing`, `delete_d1_rows` |
 
-- **Receipt.** `log_events_deleted` counts the log rows deleted. The probe gains `log_hits`: after the erase,
-  `EventsRequest::Probe` counts the rows still found for the erased message IDs (or the identity, outside held
-  threads), and must report 0 ([Privacy § 6.7](privacy.md#67-probes-f6)). `EraseRows` reports the message IDs
-  it deleted; it already writes them to the mailbox's `erased_ids`.
+- **The mailbox sends what every `EraseRows` deleted.** Every `EraseRows` commit, in every mode, writes the
+  deleted message IDs to the mailbox's `erased_ids` with `log_erased_at = NULL` and sets the mailbox alarm
+  purpose `alarm:log_erase = now`. That purpose sends `EraseMessages` for up to 1,000 pending IDs, oldest
+  first, to the tenant's `TenantEvents` (its ID read once from `tenants.events_do_id` and kept in mailbox
+  `meta.events_do_id`), then sets `log_erased_at` on them; a failure backs off from 30 seconds doubling to
+  5 minutes, and the daily maintenance re-arms the purpose while IDs are pending. `tenant_not_found` (the
+  whole log is being erased) also marks them sent; `not_initialised` is handled as every caller handles it
+  (§2.1). The 7-day `erased_ids` cleanup skips rows still pending. This is how tenant message retention and
+  per-identity expiry reach the log, and it repeats an erasure job's own call when that call was lost
+  after `EraseRows` committed; a repeat deletes nothing more. Erasure jobs still send `EraseMessages`
+  themselves after each batch, so that their probe sees the result at once.
+- **Events that list several messages.** `EraseMessages` finds rows by `events.message_id` and by
+  `event_messages`. In a `message.labels_changed` row it removes the erased entries from `data.messages`
+  with `json_remove`, as `EraseRows` does in the outbox ([Parity additions § 4.3](parity-additions.md#43-rules),
+  rule 8), lowers `payload_bytes` and `log_bytes`, and deletes the row when no entry is left; a label
+  event names only IDs and labels, so nothing of the erased message stays in a trimmed row. Staged rows of a
+  rebuild in progress are erased the same way.
+- **Receipt.** `log_events_deleted` counts the log rows deleted (a trimmed label event is not counted). The
+  probe gains `log_hits`: after the erase, `EventsRequest::Probe` counts the rows still found for the erased
+  message IDs through `events.message_id`, `event_messages` and `staged_appends` (or the identity, outside
+  held threads), and must report 0 ([Privacy § 6.7](privacy.md#67-probes-f6)). `EraseRows` reports the
+  message IDs it deleted; it already writes them to the mailbox's `erased_ids`. The rows that the mailbox's
+  own calls delete are counted in `event_log_pruned_total{reason="message_deleted"}` (§16), not in a receipt:
+  the call runs after the retention step or the expiry slice has written its counts.
 - **Late events.** An event of an erased message or identity still in flight in the queue is refused at append
   for 7 days by `erased_refs`; after that its outbox row is gone too, so the consumer skips it as unavailable.
   `identity.deleted`, which holds only IDs, is always appended, so tenant keys learn of the deletion.
@@ -1183,11 +1296,11 @@ the size budget instead. A test tenant's feed works the same way; a test key rea
 | Type patterns | At most 50, each at most 64 characters | Pylota Mail | `400 invalid_request` |
 | Identity filter | At most 100 identity IDs | Pylota Mail | `400 invalid_request` |
 | Retention | `retention.events_days` after the append (1–365, default 30) | Policy | Older cursors get `410 cursor_expired` |
-| Log size per tenant | 6,000,000,000 bytes of envelopes; pruned, oldest first, to 5,000,000,000 | Pylota Mail, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-17) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
+| Log size per tenant | 6,000,000,000 bytes of `log_bytes` (each event's envelope plus 1,024 bytes); pruned, oldest first, to 5,000,000,000; the database size is watched at 8,000,000,000 bytes | Pylota Mail, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-18) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
 | Durable consumers | 20 per tenant | Pylota Mail: the same as webhook endpoints per tenant; each is a polling client, and Pylota needs one per tenant plus a few local tools (AgentMail allows 10 per scope) | `422 event_consumer_limit_reached` |
 | Consumer name | 1–64 characters of `[a-z0-9._-]`, starting with a letter or digit | Pylota Mail | `400 invalid_request` |
 | Stream connections | 100 per tenant; 10 per key (the oldest is replaced) | Pylota Mail; Cloudflare allows 32,768 per object ([Durable Object State](https://developers.cloudflare.com/durable-objects/api/state/), read 2026-10-17) | `429 rate_limited` (`streams`) or close `4429`; `4409` for the replaced connection |
-| Stream token | Single use, 60 seconds, at most 100 unredeemed per tenant | Pylota Mail | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
+| Stream token | Single use, 60 seconds, at most 100 live (unredeemed and unexpired) per tenant | Pylota Mail | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
 | Client message | At most 16 KiB; at most 100 per 10 seconds | Pylota Mail; Cloudflare's received-message limit is 32 MiB ([Workers WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/), read 2026-10-17) | Close `1009`, or `1008` for the rate |
 | Server message | At most 100 events and 1 MiB | Pylota Mail | – |
 | Acknowledgement window | 1,000 events or 8 MiB sent and not acknowledged | Pylota Mail | Sending pauses; after 60 seconds full, close `4408` |
@@ -1214,8 +1327,8 @@ for owners and admins, read from one `EventsRequest::Stats` call per render:
   **Delete** (a `POST` form with the CSRF token; not a sensitive action, because deleting loses a position,
   never data; audit `event_consumer.delete` with `actor_user_id`).
 - **Streams:** open connections per key name, and the oldest connection's opening time.
-- **The log:** the oldest retained event's time, the envelope bytes against the size budget, and
-  `retention.events_days`.
+- **The log:** the oldest retained event's time, `log_bytes` and the database size against the size
+  budget, and `retention.events_days`.
 
 The section shows no event payloads: the inbox screens are where people read mail. The owner and admin
 permission sets gain `events:read` ([Console › Roles](console.md#roles)), so keys minted in the console may
@@ -1291,13 +1404,17 @@ pmail events stream-token [--tenant <tenant>]
   writing repeats that batch, so output is at least once. With `--consumer` the position is the consumer's,
   and no file is needed.
 - **Reconnects** follow §7.10. Exit codes ([CLI › Exit codes](../../reference/cli.md#exit-codes)): `4410` → 6,
-  printing `details.oldest_cursor` and the fix; `4401` or `4403` → 4; `4404` → 5; `4400`, `1008` or `1009` →
-  7; 10 minutes of failed reconnects → 9; Ctrl-C writes the cursor file and exits 130.
+  printing `details.oldest_cursor` and the fix; `4409` → 6, printing that another connection took this
+  one's place (a second `tail` on the same consumer, or an 11th connection of the key); `4401` or `4403` →
+  4; `4404` → 5; `4400`, `1008` or `1009` → 7; 10 minutes of failed reconnects → 9; Ctrl-C writes the cursor
+  file and exits 130. A `since_truncated: true` answer prints a warning on stderr and continues.
 - `events list --all` follows `has_more` into one document; `consumers read --commit` commits the page's
-  `next_cursor` after printing it. A consumer `<name>` is resolved to its ID with one list call.
+  `next_cursor` after printing it, so repeated runs walk a backlog page by page (§6.2 rule 5). A consumer
+  `<name>` is resolved to its ID with one list call.
 - **SDK.** The Rust SDK's `events` module covers every route, and its `stream` feature adds
   `EventStream`, which implements §7.10 (reconnect with backoff, resume, acks, a ping every 30 seconds, dead
-  after 90 seconds of silence). It uses `tokio-tungstenite` `=0.30.0` with `rustls-tls-webpki-roots` (MIT,
+  after 90 seconds of silence) and ends with `EventStreamError::Closed { code, reason, error }` on the closes
+  of rule 4, `4409` included, and `EventStreamError::Gap { oldest_cursor }` on `4410`. It uses `tokio-tungstenite` `=0.30.0` with `rustls-tls-webpki-roots` (MIT,
   published 2026-07-11, Rust 1.85 or later; crates.io, read 2026-10-17), a native dependency of `sdk` only.
   The TypeScript SDK implements the same protocol on its own page ([SDKs and skills](sdk-and-skills.md)).
 
@@ -1305,10 +1422,11 @@ pmail events stream-token [--tenant <tenant>]
 
 | Metric | Kind | Labels | Emitted by |
 |---|---|---|---|
-| `event_log_append_total` | counter | result (`appended`, `duplicate`, `refused_erased`, `skipped_no_tenant`, `skipped_system`, `skipped_unavailable`, `skipped_tenant_erasing`, `skipped_too_old`) | `pm-webhooks` (`Fanout`) and the object |
+| `event_log_append_total` | counter | result (`appended`, `staged`, `duplicate`, `refused_erased`, `skipped_no_tenant`, `skipped_system`, `skipped_unavailable`, `skipped_tenant_erasing`, `skipped_too_old`) | `pm-webhooks` (`Fanout`) and the object |
 | `event_log_append_failures_total` | counter | reason (`unavailable`, `timeout`, `payload_read`) | `pm-webhooks` |
 | `event_log_lag_ms` | observation | – | The object: `appended_at − occurred_at` for each appended event, the time from the outbox commit to the log append |
-| `event_log_pruned_total` | counter | reason (`retention`, `size_limit`, `erasure`, `reset`) | The object |
+| `event_log_pruned_total` | counter | reason (`retention`, `size_limit`, `erasure`, `message_deleted`, `reset`) | The object (`message_deleted`: an `EraseMessages` sent by a mailbox's `log_erase` purpose, §11.3) |
+| `event_log_erase_failures_total` | counter | – | The mailbox: a `log_erase` call that failed and will be retried (§11.3) |
 | `event_log_payload_bytes` | observation | – | The object's daily maintenance |
 | `event_feed_reads_total` | counter | surface (`feed`, `consumer`, `mcp`), result (`ok`, `empty`, `long_poll_timeout`, or the error code) | `fetch` |
 | `event_consumer_backlog` | observation | state (`active`, `expired`, `reset_required`) | The object's daily maintenance: each consumer's `positions_behind` |
@@ -1325,7 +1443,7 @@ pmail events stream-token [--tenant <tenant>]
 |---|---|---|---|---|
 | `event_log_append_failing` | A | `event_log_append_failures_total` > 0 in each of 5 consecutive minutes: a tenant's log refuses appends, and that tenant's webhooks wait with it | page | Event log |
 | `event_log_lag` | A | The share of `event_log_lag_ms` ≤ 10,000 is below 95% over 1 hour (ticket), or the share ≤ 60,000 is below 90% over 15 minutes (page); at least 100 events in the window | ticket / page | Event log |
-| `event_log_size:{tenant_id}` | B | Reported by the object's maintenance: `payload_bytes` passed 4,200,000,000 (70% of the budget), or the size budget pruned the log in the last 24 hours | ticket | Event log |
+| `event_log_size:{tenant_id}` | B | Reported by the object's maintenance: `log_bytes` passed 4,200,000,000 (70% of the budget), the database size passed 8,000,000,000 bytes, or the size budget pruned the log in the last 24 hours | ticket | Event log |
 | `event_stream_errors` | A | `event_stream_closed_total` with code `1011` or `1013` above 50 in 5 minutes | ticket | Event log |
 
 The existing `dlq:pm-webhooks` alert is the backstop for `Fanout` messages whose append retries ran out.
@@ -1338,10 +1456,12 @@ The existing `dlq:pm-webhooks` alert is the backstop for `Fanout` messages whose
    `503 unavailable` means the object is failing; an `rpc_owner_mismatch` alert at the same time is a
    security incident ([Compromised key](observability.md#compromised-key)).
 3. Once it answers, redrive the dead-letter items (`pmail dlq redrive`): each appends once and fans out once.
-4. If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start --kind event_log_rebuild
-   --tenant <tenant>` (§9.3), and tell the tenant, or its partner, that cursors and consumers must be reset.
+4. If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start event_log_rebuild --tenant
+   <tenant>` (§9.3), and tell the tenant, or its partner, that cursors and consumers must be reset.
 5. For `event_log_size`: compare the tenant's inbound volume with its `webhook_text_bytes`. Lowering
-   `webhook_text_bytes` shrinks new events; the budget keeps pruning the oldest.
+   `webhook_text_bytes` shrinks new events; the budget keeps pruning the oldest. When the database size, not
+   `log_bytes`, raised it, the 1,024-byte row charge is too low for this log: record the ratio of database
+   size to `log_bytes` and raise the charge in `events/log.rs` before the object fills.
 6. For `event_stream_errors`: `1013` points at D1 (revalidation), `1011` at the object (read its error
    logs).
 
@@ -1381,17 +1501,21 @@ deterministic, so the job creates it idempotently on each run. `mail_webhook_eve
 
 1. Section 6, K1: add `events:read` to the permission list and to `assertPartnerKey`'s expected list.
 2. W4.7, a job `mail-event-reconcile`, every 5 minutes per tenant: `POST /v1/event-consumers?tenant_id=…`
-   with `name: "pylota-reconcile"`, the event list of §8.1 as `types` and `start: "latest"`; then
-   `GET /v1/event-consumers/{consumer_id}/events?tenant_id=…&limit=500` until `has_more` is false; insert
-   each event into `mail_webhook_events … ON CONFLICT (event_id) DO NOTHING` with `source = 'feed'`;
-   enqueue `mail-webhook-event` for the new rows; commit `next_cursor`.
+   with `name: "pylota-reconcile"`, the event list of §8.1 as `types` and `start: "latest"`; then, page by
+   page: `GET /v1/event-consumers/{consumer_id}/events?tenant_id=…&limit=500`; insert each event into
+   `mail_webhook_events … ON CONFLICT (event_id) DO NOTHING` with `source = 'feed'`; enqueue
+   `mail-webhook-event` for the new rows; commit the page's `next_cursor` (also for an empty page); read the
+   next page while `has_more` is true, at most 40 pages a run (20,000 events), leaving the rest to the next
+   run. A consumer read always starts at the committed position (§6.2 rule 5), so a loop that commits
+   only at the end reads its first page forever.
 3. §8.4: replace the "Staleness" bullet with the feed-based check above.
 4. §8.5: make consumer catch-up step 3; keep webhook replay as an alternative; run the reconcile script only
    after `410 cursor_expired`.
 5. W7.1: `mail_webhook_events.source text NOT NULL DEFAULT 'webhook' CHECK (source IN ('webhook','feed'))`.
 6. Tests: a contract test that K1 holds `events:read`; a reconcile test where the webhook and the feed
-   deliver the same event and one row results; a live test that disables the endpoint, receives mail, and
-   finds it reconciled within one run.
+   deliver the same event and one row results; a reconcile test with a backlog of 1,200 events, and one
+   whose filters skip a whole scan window, that each reach the head in one run; a live test that disables
+   the endpoint, receives mail, and finds it reconciled within one run.
 7. G0: confirm that the pinned `openapi.yaml` contains the event-feed operations.
 8. Optional, later: the admin live view through stream tokens.
 
@@ -1434,7 +1558,9 @@ To add to [PRD § 6.10](../prd.md#610-events-and-webhooks), after FR-WH-5:
   consumer commands.
 - **FR-EVT-10** Message, thread, counterparty, identity and tenant erasure **must** remove the log's copies
   of erased data, consumers and streams, report `log_events_deleted` and a zero `log_hits` probe, keep the
-  events of held threads, and refuse a late append of erased data.
+  events of held threads, and refuse a late append of erased data. Message retention and per-identity expiry
+  **must** remove the log's copies of the messages they delete, including their entries in events that list
+  several messages.
 - **FR-EVT-11** The service **must** measure the time from outbox commit to log append (target: p95 at most
   10 seconds), append failures, consumers behind, stream connections and close codes, and alert when appends
   fail or lag.
@@ -1456,7 +1582,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | R5 | An event of the system identity; a deployment-level platform event with no tenant; `webhook.test` | Never appended to any log, so no key reads it from a feed; platform endpoints still receive what they received before (A15) | S | `it::events::unappendable_events_skipped` |
 | R6 | A dead-letter redrive brings an event older than the tenant's `retention.events_days` | Not appended (`skipped_too_old`); the fan-out continues | S | `it::events::unappendable_events_skipped` |
 | R7 | A burst: thousands of events in a minute for one tenant | Every event is appended once, one call per queue batch; streams receive them within their windows; nothing is dropped; the lag shows in `event_log_lag_ms` | S | `it::events::burst_no_loss` |
-| R8 | A tenant's log passes 6,000,000,000 bytes of envelopes | The maintenance alarm deletes the oldest events until 5,000,000,000, sets `floor_reason = size_limit` and reports `event_log_size`; cursors behind the new floor get `410 cursor_expired` with `details.reason = "size_limit"`; a later redrive of a pruned event is appended again at the head | S | `it::events::size_budget_prune` |
+| R8 | A tenant's log passes 6,000,000,000 bytes of `log_bytes` (each envelope plus 1,024 bytes, so many small events count their row overhead), or its database size passes 8,000,000,000 bytes | The maintenance alarm deletes the oldest events until `log_bytes` is 5,000,000,000, sets `floor_reason = size_limit` and reports `event_log_size` (for the database size alone, it reports without pruning); cursors behind the new floor get `410 cursor_expired` with `details.reason = "size_limit"`; a later redrive of a pruned event is appended again at the head | S | `it::events::size_budget_prune` |
 | R9 | A tenant created before M30 (`events_do_id = ''`), or an object whose first call was lost | The every-minute cron mints the ID; a caller that gets `not_initialised` re-reads the tenant row and sends `Init` only for an `active` or `suspended` tenant, then repeats its request | S | `it::events::lazy_init_and_cron_mint` |
 | R10 | Events of a tenant that is `erasing` or `erased`, including a late `Fanout` after the object was erased | Never appended; the feed, consumers and stream answer `404 tenant_not_found` to every key; the erased object refuses every request, `Init` included, so it never comes back | S | `it::events::erasing_tenant_has_no_feed` |
 | R11 | A request carrying another tenant's ID reaches a log object (a routing bug) | `internal_error`, `rpc_owner_mismatch`, and the deployment turns read-only | S | `it::events::owner_mismatch_refused` |
@@ -1494,7 +1620,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | R43 | A credential in the stream URL (`api_key`, `key`, `token`, `access_token`, `stream_token`) | `400 invalid_request` (`credential_in_url`) before anything is authenticated or redeemed; only the parameter's name is logged | S | `it::stream::handshake_validation` |
 | R44 | Both an `Authorization` key and a token, or neither; a token without `pylota-mail.events.v1` | `400 invalid_request` (`two_credentials`); `401 unauthenticated`; `400 invalid_request` (`subprotocol_required`). A `101` acknowledges `pylota-mail.events.v1` and never the token element | S | `it::stream::handshake_validation`, `core::events::stream_token_format` |
 | R45 | A stream token that is used twice, expired, forged, malformed, of another tenant, or minted by a key revoked since | The Worker accepts the socket itself, sends one `error` and closes with `4401`, the same for every case; nothing reaches the object | S | `it::stream::stream_token_single_use` |
-| R46 | A 101st unredeemed stream token in a tenant | `429 rate_limited`, `details.bucket = "stream_tokens"`, `Retry-After: 60` | S | `it::stream::stream_token_single_use` |
+| R46 | A 101st live (unredeemed and unexpired) stream token in a tenant; 100 tokens minted and abandoned | `429 rate_limited`, `details.bucket = "stream_tokens"`, `Retry-After: 60`; abandoned tokens stop counting once they expire, because each mint first deletes the tenant's expired rows | S | `it::stream::stream_token_single_use` |
 | R47 | A page on another site opens a WebSocket to the API host | It has no credential (the API host has no cookies): `401`, or `4401` on the token path | S | `it::stream::handshake_validation` |
 | R48 | No `subscribe` within 60 seconds; a second `subscribe`; an invalid one (bad cursor, two positions, filters with a consumer, another key's consumer); a position behind retention | Close `4400` (`subscribe_timeout`); `error` (`already_subscribed`), ignored; `error`, then close `4400`; `error`, then close `4410` | S | `it::stream::subscribe_rules` |
 | R49 | A binary or non-JSON frame; a frame over 16 KiB; more than 100 messages in 10 seconds; an unknown `type`; an 11th error; an `ack` ahead of what was sent, invalid, or behind the last | Close `1008`; close `1009`; close `1008`; `error` (`unknown_message`); close `1008`; `error` (`invalid_ack`), ignored; ignored | S | `it::stream::client_message_rules`, `core::events::stream_protocol_parse` |
@@ -1509,10 +1635,15 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | R58 | Identity erasure | The identity's log rows are deleted except those of held threads; the consumers its keys own are deleted; its keys' streams are closed; later events of the identity are refused, except `identity.deleted`, which is appended | S | `it::events::erasure_identity_scope` |
 | R59 | Tenant erasure | `stop_routing` closes every stream with `4404`; `delete_d1_rows` counts the rows, deletes the object's storage and marks it erased, so no later request or `Init` revives it | S | `it::events::erasing_tenant_has_no_feed` |
 | R60 | A legal hold on a thread whose messages have events in the log | Erasure of any scope keeps those rows; retention and the size budget still remove them when they expire, as the outbox's copies | S | `it::events::erasure_message_scopes`, `it::events::erasure_identity_scope` |
-| R61 | A restore, a re-applied erasure, or a damaged log | A re-applied erasure re-runs the log steps and reports zero when nothing came back; the log is never restored with point-in-time recovery; `event_log_rebuild` starts a new epoch (old cursors `410` with `log_reset`, consumers `reset_required`, streams closed `4410`) and backfills, in `occurred_at` order, only events whose payload the owners still hold | S | `it::events::rebuild_and_restore` |
+| R61 | A restore, a re-applied erasure, or a damaged log | A re-applied erasure re-runs the log steps and reports zero when nothing came back; the log is never restored with point-in-time recovery; `event_log_rebuild` starts a new epoch (old cursors `410` with `log_reset`, consumers `reset_required`, streams closed `4410`) and backfills, in `occurred_at` order, only events whose payload the owners still hold; live events that arrive during the backfill are staged and appended when it finishes, so backfilled events keep `appended_at = occurred_at` and leave with their outbox copies; a failed rebuild's staged events are appended by the maintenance alarm after 1 hour without progress | S | `it::events::rebuild_and_restore` |
 | R62 | What logs hold | Never envelopes, extracted text, cursors, stream tokens or the `Sec-WebSocket-Protocol` header | S | `it::logs::i5_no_content_in_logs` |
 | R63 | `mail_events` for a key without `events:read`, and a result over 96 KB | Not listed (`-32602 Unknown tool`); each `extracted_text` is cut to 4,000 characters, items are dropped from the end, and `next_cursor` is the last item kept, so no event is skipped | S | `it::mcp::events_tool` |
-| R64 | `pmail events tail` loses its connection, is interrupted, or meets an expired position | Reconnects with backoff and resumes from the cursor file (written atomically after each printed batch) or the consumer; Ctrl-C writes the file and exits 130; `4410` exits 6 with `details.oldest_cursor` | S | `cli::events::tail_resume_and_exit_codes` |
+| R64 | `pmail events tail` loses its connection, is interrupted, or meets an expired position | Reconnects with backoff and resumes from the cursor file (written atomically after each printed batch) or the consumer; Ctrl-C writes the file and exits 130; `4410` exits 6 with `details.oldest_cursor`; `4409` exits 6 without reconnecting | S | `cli::events::tail_resume_and_exit_codes` |
+| R65 | Tenant message retention (`retention.message_days`) or per-identity expiry (`message_hours`) deletes a message whose events are in the log; the mailbox's call to the log fails; an erasure job's own `EraseMessages` call is lost after `EraseRows` committed | The mailbox sends `EraseMessages` for every ID that `EraseRows` deleted, so the log rows go with the outbox rows and a `message.received` with extracted text is not readable through the feed after its message expired; the IDs enter `erased_refs`; a failed call is retried with backoff and re-armed by the daily maintenance, and pending IDs are never dropped by the 7-day cleanup; the mailbox's repeat of a lost job call deletes the rows | S | `it::events::retention_and_expiry_reach_log` |
+| R66 | A `message.labels_changed` event in the log lists an erased or expired message together with two others, or alone; a late label event listing an erased message | The erased entry is removed with `json_remove`, as in the outbox, and the row deleted when no entry is left; `probe.log_hits` finds label rows through `event_messages`; at append, a late event loses its erased entries, or is refused when none is left | S | `it::events::label_event_erasure`, `core::events::index_fields` |
+| R67 | Retention or the size budget passes an open stream's position; a `GET /v1/events` or a `subscribe` with `since` before events that were already removed | The stream gets `error` (`cursor_expired`, `details.oldest_cursor`) and close `4410`, never a silent skip; the page or the `subscribed` message carries `since_truncated: true`, which erasure never sets | S | `it::events::floor_never_skipped_silently` |
+| R68 | Two `pmail events tail --consumer X` processes, or an 11th connection of one key; a close `4400`, `1008` or `1009`; a close `1001`, `1006`, `1011`, `1012`, `1013` or `4408` | The replaced connection gets `4409` and its client stops (the CLI exits 6), so two clients never replace each other in a loop; on `4400`, `1008` and `1009` the client stops (exit 7); on the others it resumes with backoff | S | `cli::events::tail_resume_and_exit_codes`, `sdk::events::stream_close_rules` |
+| R69 | A consumer whose backlog is larger than one page, or whose filters skip a whole scan window | A client that commits each page's `next_cursor`, empty pages included, reaches the head; reading again without a commit returns the same page; Pylota's reconcile run commits per page | S | `it::events::consumer_backlog_paging` |
 
 ## 20. Tests
 
@@ -1521,7 +1652,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | `core::events::cursor_round_trip` | A cursor encodes and decodes; a changed byte, another secret, another tenant or an unknown `v` fails the tag or the parse; `earliest` and `latest` parse; the tag uses the domain-separation prefix | §3, R14 |
 | `core::events::visibility_covers_catalogue` | Every type of the event catalogue has a row; a type without one is invisible to every key; `Allowed` for each permission set matches §4's table | §4, R26 |
 | `core::events::filter_patterns` | `*`, `family.*` and exact types parse; more than 50, longer than 64 characters, `*` in the middle and other characters are refused; patterns combine with `Allowed` | §4, R20 |
-| `core::events::index_fields` | `message_id` from `data.message_id` or `data.message.id`, `thread_id` from `data.thread_id` or `data.message.thread_id`, for every builder's golden payload | §2.4, R57 |
+| `core::events::index_fields` | `message_id` from `data.message_id` or `data.message.id`, `thread_id` from `data.thread_id` or `data.message.thread_id`, and `listed_message_ids` from `data.messages[].message_id`, for every builder's golden payload | §2.4, R57, R66 |
 | `core::events::stream_protocol_parse` | Client messages parse with their rules; a binary or non-JSON frame, a frame over 16 KiB and an unknown type each give the specified outcome | §7.3, R49 |
 | `core::events::window_accounting` | The in-flight list merges at 32 entries, acknowledgements free it, a partial acknowledgement never understates what is in flight, and the window closes at 1,000 events or 8 MiB | §7.5, R50 |
 | `core::events::attachment_fits` | The largest valid connection state (50 patterns of 64 characters, 100 identities, 32 in-flight entries) serialises to under 16,384 bytes | §7.9, R52 |
@@ -1531,7 +1662,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | `it::events::append_failure_retries_then_dlq` | With the object failing, no `Deliver` is queued for that tenant, another tenant in the batch is delivered, retries follow the age schedule, the messages reach `pm-webhooks-dlq` after 13 deliveries, and a redrive appends once and delivers once | §2.4, §9.1, R3 |
 | `it::events::unappendable_events_skipped` | Unavailable payloads, the system identity's events, tenant-less platform events and events older than `events_days` are not appended and are counted by reason; their webhook behaviour is unchanged | §2.4, R4, R5, R6 |
 | `it::events::burst_no_loss` | 10,000 events for one tenant in a minute are all appended once and all reach a stream that acknowledges, in order | R7 |
-| `it::events::size_budget_prune` | Above the budget the oldest events are deleted to 5,000,000,000 bytes (with a small budget in the test build), `floor_reason` is `size_limit`, `event_log_size` is reported, and a cursor behind the floor gets `410` with `size_limit` | §2.5, R8 |
+| `it::events::size_budget_prune` | Above the budget the oldest events are deleted to 5,000,000,000 bytes of `log_bytes` (with a small budget in the test build), `floor_reason` is `size_limit`, `event_log_size` is reported, and a cursor behind the floor gets `410` with `size_limit`; 200-byte events count their 1,024-byte row charge; a database size over the watch line reports `event_log_size` while `log_bytes` is under budget | §2.5, R8 |
 | `it::events::lazy_init_and_cron_mint` | A tenant row with `events_do_id = ''` gets an ID from the cron; the first append initialises the object; `Init` is never sent for an `erasing` tenant; a second `Init` from the same owner is a no-op | §2.1, R9 |
 | `it::events::erasing_tenant_has_no_feed` | From `stop_routing`, appends are skipped, streams close with `4404` and every feed route answers `404`; after `delete_d1_rows` the object refuses every request and a late `Fanout` neither appends nor revives it; the receipt counts the rows | §11.3, R10, R59 |
 | `it::events::owner_mismatch_refused` | A request with another tenant's ID gets `internal_error`, logs `rpc_owner_mismatch` and turns the deployment read-only | R11 |
@@ -1553,9 +1684,14 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | `it::events::consumer_ownership` | Owner-only routes refuse other keys as R38 says; revoking or expiring the owner key deletes its consumers and closes its consumer stream with `4401`; deleting a consumer closes its stream with `4404` | §6.2, R38, R39, R41 |
 | `it::events::erasure_message_scopes` | Message, thread and counterparty erasure delete the log rows of the erased messages, count them, probe zero, refuse a late append of one, and keep the rows of held threads | §11.3, §11.4, R57, R60 |
 | `it::events::erasure_identity_scope` | Identity erasure deletes the identity's rows except held threads', deletes its keys' consumers, closes their streams, refuses later events except `identity.deleted` | §11.3, R58, R60 |
-| `it::events::rebuild_and_restore` | A re-applied erasure re-runs the log steps with zero counts; `event_log_rebuild` starts a new epoch, sets consumers to `reset_required`, closes streams with `4410` and backfills only payloads the owners still hold, in `occurred_at` order | §9.3, §11.5, R61 |
+| `it::events::rebuild_and_restore` | A re-applied erasure re-runs the log steps with zero counts; `event_log_rebuild` starts a new epoch, sets consumers to `reset_required`, closes streams with `4410` and backfills only payloads the owners still hold, in `occurred_at` order, with `appended_at = occurred_at`; live events during the backfill are staged, readable only after `finish`, and appended once; a job stopped mid-backfill has its staged events appended by the maintenance alarm after 1 hour | §9.3, §11.5, R61 |
+| `it::events::retention_and_expiry_reach_log` | Tenant message retention and a 1-hour `message_hours` identity delete messages whose events are in the log: the mailbox's `log_erase` purpose sends `EraseMessages`, the rows are gone and the IDs are in `erased_refs`; with the log failing, the IDs stay pending, the purpose backs off and the daily maintenance re-arms it, and the 7-day cleanup keeps them; a lost erasure-job call is repeated by the mailbox | §11.3, R65 |
+| `it::events::label_event_erasure` | A label event listing three messages with one erased keeps the other two entries; listing only the erased one, it is deleted; the probe finds label rows through `event_messages`; a late label event is trimmed or refused at append; a staged row is erased the same way | §2.4, §11.3, R66 |
+| `it::events::floor_never_skipped_silently` | A stream whose position retention passes gets `error` and `4410`, with `details.consumer_id` on a consumer-bound connection; `since` before removed events sets `since_truncated` on the page and on `subscribed`; erasure never sets it | §5.2, §7.5, R67 |
+| `it::events::consumer_backlog_paging` | A consumer with 1,200 events, and one whose filter skips a whole scan window: committing each page's `next_cursor`, empty pages included, reaches the head; reading again without a commit returns the same page | §6.2, §17, R69 |
+| `sdk::events::stream_close_rules` | The Rust SDK's `EventStream` resumes on `1001`, `1006`, `1011`, `1012`, `1013`, `4408` and an unknown code, retries `4429` after 30 seconds, and ends with an error on `4400`, `4401`, `4403`, `4404`, `4409`, `1008` and `1009` without reconnecting | §7.10, R68 |
 | `it::stream::handshake_validation` | R42, R43, R44 and R47; the `101` carries only `pylota-mail.events.v1`; a key-path refusal is an HTTP error with the envelope | §7.1, R42, R43, R44, R47 |
-| `it::stream::stream_token_single_use` | A token works once within 60 seconds; reuse, expiry, forgery, another tenant and a since-revoked key each give `error` and `4401` without reaching the object; the 101st unredeemed token gets `429` | §7.2, R45, R46 |
+| `it::stream::stream_token_single_use` | A token works once within 60 seconds; reuse, expiry, forgery, another tenant and a since-revoked key each give `error` and `4401` without reaching the object; the 101st live token gets `429`, and 100 abandoned tokens stop counting once expired | §7.2, R45, R46 |
 | `it::stream::subscribe_rules` | The cases of R48 | §7.3, R48 |
 | `it::stream::client_message_rules` | The cases of R49 | §7.3, R49 |
 | `it::stream::flow_control_slow_consumer` | A non-acknowledging client is paused at 1,000 events and closed with `4408` and a `resume_cursor` after 60 seconds; resuming loses nothing; an acknowledging client catches up on 50,000 events and is never closed | §7.5, R50 |
@@ -1566,7 +1702,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | `it::security::cross_tenant_matrix` (extended) | The ten event routes and the stream handshake are in `GET /__test/routes`; a foreign tenant, identity, consumer or stream token gets the same answer as a missing one | §10, R22 |
 | `it::logs::i5_no_content_in_logs` (extended) | The canaries of the integration run include an envelope's extracted text, a cursor, a stream token and a `Sec-WebSocket-Protocol` value; none appears in any log | §10, R62 |
 | `it::mcp::events_tool` | `mail_events` is listed only for keys with `events:read`, maps to `GET /v1/events`, cuts text and items as R63 says, and streams with `wait_seconds` | §15.1, R63 |
-| `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of §15.2 | §15.2, R64 |
+| `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of §15.2, never reconnecting after `4400`, `4409`, `1008` or `1009` | §15.2, R64, R68 |
 | `it::console::event_consumers_section` | Owners and admins see the section and can delete a consumer with the CSRF token; members and viewers get `403`; no payload appears | §14 |
 | `live::events::stream_through_deploy` | On staging: a browser-style client with a stream token and a native client with a key stream events, survive object hibernation, are disconnected by a deploy, and resume with nothing lost | §7.9, R51 |
 
@@ -1593,12 +1729,13 @@ files, each reviewed by that file's owner:
 | `consumers/webhooks.rs` (M8) | The append step before endpoint resolution, its age-based retry, and the Notifier hand-off reading step 1's payloads |
 | `handlers/keys.rs`, `handlers/tenants.rs`, `handlers/partners.rs` (M5) | The best-effort `ForgetKeys` and `CloseStreams` calls after revocation and suspension |
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `EraseMessages` after each `EraseRows` batch, `EraseIdentity`, `CloseStreams` and `Erase` in tenant erasure, `Probe`, the receipt fields; `Purge` in the tenant retention job's `events` step |
+| `mailbox/erase.rs` (M14), `mailbox/expiry.rs` (M37) | `erased_ids.log_erased_at` and the `log_erase` alarm purpose, which sends `EraseMessages` for what every `EraseRows` deleted, tenant retention and per-identity expiry included (§11.3). If M37 lands first, M30 adds the purpose and runs `it::events::retention_and_expiry_reach_log` against expiry |
 | `mcp/tools.rs` (M15) | `mail_events`, with its rows in M15's table test |
 | `crates/cli` (M16) | `pmail events …` |
 | `console/pages/webhooks.rs` (M21) | The event consumers and streams section |
 | `crons/` (M17 and M26's minting loop) | Minting `events_do_id` for rows at `''` |
 
-**Implements:** FR-EVT-1 to FR-EVT-11 and edge rows R1–R64
+**Implements:** FR-EVT-1 to FR-EVT-11 and edge rows R1–R69
 ([Event feed and live stream](design/event-feed.md)).
 
 **Tasks:**
@@ -1621,9 +1758,9 @@ files, each reviewed by that file's owner:
 
 **Acceptance:**
 
-- Edge rows R1–R64, with the tests named in the register (`core::events::*`, `it::events::*`,
+- Edge rows R1–R69, with the tests named in the register (`core::events::*`, `it::events::*`,
   `it::stream::*`, `it::mcp::events_tool`, `cli::events::tail_resume_and_exit_codes`,
-  `live::events::stream_through_deploy`).
+  `sdk::events::stream_close_rules`, `live::events::stream_through_deploy`).
 - The ten routes join `it::security::cross_tenant_matrix`; `sdk::coverage::every_operation` passes with the
   new operations.
 - M8's suites (`it::webhooks::*`) pass unchanged, and `it::webhooks::notifier_handoff_never_blocks` reads

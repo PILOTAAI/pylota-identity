@@ -78,7 +78,10 @@ Each tenant's policy sets how long data is kept ([FR-PRV-2](../project/prd.md#61
 **Per-mailbox retention.** An identity can be shorter-lived than its workspace: set
 `retention.message_hours` (1 to 8,760 hours) when you create it or with `PATCH /v1/identities/{identity_id}`,
 and each message is erased that many hours after it is stored, with its attachments, extracted text, index
-rows, vectors, events and drafts ([Parity additions § 7](../project/design/parity-additions.md#7-per-identity-message-retention-fr-prv-7)).
+rows, vectors, events (in the outbox and in the event feed's log) and drafts ([Parity additions § 7](../project/design/parity-additions.md#7-per-identity-message-retention-fr-prv-7)).
+A sent message leaves a content-free delivery record (a keyed hash of each recipient, the provider's message
+ID and the delivery status) for 30 days, so a bounce or spam complaint that arrives later still suppresses
+the address.
 When the workspace's `message_days` is also set, the shorter of the two applies. Setting or lowering it
 deletes mail sooner, so it needs `erasure:manage` as well as `identities:write`; raising it never brings
 back mail already erased. Held threads are skipped, as for every purge, and a daily audit row counts what

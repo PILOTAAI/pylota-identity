@@ -263,10 +263,11 @@ GROUP BY domain_id
 | `drafts_alarm_missed_total` | counter | – | `crons/drafts_due.rs` |
 | `draft_index_write_failures_total` | counter | – | mailbox |
 | `send_approval_required_total` | counter | level | `fetch` (step 16a refusals) |
-| `event_log_append_total` | counter | result (`appended`, `duplicate`, `refused_erased`, `skipped_no_tenant`, `skipped_system`, `skipped_unavailable`, `skipped_tenant_erasing`, `skipped_too_old`) | `pm-webhooks` (`Fanout`) and the `TenantEvents` object ([Event feed § 16](event-feed.md#16-observability)) |
+| `event_log_append_total` | counter | result (`appended`, `staged`, `duplicate`, `refused_erased`, `skipped_no_tenant`, `skipped_system`, `skipped_unavailable`, `skipped_tenant_erasing`, `skipped_too_old`) | `pm-webhooks` (`Fanout`) and the `TenantEvents` object ([Event feed § 16](event-feed.md#16-observability)) |
 | `event_log_append_failures_total` | counter | reason (`unavailable`, `timeout`, `payload_read`) | `pm-webhooks` |
 | `event_log_lag_ms` | observation | – | `TenantEvents`: `appended_at − occurred_at` for each appended event |
-| `event_log_pruned_total` | counter | reason (`retention`, `size_limit`, `erasure`, `reset`) | `TenantEvents` |
+| `event_log_pruned_total` | counter | reason (`retention`, `size_limit`, `erasure`, `message_deleted`, `reset`) | `TenantEvents` (`message_deleted`: an `EraseMessages` from a mailbox's `log_erase` purpose) |
+| `event_log_erase_failures_total` | counter | – | mailbox: a `log_erase` call that failed and will be retried ([Event feed § 11.3](event-feed.md#113-erasure)) |
 | `event_log_payload_bytes` | observation | – | `TenantEvents` daily maintenance |
 | `event_feed_reads_total` | counter | surface (`feed`, `consumer`, `mcp`), result (`ok`, `empty`, `long_poll_timeout`, or the error code) | `fetch` |
 | `event_consumer_backlog` | observation | state (`active`, `expired`, `reset_required`) | `TenantEvents` daily maintenance: each consumer's `positions_behind` |
@@ -279,7 +280,8 @@ GROUP BY domain_id
 | `screening_verdict_total` | counter | mode, status, reason | mailbox, at every final verdict ([Screening hold § 22](screening.md#22-observability)) |
 | `screening_latency_ms` | observation | mode | mailbox: `completed_at − started_at` |
 | `screening_deadline_lag_ms` | observation | – | mailbox `screen` alarm: run time − `deadline_at` for each expired row |
-| `screening_model_calls_total` | counter | outcome (`valid`, `invalid`, `error`, `timeout`) | `pm-screen` |
+| `screening_model_calls_total` | counter | outcome (`valid`, `invalid`, `error`, `timeout`, `length`) | `pm-screen` |
+| `screening_model_capped_total` | counter | scope (`tenant`, `sender`) | `pm-screen`: `CountScreenModel` answered `CapReached` |
 | `screening_model_ms` | observation | – | `pm-screen` |
 | `screening_deferred_total` | counter | cause (`rl_ai`, `quota`, `rpc`, `attachment_wait`) | `pm-screen` |
 | `screening_queue_wait_ms` | observation | – | `pm-screen`: commit time → first run |
@@ -455,9 +457,11 @@ the window (the Custom Alert "minimum event count").
 | `draft_send_interrupted` | A | `draft_send_failures_total{reason=send_interrupted}` > 0 over 1 hour | ticket | Read the logs of the claims that expired (`draft_claims_expired_total`); a repeating crash in composition is a bug |
 | `event_log_append_failing` | A | `event_log_append_failures_total` > 0 in each of 5 consecutive minutes: a tenant's log refuses appends, and that tenant's webhooks wait with it ([Event feed § 16](event-feed.md#16-observability)). The existing `dlq:pm-webhooks` alert is the backstop for `Fanout` messages whose append retries ran out | page | [Event log](#event-log) |
 | `event_log_lag` | A | The share of `event_log_lag_ms` ≤ 10,000 is below 95% over 1 hour (ticket), or the share ≤ 60,000 is below 90% over 15 minutes (page); at least 100 events in the window | ticket / page | [Event log](#event-log) |
-| `event_log_size:{tenant_id}` | B | Reported by the `TenantEvents` maintenance: `payload_bytes` passed 4,200,000,000 (70% of the budget), or the size budget pruned the log in the last 24 hours | ticket | [Event log](#event-log) |
+| `event_log_size:{tenant_id}` | B | Reported by the `TenantEvents` maintenance: `log_bytes` passed 4,200,000,000 (70% of the budget), the database size passed 8,000,000,000 bytes, or the size budget pruned the log in the last 24 hours | ticket | [Event log](#event-log) |
 | `event_stream_errors` | A | `event_stream_closed_total` with code `1011` or `1013` above 50 in 5 minutes | ticket | [Event log](#event-log) |
-| `screening_unavailable:{tenant_id}` | B | Reported by an identity's mailbox when, in the trailing hour, at least 10 of its hold-mode verdicts are `unavailable` and they are at least 20% of its verdicts (counted in mailbox meta per UTC hour) ([Screening hold § 22](screening.md#22-observability)) | page | [Screening unavailable](#screening-unavailable) |
+| `screening_unavailable:{tenant_id}` | B | Reported by an identity's mailbox when, in the current UTC hour, at least 10 of its hold-mode verdicts are `unavailable` and they are at least 20% of its verdicts (counted in mailbox meta `screen_hour`) ([Screening hold § 22](screening.md#22-observability)) | page | [Screening unavailable](#screening-unavailable) |
+| `screening_model_failing` | B | Reported by the `pm-screen` consumer when the default tenant's `TenantQuota` counts at least 20 verdicts `unavailable` for `model_unavailable` or `invalid_output` across the deployment in the current UTC hour (`CountScreenFailure`): an outage or a model regression spread over identities that each stay under the bar above | page | [Screening unavailable](#screening-unavailable) |
+| `screening_model_cap:{tenant_id}` | B | Reported by the `pm-screen` consumer when the tenant's `screen_model` count passes 80% of `triage.daily_model_cap`, and again when it reaches it | ticket | [Screening unavailable](#screening-unavailable) |
 | `screening_stuck:{identity_id}` | B | Reported by `ScreenExpire` (the backstop, 30 seconds after the deadline) when it finds the row still `pending`, or by the mailbox's daily maintenance when a `pending` row is more than 60 seconds past its deadline: the alarm did not end the hold | page | [Screening unavailable](#screening-unavailable) |
 | `screening_deadline_lag` | A | p95 of `screening_deadline_lag_ms` above 30 s over 15 minutes, with at least 20 points | ticket | [Screening unavailable](#screening-unavailable) |
 | `screening_queue_wait` | A | p95 of `screening_queue_wait_ms` above 20 s over 15 minutes, with at least 20 points | ticket | [Screening unavailable](#screening-unavailable) |
@@ -533,6 +537,7 @@ The `* * * * *` cron runs `ops::alerts::evaluate`:
      | `drafts_overdue`, `draft_index_stuck` | The drafts watchdog (`crons/drafts_due.rs`) and the identity's mailbox ([Drafts § 18](drafts.md#18-observability)) |
      | `event_log_size` | The tenant's `TenantEvents` object, from its daily maintenance ([Event feed § 16](event-feed.md#16-observability)) |
      | `screening_unavailable`, `screening_stuck` | The identity's mailbox (verdict counts per hour; the daily maintenance and ScreenExpire) |
+     | `screening_model_failing`, `screening_model_cap` | The `pm-screen` consumer, from the answers of `CountScreenFailure` (default tenant) and `CountScreenModel` |
      | `upload_object_missing` | The identity's mailbox, when it expires an upload whose object is missing and no restore freeze is in effect ([Uploads § 14](uploads.md#14-observability)) |
      | `retention_expiry_overdue` | The identity's mailbox, from its expiry run or its daily maintenance ([Parity additions § 11](parity-additions.md#11-observability)) |
 2. Read the current state: for each alert key, the latest `audit_log` row with
@@ -840,7 +845,7 @@ wraps it as `pmail dlq list` and `pmail dlq redrive` ([CLI and setup](cli.md)).
 | [Automatic containment](#automatic-containment) | `containment:{rule}` |
 | [Drafts overdue](#drafts-overdue) | `drafts_overdue` |
 | [Event log](#event-log) | `event_log_append_failing`, `event_log_lag`, `event_log_size`, `event_stream_errors` |
-| [Screening unavailable](#screening-unavailable) | `screening_unavailable`, `screening_stuck`, `screening_deadline_lag`, `screening_queue_wait`, `screening_suspect_spike` |
+| [Screening unavailable](#screening-unavailable) | `screening_unavailable`, `screening_model_failing`, `screening_model_cap`, `screening_stuck`, `screening_deadline_lag`, `screening_queue_wait`, `screening_suspect_spike` |
 | [Agent sign-up abuse](#agent-sign-up-abuse) | `agent_signup_spike`, `agent_signup_cap_80`, `containment:agent_signup_off` |
 | [Restore from PITR](#restore-from-pitr) | Data corruption, a bad migration, `inbound_lost` |
 
@@ -1160,11 +1165,13 @@ incident with the alert key, the times, the commands run and any follow-up.
 2. **Mitigate.**
    - Once the object answers, redrive the dead-letter items (`pmail dlq redrive`): each appends once and fans
      out once.
-   - If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start --kind event_log_rebuild
+   - If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start event_log_rebuild
      --tenant <tenant>` ([Event feed § 9.3](event-feed.md#93-rebuilding-a-log)), and tell the tenant, or its
      partner, that cursors and consumers must be reset.
    - For `event_log_size`: compare the tenant's inbound volume with its `webhook_text_bytes`. Lowering
-     `webhook_text_bytes` shrinks new events; the budget keeps pruning the oldest.
+     `webhook_text_bytes` shrinks new events; the budget keeps pruning the oldest. When the database size,
+     not `log_bytes`, raised it, the 1,024-byte row charge is too low for this log: record the ratio of
+     database size to `log_bytes` and raise the charge before the object fills.
    - For `event_stream_errors`: `1013` points at D1 (revalidation), `1011` at the object (read its error
      logs).
 3. **Verify.** Appends succeed, the lag is back under 10 seconds, and the alert resolved.
@@ -1176,10 +1183,16 @@ incident with the alert key, the times, the commands run and any follow-up.
 1. **Diagnose.** Read the reasons in `screening_verdict_total` (model errors, `ai_rate_limited`, `model_cap`,
    `deadline_exceeded`) and the queue wait (`screening_queue_wait_ms`).
 2. **Mitigate.**
-   - For a Workers AI outage, tell affected tenants (their held mail is safe and releasable) and, where a
-     tenant asks, switch its `screening.on_unavailable` to `deliver` with a platform or partner key until the
-     outage ends, then back.
-   - For `model_cap`, review the tenant's volume and `triage.daily_model_cap`.
+   - For a Workers AI outage (`screening_model_failing`, or many `model_unavailable` reasons), tell affected
+     tenants (their held mail is safe and releasable) and, where a tenant asks, switch its
+     `screening.on_unavailable` to `deliver` with a platform or partner key until the outage ends, then back.
+   - For `model_cap` or `screening_model_cap`, never switch to `deliver`: it does not apply to `model_cap`
+     holds, and a flood that drained the cap may be meant to come before steering mail. Find the sender keys
+     that spent it (`screening_model_capped_total{scope}`, the tenant's inbound volume), block them with a
+     receive-block entry, or raise `triage.daily_model_cap` with a platform or partner key when the volume is
+     legitimate.
+   - For `invalid_output` across tenants, suspect a model change: check `PM_SCREEN_MODEL` and
+     `screening_model_calls_total{outcome="length"}`.
    - For `screening_stuck`, the backstop has already expired the row, so no mail is waiting. A repeated
      condition for one identity means its mailbox's `screen` alarm purpose keeps failing: read the Worker's
      error logs for that `identity_id` and fix the handler, while the backstop, the next write to the mailbox
@@ -1355,7 +1368,7 @@ drill.
 | `it::ops::domain_rate_state_alerts` | `RecordOutcome` with `domain_id` keeps hourly per-domain counters; 2 bounces in 51 outcomes within an hour fire `bounce_rate:{tenant_id}:{domain_id}` and 1 complaint in 200 outcomes within 24 hours fires `complaint_rate:{tenant_id}:{domain_id}`, for two domains of one tenant independently, with no Custom Alert; outcomes of the system identity are not counted | section 5.3 |
 | `it::ops::platform_status` | `GET /v1/platform/status` with a platform key holding `audit:read` returns the freeze flag, the switches, `alert_email`, the firing alerts, the master-key slots with `remaining`, `activated_at` and `resealed_at`, and the capacity figures; a partner key gets `403` | section 5.5 |
 | `it::events::append_failure_retries_then_dlq` ([Event feed § 20](event-feed.md#20-tests)) | With the object failing, no `Deliver` is queued for that tenant, another tenant in the batch is delivered, retries follow the age schedule, the messages reach `pm-webhooks-dlq` after 13 deliveries, and a redrive appends once and delivers once; `event_log_append_failing` fires | [R3](../edge-cases.md), section 5.3 |
-| `it::events::size_budget_prune` | Above the budget the oldest events are deleted to 5,000,000,000 bytes (with a small budget in the test build), `floor_reason` is `size_limit`, `event_log_size` is reported, and a cursor behind the floor gets `410` with `size_limit` | [R8](../edge-cases.md), section 5.3 |
+| `it::events::size_budget_prune` | Above the budget the oldest events are deleted to 5,000,000,000 bytes of `log_bytes` (with a small budget in the test build), `floor_reason` is `size_limit`, `event_log_size` is reported, and a cursor behind the floor gets `410` with `size_limit`; a database size over the watch line reports `event_log_size` while `log_bytes` is under budget | [R8](../edge-cases.md), section 5.3 |
 | `it::uploads::q100_restore_object_missing` ([Uploads](uploads.md)) | A `ready` upload with its object removed counts `uploads_expired_total{reason=object_missing}`, and the evaluator fires `upload_object_missing` only when no freeze is set | [Q100](../edge-cases.md), section 5.3 |
 | `it::signup::platform_listing_and_status` ([Agent self-sign-up](agent-signup.md)) | `GET /v1/platform/status` and `pmail doctor` report the agent sign-up state; `agent_signup_spike` fires on a fixture of audit rows | FR-ASU-15, section 5.3 |
 | `it::retention::z56_dependency_failure` ([Parity additions § 15](parity-additions.md#15-tests)) | Back-off, kept rows, `retention_expiry_errors_total` and the `retention_expiry_overdue` alert | [Z56](../edge-cases.md), section 5.3 |

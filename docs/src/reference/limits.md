@@ -85,7 +85,7 @@ Applies to domains connected with `smtp_relay`.
 | Active API keys | 100 tenant and identity keys per tenant, 10 partner keys per partner; revoked and expired keys do not count (`422 key_limit_reached`). Platform keys are not capped |
 | Search per key | 120 per minute |
 | Agentic search per key | 20 per minute. Tenant daily cap 500 by default, counted once per validated request |
-| Workers AI per tenant (`RL_AI`, `RL_EMBED`) | 60 text-generation calls (triage, agentic planning and answers) and 600 embedding requests a minute; the account's limits, shared by every tenant, are 300 and 3,000 a minute ([Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/), read 2026-10-10). Triage and embedding jobs over the share wait and retry; interactive search degrades ([F16](../project/edge-cases.md)) |
+| Workers AI per tenant (`RL_AI`, `RL_EMBED`) | 60 text-generation calls (triage, agentic planning and answers), 60 more for screening's classifier (`RL_AI` under `screen:{tenant_id}`), and 600 embedding requests a minute; the account's limits, shared by every tenant, are 300 and 3,000 a minute ([Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/), read 2026-10-10; 300 confirmed 2026-10-18). Triage and embedding jobs over the share wait and retry; interactive search degrades; screening defers until its deadline ([F16](../project/edge-cases.md)) |
 | Model-backed triage per tenant | 2,000 a day by default (`triage.daily_model_cap`); then rules-only until local midnight |
 | Sends per identity | 120 per minute. Daily caps from policy |
 | Signing per identity (`RL_SIGN`): agent assertions and signed HTTP requests together | 600 per minute. Not counted against any plan allowance |
@@ -164,12 +164,16 @@ From [Drafts, approvals and scheduled send](../project/design/drafts.md).
 
 ## Screening
 
-From [Screening hold](../project/design/screening.md#19-billing-and-limits).
+From [Screening hold](../project/design/screening.md#19-billing-and-limits), which also lists the internal
+bounds (attachment wait, deterministic scan input, model input, the `pm-screen` queue settings) that callers
+never meet directly.
 
 | Limit | Value |
 |---|---|
 | Deadline | 30–900 seconds, default 120 (`screening.deadline_seconds`) |
-| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage |
+| Model calls per day | `triage.daily_model_cap` (default 2,000), counted separately from triage; one sender key (an authenticated organisational domain, or all unauthenticated mail) at most a tenth of it. A reached cap holds the message as `screening_unavailable` whatever `screening.on_unavailable` says |
+| Model call | 10-second timeout; no call starts with under 12 seconds left before the deadline; one immediate retry for invalid output; `max_tokens` 2,048 |
+| Text-generation rate | `RL_AI` under `screen:{tenant_id}`: 60 a minute per tenant, apart from triage and agentic search |
 | Classifier input | 6,000 estimated tokens; the deterministic scan covers the whole stored text, so size never makes a verdict unavailable |
 | Signals per record | 32 |
 | Feedback per message | 20; the next gets `422 feedback_limit_reached` |
@@ -357,11 +361,11 @@ and streams are never metered: no `402 billing_limit`, on any plan.
 | Type patterns | At most 50, each at most 64 characters | Pylota Mail | `400 invalid_request` |
 | Identity filter | At most 100 identity IDs | Pylota Mail | `400 invalid_request` |
 | Retention | `retention.events_days` after the append (1–365, default 30) | Policy | Older cursors get `410 cursor_expired` |
-| Log size per tenant | 6,000,000,000 bytes of envelopes; pruned, oldest first, to 5,000,000,000 | Pylota Mail, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-17) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
+| Log size per tenant | 6,000,000,000 bytes of `log_bytes` (each event's envelope plus 1,024 bytes); pruned, oldest first, to 5,000,000,000; the database size is watched at 8,000,000,000 bytes | Pylota Mail, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-18) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
 | Durable consumers | 20 per tenant | Pylota Mail: the same as webhook endpoints per tenant; each is a polling client, and Pylota needs one per tenant plus a few local tools (AgentMail allows 10 per scope) | `422 event_consumer_limit_reached` |
 | Consumer name | 1–64 characters of `[a-z0-9._-]`, starting with a letter or digit | Pylota Mail | `400 invalid_request` |
 | Stream connections | 100 per tenant; 10 per key (the oldest is replaced) | Pylota Mail; Cloudflare allows 32,768 per object ([Durable Object State](https://developers.cloudflare.com/durable-objects/api/state/), read 2026-10-17) | `429 rate_limited` (`streams`) or close `4429`; `4409` for the replaced connection |
-| Stream token | Single use, 60 seconds, at most 100 unredeemed per tenant | Pylota Mail | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
+| Stream token | Single use, 60 seconds, at most 100 live (unredeemed and unexpired) per tenant | Pylota Mail | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
 | Client message | At most 16 KiB; at most 100 per 10 seconds | Pylota Mail; Cloudflare's received-message limit is 32 MiB ([Workers WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/), read 2026-10-17) | Close `1009`, or `1008` for the rate |
 | Server message | At most 100 events and 1 MiB | Pylota Mail | – |
 | Acknowledgement window | 1,000 events or 8 MiB sent and not acknowledged | Pylota Mail | Sending pauses; after 60 seconds full, close `4408` |
