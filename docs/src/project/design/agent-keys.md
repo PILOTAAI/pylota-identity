@@ -7,7 +7,7 @@ a website can tell which agent made a request and that it came through this depl
 | | |
 |---|---|
 | Requirements | FR-IDN-6 to FR-IDN-9 ([PRD](../prd.md)) |
-| Edge cases | [O1–O13](../edge-cases.md) |
+| Edge cases | [O1–O13](../edge-cases.md), [O27](../edge-cases.md), [O28](../edge-cases.md) |
 | Code | `crates/core/src/{jwk.rs, jwt.rs, httpsig.rs}`, `crates/worker/src/handlers/{identity_keys.rs, assertions.rs, http_signatures.rs, well_known.rs}` |
 | Tables | D1 `identity_keys`, `key_tombstones`, `signing_keys` (purpose `web_bot_auth`) ([Data model](data-model.md)) |
 | Crate | `ed25519-dalek =3.0.0` (the version `mail-auth =0.13.3` already depends on through its `rust-crypto` feature, read from the crates.io sparse index on 2026-10-09), declared with `default-features = false, features = ["zeroize"]`, plus `zeroize =1.9.0` for the unsealed seed buffer. `mail-auth` 0.13.3 depends on `ed25519-dalek` with its default features (`fast`, `zeroize`), and Cargo unifies features, so the `fast` precomputed tables are in the Worker bundle either way; spike S4 measures the bundle with them ([Rust workspace](rust-workspace.md#3-workspace-dependencies)) |
@@ -17,7 +17,7 @@ a website can tell which agent made a request and that it came through this depl
 
 | Use | Mechanism | Verified by |
 |---|---|---|
-| An agent signs up to, or calls, a third-party service and proves "I am `bookings.brightwell@pylotamail.com`, an agent of workspace Brightwell, with an accountable human" | **Agent assertion**: a short-lived JWT signed with the identity's own Ed25519 key | The service fetches the identity's JWKS and checks the signature, audience and expiry ([§4](#4-agent-assertions)) |
+| An agent signs up to, or calls, a third-party service and proves "I am `bookings.brightwell@pylotamail.com`, an agent served by this deployment", with the workspace's own, unverified statements about its name, workspace and accountable human beside it | **Agent assertion**: a short-lived JWT signed with the identity's own Ed25519 key | The service fetches the identity's JWKS and checks the signature, audience and expiry ([§4](#4-agent-assertions)) |
 | An agent fetches web pages or calls web APIs, and the site wants to know it is a declared, accountable bot | **Signed HTTP request** (Web Bot Auth): RFC 9421 signature with a deployment key, with the agent's address in a signed `From` header | Any verifier of Web Bot Auth, including Cloudflare's verified bots when the operator has registered the directory ([§5](#5-signed-http-requests-web-bot-auth)) |
 
 Not in scope: signing email bodies (DKIM already authenticates mail), client TLS certificates, exporting a
@@ -43,6 +43,16 @@ private key, or importing a key someone else generated. Private keys never leave
   is never reused). A rotation makes a new key `active` at once and the previous one `retiring` with
   `verify_until = now + PM_IDENTITY_KEY_OVERLAP_DAYS` (default 7). A revocation
   (`POST …/keys/{kid}/revoke`) moves any key straight to `retired`, for a suspected compromise ([O3](../edge-cases.md)).
+- **Concurrent creation** ([O28](../edge-cases.md)). Two first signing requests, or a signing request and
+  `POST …/keys`, can race to create the first key. Each generates a seed and inserts an `active` row; the
+  unique index `identity_keys_one_active` lets one insert win. The loser zeroises its seed, reads the
+  winning row and uses it (a signing request signs with it; `POST …/keys` answers `200` with it), and
+  emits no event. So an identity never has two active keys, and `identity.key_created` is emitted once.
+- **After the active key is revoked** ([O28](../edge-cases.md)), the identity has no `active` key until it
+  needs one: the next signing request creates one lazily, as on first use, and emits
+  `identity.key_created`; `POST …/keys` creates one with `201`; `POST …/keys/rotate` creates one with no
+  previous key (`previous_kid: null`) and emits `identity.key_created`, not `identity.key_rotated`. The
+  revoked key is never reused: a new seed is drawn.
 - **Master-key rotation.** `pmail secrets rotate-master` re-seals `identity_keys.private_enc` and the
   `web_bot_auth` seeds like every other sealed value. Signatures and thumbprints do not change ([O8](../edge-cases.md)).
 - **Paused, suspended or deleted identities** cannot sign. The order matches sends ([Outbound › Policy
@@ -65,8 +75,10 @@ private key, or importing a key someone else generated. Private keys never leave
     "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k", "alg": "EdDSA", "use": "sig" } ] }
 ```
 
-- It lists `active` and `retiring` keys. `Cache-Control: public, max-age=300`. `Content-Type:
-  application/jwk-set+json`.
+- It lists the `active` key and the `retiring` keys whose `verify_until` is still in the future. The
+  handler applies the `verify_until > now` filter itself, so a key leaves the set at the end of its overlap
+  even before the global retention job marks it `retired`. `Cache-Control: public, max-age=300`.
+  `Content-Type: application/jwk-set+json`.
 - An unknown, deleted, paused or suspended identity gets the same `404 identity_not_found`, so the
   endpoint reveals nothing beyond what a valid assertion already names.
 - Identity IDs are ULIDs and are never derived from addresses, so the endpoint cannot be used to test
@@ -125,13 +137,26 @@ Header `{"alg":"EdDSA","typ":"agent-assertion+jwt","kid":"<thumbprint>"}`. Claim
 | `iat`, `nbf` | Now |
 | `exp` | Now + `expires_in` |
 | `jti` | A new ULID |
-| `email` | The identity's primary address |
+| `email` | The identity's **vouched address**, defined below |
 | `email_verified` | `true`: mail to that address reaches this identity |
-| `name` | The identity's display name |
-| `org` | The workspace (tenant) name |
-| `accountable_human` | `true` when the identity has an accountable owner (FR-IDN-2). The owner's name and address are never included |
+| `unverified` | An object of statements the workspace made and the deployment did not check: `name` (the identity's display name), `org` (the workspace name) and `accountable_human` (`true` when the identity has owner fields set, FR-IDN-2; the owner's name and address are never included). A verifier must not grant access on them: anyone can create a workspace with any name ([O27](../edge-cases.md) covers the verifier side) |
 | `ai_agent` | `true` |
 | `nonce`, `ext` | When given |
+
+**The vouched address** ([O29](../edge-cases.md)) is the identity's primary address when that address
+is on the platform domain, or on a tenant domain whose `state` is `healthy` or `degraded` and whose
+`inbound` is `routing` or `ses`, or `forward` with the address's `forwarding = 'ok'`. Otherwise it is the
+identity's platform address, which every identity has. So a domain that changed hands (`suspended`, [H4](../edge-cases.md)),
+a `failing` domain, a `send_only` domain whose mail never reaches the deployment, and an address whose
+forwarding check failed are never vouched for; the address returns to the claim when the domain is healthy
+again. It is read at signing time from the identity's cached domain state, the same state the send path
+uses. The window between a change of hands and its detection by the weekly ownership check
+([Identity and domains](identity-domains.md)) is not closed by this rule.
+
+Only `iss`, `sub`, `email` and `email_verified` are facts this deployment vouches for: the issuer, the
+identity, and that mail to the address reaches it. The display name, the workspace name and the owner
+fields are free text set by the workspace, so they sit under `unverified` where no verifier can mistake
+them for checked claims.
 
 Response `201`:
 
@@ -152,11 +177,16 @@ CLI as `pmail assertions verify`:
    (no `none`, no algorithm switching).
 2. `iss` must be an issuer you trust, for example `https://api.pylotamail.com`. Never fetch keys from a
    URL the token supplies.
-3. Fetch `{iss}/.well-known/jwks/{sub}.json` (cache for at most 5 minutes) and pick the key whose `kid`
-   matches. None found → reject.
-4. Verify the Ed25519 signature over the JWS signing input.
-5. `aud` must equal your own audience. Check `nbf` and `exp`, allowing 60 seconds of clock skew.
-6. Keep `jti` until `exp` and reject a repeat.
+3. `sub` must match `^idn_[0-9A-HJKMNP-TV-Z]{26}$` (an identity ID); reject anything else before building
+   a URL. The token's `sub` is not yet verified at this point, so a value such as `../../v1/links/{token}?`
+   would otherwise make the verifier fetch another path of the trusted issuer, for example a signed link
+   to a file a tenant controls, and accept it as a key set ([O27](../edge-cases.md)).
+4. Fetch `{iss}/.well-known/jwks/{sub}.json` (cache for at most 5 minutes) without following redirects: a
+   `3xx` is a failure. Accept only a `200` whose `Content-Type` media type is `application/jwk-set+json`.
+   Pick the key whose `kid` matches. None found → reject.
+5. Verify the Ed25519 signature over the JWS signing input.
+6. `aud` must equal your own audience. Check `nbf` and `exp`, allowing 60 seconds of clock skew.
+7. Keep `jti` until `exp` and reject a repeat.
 
 ## 5. Signed HTTP requests (Web Bot Auth)
 
@@ -198,8 +228,8 @@ Response `200` (nothing is created or stored):
 
 - `Signature-Agent` is a structured-field string, in double quotes, naming the deployment's origin. Its
   directory is at that origin's well-known path ([§3.2](#32-web-bot-auth-key-directory)).
-- `From` carries the identity's primary address (RFC 9110 `From`: the address of whoever is responsible
-  for the request). It is signed, so the site knows which agent made the request and how to reach its
+- `From` carries the identity's vouched address ([§4.2](#42-token); RFC 9110 `From`: the address
+  of whoever is responsible for the request). It is signed, so the site knows which agent made the request and how to reach its
   operator.
 - The signature base is built by `core::httpsig::signature_base` exactly as RFC 9421 §2.5, and signed with
   the deployment's active key. `nonce` is 64 random bytes, base64.
@@ -217,8 +247,15 @@ read 2026-10-09). Pass: `401` before registration. Fallback: signed HTTP request
   permissions): a tenant key holds it when it is in the key's list, and an identity key holds it only when
   granted, for its own identity. Platform and partner keys cannot sign as an identity: creating a platform
   or partner key with `identities:sign` is refused with `400 invalid_request` and `details.reason =
-  "permission_not_allowed_for_level"`. In the console, the owner's and admins' session principals hold it,
-  so they can create keys that carry it.
+  "permission_not_allowed_for_level"`.
+- **Who can grant it.** A key that holds `identities:sign` can grant it to a key it mints, like any
+  permission. A platform or partner key can grant it to the tenant and identity keys it mints without
+  holding it: the one exception to the subset rule ([Security §4.6](security.md#46-creating-keys-fr-key-1),
+  FR-KEY-1), recorded in the `key.create` audit row as `details.granted_without_holding`. Without it,
+  only console sessions could produce a signing key: the integration harness (which starts from a
+  platform key), a deployment without the console, and a partner such as Pylota, whose agents sign as
+  their operators' identities, would have none. In the console, the owner's and admins' session
+  principals hold it, so they can create keys that carry it.
 - Console: owners and admins create, rotate and revoke identity keys on the identity page (sensitive
   actions: re-authentication and an audit row, `identity_key.create`, `identity_key.rotate` or
   `identity_key.revoke`; the API writes the same audit actions). Everyone in the workspace can see the key
@@ -247,7 +284,9 @@ endpoints. CLI: `pmail identity-keys list|create|rotate|revoke`, `pmail assertio
 
 Events: `identity.key_created`, `identity.key_rotated` and `identity.key_revoked`, each with `identity_id`
 and `kid` (`identity.key_rotated` also carries `previous_kid`). They are identity events, written after
-the D1 change through the identity's mailbox like the other `identity.*` events. Errors: the new
+the D1 change through the identity's mailbox like the other `identity.*` events: the D1 batch also writes
+an `rpc_intents` row, so a lost `EmitEvent` is re-sent with the same event ID
+([Design conventions § 9](index.md#9-durable-object-calls-after-a-d1-change)). Errors: the new
 `web_bot_auth_disabled` (422) and `policy_denied` (403); `key_not_found` (404), the existing code for a
 missing key, also covers an unknown `kid` and the directory while it is off; plus the existing
 `tenant_suspended` (checked first, before `identity_paused`), `identity_not_found`, `identity_paused`,
@@ -301,8 +340,8 @@ published again.
 ## 10. Security and privacy
 
 - Private keys are generated, sealed, used and zeroised inside the Worker. No API returns them.
-- An assertion discloses the identity's address, display name and workspace name to its audience, which is
-  the point of it. It never contains the owner's personal data.
+- An assertion discloses the identity's address, and under `unverified` its display name and workspace
+  name, to its audience, which is the point of it. It never contains the owner's personal data.
 - Web Bot Auth attributes requests to the deployment and, through `From`, to an identity. An identity
   whose agent misbehaves on the web is paused like any other abuse case; pausing withdraws its JWKS and
   stops new signatures at once.
@@ -319,8 +358,10 @@ published again.
 | `it::identity_keys::lazy_create_and_rotate` | First sign creates a key; rotation keeps the old key in the JWKS until `verify_until` ([O2](../edge-cases.md)) |
 | `it::identity_keys::revoke_removes_from_jwks` | Revoked key disappears from the JWKS at once ([O3](../edge-cases.md)) |
 | `it::identity_keys::paused_withdraws_jwks` | Paused identity: `409` on sign, `404` on JWKS ([O1](../edge-cases.md)) |
+| `it::assertions::o29_vouched_address` | An identity whose primary address is on a tenant domain gets that address in `email` and in Web Bot Auth's `From` while the domain is `healthy`; after the domain moves to `suspended` or `failing`, when the domain is `send_only` (`inbound = 'forward'`) with `forwarding = 'failed'` or `'unverified'`, and when `inbound = 'none'`, both carry the platform address instead; `email_verified` is `true` in every case; a healthy domain restores the primary address ([O29](../edge-cases.md)) |
 | `it::assertions::claims_and_limits` | Audience, expiry and `ext` rules ([O4](../edge-cases.md), [O5](../edge-cases.md), [O6](../edge-cases.md)) |
-| `it::assertions::sdk_verifies` | The SDK verifier accepts a fresh token and rejects a wrong audience, an expired token, an unknown kid and `alg: none` |
+| `it::assertions::sdk_verifies` | The SDK verifier accepts a fresh token and rejects a wrong audience, an expired token, an unknown kid and `alg: none`; it rejects a `sub` that is not an identity ID (`../../v1/links/{token}?` included) without making a request, and a JWKS answer that is a redirect or not `application/jwk-set+json` ([O27](../edge-cases.md)) |
+| `it::identity_keys::o28_concurrent_first_sign_and_revoke_active` | Ten concurrent first signing requests and a `POST …/keys` leave one `active` key and one `identity.key_created` event, and every assertion verifies with it; after the active key is revoked, the next signing request creates a new key (a new kid, `identity.key_created`) and `POST …/keys/rotate` with no active key answers with `previous_kid: null`; a `retiring` key past `verify_until` is absent from the JWKS before the retention job runs ([O28](../edge-cases.md)) |
 | `it::assertions::erasure_tombstones_kid` | Identity erasure deletes keys and the kid is never published again ([O7](../edge-cases.md)) |
 | `it::secrets::rotate_master_reseals_identity_keys` | Signatures before and after a master rotation verify with the same public key ([O8](../edge-cases.md)) |
 | `it::http_signatures::disabled_and_policy` | `PM_WEB_BOT_AUTH=off` → `422`; tenant not opted in → `403` ([O9](../edge-cases.md), [O13](../edge-cases.md)) |
