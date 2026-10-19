@@ -4,6 +4,7 @@
 mod build_worker;
 mod layering;
 mod size;
+mod trace;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -16,6 +17,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("build-worker") => build_worker::run(&root),
         Some("check-layering") => layering::run(&root),
+        Some("trace") => trace::run(&root),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
