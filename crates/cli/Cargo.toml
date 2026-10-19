@@ -1,0 +1,13 @@
+[package]
+name = "pylota-mail-cli"
+description = "pmail, the Pylota Mail command-line tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+
+[[bin]]
+name = "pmail"
+path = "src/main.rs"

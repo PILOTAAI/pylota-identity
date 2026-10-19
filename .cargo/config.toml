@@ -1,0 +1,4 @@
+# No target-specific rustflags are needed: getrandom 0.4 selects its wasm_js backend through the
+# feature alone (Rust workspace § 5, rule 3).
+[alias]
+xtask = "run --locked --package xtask --"
