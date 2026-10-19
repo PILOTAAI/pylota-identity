@@ -1,0 +1,91 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/platform",
+    "crates/api-types",
+    "crates/worker",
+    "crates/sdk",
+    "crates/cli",
+    "crates/conformance",
+    "xtask",
+]
+
+[workspace.package]
+# The one place the version is set (Rust workspace § 9, `release --check-version`).
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1" # equal to rust-toolchain.toml
+license = "FSL-1.1-ALv2"
+repository = "https://github.com/PILOTAAI/pylota-mail"
+
+# Exact pins only (AGENTS.md); `cargo xtask check-layering` fails on any other form. The versions are
+# those of Rust workspace § 3; each was re-read on crates.io on 2026-10-19 (it exists, is not yanked,
+# has the features named here, and its licence is on deny.toml's allow-list).
+[workspace.dependencies]
+# Cloudflare (platform only). worker features: d1 and queue are not default and must be enabled.
+worker               = { version = "=0.8.7", features = ["d1", "queue"] }
+wasm-bindgen         = "=0.2.129"      # worker 0.8.7 requires ^0.2.129; worker-build matches the lockfile
+wasm-bindgen-futures = "=0.4.79"
+js-sys               = "=0.3.106"
+web-sys              = { version = "=0.3.106", features = ["AbortController", "AbortSignal", "Blob",
+                         "BlobPropertyBag", "Headers", "ReadableStream", "RequestRedirect"] }
+getrandom            = { version = "=0.4.3", features = ["wasm_js"] }   # platform, wasm32 target only
+
+# Mail
+mail-parser  = { version = "=0.11.9", features = ["full_encoding"] }   # encoding_rs decoders (B5)
+mail-auth    = { version = "=0.13.3", default-features = false,
+                 features = ["dns-doh", "rust-crypto", "arc"] }        # arc is needed for verify_arc
+mail-builder = { version = "=1.0.0", default-features = false }       # drops gethostname
+ammonia      = "=4.2.0"                                               # 4.2.1 is newer than two weeks
+
+# Serialisation, IDs, crypto
+serde      = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+ulid       = { version = "=3.0.0", default-features = false }         # Ulid::from_parts only; no rand
+sha2       = "=0.11.0"
+hmac       = "=0.13.0"
+base64     = "=0.23.1"
+
+# API description, MCP, native clients
+utoipa  = "=6.0.0"
+rmcp    = "=3.4.1"                     # native dev-dependency only (worker tests, conformance); see S5 and the MCP design
+clap    = { version = "=4.6.7", features = ["derive", "env"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls"] } # sdk, cli
+tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] } # sdk (feature "stream"), cli
+jmespath = "=0.5.0"                    # cli: --query
+
+# Console (worker): server-rendered HTML, no JavaScript
+maud   = "=0.27.0"                                                     # templates: console/layout.rs, pages/*.rs
+qrcode = { version = "=0.14.1", default-features = false, features = ["svg"] }   # TOTP enrolment QR code, inline SVG
+
+# Pure crates for core
+sha1      = { version = "=0.11.0", default-features = false }  # core::totp: HMAC-SHA1 with hmac 0.13 (digest 0.11)
+rsa       = { version = "=0.9.10", default-features = false }  # core::sns: SHA256withRSA verification only
+x509-cert = { version = "=0.2.5", default-features = false }   # core::sns: parse the SNS signing certificate
+whatlang  = "=0.18.0"                                           # core::triage: language of extracted_text
+chrono    = { version = "=0.4.45", default-features = false, features = ["alloc"] }  # local dates; no clock
+chrono-tz = { version = "=0.10.4", default-features = false }  # IANA zones for tenants.timezone
+
+# Container checks in core::attach (Inbound › Sniffing)
+miniz_oxide = { version = "=0.9.1", default-features = false, features = ["with-alloc"] }  # DEFLATE only, no std; also xtask's size budget
+cfb         = "=0.15.0"                                         # OLE compound-file directories
+
+# Signing keys (core::jwk, core::jwt, core::httpsig, and the SDK verifier)
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
+zeroize       = "=1.9.0"                                        # unsealed seed buffers (Zeroizing)
+
+# Native only, chosen at build time (the newest release at least two weeks old; crates.io, read 2026-10-19)
+toml = "=1.1.6" # xtask: reads Cargo.toml; 1.1.6+spec-1.1.0 published 2026-09-10 (1.1.7 and 1.1.8 are newer)
+
+[profile.release]
+opt-level     = "s"
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"
+strip         = "debuginfo"    # not "symbols": wasm-bindgen 0.2.129 then fails (Rust workspace § 4, M0 note)
+debug         = false
+incremental   = false
+
+[profile.dev]
+opt-level = 1                  # native tests parse large corpus messages

@@ -1,0 +1,164 @@
+# The pull-request gate (Rust workspace § 10, Testing § 12). Build plan M0 starts it with these jobs:
+# fmt, clippy, test, layering, wasm (with the NFR-SEC-2 size budget), deny, docs and trace. Later
+# milestones add itest, browser, fuzz-smoke, audit, openapi and skills.
+#
+# Every action is pinned to a full commit SHA, read from the action's releases on 2026-10-19. The
+# toolchain comes from rust-toolchain.toml; the tools are exact versions installed with --locked. No
+# job needs a secret.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  WORKER_BUILD_VERSION: "0.8.7" # matches worker 0.8.7 (ADR 0001)
+  CARGO_DENY_VERSION: "0.20.2" # crates.io, 2026-07-09
+  MDBOOK_VERSION: "0.5.4" # as in site.yml
+
+jobs:
+  fmt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Clippy on the wasm32-only code (platform::cf and the Worker's entry)
+        run: >-
+          cargo clippy --locked -p pylota-mail-core -p pylota-mail-platform -p pylota-mail-worker
+          --target wasm32-unknown-unknown -- -D warnings
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - run: cargo test --locked --workspace
+
+  layering:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - run: cargo xtask check-layering
+
+  wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - name: core builds for wasm32
+        run: cargo build --locked -p pylota-mail-core --target wasm32-unknown-unknown
+      - name: Install worker-build
+        run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
+      - name: Build the Worker and check the size budget (xtask::size_budget, NFR-SEC-2)
+        run: cargo xtask build-worker
+
+  deny:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
+      - name: Licences, advisories and sources over the workspace
+        run: cargo deny --locked --workspace check licenses advisories sources
+      - name: Bans over the Worker's wasm32 graph
+        run: >-
+          cargo deny --locked --manifest-path crates/worker/Cargo.toml
+          --target wasm32-unknown-unknown --exclude-dev check bans
+
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - name: Install mdBook
+        run: cargo install mdbook --version "$MDBOOK_VERSION" --locked
+      - name: Build the docs with no warnings
+        run: |
+          set -o pipefail
+          mdbook build docs 2>&1 | tee "$RUNNER_TEMP/mdbook.log"
+          if grep -E '^\s*(WARN|ERROR)' "$RUNNER_TEMP/mdbook.log"; then
+            echo "::error::mdbook build docs printed warnings"
+            exit 1
+          fi
+
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - name: Traceability over the landed milestones (MILESTONES)
+        run: cargo xtask trace

@@ -1,0 +1,9 @@
+# The exact toolchain for every build, local and CI (Rust workspace § 1). 1.99.1 was the stable
+# release on 2026-10-19 (static.rust-lang.org/dist/channel-rust-stable.toml, read that day); it fixes
+# a miscompilation of FFI `bool` returns on x86_64 in 1.99.0. worker 0.8.7 needs 1.91 or later.
+# Change it together with `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

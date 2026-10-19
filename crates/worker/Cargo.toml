@@ -1,0 +1,17 @@
+[package]
+name = "pylota-mail-worker"
+description = "The Pylota Mail Worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false # shipped inside the Worker bundle, never to crates.io
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Never `worker`, `wasm-bindgen`, `js-sys` or `web-sys` here: the entry points come from
+# platform::export_worker! (Rust workspace § 2; `cargo xtask check-layering`).
+[dependencies]
+pylota-mail-platform = { path = "../platform" }

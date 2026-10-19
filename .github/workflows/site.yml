@@ -46,6 +46,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, verified 2026-10-09
         with:
           persist-credentials: false
+      - name: Install the toolchain pinned in rust-toolchain.toml
+        run: rustup toolchain install --no-self-update
       - name: Install mdBook
         run: cargo install mdbook --version "$MDBOOK_VERSION" --locked
       - name: Build the docs into site/public/docs
