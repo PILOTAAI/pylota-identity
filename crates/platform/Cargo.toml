@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false # shipped inside the Worker bundle, never to crates.io
 
 # The Cloudflare implementations are compiled for wasm32 only (Rust workspace § 6.2). The direct
 # wasm-bindgen, wasm-bindgen-futures and js-sys pins hold the lockfile at the versions worker-build

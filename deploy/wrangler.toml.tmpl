@@ -1,0 +1,227 @@
+# The wrangler.toml that `pmail setup` renders into <dir>/wrangler.toml (Rust workspace § 8, CLI and
+# setup § 7). Values in {…} are filled by setup; a placeholder left after rendering is an error.
+# Secrets are never written here: they go up with `pmail wrangler secret put`.
+
+name               = "pylota-mail"
+main               = "build/index.js"          # worker-build 0.8.7 output
+compatibility_date = "2026-09-01"              # ≥ 2026-02-24: deleteAll() also deletes the alarm
+
+routes = [ { pattern = "{PM_API_HOST}", custom_domain = true } ]
+# plus { pattern = "{PM_CONSOLE_HOST}", custom_domain = true } when PM_CONSOLE_HOST differs from PM_API_HOST
+
+[vars]
+PM_PLATFORM_DOMAIN     = "{agents.example}"
+PM_API_HOST            = "{mail.example.com}"
+PM_JURISDICTION        = "eu"
+PM_ENV                 = "production"
+PM_CF_ACCOUNT_ID       = "{account-id}"
+PM_EMBED_MODEL         = "@cf/baai/bge-m3"
+PM_RERANK_MODEL        = "@cf/baai/bge-reranker-base"
+PM_AGENT_MODEL         = "@cf/qwen/qwen3.8-27b"
+PM_TRIAGE_MODEL        = "@cf/openai/gpt-oss-20b"
+PM_SCREEN_MODEL        = "@cf/openai/gpt-oss-20b"  # screening.md § 5.3
+PM_TRUSTED_AUTHSERV_ID = ""
+PM_DOH_RESOLVERS       = "https://cloudflare-dns.com/dns-query,https://dns.google/resolve"
+PM_LOG_LEVEL           = "info"
+PM_DEFAULT_POLICY      = "{}"
+PM_CONSOLE_HOST        = "{mail.example.com}"  # always written; the API host unless --console-host
+PM_SIGNUP              = "closed"              # always written
+PM_WEB_BOT_AUTH        = "off"                 # always written; "on" only after spike S13 passed
+PM_IDENTITY_KEY_OVERLAP_DAYS = "7"             # always written
+PM_NOTIFICATIONS       = "on"                  # always written
+# optional, written only when set: PM_AI_GATEWAY, PM_SCANNER_URL, PM_SECURITY_CONTACT, PM_DAILY_SEND_QUOTA,
+# PM_BACKUP_BUCKET, PM_BREAK_GLASS_KEY_ID, PM_MAILBOX_PROVIDER_DOMAINS, PM_DOCS_URL (validated by setup and deploy),
+#   SES (both directions): PM_SES_REGION, PM_SES_SNS_TOPIC_ARN, PM_SES_INBOUND_BUCKET, PM_SES_INBOUND_TOPIC_ARN,
+#   PM_SES_INBOUND_QUEUE_URL, PM_SES_RULE_SET; domains: PM_CF_SUBDOMAIN_SETUP,
+#   console and sign-up: PM_CONSOLE, PM_QUARANTINE_KEY_RELEASE, PM_SYSTEM_FROM, PM_TERMS_URL, PM_PRIVACY_URL,
+#   PM_DPA_URL, PM_TERMS_VERSION, PM_SIGNUP_BLOCKED_DOMAINS, PM_OAUTH_GOOGLE_CLIENT_ID, PM_OAUTH_GITHUB_CLIENT_ID,
+#   PM_AGENT_SIGNUP, PM_AGENT_SIGNUP_DAILY_CAP (agent-signup.md § 1),
+#   billing: PM_BILLING, PM_PLAN_CATALOG, PM_BILLING_GRACE_DAYS
+
+[[d1_databases]]
+binding       = "DB"
+database_name = "pylota-mail"
+database_id   = "{d1-id}"                      # jurisdiction is fixed when the database is created
+migrations_dir = "migrations/d1"               # Wrangler resolves it against this file's directory and uses
+                                               # it only for `wrangler d1 migrations` (the itest harness, whose
+                                               # file in deploy/ gets "../migrations/d1"); pmail deploy applies
+                                               # the bundle's files itself (cli.md §8.5)
+
+[[r2_buckets]]
+binding      = "BLOBS"
+bucket_name  = "pylota-mail-blobs"
+jurisdiction = "eu"                            # omitted when PM_JURISDICTION = default
+
+# only when PM_BACKUP_BUCKET is set:
+# [[r2_buckets]]
+# binding      = "BACKUP"
+# bucket_name  = "{PM_BACKUP_BUCKET}"
+# jurisdiction = "eu"
+
+[[durable_objects.bindings]]
+name = "MAILBOX"
+class_name = "IdentityMailbox"
+[[durable_objects.bindings]]
+name = "DOMAINS"
+class_name = "DomainMonitor"
+[[durable_objects.bindings]]
+name = "JOBS"
+class_name = "JobRunner"
+[[durable_objects.bindings]]
+name = "QUOTA"
+class_name = "TenantQuota"
+[[durable_objects.bindings]]
+name = "SES_CONTROL"
+class_name = "SesControl"
+[[durable_objects.bindings]]
+name = "NOTIFY"
+class_name = "Notifier"
+[[durable_objects.bindings]]
+name = "EVENTS"
+class_name = "TenantEvents"
+
+[[migrations]]
+tag                = "v1"                      # one tag until v1.0 (no deployment exists before M20)
+new_sqlite_classes = ["IdentityMailbox", "DomainMonitor", "JobRunner", "TenantQuota", "SesControl", "Notifier",
+                      "TenantEvents"]
+
+[[queues.producers]]
+binding = "Q_INBOUND"
+queue   = "pm-inbound"
+[[queues.producers]]
+binding = "Q_OUTBOUND"
+queue   = "pm-outbound"
+[[queues.producers]]
+binding = "Q_DELIVERY"                         # used only to redrive dead-lettered delivery events
+queue   = "pm-delivery-events"
+[[queues.producers]]
+binding = "Q_WEBHOOKS"
+queue   = "pm-webhooks"
+[[queues.producers]]
+binding = "Q_INDEX"
+queue   = "pm-index"
+[[queues.producers]]
+binding = "Q_SCREEN"
+queue   = "pm-screen"
+
+[[queues.consumers]]
+queue = "pm-inbound"
+max_batch_size = 10
+max_retries = 10
+dead_letter_queue = "pm-inbound-dlq"
+[[queues.consumers]]
+queue = "pm-outbound"
+max_batch_size = 10
+max_retries = 100                              # unexpected errors only; back-offs re-enqueue (outbound.md)
+dead_letter_queue = "pm-outbound-dlq"
+[[queues.consumers]]
+queue = "pm-delivery-events"
+max_batch_size = 10
+max_retries = 20                               # ≥ 11 needed by the G8 race schedule (outbound.md)
+dead_letter_queue = "pm-delivery-events-dlq"
+[[queues.consumers]]
+queue = "pm-webhooks"
+max_batch_size = 20
+max_retries = 13
+dead_letter_queue = "pm-webhooks-dlq"
+[[queues.consumers]]
+queue = "pm-index"
+max_batch_size = 10
+max_retries = 10
+dead_letter_queue = "pm-index-dlq"
+[[queues.consumers]]
+queue = "pm-screen"                            # screening.md § 5.1
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 3
+dead_letter_queue = "pm-screen-dlq"
+# One consumer per dead-letter queue. Behaviour: Observability design.
+[[queues.consumers]]
+queue = "pm-inbound-dlq"
+max_batch_size = 100
+[[queues.consumers]]
+queue = "pm-outbound-dlq"
+max_batch_size = 100
+[[queues.consumers]]
+queue = "pm-delivery-events-dlq"
+max_batch_size = 100
+[[queues.consumers]]
+queue = "pm-webhooks-dlq"
+max_batch_size = 100
+[[queues.consumers]]
+queue = "pm-index-dlq"
+max_batch_size = 100
+[[queues.consumers]]
+queue = "pm-screen-dlq"
+max_batch_size = 100
+
+[[vectorize]]
+binding    = "VECTORS"
+index_name = "pm-mail-chunks"
+# only while a re-embed runs (Search § 7.3), with PM_EMBED_MODEL_PREVIOUS in [vars]:
+# [[vectorize]]
+# binding    = "VECTORS_NEXT"
+# index_name = "{new index}"
+
+[ai]
+binding = "AI"
+
+[[send_email]]
+name = "EMAIL"                                 # no address restrictions; the Worker enforces policy
+
+[[ratelimits]]
+name = "RL_API"
+namespace_id = "{1001}"
+simple = { limit = 600, period = 60 }
+[[ratelimits]]
+name = "RL_SEARCH"
+namespace_id = "{1002}"
+simple = { limit = 120, period = 60 }
+[[ratelimits]]
+name = "RL_AGENTIC"
+namespace_id = "{1003}"
+simple = { limit = 20, period = 60 }
+[[ratelimits]]
+name = "RL_SEND"
+namespace_id = "{1004}"
+simple = { limit = 120, period = 60 }
+[[ratelimits]]
+name = "RL_SIGNIN"                             # keyed by client IP (CF-Connecting-IP); console sign-in routes
+namespace_id = "{1005}"
+simple = { limit = 10, period = 60 }
+[[ratelimits]]
+name = "RL_SIGN"                               # keyed by identity ID; assertions and HTTP signatures
+namespace_id = "{1006}"
+simple = { limit = 600, period = 60 }
+[[ratelimits]]
+name = "RL_PARTNER"                            # keyed by partner ID; tenant creation and invitations
+namespace_id = "{1007}"                        # by partner keys (Security § 10)
+simple = { limit = 10, period = 60 }
+[[ratelimits]]
+name = "RL_TENANT"                             # keyed by tenant ID; every request of a tenant or identity key
+namespace_id = "{1008}"
+simple = { limit = 1800, period = 60 }
+[[ratelimits]]
+name = "RL_PARTNER_API"                        # keyed by partner ID; every request of a partner key
+namespace_id = "{1009}"
+simple = { limit = 1800, period = 60 }
+
+[triggers]
+crons = ["* * * * *", "*/15 * * * *"]
+
+[limits]
+cpu_ms = 120000
+
+[observability]                                # as required by the Observability design
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+invocation_logs = false                        # invocation logs carry URLs and recipients (FR-PRV-6)
+
+[observability.traces]                         # preserved across re-renders (CLI and setup § 7)
+enabled = false                                # staging sets enabled = true, head_sampling_rate = 0.1
+
+[[analytics_engine_datasets]]                  # METRICS (Configuration › Bindings)
+binding = "METRICS"
+dataset = "pylota_mail_metrics"

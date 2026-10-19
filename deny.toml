@@ -1,0 +1,74 @@
+# cargo-deny 0.20.2 (Security § 11, Rust workspace § 10). CI runs two passes:
+#   cargo deny --locked --workspace check licenses advisories sources
+#   cargo deny --locked --manifest-path crates/worker/Cargo.toml --target wasm32-unknown-unknown --exclude-dev check bans
+# The second checks bans on the Worker's wasm graph only, because the native crates use tokio
+# legitimately (reqwest in sdk and cli, rmcp as a dev-dependency).
+
+[graph]
+# The targets actually built: the Worker, and the CLI's release matrix. Dependencies that none of
+# them selects are ignored.
+targets = [
+    "wasm32-unknown-unknown",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+ignore = [
+    # Marvin attack on RSA private-key operations, no patched version. The Worker holds no RSA private
+    # key: core::sns only verifies public signatures (Rust workspace § 3, `rsa` 0.9.10).
+    { id = "RUSTSEC-2023-0071", reason = "only RSA public-key verification is used (core::sns)" },
+]
+
+[licenses]
+# Compatible with FSL-1.1-ALv2 and its Apache-2.0 future licence. Anything else needs an ADR.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.93
+# The allow-list is policy; most entries appear only once later milestones add their crates.
+unused-allowed-license = "allow"
+exceptions = [
+    # The Mozilla root certificates as data (Security § 11 is the record the allow-list rule asks for).
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
+    # This repository's own crates.
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-core" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-platform" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-api-types" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-worker" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-cli" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-conformance" },
+    { allow = ["FSL-1.1-ALv2"], crate = "xtask" },
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true # path dependencies of the unpublished crates (worker, platform)
+deny = [
+    { crate = "openssl-sys", reason = "rustls only" },
+    # tokio only as worker's own dependency, which enables no features (checked by check-layering).
+    { crate = "tokio", wrappers = ["worker"], reason = "no tokio runtime in the Worker" },
+    { crate = "gethostname", reason = "panics on wasm32 (Rust workspace § 5)" },
+    { crate = "hickory-resolver", reason = "DNS goes through the platform DoH resolver" },
+    { crate = "sha2", deny-multiple-versions = true },
+    { crate = "hmac", deny-multiple-versions = true },
+    { crate = "aes-gcm", deny-multiple-versions = true },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
