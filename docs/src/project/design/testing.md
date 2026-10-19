@@ -724,6 +724,27 @@ do not fail. Once `M20` is listed (and always in `release.yml`), the full check 
 named in a design page's Tests table must exist too. So the required `trace` check is green on every
 milestone's pull request and complete at release.
 
+**How it reads the build plan** (written with M0, 2026-10-19). A milestone names what its
+`**Implements:**` paragraph and its acceptance name: every code span that is a test name (the prefixes
+of section 11.1; a trailing `*` is a wildcard) and, outside code spans, every edge-row ID or range
+(`A1–A4`). A parenthesis that names another milestone is skipped, because it assigns its tests and rows
+there (M2's "D10's test is … so it belongs to M7"). `D1` and `R2` standing alone are Cloudflare's
+database and object store; they count as rows only inside a range. A milestone whose acceptance is
+split into named blocks is listed in `MILESTONES` per block, by the block's name (`M17 Foundation`,
+then `M17 Completion` with M20); its ID alone stands for all of its blocks. Test names come from the
+source tree: the crate's prefix (`conf` for `conformance`; `it`, `live` and `browser` for the test
+directories of `crates/worker/tests/`), then the file's module path and inline modules without modules
+named `tests`, then the function; an `xtask::` name is the function alone. A test without a `Covers:`
+line does not fail (M0's per-crate placeholder tests have none). `sdks/typescript-tests.json` is a list
+of `{ "name", "covers" }` objects, or an object whose `tests` field is that list. `eval::` names are
+`pending (evaluation)` until the evaluations land (M18).
+
+**Requirements in the full check.** The PRD sets priorities per area ([PRD § 5](../prd.md#5-scope-and-priorities)),
+not per requirement ID, so `trace` cannot tell a `P0` ID from a `P1` one. Until the PRD marks them, the
+full check (with `M20` listed) requires a covering test for every `FR-*` and `NFR-*` ID the PRD defines,
+which is stricter than release criterion 1; the pull request that lists `M20` either adds per-ID
+priorities or keeps the stricter rule.
+
 It prints the traceability matrix as Markdown into the CI summary, with the milestone of each row.
 
 ### 11.3 How rows are exercised

@@ -19,14 +19,15 @@ the spike that settles it.
 
 ```text
 Cargo.toml                 workspace, [workspace.dependencies], profiles
-rust-toolchain.toml        stable channel, exact version pinned at build time (≥ 1.91, worker 0.8.7's MSRV)
+rust-toolchain.toml        stable channel, exact version pinned at build time (≥ 1.91, worker 0.8.7's MSRV;
+                           M0 pinned 1.99.1 on 2026-10-19)
 .cargo/config.toml         target-specific rustflags (none required), alias `xtask = "run -p xtask --"`
 deny.toml                  cargo-deny: licences, advisories, bans, sources
 crates/
   core/                    package pylota-mail-core        lib pylota_mail_core
-  platform/                package pylota-mail-platform    lib pylota_mail_platform
+  platform/                package pylota-mail-platform    lib pylota_mail_platform (publish = false)
   api-types/               package pylota-mail-api-types   lib pylota_mail_api_types
-  worker/                  package pylota-mail-worker      cdylib + rlib (the Worker)
+  worker/                  package pylota-mail-worker      cdylib + rlib (the Worker; publish = false)
   sdk/                     package pylota-mail             lib pylota_mail
   cli/                     package pylota-mail-cli         bin pmail
   conformance/             package pylota-mail-conformance (corpus, runners; publish = false)
@@ -81,7 +82,15 @@ All crates use edition 2024, `rust-version` equal to the toolchain pin, and
    features enabled only by dev-dependencies do not count: the output must be exactly one path, through
    `worker`, with an empty feature list. The same rule is enforced again by `cargo deny`
    ([Security › Supply chain](security.md#11-supply-chain)).
-4. Every entry in `[workspace.dependencies]` is an exact `=x.y.z` pin.
+4. Every entry in `[workspace.dependencies]` is an exact `=x.y.z` pin, and so is every registry
+   dependency of every workspace package.
+
+The same pass applies the table's other "Must not depend on" cells to normal and build dependencies
+(`api-types` may depend only on `serde`, `serde_json` and `utoipa`; `sdk` not on `core` or `platform`;
+`cli` not on `platform`; `worker` and `platform` not on `tokio` or `reqwest`). Dev-dependencies are
+exempt, because they never reach the Worker's bundle. Rules 1, 2 and 4 read
+`cargo metadata --no-deps`, so they need no network; `xtask::check_layering_rejects_worker_dep` runs
+them on a fixture workspace.
 
 **Entry points.** The `#[event(...)]` and `#[durable_object]` attribute macros of `workers-rs` 0.8.7
 expand to absolute `::worker::…` paths (read from `worker-macros/src/event.rs` and `durable_object.rs`
@@ -256,7 +265,7 @@ opt-level     = "s"
 lto           = "fat"
 codegen-units = 1
 panic         = "abort"
-strip         = "symbols"
+strip         = "debuginfo"
 debug         = false
 incremental   = false
 
@@ -280,8 +289,13 @@ opt-level = 1                  # native tests parse large corpus messages
   logs it, and the instance is re-initialised on the next request. Panic recovery was implemented in
   `workers-rs` 0.6.2 and is on by default from 0.6.5 (release notes, read 2026-10-09). Code still treats
   a panic as a bug: `core` is fuzzed, and handlers never `unwrap()` on input-derived data.
-- **`strip = "symbols"`** removes the name section. `worker-build` then runs `wasm-opt` (binaryen 132)
-  on the output.
+- **`strip = "debuginfo"`**, not `"symbols"`. M0 result (2026-10-19): with `strip = "symbols"`,
+  `wasm-bindgen` 0.2.129 fails with "externref table required for catch wrappers"; the catch wrappers
+  are the ones `worker-build` 0.8.7 asks for with `--force-enable-abort-handler`, and stripping symbols
+  leaves it unable to find the externref table. `"debuginfo"` builds, so the name section stays;
+  `worker-build` keeps it through `wasm-opt` anyway (it passes `--debuginfo`, read from its 0.8.7
+  source). `worker-build` then runs `wasm-opt` (binaryen 132) on the output. S4 measures what the
+  name section costs.
 
 ## 5. wasm32 rules
 
@@ -1065,7 +1079,7 @@ dataset = "pylota_mail_metrics"
 
 | Command | Does |
 |---|---|
-| `cargo xtask build-worker` | Runs `worker-build --release` (0.8.7) in `crates/worker` with three build-time values in the environment: `PM_BUILD_VERSION` (the workspace version, or the tag without its `v` in a release), `PM_BUILD_COMMIT` (`git rev-parse --short=7 HEAD`) and `PM_BUILD_DATE` (the UTC date of `SOURCE_DATE_EPOCH` when set, which `xtask release` sets to the tagged commit's time, otherwise today). `crates/worker/build.rs` passes them to the compiler with `cargo:rustc-env` and `cargo:rerun-if-env-changed`, defaulting to `CARGO_PKG_VERSION`, `unknown` and `1970-01-01` for native and test builds. `/health` reads `version` and `commit` from them, and `security.txt` computes `Expires` as `PM_BUILD_DATE` plus 365 days. Then measures `build/index.js` + `build/index_bg.wasm`: gzip level 9 total must be ≤ 10,485,760 bytes (NFR-SEC-2) and uncompressed ≤ 64 MiB, else it fails. Prints a size table by crate (from `twiggy`-style name-section data in a non-stripped copy) and warns above 8 MiB compressed |
+| `cargo xtask build-worker` | Runs `worker-build --release` (0.8.7) in `crates/worker` with three build-time values in the environment: `PM_BUILD_VERSION` (the workspace version, or the tag without its `v` in a release), `PM_BUILD_COMMIT` (`git rev-parse --short=7 HEAD`) and `PM_BUILD_DATE` (the UTC date of `SOURCE_DATE_EPOCH` when set, which `xtask release` sets to the tagged commit's time, otherwise today). `crates/worker/build.rs` passes them to the compiler with `cargo:rustc-env` and `cargo:rerun-if-env-changed`, defaulting to `CARGO_PKG_VERSION`, `unknown` and `1970-01-01` for native and test builds. `/health` reads `version` and `commit` from them, and `security.txt` computes `Expires` as `PM_BUILD_DATE` plus 365 days. Then measures `build/index.js` + `build/index_bg.wasm`: gzip level 9 total must be ≤ 10,485,760 bytes (NFR-SEC-2) and uncompressed ≤ 64 MiB, else it fails. Prints a size table by crate (from `twiggy`-style name-section data in a non-stripped copy) and warns above 8 MiB compressed. M0 (2026-10-19): it runs `worker-build --release --locked`, measures gzip level 9 as miniz_oxide's level-9 DEFLATE stream plus the 18 bytes of gzip framing, and prints the table by file; the table by crate comes with spike S4, which measures the bundle |
 | `cargo xtask check-layering` | The checks in section 2: rules 1, 2 and 4 from `cargo metadata`, rule 3 (tokio only under `worker`, with no features; no `gethostname` or `hickory-resolver`) from `cargo tree` on the wasm32 graph without dev-dependencies |
 | `cargo xtask itest` | Builds the Worker with the `itest-hooks` cargo feature, renders `deploy/wrangler.itest.toml` (same bindings, local resources, `PM_ENV = "local"`, test secrets, the fake-server URL and test token), starts the fake server on `127.0.0.1:8798`, applies D1 migrations with `--local --persist-to target/itest/state`, writes a throwaway TLS certificate, starts `npx --yes wrangler@4.139.0 dev --local --port 8799 --local-protocol https` with that certificate (`--persist-to target/itest/state --test-scheduled --config deploy/wrangler.itest.toml`), waits for `GET https://localhost:8799/health`, then runs `cargo test -p pylota-mail-worker --features itest-hooks --test it -- --test-threads=1` with `PM_ITEST_URL`. Email events are injected through the local email-event endpoint that `wrangler dev` provides, and cron and alarm time through its scheduled-event endpoint and the `/__test/alarm` hook. Fault injection (R2 failure, D1 failure, transport outcomes) uses `PM_ENV = "local"`-only test hooks compiled behind `itest-hooks`, never in release bundles. The full sequence and the fakes are in [Testing › What cargo xtask itest does](testing.md#61-what-cargo-xtask-itest-does). From M21 on it then runs the Playwright browser suite against the same Worker ([Testing › Browser suite](testing.md#68-browser-suite-browser)); `--suite it` or `--suite browser` runs one of the two. `--serve` stops after the harness is up and keeps the Worker and the fake server running, writing `target/itest/serve.json` (URL, CA path, platform key), for the TypeScript SDK repository's `ts::it::` tests |
 | `cargo xtask live [--manual]` | Runs `cargo test -p pylota-mail-worker --features live --test live -- --test-threads=1` against staging ([Testing › Live suite](testing.md#10-live-end-to-end-suite-live)). `--manual` runs only the tests marked manual, which pause for a person's browser steps and record the results |
@@ -1116,7 +1130,7 @@ from M32); all run nightly for 10 minutes each.
 | Job | Runs | Fails when |
 |---|---|---|
 | `fmt` | `cargo fmt --all --check` | any diff |
-| `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | any warning |
+| `clippy` | `cargo clippy --workspace --all-targets -- -D warnings`, then the same for `core`, `platform` and `worker` with `--target wasm32-unknown-unknown`, because `platform::cf` and the Worker's entry compile only there | any warning |
 | `test` | `cargo test --workspace` (native: core, api-types, platform fakes, worker logic, sdk, cli, conformance corpus) | any failure |
 | `layering` | `cargo xtask check-layering` | a forbidden dependency |
 | `wasm` | `cargo build -p pylota-mail-core --target wasm32-unknown-unknown`, then `cargo xtask build-worker` | build error or size budget exceeded |
@@ -1127,7 +1141,7 @@ from M32); all run nightly for 10 minutes each.
 | `audit` | `cargo audit` (RustSec) | any advisory |
 | `trace` | `cargo xtask trace` | a named test missing, or a `P0` requirement without a test |
 | `openapi` | `cargo xtask openapi` | a contract drift |
-| `docs` | `mdbook build docs` (mdBook 0.5.4), then `cargo xtask docs-check`, and a link check over `site/public` | a broken build or link, or an error code without its anchor |
+| `docs` | `mdbook build docs` (mdBook 0.5.4), then `cargo xtask docs-check`, and a link check over `site/public` | a `WARN` or `ERROR` line from mdBook, a broken build or link, or an error code without its anchor |
 | `skills` | The `gen-skills` check, the `xtask::skills_*` checks, `skills-ref validate`, and `claude plugin validate --strict` where it runs unsigned | any failure |
 
 CodeQL (`.github/workflows/codeql.yml`): CodeQL for Rust on every pull request and weekly. Its job is a
