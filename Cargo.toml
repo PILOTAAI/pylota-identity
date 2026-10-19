@@ -83,7 +83,7 @@ opt-level     = "s"
 lto           = "fat"
 codegen-units = 1
 panic         = "abort"
-strip         = "symbols"
+strip         = "debuginfo"    # not "symbols": wasm-bindgen 0.2.129 then fails (Rust workspace § 4, M0 note)
 debug         = false
 incremental   = false
 

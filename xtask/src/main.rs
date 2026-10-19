@@ -1,7 +1,9 @@
 //! `cargo xtask <command>` (Rust workspace § 9). M0 has `build-worker`, `check-layering` and `trace`.
 #![forbid(unsafe_code)]
 
+mod build_worker;
 mod layering;
+mod size;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -12,6 +14,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let root = workspace_root();
     let result = match args.first().map(String::as_str) {
+        Some("build-worker") => build_worker::run(&root),
         Some("check-layering") => layering::run(&root),
         _ => {
             eprintln!("{USAGE}");
