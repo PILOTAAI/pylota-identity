@@ -275,7 +275,7 @@ request fails with `422 transport_unavailable` and `details.reason = "ses_not_co
   `forwarding` is `null`. There is no webhook event for it.
 - **Forwarding test.** `POST /v1/identities/{identity_id}/addresses/{address_id}/test-forwarding`
   (`identities:write`) answers `202` and sends a short message, from `mailer-daemon@{platform domain}`
-  with subject "Pylota Identity forwarding check" and a one-time token in the header `X-Pylota-Mail-Check`
+  with subject "Pylota Identity forwarding check" and a one-time token in the header `X-Pylota-Identity-Check`
   (format in [Inbound › Steps](inbound.md#steps), step 3), to the external address. `forwarding`
   becomes `ok` when the token arrives at the identity's platform address within 10 minutes, and `failed`
   otherwise. The token is kept in the domain's `DomainMonitor` storage until it arrives or expires; it is
@@ -287,7 +287,7 @@ request fails with `422 transport_unavailable` and `details.reason = "ses_not_co
   breaks DKIM, so such messages are marked `unauthenticated` and quarantined by default. The guide names
   this as the main drawback of `send_only`.
 - **Loops ([N13](../edge-cases.md)).** An agent writing to its own external address, which forwards back
-  to the platform address, is caught by loop detection: our outbound mail carries `X-Pylota-Mail-Hop`,
+  to the platform address, is caught by loop detection: our outbound mail carries `X-Pylota-Identity-Hop`,
   which forwarding keeps, and automatic exchanges per thread are capped ([D6](../edge-cases.md)).
 
 ### 4.5 Inbound through SES

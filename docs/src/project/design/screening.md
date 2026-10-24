@@ -290,7 +290,7 @@ precedence. A receive-allow entry, which skips rules 4a and 6, does not skip rul
   ([Inbound › The system identity's mailbox](inbound.md#the-system-identitys-mailbox), T14).
 
 Loopback mail of a test tenant is screened like any other (T16). So is mail from other agents, on the shared
-platform domain or carrying `X-Pylota-Mail-Hop`: an agent that mail steered can pass the instruction on.
+platform domain or carrying `X-Pylota-Identity-Hop`: an agent that mail steered can pass the instruction on.
 
 **Known correspondents and receive-allowed senders are screened (decision).** AgentMail does not skip them
 either, and the reasons are specific: steering arrives through accounts that are trusted, not through
@@ -1364,7 +1364,7 @@ while the backstop, the next write to the mailbox and the daily maintenance keep
 Test tenants run the same screening. To let integrators exercise every path deterministically without crafting
 injection text, mail on a test tenant (`tenants.mode = 'test'`) that arrived by loopback (`IngestInput.loopback`
 set, so it was sent by the same tenant or a tenant of the same partner, [Inbound › Test-mode loopback](inbound.md#test-mode-loopback-l3))
-may carry `X-Pylota-Mail-Screening-Test` with one value:
+may carry `X-Pylota-Identity-Screening-Test` with one value:
 
 | Value | Effect |
 |---|---|
@@ -1525,8 +1525,8 @@ Rows to add to [PRD §6.4 Inbound](../prd.md#64-inbound) as a new subsection "Sc
 | T12 | `off` mode | `screening: null`; no record, no event, no job, no model call | S | `it::screening::t12_mode_off` |
 | T13 | A message caught by rules 1–6 (receive-block, throttle, `auth_failed`, `auth_unverified`, `risky_attachment`, `account_unapproved`, `otp_unsolicited`, `spam`) | Never screened in either mode (`screening: null`); its release makes it `received` without screening | S | `it::screening::t13_precedence` |
 | T14 | A delivery report, a read receipt, or mail to the system identity | Never screened (`screening: null`) | S | `it::screening::t14_never_screened` |
-| T15 | Mail from a known correspondent, a receive-allowed sender, a `pass` sender on the tenant's own domain, or another agent (`X-Pylota-Mail-Hop`, `shared_domain_sender`) | Screened like any other; the classifier is given no trust facts | S | `it::screening::t15_trusted_senders_screened` |
-| T16 | `X-Pylota-Mail-Screening-Test` on loopback mail of a test tenant, on a live tenant, or on outside mail to a test tenant | Honoured only for test-tenant loopback mail (reason `test_forced`; `deadline` leaves it pending for the alarm); ignored and counted everywhere else; the `screening_test` send option is refused for live tenants | S | `it::screening::t16_test_tenant_header` |
+| T15 | Mail from a known correspondent, a receive-allowed sender, a `pass` sender on the tenant's own domain, or another agent (`X-Pylota-Identity-Hop`, `shared_domain_sender`) | Screened like any other; the classifier is given no trust facts | S | `it::screening::t15_trusted_senders_screened` |
+| T16 | `X-Pylota-Identity-Screening-Test` on loopback mail of a test tenant, on a live tenant, or on outside mail to a test tenant | Honoured only for test-tenant loopback mail (reason `test_forced`; `deadline` leaves it pending for the alarm); ignored and counted everywhere else; the `screening_test` send option is refused for live tenants | S | `it::screening::t16_test_tenant_header` |
 | T17 | A `screening` message and every agent-facing surface | Absent from thread lists and counts, the message list (without `status=screening` and `quarantine:review`), get by ID, attachments, attachment text, raw MIME, labels, reply and forward, keyword, semantic, hybrid and agentic search, related, contacts, `wait`, MCP tools, console inbox views and notifications; the test enumerates the router table's read routes and MCP tools and fails on one without a case | S | `it::screening::t17_hidden_everywhere` |
 | T18 | A reviewer with `quarantine:review` | Lists it with `status=screening`, reads it by ID, finds it in search with `include_quarantined`; a key without the permission gets `200` without it or `404`, never `403` | S | `it::screening::t18_reviewer_access` |
 | T19 | Release of a message still `screening` | `409 not_quarantined` with `details.status = "screening"` and `details.deadline_at`; nothing changes | S | `it::screening::t19_release_pending_refused` |

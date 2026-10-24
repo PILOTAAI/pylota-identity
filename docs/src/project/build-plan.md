@@ -1882,7 +1882,7 @@ versions for the SDK repository's CI.
   and the extended `it::security::mcp_tools_follow_key`; `it::mcp::inspector_replay` still replays green.
 - `cli::skills::generate_for_key` and `cli::mcp::y59_client_snippets`; the `skills` job green with
   `skills-ref validate` (and `claude plugin validate --strict` if it runs without signing in).
-- The SDK repository's first release candidate produces `pylotahq-mail-{version}.tgz` in its draft
+- The SDK repository's first release candidate produces `pylotahq-identity-{version}.tgz` in its draft
   release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.

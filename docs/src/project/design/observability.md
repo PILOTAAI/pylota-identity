@@ -317,7 +317,7 @@ GROUP BY domain_id
 | `agent_signup_ended_total` | counter | reason (`expired`, `abandoned`, `refused`) | `signup/end.rs`, `crons/agent_signup.rs` |
 | `agent_signup_mail_total` | counter | result (`queued`, `not_sent`, `delivered`, `bounced`, `complained`) | `signup/mail.rs`, `signup/outcomes.rs` |
 | `agent_signup_refusals_total` | counter | reason (`refused`, `complaint`, `lifted`) | `signup/end.rs`, `signup/outcomes.rs` |
-| `api_client_requests_total` | counter | client (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), client_version (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Mail-Client`; MCP requests are already counted by `mcp_method` ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)) |
+| `api_client_requests_total` | counter | client (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), client_version (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Identity-Client`; MCP requests are already counted by `mcp_method` ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)) |
 | `messages_batch_total` | counter | op (`get`, `update`), result (`ok` or the error code) | `fetch` ([Parity additions § 11](parity-additions.md#11-observability)) |
 | `messages_batch_ids` | observation | op | `fetch`: IDs per request |
 | `label_events_total` | counter | source (`message`, `thread`, `batch`) | mailbox |

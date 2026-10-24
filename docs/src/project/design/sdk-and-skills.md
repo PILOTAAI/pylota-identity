@@ -499,7 +499,7 @@ against a newer deployment ([Y40](../edge-cases.md)):
   ([Y44](../edge-cases.md)).
 - Every request uses `redirect: 'error'`, so the `Authorization` header never follows a redirect to
   another host ([Y45](../edge-cases.md)).
-- `User-Agent` (or `X-Pylota-Mail-Client` where a runtime forbids setting `User-Agent`) is
+- `User-Agent` (or `X-Pylota-Identity-Client` where a runtime forbids setting `User-Agent`) is
   `pylota-identity-ts/{version} ({runtime}/{runtime major})` plus the caller's optional suffix. It carries no
   host name, user or tenant data.
 - The SDK sends no telemetry and stores nothing outside the process: its only caches are the server
@@ -546,7 +546,7 @@ repository's release pipeline ([Rust workspace § 10](rust-workspace.md#10-ci-pi
   deployment for the operations both know ([§2.13](#213-forward-compatibility)).
 - **Built and signed like a product release.** The SDK repository's `release.yml`, on a `v*` tag, runs the
   full CI gate, refuses a tag that differs from `package.json` `version` or an `openapi.json` that is not
-  the named release's asset, runs `npm pack`, attests `pylotahq-mail-{version}.tgz` and lists it in an
+  the named release's asset, runs `npm pack`, attests `pylotahq-identity-{version}.tgz` and lists it in an
   unsigned `SHA256SUMS` on a draft GitHub Release. The owner signs it offline with the same minisign key as
   product releases ([Security §11](security.md#11-supply-chain)), through the same tool:
   `cargo xtask release sign <tag> --repo PILOTAAI/pylota-identity-typescript` checks the checksum and the
@@ -1201,7 +1201,7 @@ No new event type. The `key.create` audit row's `details` gains `mcp_tools` (the
 
 | Metric | Kind | Labels | Emitted by |
 |---|---|---|---|
-| `api_client_requests_total` | counter | `client` (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), `client_version` (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Mail-Client`; MCP requests are already counted by `mcp_method` |
+| `api_client_requests_total` | counter | `client` (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), `client_version` (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Identity-Client`; MCP requests are already counted by `mcp_method` |
 
 The labels are bounded: unknown products count as `other` and versions keep only major and minor. The
 operator dashboard gains a "Client versions" panel: requests by `client` and `client_version`, and the
@@ -1570,7 +1570,7 @@ versions for the SDK repository's CI.
   and the extended `it::security::mcp_tools_follow_key`; `it::mcp::inspector_replay` still replays green.
 - `cli::skills::generate_for_key` and `cli::mcp::y59_client_snippets`; the `skills` job green with
   `skills-ref validate` (and `claude plugin validate --strict` if it runs without signing in).
-- The SDK repository's first release candidate produces `pylotahq-mail-{version}.tgz` in its draft
+- The SDK repository's first release candidate produces `pylotahq-identity-{version}.tgz` in its draft
   release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.

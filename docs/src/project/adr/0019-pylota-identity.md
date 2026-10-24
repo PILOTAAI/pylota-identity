@@ -29,7 +29,9 @@ published, and the only code is the M0 skeleton (PR #7). Renaming now costs only
    2026-10-24. Planned Cloudflare resources that do not exist yet take the new name (`pylota-identity`,
    `pylota-identity-blobs`, …), and so do contract strings that nothing has implemented (the WebSocket
    subprotocol `pylota-identity.events.v1`, the DNS label `_pylota-identity`, the `User-Agent`
-   `PylotaIdentity/1.0`, the configuration directory `~/.config/pylota-identity`).
+   `PylotaIdentity/1.0`, the mail headers `X-Pylota-Identity-Hop`, `-Role-Hop`, `-Check` and
+   `-Screening-Test`, the SDK header `X-Pylota-Identity-Client`, the configuration directory
+   `~/.config/pylota-identity`).
 3. **The command-line tool is `idvy`** ("id" plus "v" for vault). On 2026-10-24 it was unregistered on
    crates.io, npm, PyPI, Homebrew (formulae and casks), Debian sources and the Arch AUR; no installed command
    on macOS uses it; GitHub has one personal repository with that name and no stars; a web search found no
