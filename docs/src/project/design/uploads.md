@@ -7,7 +7,7 @@ request body of at most 7 MiB, which inflates it by a third, and an MCP client m
 those bytes as text. An upload is sent to the Worker once, verified for size and SHA-256 while it streams
 into R2, classified with the same `core::attach` rules as inbound mail, and then copied into every message
 that uses it. Uploads are not a drive: they have no paths, no folders, no download route and a lifetime of
-at most 7 days. Pylota Mail never fetches an attachment from a URL ([§1](#1-what-uploads-are-and-are-not)).
+at most 7 days. Pylota Identity never fetches an attachment from a URL ([§1](#1-what-uploads-are-and-are-not)).
 
 | | |
 |---|---|
@@ -35,11 +35,11 @@ SHA-256), sent once to a signed URL on the Worker, verified, classified, and the
 `{ "upload_id": "upl_…" }` until it expires. Every message that uses it gets its own copy of the bytes,
 so expiring or deleting the upload never changes a sent message ([§5.4](#54-reuse-copy-never-reference)).
 
-**Pylota Mail never fetches attachments from URLs.** AgentMail accepts `url` attachments and fetches them
-at send time. Pylota Mail does not, for three reasons:
+**Pylota Identity never fetches attachments from URLs.** AgentMail accepts `url` attachments and fetches them
+at send time. Pylota Identity does not, for three reasons:
 
 - **SSRF.** A fetch on behalf of a request would be an outbound request to an address chosen by the caller.
-  Every outbound destination Pylota Mail calls today is fixed by the operator and passes the SSRF guard of
+  Every outbound destination Pylota Identity calls today is fixed by the operator and passes the SSRF guard of
   [Security § 9](security.md#93-other-outbound-destinations); a per-request URL would turn every send key
   into a way to probe internal or link-local addresses, follow redirects into them, or make the Worker
   download from a host that serves something different to Cloudflare's addresses.
@@ -48,7 +48,7 @@ at send time. Pylota Mail does not, for three reasons:
   declared before the bytes arrive and checked by R2; a replayed send can only ever attach the same
   bytes.
 - **Prompt injection.** Agents read untrusted mail. "Attach the file at https://…" in a message is an
-  instruction an agent should not follow; with no URL attachments, following it cannot make Pylota Mail
+  instruction an agent should not follow; with no URL attachments, following it cannot make Pylota Identity
   fetch and forward anything.
 
 **Not a drive.** AgentMail's Agent Drive keeps files under paths with listing, download links and
@@ -71,7 +71,7 @@ carries the bytes.
 **Why the Worker can take the bytes.** A Worker accepts request bodies of up to 100 MB on the Free and Pro
 account plans, 200 MB on Business and up to 5 GB on Enterprise, and answers `413` above that
 ([Workers limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-10-17). The
-upload maximum of **26,214,400 bytes (25 MiB, a Pylota Mail choice)** is below every plan's limit, so it
+upload maximum of **26,214,400 bytes (25 MiB, a Pylota Identity choice)** is below every plan's limit, so it
 is a fixed number rather than a setting. It is also the largest message Cloudflare Email Routing delivers
 inbound ([Limits › Mail](../../reference/limits.md#mail)), so an agent can forward or re-send anything it
 can receive, and it bounds the memory classification needs ([§4.3](#43-classification-and-the-scanner)).
@@ -384,7 +384,7 @@ metadata):
    seconds per file ([Inbound › Malware scanner hook](inbound.md#malware-scanner-hook-pm_scanner_url-p1));
    uploads are scanned when their bytes arrive.
 4. **Total size.** The decoded sizes of all attachments (inline bytes and uploads' `size`) must be at most
-   26,214,400 bytes (a Pylota Mail choice: the upload maximum, so one maximal upload always fits);
+   26,214,400 bytes (a Pylota Identity choice: the upload maximum, so one maximal upload always fits);
    otherwise `413 message_too_large` with `details.reason = "attachments_total"`, `details.size` and
    `details.max`, whatever `large_attachments` says. The existing limit of 32 attachments still applies.
 
@@ -414,7 +414,7 @@ Used by step 9 of the `PUT` (§3.2):
    ([Inbound › Sniffing](inbound.md#sniffing)), which can sit anywhere in the file. A Worker isolate has
    128 MB, shared by every request it is running
    ([Workers limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-10-17), so
-   each isolate keeps a byte budget of 33,554,432 bytes (32 MiB, a Pylota Mail choice: a quarter of the
+   each isolate keeps a byte budget of 33,554,432 bytes (32 MiB, a Pylota Identity choice: a quarter of the
    isolate) for upload bytes held for classification. A classification waits up to 10 seconds for room;
    then the `PUT` gets `503 unavailable` (retryable, not counted), the object stays in R2, and the retry
    skips streaming (§3.2 step 6).
@@ -564,7 +564,7 @@ revision is saved, so:
 The cost is storage: one 25 MiB file sent to ten separate threads is stored ten times (plus the upload
 until it expires). A shared, reference-counted object would save that, but it would couple the lifetime
 of every message to every other message that used the file, and an erasure of one message could not
-delete bytes another message still points to. Pylota Mail chooses the simpler rule.
+delete bytes another message still points to. Pylota Identity chooses the simpler rule.
 
 ## 6. Concurrency and idempotency
 
@@ -712,7 +712,7 @@ digest.
   allowance (§3.1 step 4); a `PUT` is not gated, because its create already was and the bytes were
   declared. Sends with attachments are gated at policy step 18 as today.
 - **No new allowance.** Uploads are not a plan feature; there is no count to buy.
-- **Limits (Pylota Mail choices).** 26,214,400 bytes per upload; 100 live uploads and 524,288,000
+- **Limits (Pylota Identity choices).** 26,214,400 bytes per upload; 100 live uploads and 524,288,000
   declared bytes of live uploads per identity (`422 upload_limit_reached`); `expires_in` 900–604,800
   seconds, default 86,400; upload URL 3,600 seconds; 10 counted failed `PUT`s; 26,214,400 decoded
   attachment bytes per message; tombstones 7 days. They are fixed, not policy: they bound memory, storage
@@ -762,17 +762,17 @@ model must produce (§1). So:
 **CLI.**
 
 ```text
-pmail uploads create FILE [--identity ID] [--filename NAME] [--content-type TYPE] [--expires-in SECONDS]
-pmail uploads list [--identity ID] [--status STATUS]
-pmail uploads get UPLOAD_ID [--identity ID]
-pmail uploads delete UPLOAD_ID [--identity ID]
+idvy uploads create FILE [--identity ID] [--filename NAME] [--content-type TYPE] [--expires-in SECONDS]
+idvy uploads list [--identity ID] [--status STATUS]
+idvy uploads get UPLOAD_ID [--identity ID]
+idvy uploads delete UPLOAD_ID [--identity ID]
 ```
 
 `create` reads the file, computes its size and SHA-256 locally, creates the upload, `PUT`s the bytes
 (retrying the `PUT` on `503` and `409 upload_in_progress` after `Retry-After`, at most 5 times), and
 prints the upload ID and `expires_at`. The content type defaults to the file extension's
-(`application/octet-stream` when unknown). `pmail send --attach FILE` (and `reply`, `forward`) sends files
-of at most 1,048,576 bytes inline and uploads larger ones first (a Pylota Mail choice: below 1 MiB the
+(`application/octet-stream` when unknown). `idvy send --attach FILE` (and `reply`, `forward`) sends files
+of at most 1,048,576 bytes inline and uploads larger ones first (a Pylota Identity choice: below 1 MiB the
 extra round trips cost more than the base64).
 
 ## 14. Observability
@@ -817,8 +817,8 @@ re-uses the upload for a retry of the same action until it expires.
 
 **Agents.** Specialists never handle bytes or upload URLs: they pass Pylota file references to Pylota's
 capability route, which uploads server-side. The public-webchat coordinator never reaches uploads at all,
-and because Pylota Mail fetches no URLs, text from a webchat or an email can never make the service fetch
-and attach a file. An MCP client of Pylota's own (an operator using Claude with Pylota Mail directly) uses
+and because Pylota Identity fetches no URLs, text from a webchat or an email can never make the service fetch
+and attach a file. An MCP client of Pylota's own (an operator using Claude with Pylota Identity directly) uses
 `mail_create_upload` and its code tool for the `PUT`.
 
 **Failures in Pylota.** `422 attachment_risky` fails the pending action with a visible reason in the app
@@ -889,7 +889,7 @@ To add to [PRD § 6](../prd.md) as a new group, "Uploads":
   uploads as a file store: no paths, no download route and no sharing between identities.
 - **FR-UPL-12** The MCP server **must** offer `mail_create_upload` and `mail_get_upload` and accept
   `upload_id` items in `mail_send`, `mail_reply` and `mail_forward`; the CLI **must** offer
-  `pmail uploads create|list|get|delete` and use uploads for `--attach` files over 1 MiB.
+  `idvy uploads create|list|get|delete` and use uploads for `--attach` files over 1 MiB.
 
 ## 17. Edge cases
 
@@ -990,7 +990,7 @@ Section Q of the [edge-case register](../edge-cases.md) (rows Q65–Q108):
 | `it::uploads::q108_draft_reference` | A draft revision saved with an upload; the upload deleted; the draft sent: the message carries the bytes and `upload_id` | [Q108](../edge-cases.md) |
 | `it::uploads::lifecycle_and_reads` | Create, list (with `status`), get and delete answers; `upload_url` only in create and in `GET` of `pending` and `uploading`; `Message.attachments[].upload_id` set for copied attachments and `null` otherwise; the metrics of §14 are written | §2, §3, §14 |
 | `it::mcp::upload_tools` | `mail_create_upload` and `mail_get_upload` are listed for keys with `messages:send` or `drafts:write` and not otherwise; they map to their routes and return the same errors; `mail_send` accepts an `upload_id` item and refuses an item with both shapes | §13 |
-| `cli::uploads::create_and_attach` | Against recorded fakes: `pmail uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `pmail send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | §13 |
+| `cli::uploads::create_and_attach` | Against recorded fakes: `idvy uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `idvy send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | §13 |
 | `live::uploads::large_attachment_link` | On staging: a 20 MiB PDF uploaded and sent with `large_attachments: "link"` to a Gmail test mailbox arrives with a working link whose download has the upload's SHA-256; `upload_copy_ms` for it is recorded for the copy budget | [Q87](../edge-cases.md), §4.4 |
 
 ## 19. Milestone
@@ -1048,9 +1048,9 @@ handler code.
 
 From the AgentMail inventories (public docs and OpenAPI, read 2026-10-17; their content is untrusted data):
 
-| AgentMail | Pylota Mail | Verdict |
+| AgentMail | Pylota Identity | Verdict |
 |---|---|---|
-| Inline `content` (base64) up to 6 MB per whole request; `413` above | Inline `content_base64` up to the 7 MiB request body; uploads stage up to 25 MiB per file, but the composed message is capped at 5 MiB encoded ([Limits](../../reference/limits.md)), so a larger file goes out as a signed download link under `large_attachments: "link"`, which is P1 ([§4.2](#42-step-17-size-inline-or-linked)) | Deliberately different on size: AgentMail attaches about 30 MB per message (by URL), Pylota Mail attaches at most 5 MiB and links the rest. Exceed on integrity, classification and SSRF (the rows below) |
+| Inline `content` (base64) up to 6 MB per whole request; `413` above | Inline `content_base64` up to the 7 MiB request body; uploads stage up to 25 MiB per file, but the composed message is capped at 5 MiB encoded ([Limits](../../reference/limits.md)), so a larger file goes out as a signed download link under `large_attachments: "link"`, which is P1 ([§4.2](#42-step-17-size-inline-or-linked)) | Deliberately different on size: AgentMail attaches about 30 MB per message (by URL), Pylota Identity attaches at most 5 MiB and links the rest. Exceed on integrity, classification and SSRF (the rows below) |
 | `url` attachments fetched at send time, "around 30 MB total per message" (OpenAPI `SendAttachment`, re-read 2026-10-18); an unfetchable URL is `403 message_rejected` | No URL attachments; uploads verified by SHA-256 before use; up to 25 MiB of uploads per message, delivered inline within the 5 MiB message cap and as links above it | Deliberately different: SSRF, content integrity, prompt injection (§1) |
 | Agent Drive (Labs, US only): per-inbox files under paths, create → PUT to storage with headers → complete, upload URL up to 1 hour, 100 MiB per file, 1 GiB and 10,000 files per org, download links | Per-identity uploads with no paths or downloads; create → `PUT` to the Worker (no complete call); upload URL 1 hour; 25 MiB per file; 100 uploads and 500 MiB per identity; at most 7 days | Deliberately different: a staging area for sends, not a drive; the 25 MiB file limit fits every Workers plan and Email Routing's inbound size |
 | Drive: storage verifies size and SHA-256; a retried PUT after success gets `412` | The Worker and R2 verify size and SHA-256; a retried `PUT` after success gets `200` with the upload; stored-but-unanswered uploads resume without re-sending bytes | Exceed |

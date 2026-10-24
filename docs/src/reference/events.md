@@ -1,15 +1,15 @@
 # Webhook events
 
-Pylota Mail delivers events to your HTTPS endpoints using
+Pylota Identity delivers events to your HTTPS endpoints using
 [Standard Webhooks](https://www.standardwebhooks.com/). Configure endpoints through the
-[API](api.md#webhooks) or `pmail webhooks create`.
+[API](api.md#webhooks) or `idvy webhooks create`.
 
 ## Delivery
 
 ```http
 POST /webhooks/mail HTTP/1.1
 Content-Type: application/json
-User-Agent: PylotaMail/1.0 (+https://github.com/PILOTAAI/pylota-mail)
+User-Agent: PylotaIdentity/1.0 (+https://github.com/PILOTAAI/pylota-identity)
 webhook-id: evt_01J9Z5…
 webhook-timestamp: 1791540000
 webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4= v1,Hq3…(second during rotation)
@@ -25,7 +25,7 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4= v1,Hq3…(sec
 4. Reject the request if `webhook-timestamp` is more than 5 minutes from your clock.
 5. Deduplicate on `webhook-id`: delivery is **at least once**.
 
-Standard Webhooks libraries exist for most languages. `pmail webhooks verify` checks a captured
+Standard Webhooks libraries exist for most languages. `idvy webhooks verify` checks a captured
 request locally.
 
 ### Responses and retries

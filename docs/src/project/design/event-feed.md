@@ -16,7 +16,7 @@ the CLI, and how Pylota uses all of it.
 | Edge cases | [R1](../edge-cases.md)–[R69](../edge-cases.md) (this page, section 19) |
 | Code | `crates/core/src/events/{mod.rs, cursor.rs, visibility.rs, filter.rs, stream.rs, token.rs}` (cursors, the visibility table, filter patterns, the stream protocol, the flow-control window, close codes and the stream-token format; pure); `crates/api-types/src/events/feed.rs`; `crates/worker/src/events/{mod.rs, object.rs (the TenantEvents Durable Object), log.rs, consumers.rs, stream.rs, tokens.rs, schema/}`; `handlers/events.rs`; the append step in `consumers/webhooks.rs`; the log steps in `jobs/erasure.rs` and `jobs/retention.rs`; `jobs/event_log_rebuild.rs`; `mcp/tools.rs` (`mail_events`); `console/pages/webhooks.rs` (the events section); `crates/platform/src/cf/{glue.rs, hibernation.rs}` and `crates/platform/src/fakes/hibernation.rs`; `crates/sdk/src/events.rs` (feature `stream`); `crates/cli/src/commands/events.rs` |
 | Tables | The `TenantEvents` object's SQLite tables `meta`, `events`, `consumers`, `stream_tokens` and `erased_refs` ([§2.2](#22-schema)); D1 `tenants.events_do_id`; D1 `jobs.kind` value `event_log_rebuild`; the erasure receipt fields `log_events_deleted` and `probe.log_hits` |
-| Contracts | `GET /v1/events`, `GET /v1/events/stream` (WebSocket), `POST /v1/events/stream-tokens`, `POST` and `GET /v1/event-consumers`, `GET` and `DELETE /v1/event-consumers/{consumer_id}`, `GET /v1/event-consumers/{consumer_id}/events`, `POST /v1/event-consumers/{consumer_id}/commit` and `…/reset`; the permission `events:read`; the stream subprotocol `pylota-mail.events.v1` and the close codes of [§7.8](#78-close-codes); `410 cursor_expired` (extended), `404 event_consumer_not_found`, `409 event_consumer_name_taken`, `422 event_consumer_limit_reached`, `426 upgrade_required`, and `429 rate_limited` with `details.bucket` `events_wait`, `stream_tokens` or `streams`; no new event types and no new policy fields (`retention.events_days` now also governs the log) |
+| Contracts | `GET /v1/events`, `GET /v1/events/stream` (WebSocket), `POST /v1/events/stream-tokens`, `POST` and `GET /v1/event-consumers`, `GET` and `DELETE /v1/event-consumers/{consumer_id}`, `GET /v1/event-consumers/{consumer_id}/events`, `POST /v1/event-consumers/{consumer_id}/commit` and `…/reset`; the permission `events:read`; the stream subprotocol `pylota-identity.events.v1` and the close codes of [§7.8](#78-close-codes); `410 cursor_expired` (extended), `404 event_consumer_not_found`, `409 event_consumer_name_taken`, `422 event_consumer_limit_reached`, `426 upgrade_required`, and `429 rate_limited` with `details.bucket` `events_wait`, `stream_tokens` or `streams`; no new event types and no new policy fields (`retention.events_days` now also governs the log) |
 | Limits | [§12](#12-billing-and-limits), to become [Limits › Event feed and stream](../../reference/limits.md) |
 | Built in | [M30](../build-plan.md) (section 21) |
 
@@ -358,7 +358,7 @@ ID.
   alone would not show. Above the budget, the maintenance alarm deletes the oldest rows, in the same
   transactions of 2,000, until `log_bytes` is at most 5,000,000,000, with `floor_reason = 'size_limit'`
   and `floor_appended_at` raised as retention does, and reports the `event_log_size` condition. The budget
-  and the 1,024-byte charge are Pylota Mail choices: the Durable Objects limits page states 10 GB per
+  and the 1,024-byte charge are Pylota Identity choices: the Durable Objects limits page states 10 GB per
   object but not what counts towards it (read 2026-10-18), so 4 GB stay free for page slack, free pages
   and the other tables, and the maintenance alarm also reads the database size (`Sql::database_size`,
   `ctx.storage.sql.databaseSize`) and reports `event_log_size` when it passes 8,000,000,000 bytes even
@@ -584,7 +584,7 @@ again. In order:
 
 A durable consumer is a named position in the tenant's log, kept by the service, so a client that cannot
 keep state (a cron job, a serverless function, an agent in a sandbox) reads "everything since last time"
-with no cursor of its own. It is Pylota Mail's equivalent of AgentMail's polling webhooks.
+with no cursor of its own. It is Pylota Identity's equivalent of AgentMail's polling webhooks.
 
 ### 6.1 Routes
 
@@ -691,7 +691,7 @@ Upgrade: websocket
 Connection: Upgrade
 Sec-WebSocket-Version: 13
 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
-Sec-WebSocket-Protocol: pylota-mail.events.v1
+Sec-WebSocket-Protocol: pylota-identity.events.v1
 Authorization: Bearer pmk_live_…
 ```
 
@@ -700,7 +700,7 @@ as a second subprotocol element:
 
 ```js
 const ws = new WebSocket("wss://mail.example.com/v1/events/stream",
-                         ["pylota-mail.events.v1", "pylota-mail.token." + token]);
+                         ["pylota-identity.events.v1", "pylota-identity.token." + token]);
 ```
 
 No credential is ever accepted in the URL. AgentMail's stream takes its API key as an `api_key` query
@@ -716,12 +716,12 @@ The handler (`handlers/events.rs`), in order:
    authenticated or redeemed; the log records the parameter's name only. The `fix` says to rotate the key if
    one was sent.
 3. **Exactly one credential.** An `Authorization: Bearer` key, or one `Sec-WebSocket-Protocol` element
-   `pylota-mail.token.{token}`. Both → `400 invalid_request` (`details.reason = "two_credentials"`); neither
+   `pylota-identity.token.{token}`. Both → `400 invalid_request` (`details.reason = "two_credentials"`); neither
    → `401 unauthenticated`.
 4. **Key path.** Authenticate ([Security § 4.2](security.md#42-verification)), `events:read`, the tenant as in
    §5.2 step 2. A `suspended` tenant → `403 tenant_suspended`; `erasing` or `erased` → `404 tenant_not_found`.
    These are ordinary HTTP error responses with the error envelope.
-5. **Token path.** The request must also offer `pylota-mail.events.v1` (otherwise `400 invalid_request`,
+5. **Token path.** The request must also offer `pylota-identity.events.v1` (otherwise `400 invalid_request`,
    `details.reason = "subprotocol_required"`). Parse the token (`core::events::token`) for the tenant, read
    the tenant row, send `EventsRequest::RedeemStreamToken`, load the returned key and apply steps 7–9 of
    [Security § 4.2](security.md#42-verification) (revoked, expired, mode, tenant and partner status) and the
@@ -740,12 +740,12 @@ The handler (`handlers/events.rs`), in order:
    Then `accept_websocket_with_tags(server, ["c:{connection_id}", "k:{key_id}"])`, the attachment
    ([§7.9](#79-hibernation-and-what-workers-rs-087-provides)), and the `101` answer. `connection_id` is
    `wsc_` + ULID.
-7. **The `101`.** It carries `Sec-WebSocket-Protocol: pylota-mail.events.v1` when the request offered it, and
+7. **The `101`.** It carries `Sec-WebSocket-Protocol: pylota-identity.events.v1` when the request offered it, and
    never the token element. RFC 6455 requires the selected value to be one the client offered and lets a
    server that agrees to none send no header (§4.2.2), and a client fails the connection when the server
    names a subprotocol it did not request (§4.1) ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455.html),
    read 2026-10-17); the WebSockets standard also fails a connection whose requested subprotocol is not
-   acknowledged (WHATWG, above). Offering `pylota-mail.events.v1` beside the token is what lets the server
+   acknowledged (WHATWG, above). Offering `pylota-identity.events.v1` beside the token is what lets the server
    acknowledge something other than the secret.
 8. **Rate limit.** The handshake counts once in `RL_API`. Messages on the connection have their own limits
    (§7.3).
@@ -767,14 +767,14 @@ or drop):
 { "token": "pmst_01J9Z3K8V4QW7X2M5N6P8R0T1Y_7k2m9q4xa0bcd5ef8gh1jk3mn6pq9rs2tv4wx7yz0ab3cd5ef8gh1jk",
   "expires_at": "2026-10-17T10:01:00Z",
   "url": "wss://mail.example.com/v1/events/stream",
-  "protocols": ["pylota-mail.events.v1",
-                "pylota-mail.token.pmst_01J9Z3K8V4QW7X2M5N6P8R0T1Y_7k2m9q4xa0bcd5ef8gh1jk3mn6pq9rs2tv4wx7yz0ab3cd5ef8gh1jk"] }
+  "protocols": ["pylota-identity.events.v1",
+                "pylota-identity.token.pmst_01J9Z3K8V4QW7X2M5N6P8R0T1Y_7k2m9q4xa0bcd5ef8gh1jk3mn6pq9rs2tv4wx7yz0ab3cd5ef8gh1jk"] }
 ```
 
 - **Format.** `pmst_` ‖ the tenant's ULID (its ID without `ten_`, 26 upper-case Crockford base32 characters)
   ‖ `_` ‖ 52 lower-case Crockford base32 characters encoding 32 bytes from `platform::Rng`; regex
   `^pmst_[0-9A-HJKMNP-TV-Z]{26}_[0-9a-hjkmnp-tv-z]{52}$`. Letters, digits and `_` are token characters, so
-  `pylota-mail.token.{token}` is a valid subprotocol element. The tenant part only routes the handshake; it
+  `pylota-identity.token.{token}` is a valid subprotocol element. The tenant part only routes the handshake; it
   grants nothing.
 - **Storage.** `stream_tokens` keeps the hex SHA-256 of the 32 random bytes, the minting key's ID and
   `expires_at = now + 60 s`. A 256-bit random secret needs no pepper.
@@ -1014,7 +1014,7 @@ connection drops without one.
   `WebSocketIncomingMessage::String`, anything else is copied through a `Uint8Array` into `Binary`).
 - **What it does not bind:** `getWebSocketAutoResponseTimestamp` and `setHibernatableWebSocketEventTimeout`.
   This design uses neither, so no `wasm-bindgen` extern is needed for them.
-- **The glue.** Pylota Mail does not use `#[durable_object]`
+- **The glue.** Pylota Identity does not use `#[durable_object]`
   ([Rust workspace § 2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)), so
   `platform::export_worker!` must export the three handlers for `TenantEvents`, mirroring the macro's glue
   (the same `js_name`s and message conversion). `ObjectApp` gains three provided methods (by default they
@@ -1288,25 +1288,25 @@ the size budget instead. A test tenant's feed works the same way; a test key rea
 
 | Limit | Value | Source | What happens |
 |---|---|---|---|
-| Page size (`limit`) | 1–500, default 100 | Pylota Mail | `400 invalid_request` outside it |
-| Response body | 4 MiB of envelopes | Pylota Mail | The page ends early with `has_more: true` |
-| Scan window | 10,000 log positions per read | Pylota Mail | An empty page with `has_more: true`; ask again |
-| Long poll (`wait`) | 0–60 seconds, default 0; checked every second | Pylota Mail | – |
-| Concurrent long polls | 5 per key, 20 per tenant | Pylota Mail | `429 rate_limited`, `details.bucket = "events_wait"`, `Retry-After: 5` |
-| Type patterns | At most 50, each at most 64 characters | Pylota Mail | `400 invalid_request` |
-| Identity filter | At most 100 identity IDs | Pylota Mail | `400 invalid_request` |
+| Page size (`limit`) | 1–500, default 100 | Pylota Identity | `400 invalid_request` outside it |
+| Response body | 4 MiB of envelopes | Pylota Identity | The page ends early with `has_more: true` |
+| Scan window | 10,000 log positions per read | Pylota Identity | An empty page with `has_more: true`; ask again |
+| Long poll (`wait`) | 0–60 seconds, default 0; checked every second | Pylota Identity | – |
+| Concurrent long polls | 5 per key, 20 per tenant | Pylota Identity | `429 rate_limited`, `details.bucket = "events_wait"`, `Retry-After: 5` |
+| Type patterns | At most 50, each at most 64 characters | Pylota Identity | `400 invalid_request` |
+| Identity filter | At most 100 identity IDs | Pylota Identity | `400 invalid_request` |
 | Retention | `retention.events_days` after the append (1–365, default 30) | Policy | Older cursors get `410 cursor_expired` |
-| Log size per tenant | 6,000,000,000 bytes of `log_bytes` (each event's envelope plus 1,024 bytes); pruned, oldest first, to 5,000,000,000; the database size is watched at 8,000,000,000 bytes | Pylota Mail, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-18) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
-| Durable consumers | 20 per tenant | Pylota Mail: the same as webhook endpoints per tenant; each is a polling client, and Pylota needs one per tenant plus a few local tools (AgentMail allows 10 per scope) | `422 event_consumer_limit_reached` |
-| Consumer name | 1–64 characters of `[a-z0-9._-]`, starting with a letter or digit | Pylota Mail | `400 invalid_request` |
-| Stream connections | 100 per tenant; 10 per key (the oldest is replaced) | Pylota Mail; Cloudflare allows 32,768 per object ([Durable Object State](https://developers.cloudflare.com/durable-objects/api/state/), read 2026-10-17) | `429 rate_limited` (`streams`) or close `4429`; `4409` for the replaced connection |
-| Stream token | Single use, 60 seconds, at most 100 live (unredeemed and unexpired) per tenant | Pylota Mail | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
-| Client message | At most 16 KiB; at most 100 per 10 seconds | Pylota Mail; Cloudflare's received-message limit is 32 MiB ([Workers WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/), read 2026-10-17) | Close `1009`, or `1008` for the rate |
-| Server message | At most 100 events and 1 MiB | Pylota Mail | – |
-| Acknowledgement window | 1,000 events or 8 MiB sent and not acknowledged | Pylota Mail | Sending pauses; after 60 seconds full, close `4408` |
-| Subscribe deadline | 60 seconds after the upgrade | Pylota Mail | Close `4400` (`subscribe_timeout`) |
-| Heartbeat | Server every 60 seconds; client ping every 30 seconds; dead after 90 seconds of silence | Pylota Mail | – |
-| Revocation | Streams close within 60 seconds; nothing is sent after the last validation is 60 seconds old | Pylota Mail | Close `4401`, `4403` or `4404` |
+| Log size per tenant | 6,000,000,000 bytes of `log_bytes` (each event's envelope plus 1,024 bytes); pruned, oldest first, to 5,000,000,000; the database size is watched at 8,000,000,000 bytes | Pylota Identity, inside Cloudflare's 10 GB per object ([Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/), read 2026-10-18) | Older cursors get `410 cursor_expired` (`size_limit`); `event_log_size` alert |
+| Durable consumers | 20 per tenant | Pylota Identity: the same as webhook endpoints per tenant; each is a polling client, and Pylota needs one per tenant plus a few local tools (AgentMail allows 10 per scope) | `422 event_consumer_limit_reached` |
+| Consumer name | 1–64 characters of `[a-z0-9._-]`, starting with a letter or digit | Pylota Identity | `400 invalid_request` |
+| Stream connections | 100 per tenant; 10 per key (the oldest is replaced) | Pylota Identity; Cloudflare allows 32,768 per object ([Durable Object State](https://developers.cloudflare.com/durable-objects/api/state/), read 2026-10-17) | `429 rate_limited` (`streams`) or close `4429`; `4409` for the replaced connection |
+| Stream token | Single use, 60 seconds, at most 100 live (unredeemed and unexpired) per tenant | Pylota Identity | `4401` when spent or expired; `429 rate_limited` (`stream_tokens`) |
+| Client message | At most 16 KiB; at most 100 per 10 seconds | Pylota Identity; Cloudflare's received-message limit is 32 MiB ([Workers WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/), read 2026-10-17) | Close `1009`, or `1008` for the rate |
+| Server message | At most 100 events and 1 MiB | Pylota Identity | – |
+| Acknowledgement window | 1,000 events or 8 MiB sent and not acknowledged | Pylota Identity | Sending pauses; after 60 seconds full, close `4408` |
+| Subscribe deadline | 60 seconds after the upgrade | Pylota Identity | Close `4400` (`subscribe_timeout`) |
+| Heartbeat | Server every 60 seconds; client ping every 30 seconds; dead after 90 seconds of silence | Pylota Identity | – |
+| Revocation | Streams close within 60 seconds; nothing is sent after the last validation is 60 seconds old | Pylota Identity | Close `4401`, `4403` or `4404` |
 | Close reason | At most 123 bytes | RFC 6455 § 5.5 (125-byte control frames, read 2026-10-17) | The full error is in the `error` message |
 | Connection attachment | At most 16,384 bytes | Cloudflare ([Durable Objects › WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/), read 2026-10-17) | The largest valid state is under 9,000 bytes |
 
@@ -1373,25 +1373,25 @@ Title "Read mail events". Description:
   read 2026-10-17); the server exposes no resources. An events primitive is the work of the MCP Triggers and
   Events Working Group, chartered on 2026-03-24, whose SEP is at "Ideating"
   ([charter](https://modelcontextprotocol.io/community/working-groups/triggers-events), read 2026-10-17).
-  AgentMail's MCP events follow that unreleased shape with a webhook callback. Pylota Mail adds MCP event
+  AgentMail's MCP events follow that unreleased shape with a webhook callback. Pylota Identity adds MCP event
   subscriptions once an events SEP is accepted; until then an agent polls `mail_events` between turns, and a
   host that can run code uses the stream.
 
 ### 15.2 CLI
 
 ```text
-pmail events list [--tenant <tenant>] [--after <cursor> | --since <time>] [--types <pattern,…>]
+idvy events list [--tenant <tenant>] [--after <cursor> | --since <time>] [--types <pattern,…>]
                   [--identity <identity>]… [--limit <1-500>] [--wait <0-60>] [--all]
-pmail events tail [--tenant <tenant>] [--after <cursor> | --since <time> | --consumer <name|id>]
+idvy events tail [--tenant <tenant>] [--after <cursor> | --since <time> | --consumer <name|id>]
                   [--types <pattern,…>] [--identity <identity>]… [--cursor-file <path>]
                   [--transport stream|poll]
-pmail events consumers create <name> [--tenant <tenant>] [--types <pattern,…>] [--identity <identity>]…
+idvy events consumers create <name> [--tenant <tenant>] [--types <pattern,…>] [--identity <identity>]…
                   [--start earliest|latest|<cursor>]
-pmail events consumers list|get|delete [<name|id>] [--tenant <tenant>]
-pmail events consumers read <name|id> [--limit <n>] [--wait <0-60>] [--commit]
-pmail events consumers commit <name|id> --cursor <cursor>
-pmail events consumers reset <name|id> (--to earliest|latest|<cursor> | --since <time>)
-pmail events stream-token [--tenant <tenant>]
+idvy events consumers list|get|delete [<name|id>] [--tenant <tenant>]
+idvy events consumers read <name|id> [--limit <n>] [--wait <0-60>] [--commit]
+idvy events consumers commit <name|id> --cursor <cursor>
+idvy events consumers reset <name|id> (--to earliest|latest|<cursor> | --since <time>)
+idvy events stream-token [--tenant <tenant>]
 ```
 
 - **`events tail`** streams with the `Authorization` header (the CLI is not a browser) and acknowledges each
@@ -1451,12 +1451,12 @@ The existing `dlq:pm-webhooks` alert is the backstop for `Fanout` messages whose
 **Runbook: Event log.**
 
 1. Find the tenants: `event_log_append_failures_total` and `event_log_lag_ms` by `index1`;
-   `pmail dlq list --queue pm-webhooks`.
-2. Check the object: `pmail events list --tenant <tenant> --limit 1` with a platform key. Repeated
+   `idvy dlq list --queue pm-webhooks`.
+2. Check the object: `idvy events list --tenant <tenant> --limit 1` with a platform key. Repeated
    `503 unavailable` means the object is failing; an `rpc_owner_mismatch` alert at the same time is a
    security incident ([Compromised key](observability.md#compromised-key)).
-3. Once it answers, redrive the dead-letter items (`pmail dlq redrive`): each appends once and fans out once.
-4. If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start event_log_rebuild --tenant
+3. Once it answers, redrive the dead-letter items (`idvy dlq redrive`): each appends once and fans out once.
+4. If it cannot recover (a schema or data fault), rebuild it: `idvy jobs start event_log_rebuild --tenant
    <tenant>` (§9.3), and tell the tenant, or its partner, that cursors and consumers must be reset.
 5. For `event_log_size`: compare the tenant's inbound volume with its `webhook_text_bytes`. Lowering
    `webhook_text_bytes` shrinks new events; the budget keeps pruning the oldest. When the database size, not
@@ -1467,7 +1467,7 @@ The existing `dlq:pm-webhooks` alert is the backstop for `Fanout` messages whose
 
 ## 17. Pylota agentic OS
 
-Pylota reaches Pylota Mail Cloud as a partner: each operator is a tenant, and Pylota's API server holds the
+Pylota reaches Pylota Identity Cloud as a partner: each operator is a tenant, and Pylota's API server holds the
 partner key K1 ([Pylota integration spec](https://github.com/PILOTAAI/pylota) §4, §6). Its agents hold no
 key: the operator coordinator and the 19 specialists act through the API's internal routes, and react to mail
 through pg-boss jobs that the webhook receiver enqueues (spec §8.2). The feed therefore serves Pylota's
@@ -1478,7 +1478,7 @@ servers and its people's tools, not the agents directly.
 | The webhook receiver and `mail-webhook-health` (spec §8.2, §8.4) | One durable consumer per tenant, `pylota-reconcile`, read every 5 minutes: events missing from `mail_webhook_events` are inserted with the same deduplication key and processed like webhook events | K1 (partner), which must gain `events:read` |
 | The replay runbook (spec §8.5) | Consumer catch-up replaces finding gaps by delivery logs and replaying windows; webhook replay stays available; the API reconcile script is needed only after `410 cursor_expired` | K1 |
 | Staleness detection (spec §8.4) | Exact instead of heuristic: an event in the feed that has not arrived by webhook within 2 minutes means the webhook path is degraded | K1 |
-| The owner's local agents and tools (Claude Code with the Pylota Mail MCP server, `pmail`) | `mail_events` and `pmail events tail` against Pylota-owned tenants and staging, to watch inbound while developing and to let a session catch up on what happened between turns | A tenant key the owner mints for the session, with `events:read` and no send permission |
+| The owner's local agents and tools (Claude Code with the Pylota Identity MCP server, `idvy`) | `mail_events` and `idvy events tail` against Pylota-owned tenants and staging, to watch inbound while developing and to let a session catch up on what happened between turns | A tenant key the owner mints for the session, with `events:read` and no send permission |
 | Pylota's admin dashboard (optional, owner-only) | A live view of one tenant's events through a stream token that the API mints with K1 for that tenant and hands to the admin page | K1, through the API |
 | The operator coordinator and the specialists | Nothing directly: they keep reacting to pg-boss jobs; the reconcile job only makes those jobs complete when a webhook was lost | – |
 | The public-webchat coordinator | Never: everything it touches is untrusted, and it has no mail tool that reads events | – |
@@ -1491,7 +1491,7 @@ deterministic, so the job creates it idempotently on each run. `mail_webhook_eve
 
 | Answer | Pylota does |
 |---|---|
-| `410 cursor_expired` on `pylota-reconcile` | Pages ops: Pylota was behind for longer than `retention.events_days`, or the tenant's log was pruned by size or rebuilt. Runs `pylota-mail-reconcile.ts` from the consumer's last commit time, then resets the consumer to `latest` |
+| `410 cursor_expired` on `pylota-reconcile` | Pages ops: Pylota was behind for longer than `retention.events_days`, or the tenant's log was pruned by size or rebuilt. Runs `pylota-identity-reconcile.ts` from the consumer's last commit time, then resets the consumer to `latest` |
 | `404 tenant_not_found` | The tenant is being erased: stops reconciling it (its `mail_tenants` row is `erasing`) |
 | `403 partner_suspended` | A possible key incident (spec §19.2): pages at once |
 | `503`, `504` or a network error | Retries at the next run; 3 failed runs in a row page ops |
@@ -1555,7 +1555,7 @@ To add to [PRD § 6.10](../prd.md#610-events-and-webhooks), after FR-WH-5:
   tenant or identity is being erased, **must** be closed within 60 seconds, and no event **may** be sent on a
   connection whose key was last validated more than 60 seconds earlier.
 - **FR-EVT-9** The MCP server **must** offer `mail_events`, a cursor poll of the feed, and the CLI **must**
-  offer `pmail events list`, `pmail events tail` (resuming from a saved cursor or a consumer) and the
+  offer `idvy events list`, `idvy events tail` (resuming from a saved cursor or a consumer) and the
   consumer commands.
 - **FR-EVT-10** Message, thread, counterparty, identity and tenant erasure **must** remove the log's copies
   of erased data, consumers and streams, report `log_events_deleted` and a zero `log_hits` probe, keep the
@@ -1619,7 +1619,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | R41 | A consumer is deleted while a stream is subscribed to it | The stream is closed with `4404` (`consumer_deleted`) | S | `it::events::consumer_ownership` |
 | R42 | A stream request with another method, or a `GET` without `Upgrade: websocket` | `405 method_not_allowed`; `426 upgrade_required` with `Upgrade: websocket` | S | `it::stream::handshake_validation` |
 | R43 | A credential in the stream URL (`api_key`, `key`, `token`, `access_token`, `stream_token`) | `400 invalid_request` (`credential_in_url`) before anything is authenticated or redeemed; only the parameter's name is logged | S | `it::stream::handshake_validation` |
-| R44 | Both an `Authorization` key and a token, or neither; a token without `pylota-mail.events.v1` | `400 invalid_request` (`two_credentials`); `401 unauthenticated`; `400 invalid_request` (`subprotocol_required`). A `101` acknowledges `pylota-mail.events.v1` and never the token element | S | `it::stream::handshake_validation`, `core::events::stream_token_format` |
+| R44 | Both an `Authorization` key and a token, or neither; a token without `pylota-identity.events.v1` | `400 invalid_request` (`two_credentials`); `401 unauthenticated`; `400 invalid_request` (`subprotocol_required`). A `101` acknowledges `pylota-identity.events.v1` and never the token element | S | `it::stream::handshake_validation`, `core::events::stream_token_format` |
 | R45 | A stream token that is used twice, expired, forged, malformed, of another tenant, or minted by a key revoked since | The Worker accepts the socket itself, sends one `error` and closes with `4401`, the same for every case; nothing reaches the object | S | `it::stream::stream_token_single_use` |
 | R46 | A 101st live (unredeemed and unexpired) stream token in a tenant; 100 tokens minted and abandoned | `429 rate_limited`, `details.bucket = "stream_tokens"`, `Retry-After: 60`; abandoned tokens stop counting once they expire, because each mint first deletes the tenant's expired rows | S | `it::stream::stream_token_single_use` |
 | R47 | A page on another site opens a WebSocket to the API host | It has no credential (the API host has no cookies): `401`, or `4401` on the token path | S | `it::stream::handshake_validation` |
@@ -1639,11 +1639,11 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | R61 | A restore, a re-applied erasure, or a damaged log | A re-applied erasure re-runs the log steps and reports zero when nothing came back; the log is never restored with point-in-time recovery; `event_log_rebuild` starts a new epoch (old cursors `410` with `log_reset`, consumers `reset_required`, streams closed `4410`) and backfills, in `occurred_at` order, only events whose payload the owners still hold; live events that arrive during the backfill are staged and appended when it finishes, so backfilled events keep `appended_at = occurred_at` and leave with their outbox copies; a failed rebuild's staged events are appended by the maintenance alarm after 1 hour without progress | S | `it::events::rebuild_and_restore` |
 | R62 | What logs hold | Never envelopes, extracted text, cursors, stream tokens or the `Sec-WebSocket-Protocol` header | S | `it::logs::i5_no_content_in_logs` |
 | R63 | `mail_events` for a key without `events:read`, and a result over 96 KB | Not listed (`-32602 Unknown tool`); each `extracted_text` is cut to 4,000 characters, items are dropped from the end, and `next_cursor` is the last item kept, so no event is skipped | S | `it::mcp::events_tool` |
-| R64 | `pmail events tail` loses its connection, is interrupted, or meets an expired position | Reconnects with backoff and resumes from the cursor file (written atomically after each printed batch) or the consumer; Ctrl-C writes the file and exits 130; `4410` exits 6 with `details.oldest_cursor`; `4409` exits 6 without reconnecting | S | `cli::events::tail_resume_and_exit_codes` |
+| R64 | `idvy events tail` loses its connection, is interrupted, or meets an expired position | Reconnects with backoff and resumes from the cursor file (written atomically after each printed batch) or the consumer; Ctrl-C writes the file and exits 130; `4410` exits 6 with `details.oldest_cursor`; `4409` exits 6 without reconnecting | S | `cli::events::tail_resume_and_exit_codes` |
 | R65 | Tenant message retention (`retention.message_days`) or per-identity expiry (`message_hours`) deletes a message whose events are in the log; the mailbox's call to the log fails; an erasure job's own `EraseMessages` call is lost after `EraseRows` committed | The mailbox sends `EraseMessages` for every ID that `EraseRows` deleted, so the log rows go with the outbox rows and a `message.received` with extracted text is not readable through the feed after its message expired; the IDs enter `erased_refs`; a failed call is retried with backoff and re-armed by the daily maintenance, and pending IDs are never dropped by the 7-day cleanup; the mailbox's repeat of a lost job call deletes the rows | S | `it::events::retention_and_expiry_reach_log` |
 | R66 | A `message.labels_changed` event in the log lists an erased or expired message together with two others, or alone; a late label event listing an erased message | The erased entry is removed with `json_remove`, as in the outbox, and the row deleted when no entry is left; `probe.log_hits` finds label rows through `event_messages`; at append, a late event loses its erased entries, or is refused when none is left | S | `it::events::label_event_erasure`, `core::events::index_fields` |
 | R67 | Retention or the size budget passes an open stream's position; a `GET /v1/events` or a `subscribe` with `since` before events that were already removed | The stream gets `error` (`cursor_expired`, `details.oldest_cursor`) and close `4410`, never a silent skip; the page or the `subscribed` message carries `since_truncated: true`, which erasure never sets | S | `it::events::floor_never_skipped_silently` |
-| R68 | Two `pmail events tail --consumer X` processes, or an 11th connection of one key; a close `4400`, `1008` or `1009`; a close `1001`, `1006`, `1011`, `1012`, `1013` or `4408` | The replaced connection gets `4409` and its client stops (the CLI exits 6), so two clients never replace each other in a loop; on `4400`, `1008` and `1009` the client stops (exit 7); on the others it resumes with backoff | S | `cli::events::tail_resume_and_exit_codes`, `sdk::events::stream_close_rules`, `ts::events::stream_close_rules` |
+| R68 | Two `idvy events tail --consumer X` processes, or an 11th connection of one key; a close `4400`, `1008` or `1009`; a close `1001`, `1006`, `1011`, `1012`, `1013` or `4408` | The replaced connection gets `4409` and its client stops (the CLI exits 6), so two clients never replace each other in a loop; on `4400`, `1008` and `1009` the client stops (exit 7); on the others it resumes with backoff | S | `cli::events::tail_resume_and_exit_codes`, `sdk::events::stream_close_rules`, `ts::events::stream_close_rules` |
 | R69 | A consumer whose backlog is larger than one page, or whose filters skip a whole scan window | A client that commits each page's `next_cursor`, empty pages included, reaches the head; reading again without a commit returns the same page; Pylota's reconcile run commits per page | S | `it::events::consumer_backlog_paging` |
 
 ## 20. Tests
@@ -1691,7 +1691,7 @@ New section **R · Event feed and live stream** of the [edge-case register](../e
 | `it::events::floor_never_skipped_silently` | A stream whose position retention passes gets `error` and `4410`, with `details.consumer_id` on a consumer-bound connection; `since` before removed events sets `since_truncated` on the page and on `subscribed`; erasure never sets it | §5.2, §7.5, R67 |
 | `it::events::consumer_backlog_paging` | A consumer with 1,200 events, and one whose filter skips a whole scan window: committing each page's `next_cursor`, empty pages included, reaches the head; reading again without a commit returns the same page | §6.2, §17, R69 |
 | `sdk::events::stream_close_rules` | The Rust SDK's `EventStream` resumes on `1001`, `1006`, `1011`, `1012`, `1013`, `4408` and an unknown code, retries `4429` after 30 seconds, and ends with an error on `4400`, `4401`, `4403`, `4404`, `4409`, `1008` and `1009` without reconnecting | §7.10, R68 |
-| `it::stream::handshake_validation` | R42, R43, R44 and R47; the `101` carries only `pylota-mail.events.v1`; a key-path refusal is an HTTP error with the envelope | §7.1, R42, R43, R44, R47 |
+| `it::stream::handshake_validation` | R42, R43, R44 and R47; the `101` carries only `pylota-identity.events.v1`; a key-path refusal is an HTTP error with the envelope | §7.1, R42, R43, R44, R47 |
 | `it::stream::stream_token_single_use` | A token works once within 60 seconds; reuse, expiry, forgery, another tenant and a since-revoked key each give `error` and `4401` without reaching the object; the 101st live token gets `429`, and 100 abandoned tokens stop counting once expired | §7.2, R45, R46 |
 | `it::stream::subscribe_rules` | The cases of R48 | §7.3, R48 |
 | `it::stream::client_message_rules` | The cases of R49 | §7.3, R49 |
@@ -1732,7 +1732,7 @@ files, each reviewed by that file's owner:
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `EraseMessages` after each `EraseRows` batch, `EraseIdentity`, `CloseStreams` and `Erase` in tenant erasure, `Probe`, the receipt fields; `Purge` in the tenant retention job's `events` step |
 | `mailbox/erase.rs` (M14), `mailbox/expiry.rs` (M37) | `erased_ids.log_erased_at` and the `log_erase` alarm purpose, which sends `EraseMessages` for what every `EraseRows` deleted, tenant retention and per-identity expiry included (§11.3). If M37 lands first, M30 adds the purpose and runs `it::events::retention_and_expiry_reach_log` against expiry |
 | `mcp/tools.rs` (M15) | `mail_events`, with its rows in M15's table test |
-| `crates/cli` (M16) | `pmail events …` |
+| `crates/cli` (M16) | `idvy events …` |
 | `console/pages/webhooks.rs` (M21) | The event consumers and streams section |
 | `crons/` (M17 and M26's minting loop) | Minting `events_do_id` for rows at `''` |
 
@@ -1785,7 +1785,7 @@ M8, M14, M15, M16, M17 Foundation, M21 ─▶ M30 event feed and live stream ─
 From the AgentMail inventory `inv-realtime.md` §1–§5 (public documentation and AsyncAPI, read 2026-10-17;
 untrusted data, summarised, re-check before quoting).
 
-| AgentMail | Pylota Mail | |
+| AgentMail | Pylota Identity | |
 |---|---|---|
 | Webhooks: 20 event types, Svix signing, 8 attempts over about 27.5 hours, at least once; events may arrive out of order | Webhooks unchanged (Standard Webhooks, 13 attempts over about 72 hours, replay for 30 days), and every event is also in an ordered per-tenant log before its first delivery | Exceed |
 | An endpoint disabled after 5 days of failures; events in that period are not redelivered | The log holds every event whatever the state of the endpoints, for `retention.events_days` | Exceed |
@@ -1803,7 +1803,7 @@ untrusted data, summarised, re-check before quoting).
 | Spam, blocked and unauthenticated events need label permissions, checked at connection open; calendar events only when named | Quarantine and screening events need `quarantine:review`, mail events `messages:read`; checked at subscribe and revalidated every 60 seconds; types a key cannot see are reported in `withheld_types` | Exceed |
 | No documented behaviour when a key is revoked during a stream | Closed within 60 seconds, and nothing is sent once the last validation is 60 seconds old | Exceed |
 | MCP events: `message.received` pushed to a webhook callback, 72-hour subscriptions, 20 per key | `mail_events`, a cursor poll with a long poll; no MCP push until an MCP events SEP is accepted | Deliberately different: MCP 2026-07-28 has no event primitive, and the Triggers and Events Working Group's SEP is still at "Ideating" |
-| The TypeScript SDK reconnects automatically; resubscription is not documented | `pmail events tail` and the Rust SDK resume from a cursor file or a consumer and acknowledge each batch; the TypeScript SDK follows the same protocol | Exceed |
+| The TypeScript SDK reconnects automatically; resubscription is not documented | `idvy events tail` and the Rust SDK resume from a cursor file or a consumer and acknowledge each batch; the TypeScript SDK follows the same protocol | Exceed |
 
 ## 23. Integration
 

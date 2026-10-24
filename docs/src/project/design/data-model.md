@@ -154,7 +154,7 @@ CREATE TABLE domains (
                                          'suspended','removing','removed')),
   state_reason          TEXT,                              -- machine code, e.g. dkim_missing
   state_changed_at      INTEGER NOT NULL,
-  ownership_token       TEXT,                              -- value for _pylota-mail TXT challenge
+  ownership_token       TEXT,                              -- value for _pylota-identity TXT challenge
   ownership_verified_at INTEGER,                           -- NULL until first verified: such a domain counts
                                                            -- toward the unverified cap, expires after 14 days
                                                            -- and can be evicted (identity-domains.md)
@@ -313,7 +313,7 @@ CREATE TABLE api_keys (
                                                            -- 'owner' lets a tenant key hold tenants:erase
   created_by_level  TEXT NOT NULL CHECK (created_by_level IN ('platform','partner','tenant','identity',
                                                              'console','setup')),  -- who minted it: the
-                                                           -- caller's level, a console session, or pmail setup;
+                                                           -- caller's level, a console session, or idvy setup;
                                                            -- platform/partner = provider-managed (W48)
   expires_at        INTEGER,
   revoked_at        INTEGER,
@@ -1110,7 +1110,7 @@ CREATE TABLE platform_objects (
   `users.totp_pending_sealed`, `users.recovery_codes_sealed` and `oauth_states.pkce_sealed`. Each is an
   entry of the sealed-column
   registry (`crates/core/src/sealed.rs`), which the re-seal sweep and the count query of
-  `pmail secrets rotate-master` read, so the rotation covers every one of them. Recovery codes are sealed, not hashed under a `link` key, because link keys are deleted 7 days
+  `idvy secrets rotate-master` read, so the rotation covers every one of them. Recovery codes are sealed, not hashed under a `link` key, because link keys are deleted 7 days
   after a rotation and recovery codes live for months.
 - **Notification preferences.** `notification_prefs` rows exist only where a person changed a default.
   Removing a member deletes their rows for that workspace ([O19](../edge-cases.md)); erasing a person
@@ -2153,6 +2153,6 @@ metadata indexes (8 of 10 allowed):
 metadata stored: the indexed fields only. Never text, subject or addresses.
 ```
 
-Create it with `pmail setup`, which calls the Vectorize API for the index and each metadata index.
+Create it with `idvy setup`, which calls the Vectorize API for the index and each metadata index.
 Query with `topK ≤ 100` and `returnMetadata: "none"`: the message ID is parsed from the vector ID, and
 text is always read back from the mailbox, which also enforces visibility (quarantine, holds, erasure).

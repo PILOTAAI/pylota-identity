@@ -8,13 +8,13 @@ domain fallback and testing.
 All four send operations need the `messages:send` permission and an `Idempotency-Key` header. They
 return `202 Accepted` with the [Message object](../reference/api.md#message-object)
 (`direction: "outbound"`, `status: "queued"`) and `"deduplicated": false`. The CLI equivalents are
-`pmail send`, `pmail reply`, `pmail reply-all` and `pmail forward`.
+`idvy send`, `idvy reply`, `idvy reply-all` and `idvy forward`.
 
 ## Send a new message
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" \
   -H "Idempotency-Key: bk-2291:confirm" \
   -H "Content-Type: application/json" \
   -d @- <<'EOF'
@@ -51,13 +51,13 @@ Full request and response: [REST API › Sending](../reference/api.md#sending).
 ```bash
 # reply to the sender
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_01JA6D3J9S/reply \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Idempotency-Key: bk-2291:reply-dates" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Idempotency-Key: bk-2291:reply-dates" \
   -H "Content-Type: application/json" \
   -d '{"text":"Friday works. See you at 10."}'
 
 # forward, with the original attachments
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_01JA7E4K0T/forward \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Idempotency-Key: claim-7781:forward-photos" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Idempotency-Key: claim-7781:forward-photos" \
   -H "Content-Type: application/json" \
   -d '{"to":["claims@insurer.example"],"text":"Forwarding the photos for claim 7781.","include_attachments":true}'
 ```
@@ -129,8 +129,8 @@ works for one hour and only for those bytes), and attach it as `{ "upload_id": "
 reply-all, forward or draft ([Uploads](../project/design/uploads.md)). An upload is at most 25 MiB and expires
 after a day by default (at most 7); every message that uses it keeps its own copy, so expiry never changes
 a sent message. The attachments of one message may total 25 MiB; the composed message must still fit the
-5 MiB limit, so larger files go out as signed links under `large_attachments: "link"`. `pmail send --attach`
-uploads files over 1 MiB for you. Pylota Mail never fetches an attachment from a URL.
+5 MiB limit, so larger files go out as signed links under `large_attachments: "link"`. `idvy send --attach`
+uploads files over 1 MiB for you. Pylota Identity never fetches an attachment from a URL.
 
 ## Drafts, approval and scheduled send
 
@@ -148,7 +148,7 @@ direct send, with the same policy, caps, holds and retry rules. The sent message
   around it. Or give the agent `drafts:write` without `messages:send`: it can only write drafts.
 - **Who approves.** An approver holds `drafts:approve`, which identity keys can never hold, and approves the
   exact revision and digest they read (`POST …/approve` with `revision`, `digest` and `send`). An edit after
-  approval asks again. On Pylota Mail Cloud only people approve, in the console, unless the operator or the
+  approval asks again. On Pylota Identity Cloud only people approve, in the console, unless the operator or the
   workspace's partner set `drafts.key_approval`, which lets the partner's key approve (never the workspace's
   own keys). `POST …/reject` sends a reason back to the writer.
 - **Scheduled send.** `send_at` (60 seconds to 90 days ahead) sends the draft at that time; a send more
@@ -157,12 +157,12 @@ direct send, with the same policy, caps, holds and retry rules. The sent message
 - **Events.** `draft.approval_requested`, `draft.approved`, `draft.rejected`, `draft.sent` and
   `draft.failed`.
 
-The CLI is `pmail drafts …`; `pmail drafts send` without `--idempotency-key` derives one from the draft and
+The CLI is `idvy drafts …`; `idvy drafts send` without `--idempotency-key` derives one from the draft and
 its revision, so re-running it never sends twice.
 
 ## Calendar invitations
 
-Pylota Mail reads and sends calendar invitations (iMIP), but keeps no calendar: your own calendar system
+Pylota Identity reads and sends calendar invitations (iMIP), but keeps no calendar: your own calendar system
 holds the state ([Calendar invitations](../project/design/calendar-invitations.md)). Reading invitations
 is part of v1.0. Sending invitations and answering them (FR-CAL-8–11) are P1: they ship in v1.0 unless they
 threaten the release, and need spike S1's raw send on the Cloudflare transport
@@ -175,12 +175,12 @@ threaten the release, and need spike S1's raw send on the Cloudflare transport
 - **Answer a received invitation** with `POST …/messages/{message_id}/calendar-reply` (`messages:send`,
   `Idempotency-Key` required): `{ "partstat": "accepted" }`, `declined` or `tentative`, with an optional
   `comment` and `recurrence_id`. Only a verified invitation can be answered, and the reply goes to its
-  organizer. `pmail calendar-reply` is the CLI form.
+  organizer. `idvy calendar-reply` is the CLI form.
 - An agent should never accept an invitation on its own initiative; answer only when the operator wants it.
 
 ## Who a reply goes to
 
-Pylota Mail chooses the recipient and the `From` address of every reply. It does not trust the
+Pylota Identity chooses the recipient and the `From` address of every reply. It does not trust the
 original message's headers blindly.
 
 **The recipient** ([D3](../project/edge-cases.md)):
@@ -223,7 +223,7 @@ Every message has a `kind` ([G9](../project/edge-cases.md)):
 Marketing mail gets RFC 8058 one-click unsubscribe headers (`List-Unsubscribe` and
 `List-Unsubscribe-Post`) and a visible unsubscribe link ([FR-OUT-8](../project/prd.md#65-outbound)).
 Your application handles the unsubscribe URL. Record each unsubscribe as a suppression with reason
-`unsubscribe` so the address is never mailed again. Pylota Mail has no list or campaign features.
+`unsubscribe` so the address is never mailed again. Pylota Identity has no list or campaign features.
 
 Automatic replies are limited so two agents cannot answer each other for ever
 ([D6](../project/edge-cases.md)):
@@ -264,7 +264,7 @@ and the DKIM signature. Custom headers can total 16 KB, with values of at most 2
 
 A request can fail in a way that leaves you not knowing whether it worked: the connection drops, a
 proxy times out, your process restarts. Retrying blindly could send a customer two booking
-confirmations, or two payment reminders. Pylota Mail makes retries safe instead.
+confirmations, or two payment reminders. Pylota Identity makes retries safe instead.
 
 ### The rules
 
@@ -312,7 +312,7 @@ body is still safe, for 30 days. The general retry rules are in
 ### Network errors and timeouts
 
 A network error on a send is always safe to retry with the same key. You get the original result
-back whether or not the first attempt reached the server. A `504 timeout` from Pylota Mail happens
+back whether or not the first attempt reached the server. A `504 timeout` from Pylota Identity happens
 before the message is queued, so a retry with the same key is safe too.
 
 ### The `202` is not the end
@@ -327,7 +327,7 @@ with a **new** key ([K3](../project/edge-cases.md)).
 ### Uncertain sends
 
 Sometimes the transport gives no answer: it times out, or the connection drops after the request was
-written. The email may or may not have left. Pylota Mail then:
+written. The email may or may not have left. Pylota Identity then:
 
 1. sets the message to `uncertain`, with reason `transport_timeout` or `transport_connection_lost`,
    and emits `message.uncertain` with a `fix` sentence;
@@ -340,7 +340,7 @@ If reconciliation does not settle it, a person decides:
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_01JA8F5L1V/resolve \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"outcome":"not_sent"}'
 ```
 
@@ -349,7 +349,7 @@ curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_
   send again, with a **new** Idempotency-Key.
 
 `resolve` needs `messages:write`, works only on `uncertain` messages (otherwise `409 not_uncertain`)
-and is audit-logged. The CLI command is `pmail resolve`.
+and is audit-logged. The CLI command is `idvy resolve`.
 
 What *not* to do with an uncertain send:
 
@@ -418,14 +418,14 @@ creates a suppression as usual
 
 ## Cancel a queued message
 
-`POST …/messages/{message_id}/cancel` (`messages:send`, CLI `pmail cancel`) stops a message while it
+`POST …/messages/{message_id}/cancel` (`messages:send`, CLI `idvy cancel`) stops a message while it
 is still `queued`. It returns the message with `status: "canceled"`. Once the message has gone to the
 transport, cancel fails with `409 not_cancelable`. Use it as the last step of an approval flow: if a
 person rejects a message that was queued, cancel it ([E7](../project/edge-cases.md)).
 
 ## Bounces, complaints and suppressions
 
-| Event | What Pylota Mail does ([G6](../project/edge-cases.md)) |
+| Event | What Pylota Identity does ([G6](../project/edge-cases.md)) |
 |---|---|
 | Hard bounce | Marks the recipient `bounced` and creates a suppression (`hard_bounce`) |
 | Soft bounce | The provider retries (`deferred`). If retries run out, `bounced` with `bounce_type: soft` |
@@ -439,17 +439,17 @@ accepted and ends `suppressed`. It does not return an HTTP error. A dry run (`?d
 `422 all_recipients_suppressed` or `422 recipient_blocked` without sending
 ([Errors › Policy and limits](../reference/errors.md#policy-and-limits)).
 
-Manage suppressions with `suppressions:manage` (CLI `pmail suppressions`):
+Manage suppressions with `suppressions:manage` (CLI `idvy suppressions`):
 
 ```bash
 # add one
 curl -X POST https://mail.example.com/v1/tenants/ten_01J9…/suppressions \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"address":"jo@example.net","reason":"manual","note":"Asked not to be contacted"}'
 
 # look one up
 curl "https://mail.example.com/v1/tenants/ten_01J9…/suppressions?address=jo@example.net" \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 Listings show a masked `address_hint` (for example `j***@example.net`), never the address. You can
@@ -482,7 +482,7 @@ it.
 
 ## When a domain fails
 
-Pylota Mail never sends as a domain whose authentication records are broken
+Pylota Identity never sends as a domain whose authentication records are broken
 ([FR-DOM-5](../project/prd.md#63-domains)). When an identity's domain becomes `failing`:
 
 - sends **fall back** to the identity's platform address (for example `bookings.acme@agents.example`);

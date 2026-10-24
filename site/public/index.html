@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pylota Mail · Email and identity for AI agents</title>
-  <meta name="description" content="Email and identity for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Mail Cloud.">
+  <title>Pylota Identity · Email and identity for AI agents</title>
+  <meta name="description" content="Email and identity for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0A0A0B" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://pylotamail.com/">
   <meta property="og:url" content="https://pylotamail.com/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Pylota Mail">
-  <meta property="og:description" content="Email and identity for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Mail Cloud.">
+  <meta property="og:title" content="Pylota Identity">
+  <meta property="og:description" content="Email and identity for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="icon" href="favicon/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="favicon/favicon-16.png" sizes="16x16" type="image/png">
@@ -59,7 +59,7 @@
 
   <header class="site-header">
     <div class="wrap header-inner">
-      <a class="brand" href="/" aria-label="Pylota Mail home">
+      <a class="brand" href="/" aria-label="Pylota Identity home">
         <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path class="brand-mark-apex" d="M8 46 L26 14 L56 44" pathLength="100" fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="miter"/></svg>
         <span class="brand-name">Pylota <span>Mail</span></span>
       </a>
@@ -92,7 +92,7 @@
               </div>
               </div>
               <a class="menu-foot" href="#why">
-                <span class="menu-foot-tag">Why Pylota Mail</span>
+                <span class="menu-foot-tag">Why Pylota Identity</span>
                 <span>Eight guarantees, each backed by named tests</span>
                 <svg class="i" aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg>
               </a>
@@ -115,7 +115,7 @@
               <div class="menu-col">
                 <p class="menu-label">Tools</p>
                 <ul>
-                  <li><a class="menu-link" href="/docs/reference/cli.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-terminal"/></svg></span><span class="menu-text"><span class="menu-title">CLI</span><span class="menu-desc">pmail: setup, send, search, ask</span></span></a></li>
+                  <li><a class="menu-link" href="/docs/reference/cli.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-terminal"/></svg></span><span class="menu-text"><span class="menu-title">CLI</span><span class="menu-desc">idvy: setup, send, search, ask</span></span></a></li>
                   <li><a class="menu-link" href="/docs/reference/events.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-webhook"/></svg></span><span class="menu-text"><span class="menu-title">Webhooks</span><span class="menu-desc">Signed events, retried for 72 hours</span></span></a></li>
                   <li><a class="menu-link" href="#developers"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-crate"/></svg></span><span class="menu-text"><span class="menu-title">Rust SDK</span><span class="menu-desc">A typed client for Rust services</span></span></a></li>
                 </ul>
@@ -140,7 +140,7 @@
           <svg class="i i-sun" aria-hidden="true" focusable="false"><use href="#i-sun"/></svg>
           <span class="visually-hidden">Dark theme</span>
         </button>
-        <a class="btn btn-ghost btn-sm header-gh" href="https://github.com/PILOTAAI/pylota-mail">
+        <a class="btn btn-ghost btn-sm header-gh" href="https://github.com/PILOTAAI/pylota-identity">
           <svg class="i" aria-hidden="true" focusable="false"><use href="#i-github"/></svg>
           <span class="gh-label">GitHub</span>
         </a>
@@ -181,7 +181,7 @@
             </ul>
             <div class="sheet-actions">
               <a class="btn btn-primary" href="/docs/self-hosting.html">Deploy to Cloudflare<svg class="i" aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg></a>
-              <a class="btn btn-ghost" href="https://github.com/PILOTAAI/pylota-mail"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-github"/></svg>GitHub</a>
+              <a class="btn btn-ghost" href="https://github.com/PILOTAAI/pylota-identity"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-github"/></svg>GitHub</a>
             </div>
           </nav>
         </details>
@@ -196,7 +196,7 @@
         <div class="hero-copy">
           <p class="kicker rise"><span class="kicker-tag">Fair Source</span> FSL-1.1-ALv2 · Rust on Cloudflare Workers</p>
           <h1 id="hero-title" class="rise">Email and identity for AI&nbsp;agents.</h1>
-          <p class="lede rise">Written in Rust. Self-host it free on your own Cloudflare account, or use Pylota Mail Cloud.</p>
+          <p class="lede rise">Written in Rust. Self-host it free on your own Cloudflare account, or use Pylota Identity Cloud.</p>
           <div class="cta-row rise">
             <a class="btn btn-primary" href="/docs/self-hosting.html">
               Deploy to Cloudflare
@@ -206,7 +206,7 @@
           </div>
           <div class="cmd rise">
             <span class="cmd-prompt" aria-hidden="true">$</span>
-            <code id="cmd-install">cargo install pylota-mail-cli --locked &amp;&amp; pmail setup</code>
+            <code id="cmd-install">cargo install pylota-identity-cli --locked &amp;&amp; idvy setup</code>
             <button class="copy" type="button" data-copy="cmd-install">
               <svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg>
               <span class="copy-label">Copy</span><span class="visually-hidden"> install command</span>
@@ -229,7 +229,7 @@
       </div>
 
       <div class="wrap hero-stage">
-        <div class="window" role="img" aria-label="Illustration of the Pylota Mail inbox for the identity bookings@acme.example.com. Inbound threads carry triage chips for category, urgency and needs reply. Sent messages show delivery status: delivered, deferred and bounced. The selected invoice shows a verified sender badge, DKIM pass and DMARC pass, and its raw Received, DKIM-Signature and Authentication-Results headers resolved into structured JSON.">
+        <div class="window" role="img" aria-label="Illustration of the Pylota Identity inbox for the identity bookings@acme.example.com. Inbound threads carry triage chips for category, urgency and needs reply. Sent messages show delivery status: delivered, deferred and bounced. The selected invoice shows a verified sender badge, DKIM pass and DMARC pass, and its raw Received, DKIM-Signature and Authentication-Results headers resolved into structured JSON.">
           <div class="win-bar">
             <span class="win-dots"><i></i><i></i><i></i></span>
             <span class="win-title">bookings@acme.example.com</span>
@@ -391,7 +391,7 @@
     <section class="section section-why" id="why" aria-labelledby="why-title">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Why Pylota Mail</p>
+          <p class="eyebrow">Why Pylota Identity</p>
           <h2 id="why-title">The guarantees other agent mail leaves to you.</h2>
           <p class="section-sub">Eight promises, each enforced in code and covered by named tests you can read.</p>
         </div>
@@ -464,7 +464,7 @@
               <p class="stage-num" aria-hidden="true">01</p>
               <h3>Receive</h3>
               <p>A catch-all route sends mail for every address on your domain to the right identity. Messages up to 25&nbsp;MiB are accepted, parsed and given a sender verdict.</p>
-              <p>Mail that fails authentication, looks like spam or carries an unsafe attachment goes to quarantine and waits for review. On Pylota Mail Cloud only a signed-in person can release it, unless the workspace's policy lets an API key with review permission do so; a self-hosted deployment chooses its own rule.</p>
+              <p>Mail that fails authentication, looks like spam or carries an unsafe attachment goes to quarantine and waits for review. On Pylota Identity Cloud only a signed-in person can release it, unless the workspace's policy lets an API key with review permission do so; a self-hosted deployment chooses its own rule.</p>
               <ul class="ticks">
                 <li>Catch-all routing to identities</li>
                 <li>Inbound messages up to 25&nbsp;MiB</li>
@@ -549,15 +549,15 @@
             </div>
             <div class="stage-visual rise-on-scroll">
               <figure class="terminal">
-                <div class="term-bar"><span class="win-dots"><i></i><i></i><i></i></span><span class="term-title">pmail</span></div>
-<pre class="term-body" tabindex="0"><code><span class="t-p">$</span> pmail send --identity bookings@acme.example.com \
+                <div class="term-bar"><span class="win-dots"><i></i><i></i><i></i></span><span class="term-title">idvy</span></div>
+<pre class="term-body" tabindex="0"><code><span class="t-p">$</span> idvy send --identity bookings@acme.example.com \
     --to renter@example.org --subject <span class="t-s">"Your booking BK-2291"</span> \
     --text <span class="t-s">"Your car is ready at 9:00."</span> \
     --idempotency-key <span class="t-key">bk-2291-confirm</span>
 { <span class="t-k">"id"</span>: <span class="t-s">"msg_01JA5C2H8R"</span>, <span class="t-k">"status"</span>: <span class="t-s">"queued"</span>, <span class="t-k">"deduplicated"</span>: <span class="t-n">false</span> }
 
 <span class="t-c"># the connection dropped before the reply arrived, so the agent retries</span>
-<span class="t-p">$</span> pmail send --identity bookings@acme.example.com \
+<span class="t-p">$</span> idvy send --identity bookings@acme.example.com \
     --to renter@example.org --subject <span class="t-s">"Your booking BK-2291"</span> \
     --text <span class="t-s">"Your car is ready at 9:00."</span> \
     --idempotency-key <span class="t-key">bk-2291-confirm</span>
@@ -629,7 +629,7 @@
           <h2 id="dev-title">Connect your agent the way it already works.</h2>
           <ul class="ways">
             <li><h3>MCP server</h3><p>Point any MCP client at <code>/mcp</code> with a scoped key.</p></li>
-            <li><h3>CLI</h3><p><code>pmail</code> sets up the deployment, manages identities and runs searches.</p></li>
+            <li><h3>CLI</h3><p><code>idvy</code> sets up the deployment, manages identities and runs searches.</p></li>
             <li><h3>REST API</h3><p>JSON over HTTPS. Every write that sends mail takes an <code>Idempotency-Key</code>.</p></li>
             <li><h3>Rust SDK</h3><p>A typed client for services written in Rust.</p></li>
             <li><h3>Signed webhooks</h3><p>Events pushed to your endpoint, signed, and retried for up to 72&nbsp;hours.</p></li>
@@ -644,10 +644,10 @@
                 <div class="code-head"><span class="code-file">mcp.json</span><button class="copy" type="button" data-copy="code-mcp"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> MCP configuration</span></button></div>
 <pre tabindex="0"><code id="code-mcp">{
   <span class="t-k">"mcpServers"</span>: {
-    <span class="t-k">"pylota-mail"</span>: {
+    <span class="t-k">"pylota-identity"</span>: {
       <span class="t-k">"url"</span>: <span class="t-s">"https://mail.example.com/mcp"</span>,
       <span class="t-k">"headers"</span>: {
-        <span class="t-k">"Authorization"</span>: <span class="t-s">"Bearer ${PYLOTA_MAIL_KEY}"</span>
+        <span class="t-k">"Authorization"</span>: <span class="t-s">"Bearer ${PYLOTA_IDENTITY_KEY}"</span>
       }
     }
   }
@@ -660,13 +660,13 @@
               <div class="code">
                 <div class="code-head"><span class="code-file">shell</span><button class="copy" type="button" data-copy="code-cli"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> CLI commands</span></button></div>
 <pre tabindex="0"><code id="code-cli"><span class="t-c"># give the bookings agent its own identity</span>
-pmail identities create --username bookings --display-name <span class="t-s">"Acme Car Hire"</span>
+idvy identities create --username bookings --display-name <span class="t-s">"Acme Car Hire"</span>
 
 <span class="t-c"># exact reference lookup, filtered by sender and attachment</span>
-pmail search <span class="t-s">"from:@brightwell.example ref:AB12CDE has:attachment"</span> --identity bookings@acme.example.com
+idvy search <span class="t-s">"from:@brightwell.example ref:AB12CDE has:attachment"</span> --identity bookings@acme.example.com
 
 <span class="t-c"># ask a question and get an answer with cited message IDs</span>
-pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --identity compliance@acme.example.com</code></pre>
+idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --identity compliance@acme.example.com</code></pre>
               </div>
             </div>
 
@@ -675,7 +675,7 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
               <div class="code">
                 <div class="code-head"><span class="code-file">shell</span><button class="copy" type="button" data-copy="code-curl"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> curl request</span></button></div>
 <pre tabindex="0"><code id="code-curl">curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages \
-  -H <span class="t-s">"Authorization: Bearer $PYLOTA_MAIL_KEY"</span> \
+  -H <span class="t-s">"Authorization: Bearer $PYLOTA_IDENTITY_KEY"</span> \
   -H <span class="t-s">"Idempotency-Key: bk-2291-confirm"</span> \
   -H <span class="t-s">"Content-Type: application/json"</span> \
   -d <span class="t-s">'{"to":["renter@example.org"],"subject":"Your booking BK-2291","text":"Your car is ready at 9:00."}'</span></code></pre>
@@ -686,10 +686,10 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
               <h3 class="tab-label" data-tab-label>Rust SDK</h3>
               <div class="code">
                 <div class="code-head"><span class="code-file">src/booking.rs</span><button class="copy" type="button" data-copy="code-rust"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> Rust example</span></button></div>
-<pre tabindex="0"><code id="code-rust"><span class="t-kw">use</span> pylota_mail::{Client, IdempotencyKey};
-<span class="t-kw">use</span> pylota_mail::types::{Recipient, SendRequest};
+<pre tabindex="0"><code id="code-rust"><span class="t-kw">use</span> pylota_identity::{Client, IdempotencyKey};
+<span class="t-kw">use</span> pylota_identity::types::{Recipient, SendRequest};
 
-<span class="t-kw">async fn</span> <span class="t-f">confirm_booking</span>(key: String) -&gt; Result&lt;(), pylota_mail::Error&gt; {
+<span class="t-kw">async fn</span> <span class="t-f">confirm_booking</span>(key: String) -&gt; Result&lt;(), pylota_identity::Error&gt; {
     <span class="t-kw">let</span> client = Client::<span class="t-f">builder</span>()
         .<span class="t-f">base_url</span>(<span class="t-s">"https://mail.example.com"</span>)
         .<span class="t-f">api_key</span>(key)
@@ -806,21 +806,21 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
             <!-- Cloud opens with v1.0. Once it runs with PM_SIGNUP=waitlist, point these three buttons at
                  https://app.pylotamail.com/console/waitlist?plan={free|developer|team} and label them
                  "Get early access" (docs: Cloud sign-up §6.1). -->
-            <a class="btn btn-ghost plan-cta" href="/docs/guides/plans.html#pylota-mail-cloud">See how plans work</a>
+            <a class="btn btn-ghost plan-cta" href="/docs/guides/plans.html#pylota-identity-cloud">See how plans work</a>
             <ul class="plan-feats"><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>5 inboxes</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>1,000 sends a month</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>500 triage analyses a month</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>1 GB of storage</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>1 seat</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Help on GitHub issues</li></ul>
           </li>
           <li class="plan">
             <div class="plan-head"><h3>Developer</h3></div>
             <p class="plan-blurb">For one person's agents in production.</p>
             <p class="plan-price"><span class="plan-amount">£10</span><span class="plan-per">a month</span></p>
-            <a class="btn btn-ghost plan-cta" href="/docs/guides/plans.html#pylota-mail-cloud">See how plans work</a>
+            <a class="btn btn-ghost plan-cta" href="/docs/guides/plans.html#pylota-identity-cloud">See how plans work</a>
             <ul class="plan-feats"><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>10 inboxes</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>10,000 sends a month</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>10,000 triage analyses a month</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>5 custom domains</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>10 GB of storage · 2 seats</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Email support · £1 top-ups</li></ul>
           </li>
           <li class="plan plan-featured">
             <div class="plan-head"><h3>Team</h3><span class="plan-badge">Most capacity</span></div>
             <p class="plan-blurb">For a team running a fleet of agents.</p>
             <p class="plan-price"><span class="plan-amount">£49.50</span><span class="plan-per">a month</span></p>
-            <a class="btn btn-primary plan-cta" href="/docs/guides/plans.html#pylota-mail-cloud">See how plans work</a>
+            <a class="btn btn-primary plan-cta" href="/docs/guides/plans.html#pylota-identity-cloud">See how plans work</a>
             <ul class="plan-feats"><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>100 inboxes</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>100,000 sends a month</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>100,000 triage analyses a month</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>50 custom domains</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>100 GB of storage · 10 seats</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Priority email · £1 top-ups</li></ul>
           </li>
           <li class="plan plan-self">
@@ -831,7 +831,7 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
             <ul class="plan-feats"><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>API, MCP, CLI and console</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>No plan limits, billing off by default</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>One Rust Worker, no servers</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>EU jurisdiction optional</li><li><svg class="i" aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Support contracts available</li></ul>
           </li>
         </ol>
-        <p class="plans-note">Prices in pounds sterling, excluding VAT. A top-up is £1 a month for one more inbox, 1,000 more sends or 1,000 more triage analyses. Monthly allowances reset on your billing date on a paid plan, and on the 1st of each month on Free; inbox, domain and seat counts do not. Pylota Mail Cloud opens with the v1.0 release.</p>
+        <p class="plans-note">Prices in pounds sterling, excluding VAT. A top-up is £1 a month for one more inbox, 1,000 more sends or 1,000 more triage analyses. Monthly allowances reset on your billing date on a paid plan, and on the 1st of each month on Free; inbox, domain and seat counts do not. Pylota Identity Cloud opens with the v1.0 release.</p>
       </div>
     </section>
 
@@ -841,7 +841,7 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
         <div class="os-copy">
           <p class="eyebrow">Self-host</p>
           <h2 id="os-title">Read the code. Run it on your own account.</h2>
-          <p>The source is published under the Functional Source License (FSL-1.1-ALv2): free to run for your own agents, and each release becomes Apache-2.0 two years after it ships. Install the CLI and <code>pmail setup</code> creates the Cloudflare resources it needs.</p>
+          <p>The source is published under the Functional Source License (FSL-1.1-ALv2): free to run for your own agents, and each release becomes Apache-2.0 two years after it ships. Install the CLI and <code>idvy setup</code> creates the Cloudflare resources it needs.</p>
           <h3 class="req-title">You will need</h3>
           <ul class="ticks">
             <li>A Cloudflare account on the Workers Paid plan</li>
@@ -851,10 +851,10 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
           <p class="stage-links"><a href="/docs/self-hosting.html">Deploy guide</a><a href="/docs/quickstart.html">Quickstart</a></p>
         </div>
         <div class="os-visual">
-          <a class="repo" href="https://github.com/PILOTAAI/pylota-mail">
+          <a class="repo" href="https://github.com/PILOTAAI/pylota-identity">
             <span class="repo-top">
               <svg class="repo-icon" aria-hidden="true" focusable="false"><use href="#i-repo"/></svg>
-              <span class="repo-name"><span>PILOTAAI /</span> pylota-mail</span>
+              <span class="repo-name"><span>PILOTAAI /</span> pylota-identity</span>
               <svg class="repo-gh" aria-hidden="true" focusable="false"><use href="#i-github"/></svg>
             </span>
             <span class="repo-desc">Email and identity for AI agents.</span>
@@ -862,10 +862,10 @@ pmail ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --id
           </a>
           <div class="code code-os">
             <div class="code-head"><span class="code-file">shell</span><button class="copy" type="button" data-copy="code-os"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> setup commands</span></button></div>
-<pre tabindex="0"><code id="code-os">git clone https://github.com/PILOTAAI/pylota-mail
-cargo install pylota-mail-cli --locked
-pmail setup --domain mail.example.com --mail-domain agents.example --jurisdiction eu
-pmail deploy</code></pre>
+<pre tabindex="0"><code id="code-os">git clone https://github.com/PILOTAAI/pylota-identity
+cargo install pylota-identity-cli --locked
+idvy setup --domain mail.example.com --mail-domain agents.example --jurisdiction eu
+idvy deploy</code></pre>
           </div>
         </div>
       </div>
@@ -881,7 +881,7 @@ pmail deploy</code></pre>
         <div class="faq">
           <details>
             <summary>Is it free?</summary>
-            <p>Self-hosting is free under FSL-1.1-ALv2: you pay only your own Cloudflare usage, with no plan limits. Pylota Mail Cloud has a free plan and paid plans from £10 a month; see <a href="#pricing">pricing</a>.</p>
+            <p>Self-hosting is free under FSL-1.1-ALv2: you pay only your own Cloudflare usage, with no plan limits. Pylota Identity Cloud has a free plan and paid plans from £10 a month; see <a href="#pricing">pricing</a>.</p>
           </details>
           <details>
             <summary>Is it open source?</summary>
@@ -889,7 +889,7 @@ pmail deploy</code></pre>
           </details>
           <details>
             <summary>Do I need my own domain?</summary>
-            <p>On Pylota Mail Cloud, no: every inbox gets an address at <code>pylotamail.com</code>, such as <code>bookings.brightwell@pylotamail.com</code>. To self-host you need one domain on Cloudflare DNS whose apex receives agent mail, for example <code>agents.example</code>. Your company's main domain and its mailboxes stay where they are.</p>
+            <p>On Pylota Identity Cloud, no: every inbox gets an address at <code>pylotamail.com</code>, such as <code>bookings.brightwell@pylotamail.com</code>. To self-host you need one domain on Cloudflare DNS whose apex receives agent mail, for example <code>agents.example</code>. Your company's main domain and its mailboxes stay where they are.</p>
           </details>
           <details>
             <summary>Can operators bring their own domain?</summary>
@@ -917,7 +917,7 @@ pmail deploy</code></pre>
               <span class="stamp-text">AGENT<br>MAIL</span>
             </span>
             <h2 id="cta-title">Give your agents an address you control.</h2>
-            <p>Deploy Pylota Mail to your own Cloudflare account and send the first message today.</p>
+            <p>Deploy Pylota Identity to your own Cloudflare account and send the first message today.</p>
             <div class="cta-row">
               <a class="btn btn-primary" href="/docs/self-hosting.html">
                 Deploy to Cloudflare
@@ -934,7 +934,7 @@ pmail deploy</code></pre>
   <footer class="site-footer">
     <div class="wrap footer-grid">
       <div class="footer-brand">
-        <a class="brand" href="/" aria-label="Pylota Mail home">
+        <a class="brand" href="/" aria-label="Pylota Identity home">
           <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path class="brand-mark-apex" d="M8 46 L26 14 L56 44" pathLength="100" fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="miter"/></svg>
           <span class="brand-name">Pylota <span>Mail</span></span>
         </a>
@@ -962,15 +962,15 @@ pmail deploy</code></pre>
       <nav class="footer-col" aria-labelledby="f-src">
         <h2 id="f-src">Source</h2>
         <ul>
-          <li><a href="https://github.com/PILOTAAI/pylota-mail">GitHub</a></li>
+          <li><a href="https://github.com/PILOTAAI/pylota-identity">GitHub</a></li>
           <li><a href="/docs/self-hosting.html">Deploy guide</a></li>
           <li><a href="/docs/guides/custom-domains.html">Custom domains</a></li>
-          <li><a href="https://github.com/PILOTAAI/pylota-mail/blob/main/LICENSE.md">Licence</a></li>
+          <li><a href="https://github.com/PILOTAAI/pylota-identity/blob/main/LICENSE.md">Licence</a></li>
         </ul>
       </nav>
     </div>
     <div class="wrap footer-base">
-      <p>Pylota Mail is source available under the Functional Source License (FSL-1.1-ALv2). This page loads no third-party fonts, scripts or analytics.</p>
+      <p>Pylota Identity is source available under the Functional Source License (FSL-1.1-ALv2). This page loads no third-party fonts, scripts or analytics.</p>
       <p>© 2026 TREFT LTD. Made by Pylota.</p>
     </div>
   </footer>

@@ -1,6 +1,6 @@
 [package]
-name = "pylota-mail-conformance"
-description = "Pylota Mail MIME conformance corpus and runners"
+name = "pylota-identity-conformance"
+description = "Pylota Identity MIME conformance corpus and runners"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -26,7 +26,7 @@ used, so `bookings@a.example` and `bookings@b.example` reach the same agent.
 ## Decision
 
 1. **The platform domain must be a zone apex** with a catch-all rule that sends every message to the
-   Worker. `pmail setup` refuses a non-apex platform domain.
+   Worker. `idvy setup` refuses a non-apex platform domain.
 2. **A D1 directory decides.** `email()` normalises the envelope recipient, strips the `+tag`, and looks
    the address up in `addresses` (cached 60 s for hits, 5 s for misses). Unknown and erased addresses get
    `550 5.1.1` (indistinguishable), retired ones `550 5.1.6`, suspended tenants a temporary failure for up to 5

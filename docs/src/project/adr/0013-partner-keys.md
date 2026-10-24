@@ -9,7 +9,7 @@
 
 ## Context
 
-Pylota Mail Cloud is public: anyone can sign up for a workspace. Pylota itself is one integrator on that
+Pylota Identity Cloud is public: anyone can sign up for a workspace. Pylota itself is one integrator on that
 same deployment. It provisions a tenant and identities for each car-rental operator it serves, through
 the API, without a person in the console.
 

@@ -332,7 +332,7 @@ pub fn signature_header(current: &[u8], previous: Option<&[u8]>, content: &[u8])
 - During a rotation overlap (`prev_secret_expires_at > now`) the header carries both signatures,
   separated by one space, the new secret's first: `v1,{new} v1,{old}`.
 - Other headers: `Content-Type: application/json` and
-  `User-Agent: PylotaMail/1.0 (+https://github.com/PILOTAAI/pylota-mail)` (the version is the deployed
+  `User-Agent: PylotaIdentity/1.0 (+https://github.com/PILOTAAI/pylota-identity)` (the version is the deployed
   release), and the endpoint's custom headers, added before these so they cannot override them
   ([Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)). Custom headers are not
   signed: a receiver still verifies the signature.
@@ -347,7 +347,7 @@ pub fn signature_header(current: &[u8], previous: Option<&[u8]>, content: &[u8])
   (`pm1.{kid}.{nonce}.{ciphertext}`, a fresh random 96-bit nonce from `platform::Rng` for every seal, so a
   nonce is never reused with the key). The associated data binds the value to its row and column
   (`pm1|webhook_endpoints|secret_enc|{endpoint_id}`), so a ciphertext copied elsewhere fails to decrypt.
-  The `kid` lets `pmail secrets rotate-master` find values still sealed under an old key. AES-GCM is the
+  The `kid` lets `idvy secrets rotate-master` find values still sealed under an old key. AES-GCM is the
   `aes-gcm` crate (pin at build time).
 - **Use.** Decrypted per delivery and cached in the isolate for at most 60 seconds, keyed by endpoint ID
   and a hash of `secret_enc`. A decryption failure records the attempt as failed with error

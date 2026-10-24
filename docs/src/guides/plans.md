@@ -1,7 +1,7 @@
 # Plans and billing
 
-There are two ways to run Pylota Mail. You can host it yourself on your own Cloudflare account, free and
-with no plan limits. Or you can use Pylota Mail Cloud, Pylota's hosted deployment of the same code, on the
+There are two ways to run Pylota Identity. You can host it yourself on your own Cloudflare account, free and
+with no plan limits. Or you can use Pylota Identity Cloud, Pylota's hosted deployment of the same code, on the
 Free, Developer or Team plan. This guide covers both: what each plan includes, what counts against it,
 what happens at a limit, who is told by email before it, how to change plans, and how an agent reads its
 own limits.
@@ -11,7 +11,7 @@ own limits.
 Self-hosting is free under FSL-1.1-ALv2. You pay only your own Cloudflare usage
 ([Deploy to Cloudflare](../self-hosting.md)).
 
-- Billing is **off** by default (`PM_BILLING=off`). You need no Stripe account, and `pmail setup` never
+- Billing is **off** by default (`PM_BILLING=off`). You need no Stripe account, and `idvy setup` never
   asks for one.
 - There are **no plan limits**. Nothing returns `402 billing_limit`.
 - You can still set **quotas** in each tenant's policy: daily send caps per identity and per tenant
@@ -29,14 +29,14 @@ described in the [billing design](../project/design/billing.md#self-host-mode). 
 permit offering the software to others as a competing commercial product or service, so read
 [PRD §12](../project/prd.md#12-licensing) before you charge anyone for a deployment.
 
-## Pylota Mail Cloud
+## Pylota Identity Cloud
 
-Pylota Mail Cloud is the same Worker, run by Pylota, with billing on. Each workspace has a plan, and the
+Pylota Identity Cloud is the same Worker, run by Pylota, with billing on. Each workspace has a plan, and the
 plan's allowances are enforced exactly.
 
-**Pylota Mail Cloud opens with the v1.0 release.** Until then there is nothing to sign up for, and this
+**Pylota Identity Cloud opens with the v1.0 release.** Until then there is nothing to sign up for, and this
 page describes how the plans will work. Releases are announced in the
-[GitHub repository](https://github.com/PILOTAAI/pylota-mail).
+[GitHub repository](https://github.com/PILOTAAI/pylota-identity).
 
 ### Plans
 
@@ -173,7 +173,7 @@ limits from the API and webhooks ([Notifications design](../project/design/notif
 - **What the email says.** The allowance in plain words, used and granted, when it resets (or that it
   does not), and what happens at 100%, for example "sends return `402 billing_limit` until 1 November".
   It links to **Plan and usage**, and for the owner to buying a top-up. The subject reads like
-  `[Pylota Mail] Sends at 80% for Brightwell`.
+  `[Pylota Identity] Sends at 80% for Brightwell`.
 - **Webhooks are unchanged.** `quota.warning` and `billing.limit_reached` events still go to your
   endpoints, so agents and your backend learn about limits the same way as before.
 - **Self-hosted with billing off.** There are no plan limits, so no usage alert is sent.
@@ -235,7 +235,7 @@ Agents can read their own limits before they hit one ([REST API › Usage](../re
 request without `tenant_id` gets `400 invalid_request`).
 
 ```bash
-curl https://mail.example.com/v1/usage -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+curl https://mail.example.com/v1/usage -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 ```json
@@ -270,7 +270,7 @@ counted but not limited by any plan.
 **`GET /v1/plans`** needs no key. It returns the plan catalog, or `{ "billing_enabled": false, "data": [] }`
 on a deployment without billing.
 
-**CLI.** `pmail usage` prints the allowances table, and `pmail usage daily` the per-day figures. Add
+**CLI.** `idvy usage` prints the allowances table, and `idvy usage daily` the per-day figures. Add
 `--json` for the raw response.
 
 **MCP.** [`mail_get_usage`](../reference/mcp.md#mail_get_usage) returns the same object. It is read-only
@@ -294,7 +294,7 @@ ID there or in the Customer Portal, and it appears on invoices.
 | Team | Priority email |
 | Self-host | Support contracts are available |
 
-Security problems go to the process in [SECURITY.md](https://github.com/PILOTAAI/pylota-mail/blob/main/SECURITY.md),
+Security problems go to the process in [SECURITY.md](https://github.com/PILOTAAI/pylota-identity/blob/main/SECURITY.md),
 never to a public issue.
 
 ## Related

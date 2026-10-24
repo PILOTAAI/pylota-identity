@@ -33,7 +33,7 @@ sender ──SMTP──▶ Cloudflare Email Routing ──▶ email() handler
   ([A2](../project/edge-cases.md)).
 - **No acknowledged message is lost.** The raw message is in R2 before the sending server gets its
   acknowledgement. If the write fails, the sender gets a temporary failure and retries
-  ([FR-IN-1](../project/prd.md#64-inbound)). If Pylota Mail's own directory is briefly unavailable,
+  ([FR-IN-1](../project/prd.md#64-inbound)). If Pylota Identity's own directory is briefly unavailable,
   the message is accepted into a staging area and routed later, never rejected
   ([J7](../project/edge-cases.md)).
 - **Paused identities** still receive and store mail ([A7](../project/edge-cases.md)).
@@ -44,7 +44,7 @@ sender ──SMTP──▶ Cloudflare Email Routing ──▶ email() handler
   application can act only on the primary recipient's copy ([A9](../project/edge-cases.md)).
 - **BCC**: when an identity received the message without being named in its headers, the message has
   the flag `bcc` ([A10](../project/edge-cases.md)).
-- Messages larger than 25 MiB are rejected by Cloudflare before Pylota Mail sees them.
+- Messages larger than 25 MiB are rejected by Cloudflare before Pylota Identity sees them.
 
 ### Domains that do not use Email Routing
 
@@ -92,7 +92,7 @@ Every inbound message carries an authentication verdict and trust metadata
 
 | Field | Meaning |
 |---|---|
-| `verdict` | `pass`, `arc_rescued`, `fail`, `softfail`, `none`, `unaligned` or `unverified` (SPF alignment could not be checked yet, because the deployment's `PM_TRUSTED_AUTHSERV_ID` is not set). `arc_rescued` means DMARC failed only because a trusted forwarder (by default Google or Microsoft) changed the message, and that forwarder's ARC seal records a DMARC pass before it did ([Parity additions § 6](../project/design/parity-additions.md#6-trusted-arc-sealers-fr-in-15)). It is not `pass`: rules that need proven authenticity, such as service sign-up codes, still require `pass`. Computed by Pylota Mail's own DKIM, ARC and DMARC verification, plus Cloudflare's `Authentication-Results` header when its authserv-id is trusted ([D9](../project/edge-cases.md)) |
+| `verdict` | `pass`, `arc_rescued`, `fail`, `softfail`, `none`, `unaligned` or `unverified` (SPF alignment could not be checked yet, because the deployment's `PM_TRUSTED_AUTHSERV_ID` is not set). `arc_rescued` means DMARC failed only because a trusted forwarder (by default Google or Microsoft) changed the message, and that forwarder's ARC seal records a DMARC pass before it did ([Parity additions § 6](../project/design/parity-additions.md#6-trusted-arc-sealers-fr-in-15)). It is not `pass`: rules that need proven authenticity, such as service sign-up codes, still require `pass`. Computed by Pylota Identity's own DKIM, ARC and DMARC verification, plus Cloudflare's `Authentication-Results` header when its authserv-id is trusted ([D9](../project/edge-cases.md)) |
 | `known_sender` | The identity has exchanged mail with this address before |
 | `spam_score` | 0 to 1. Above the tenant's `quarantine.spam_threshold` (default 0.8) the message is quarantined |
 | `automated` | Auto-reply, mailing list, bounce or read receipt |
@@ -127,7 +127,7 @@ removed from `extracted_text`, snippets and the triage input, and raises the `hi
 |---|---|
 | S/MIME or PGP encrypted | Stored with the flag `encrypted`. The body is unavailable ([B9](../project/edge-cases.md)) |
 | Calendar invitations | `kind: calendar` with a verified, structured `calendar` object and a `calendar.received` event; never accepted automatically ([B8](../project/edge-cases.md), [Calendar invitations](../project/design/calendar-invitations.md)) |
-| Read-receipt requests | Ignored. Pylota Mail never sends read receipts |
+| Read-receipt requests | Ignored. Pylota Identity never sends read receipts |
 | Forwarded messages (`message/rfc822`) | Parsed as a nested message and never merged into the outer thread ([B6](../project/edge-cases.md)) |
 | Malformed MIME | Kept raw, parsed as far as possible, flagged `parse_degraded`. Never dropped ([B2](../project/edge-cases.md)) |
 
@@ -157,11 +157,11 @@ Its `message.quarantined` event carries no `extracted_text`.
 | `quarantine_reason` | Cause | Policy |
 |---|---|---|
 | `auth_failed` | The message failed authentication | `quarantine.on_auth_fail` (default `true`) |
-| `auth_unverified` | The sender's DMARC policy is `quarantine` or `reject`, DKIM did not align, and SPF could not be checked because the deployment has not yet learned Cloudflare's `Authentication-Results` authserv-id (`PM_TRUSTED_AUTHSERV_ID`; `pmail setup` sets it) | `quarantine.on_auth_fail` (default `true`) |
+| `auth_unverified` | The sender's DMARC policy is `quarantine` or `reject`, DKIM did not align, and SPF could not be checked because the deployment has not yet learned Cloudflare's `Authentication-Results` authserv-id (`PM_TRUSTED_AUTHSERV_ID`; `idvy setup` sets it) | `quarantine.on_auth_fail` (default `true`) |
 | `spam` | `spam_score` above the threshold | `quarantine.spam_threshold` (default 0.8) |
 | `risky_attachment` | An attachment has a `risk` | Always |
 | `blocked_sender` | The sender matched a receive-block rule (see [Blocked senders and throttling](#blocked-senders-and-throttling)). These messages get status `hidden`, not `quarantined`: they are never evented, never shown in the quarantine and cannot be released | Tenant lists |
-| `account_unapproved` | A verification code or link from a service for which the identity has no approved service sign-up entry ([E9](../project/edge-cases.md), [Service sign-up ledger](../project/design/service-accounts.md)). Senders on your receive-allow list are exempt | `accounts.require_approval` (default `false`; `true` on Pylota Mail Cloud) |
+| `account_unapproved` | A verification code or link from a service for which the identity has no approved service sign-up entry ([E9](../project/edge-cases.md), [Service sign-up ledger](../project/design/service-accounts.md)). Senders on your receive-allow list are exempt | `accounts.require_approval` (default `false`; `true` on Pylota Identity Cloud) |
 | `otp_unsolicited` | A password-reset or one-time-code message that no `wait` asked for in the previous 30 minutes ([E5](../project/edge-cases.md)) | `quarantine.unsolicited_otp` (default `true`) |
 | `steering_suspected` | Screening judged that the message tries to give instructions to an AI agent (see [Screening](#screening)) | `screening.mode` `hold` |
 | `screening_unavailable` | Screening could not reach a verdict before the deadline, and the workspace fails closed | `screening.on_unavailable` (default `quarantine`) |
@@ -181,10 +181,10 @@ curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_
 
 Releasing moves the message to `received`, emits `message.released` (and then `message.received` with
 `released: true` when the message had never reached agents before), runs triage and writes an audit entry.
-The CLI commands are `pmail quarantine list` and `pmail quarantine release`.
+The CLI commands are `idvy quarantine list` and `idvy quarantine release`.
 
 Release is a human decision. Give `quarantine:review` to the people who review mail, not to agents
-([Security](security.md#quarantine)). Where `PM_QUARANTINE_KEY_RELEASE` is `off`, as on Pylota Mail Cloud,
+([Security](security.md#quarantine)). Where `PM_QUARANTINE_KEY_RELEASE` is `off`, as on Pylota Identity Cloud,
 every key gets `403 permission_denied` and a person releases in the console, unless the workspace's
 policy has `quarantine.key_release: true`, which lets the partner's key (never the workspace's own keys)
 release ([Configuration › Tenant policy](../reference/configuration.md#tenant-policy)).
@@ -212,10 +212,10 @@ classifier decides the unclear ones. The tenant policy chooses one of three mode
 - **Attachments screening could not read** (an image while `inbound.extract_image_text` is off, a file whose
   conversion failed) do not hold a message; it carries the trust flag `attachments_unscreened`. Treat those
   attachments as unscreened content before you hand their bytes to a model that can act.
-- **Feedback.** Tell Pylota Mail whether a verdict was right with
+- **Feedback.** Tell Pylota Identity whether a verdict was right with
   `POST …/messages/{message_id}/feedback` (`messages:write`; `correct`, `false_positive`, `missed_threat`,
-  `legitimate_instruction` or `spam`), or `pmail messages feedback`. Feedback changes nothing about the
-  message; it feeds the workspace's precision and recall (`pmail screening summary`, and the console's
+  `legitimate_instruction` or `spam`), or `idvy messages feedback`. Feedback changes nothing about the
+  message; it feeds the workspace's precision and recall (`idvy screening summary`, and the console's
   Screening page).
 - **Agents should not hold `quarantine:review`.** Release of screened mail is the same human decision as
   any release ([Quarantine](#quarantine)).
@@ -229,7 +229,7 @@ Entries are a full address or a whole domain (`@example.com`).
 ```bash
 # block a sender domain for the whole tenant
 curl -X PUT https://mail.example.com/v1/tenants/ten_01J9…/lists/receive/block/@spam.example \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 | Control | Effect |
@@ -249,7 +249,7 @@ request filters on that `status` and the key holds `quarantine:review`.
 
 ```bash
 curl -X POST https://mail.example.com/v1/tenants/ten_01J9…/webhooks \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"url":"https://api.example.com/webhooks/mail",
        "events":["message.received","message.triaged","message.bounced","message.uncertain"],
        "identity_ids":null,"description":"Production API"}'
@@ -265,7 +265,7 @@ redirects are not followed ([FR-WH-5](../project/prd.md#610-events-and-webhooks)
 
 ### 2. Answer quickly
 
-Return any `2xx` within 15 seconds. Pylota Mail ignores the response body. Do the real work later:
+Return any `2xx` within 15 seconds. Pylota Identity ignores the response body. Do the real work later:
 store the event, return `200`, and process it in a background job. Anything else (a timeout, a
 `3xx`, a `5xx`, a TLS or DNS error) counts as a failure and is retried.
 
@@ -306,7 +306,7 @@ pub enum VerifyError {
     BadSignature,
 }
 
-/// Verifies a Pylota Mail webhook request.
+/// Verifies a Pylota Identity webhook request.
 ///
 /// `secret` is the endpoint's `whsec_…` value. The three header values are passed as received.
 /// `body` must be the raw request body bytes. `now_unix` is the current time in Unix seconds.
@@ -350,7 +350,7 @@ pub fn verify_webhook(
 }
 ```
 
-`pmail webhooks verify` checks a captured request against a secret locally, which helps when your
+`idvy webhooks verify` checks a captured request against a secret locally, which helps when your
 own verification disagrees.
 
 ### 4. Deduplicate and process durably
@@ -363,7 +363,7 @@ a model call) is retried by your job system and never re-runs an agent turn or a
 ### 5. Test it
 
 ```bash
-pmail webhooks test whk_01JA…
+idvy webhooks test whk_01JA…
 ```
 
 This sends a `webhook.test` event straight away and shows the delivery attempt.
@@ -372,12 +372,12 @@ This sends a `webhook.test` event straight away and shows the delivery attempt.
 
 ```bash
 curl -X POST https://mail.example.com/v1/webhooks/whk_01JA…/rotate-secret \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"overlap_hours":24}'
 ```
 
 The new secret is returned once. For `overlap_hours` (0–168), every delivery carries both signatures,
-so you can deploy the new secret without dropping events. CLI: `pmail webhooks rotate`.
+so you can deploy the new secret without dropping events. CLI: `idvy webhooks rotate`.
 
 ## Retries, replay and dead deliveries
 
@@ -398,17 +398,17 @@ See what happened, then replay:
 ```bash
 # failed and dead attempts for one endpoint
 curl "https://mail.example.com/v1/webhooks/whk_01JA…/deliveries?status=dead" \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 
 # replay every dead delivery from one day
 curl -X POST https://mail.example.com/v1/webhooks/whk_01JA…/replay \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"since":"2026-10-08T00:00:00Z","until":"2026-10-09T00:00:00Z","status":"dead"}'
 ```
 
 Replay returns `202` with `{ "queued": 42 }`. You can also replay specific events with
 `{"event_ids": ["evt_01J…"]}`. Replayed events keep their original `webhook-id`, so your
-deduplication still works. CLI: `pmail webhooks deliveries` and `pmail webhooks replay`.
+deduplication still works. CLI: `idvy webhooks deliveries` and `idvy webhooks replay`.
 
 ## Ordering with `sequence`
 
@@ -473,7 +473,7 @@ until a matching message arrives ([E4](../project/edge-cases.md)):
 
 ```bash
 curl "https://mail.example.com/v1/identities/idn_01J9Z3K8V4/wait?from=@service.example&kind=verification&timeout=60" \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 ```json
@@ -504,4 +504,4 @@ Rules that keep this safe:
   available through `wait`.
 - Codes and links are kept for 24 hours, then purged.
 
-`wait` needs `search:read`. The MCP tool is `mail_wait`, and the CLI command is `pmail wait`.
+`wait` needs `search:read`. The MCP tool is `mail_wait`, and the CLI command is `idvy wait`.

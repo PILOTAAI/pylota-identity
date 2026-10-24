@@ -1,6 +1,6 @@
 # Privacy, retention and erasure
 
-Pylota Mail stores other people's email, so it is built to keep data where you choose, for as long as
+Pylota Identity stores other people's email, so it is built to keep data where you choose, for as long as
 you choose, and to delete it provably. This guide covers the jurisdiction, what is stored where,
 retention, erasure with receipts, legal holds, subject-access export, what agent assertions and
 notification emails disclose, and the places where data remains after an erasure (and why). The design is in [Privacy and erasure](../project/design/privacy.md).
@@ -10,7 +10,7 @@ for your legal obligations. This guide describes what the software does.
 
 ## Choosing a jurisdiction
 
-`pmail setup --jurisdiction` takes `eu` (the default) or `default`
+`idvy setup --jurisdiction` takes `eu` (the default) or `default`
 ([FR-PRV-1](../project/prd.md#612-privacy)):
 
 - `eu` creates D1, the R2 bucket and **every Durable Object** with Cloudflare's EU jurisdiction, so the
@@ -30,7 +30,7 @@ AWS is involved only if you connect domains through Amazon SES: the `dns_records
 methods, `smtp_relay` with SES receiving, or a switch to SES as the backup sender
 ([Custom domains](custom-domains.md)). Then SES sends and receives that mail in the region you set in
 `PM_SES_REGION`, and AWS becomes a sub-processor you list in your records. With the `eu` jurisdiction,
-`pmail setup ses` refuses a region outside the EU and the UK unless you pass `--allow-non-eu`, and
+`idvy setup ses` refuses a region outside the EU and the UK unless you pass `--allow-non-eu`, and
 `/health` shows `ses_region` so anyone can check it. For the SES region, `eu` means "EU or UK": the UK
 has an EU adequacy decision under the GDPR, so London (`eu-west-2`) is accepted. Cloudflare's `eu`
 jurisdiction for D1, R2 and Durable Objects means the European Union only. Without SES, nothing goes to AWS.
@@ -48,7 +48,7 @@ under your own agreement with them.
 | R2 | Raw `.eml` files, attachments, extracted attachment text, composed outbound messages, draft attachments, uploaded files waiting to be sent (at most 7 days), subject-access exports | Yes |
 | Vectorize | One vector per chunk of message or attachment text, with filter fields: identity, thread, date, sender domain, direction, has-attachment, verdict and chunk kind. **Never text, subjects or addresses** | No documented option |
 | Queues | Pointers only, never content. Dead-letter queues keep items at most 14 days | – |
-| Amazon S3 (SES domains only) | Raw incoming mail, until Pylota Mail has taken it in. Encrypted at rest, no public access | Your SES region |
+| Amazon S3 (SES domains only) | Raw incoming mail, until Pylota Identity has taken it in. Encrypted at rest, no public access | Your SES region |
 | Amazon SQS (SES domains only) | A backup copy of each "mail arrived" notice: sender and recipient addresses and the message headers, including the subject | Your SES region |
 | Your webhook endpoints | Event payloads: IDs, a header summary, verdicts, triage and up to `policy.webhook_text_bytes` of extracted text (default 16 KB) | Your systems |
 
@@ -127,7 +127,7 @@ curl -X POST https://mail.example.com/v1/erasure-requests \
        "reason":"Data subject request DSR-1182"}'
 ```
 
-The response is `202` with the erasure request. CLI: `pmail erasure create`. Shortcuts exist too:
+The response is `202` with the erasure request. CLI: `idvy erasure create`. Shortcuts exist too:
 `DELETE …/messages/{message_id}` starts a `message`-scope erasure, and `DELETE /v1/identities/{id}`
 starts an `identity`-scope erasure.
 
@@ -156,10 +156,10 @@ searches run afterwards:
 - Erasure completes within 24 hours, and always produces a receipt
   ([NFR-PRV-1](../project/prd.md#7-non-functional-requirements)).
 
-Check progress with `GET /v1/erasure-requests/{id}` (`pmail erasure get`). An `erasure.completed`
+Check progress with `GET /v1/erasure-requests/{id}` (`idvy erasure get`). An `erasure.completed`
 event carries the request with its receipt. A step that fails is retried automatically until 20 hours
 after the request; if it still fails, the request ends `failed` and an `erasure.failed` event names the
-step. Restart it with `pmail erasure retry <id>`: a workspace (tenant) erasure then continues from the
+step. Restart it with `idvy erasure retry <id>`: a workspace (tenant) erasure then continues from the
 step that failed and keeps the original deadline; other scopes run again (a counterparty erasure needs
 the address again, because it is never stored). Keep receipts (or the events) outside the deployment: they are
 your evidence that the request was carried out, and you need them after a restore (see
@@ -184,7 +184,7 @@ your evidence that the request was carried out, and you need them after a restor
 
 ## Console accounts
 
-For each person who uses the console, Pylota Mail stores their sign-in address and name, the workspaces
+For each person who uses the console, Pylota Identity stores their sign-in address and name, the workspaces
 they belong to and their role, their sessions (with the browser family only), their notification
 preferences in each workspace, and when they accepted the terms. If they use Google or GitHub, it stores
 that provider's account ID and the address at the time of linking. A two-step verification secret and
@@ -236,7 +236,7 @@ curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/threads/thr_0
 ```
 
 - Placing and removing a hold (`DELETE …/hold`) need `erasure:manage` and are audit-logged. CLI:
-  `pmail threads hold` and `pmail threads unhold`.
+  `idvy threads hold` and `idvy threads unhold`.
 - Erasure skips held threads and lists them in the receipt. Other operations that would delete held
   data are refused with `423 legal_hold`.
 - Deleting a whole workspace keeps its held threads too: everything else is erased, the workspace
@@ -261,7 +261,7 @@ curl -X POST https://mail.example.com/v1/exports \
 When the export is ready, an `export.completed` event is sent with `export_id` and `expires_at`. Then
 `GET /v1/exports/{id}` returns a `download_url`: a signed link, valid for 7 days, to a ZIP file with
 one `.eml` per message and a `messages.json` index. The file itself is deleted after 7 days. CLI:
-`pmail export create` and `pmail export get`.
+`idvy export create` and `idvy export get`.
 
 ## Suppressions are kept as hashes
 
@@ -270,14 +270,14 @@ request) are **not** deleted. Deleting them would let the address be mailed agai
 person's objection to being contacted (UK and EU GDPR Article 21) ([I7](../project/edge-cases.md)).
 
 So suppressions never store the address itself. They store an HMAC of it, keyed with the deployment
-secret `PM_HASH_KEY`, and a masked hint such as `j***@example.net`. The hash lets Pylota Mail check
+secret `PM_HASH_KEY`, and a masked hint such as `j***@example.net`. The hash lets Pylota Identity check
 "is this recipient suppressed?" without keeping the address in a readable form. Address tombstones for
 deleted identities work the same way.
 
 ## Vectorize residency
 
 Vectorize has no documented option to choose where vectors are stored, so it is not covered by the
-jurisdiction setting. Pylota Mail limits what goes there: vectors carry identifiers and a few filter
+jurisdiction setting. Pylota Identity limits what goes there: vectors carry identifiers and a few filter
 fields, never message text, subjects or addresses, and search always reads text back from the mailbox.
 
 Be aware that vectors are derived from message text, and that the `sender_domain` filter field can
@@ -292,7 +292,7 @@ would bring it back ([I6](../project/edge-cases.md)). Document this as residual 
 
 If you ever restore, follow the restore runbook
 ([Observability › Restore from PITR](../project/design/observability.md#restore-from-pitr)), which
-`pmail ops` automates:
+`idvy ops` automates:
 
 1. Freeze the deployment, so nothing is accepted that the restore could lose.
 2. Restore to the latest point that fixes the problem. The tooling exports the database first and
@@ -304,7 +304,7 @@ If you ever restore, follow the restore runbook
 
 R2, which holds raw mail and attachments, has no point-in-time recovery, versioning or replication. An
 object deleted by retention or erasure is gone, which is what erasure needs; an object deleted by a bug
-is gone too. If you set `PM_BACKUP_BUCKET` (Pylota Mail Cloud does), a nightly job copies new objects to
+is gone too. If you set `PM_BACKUP_BUCKET` (Pylota Identity Cloud does), a nightly job copies new objects to
 a second bucket in the same jurisdiction, and every retention and erasure delete removes the copy as
 well, including a copy that was being made while the erasure ran
 ([Privacy design](../project/design/privacy.md#54-optional-r2-backup-copy)). If you copy the bucket any
@@ -318,6 +318,6 @@ other way, erasure must purge that copy too.
   ([I5](../project/edge-cases.md)).
 - The audit log records actions and targets, never message content or clear addresses.
 - If you set `PM_AI_GATEWAY`, model calls (which carry mail content) pass through that AI Gateway.
-  Pylota Mail turns off the gateway's log collection and caching on every call that carries mail
+  Pylota Identity turns off the gateway's log collection and caching on every call that carries mail
   content, so the gateway keeps only request metadata (model, time, tokens) for those calls. Its rate
   limits and other settings still apply.

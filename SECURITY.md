@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through GitHub's private vulnerability reporting on
-`https://github.com/PILOTAAI/pylota-mail` ("Security" tab → "Report a vulnerability"). Do not open a
+`https://github.com/PILOTAAI/pylota-identity` ("Security" tab → "Report a vulnerability"). Do not open a
 public issue.
 
 Include what you found, how to reproduce it and the impact you believe it has. We aim to acknowledge
@@ -12,7 +12,7 @@ reports within 3 working days and to agree a fix and disclosure date with you.
 ## Scope
 
 In scope: the Worker (`crates/worker`), the core library, the CLI, the SDK, the default configuration
-written by `pmail setup`, and the documentation where following it would leave a deployment insecure.
+written by `idvy setup`, and the documentation where following it would leave a deployment insecure.
 
 Especially interesting:
 

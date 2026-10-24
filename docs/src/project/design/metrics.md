@@ -36,7 +36,7 @@ which stay as they are ([§2](#2-what-the-routes-are-for-and-how-they-relate-to-
   units per UTC day for a tenant (`inbound`, `outbound`, `sends`, `triage`, `search`, `agentic`,
   `assertions`, `http_signatures`, `ai_neurons`, `storage_bytes`), from `usage_daily`.
 - **Operator metrics** ([Observability § 3](observability.md#3-metrics)). Analytics Engine, dataset
-  `pylota_mail_metrics`, sampled per tenant, with no identity labels; read by the operator through the
+  `pylota_identity_metrics`, sampled per tenant, with no identity labels; read by the operator through the
   Analytics SQL API, never by tenants.
 - **Domain health** ([Identities and domains](identity-domains.md)): DNS and authentication state per
   domain, `GET /v1/domains/{domain_id}`. Not a rate.
@@ -317,7 +317,7 @@ Both are tested as properties of `core::abuse` and end to end ([§14](#14-tests)
 **`RecordOutcome` gains its thresholds.** Today's `RecordOutcome { identity_id, domain_id, outcome, at,
 event_id, counted }` names `policy.abuse.*` but carries no policy, and `TenantQuota` keeps none. It gains
 `thresholds: AbuseThresholds`: the delivery consumer resolves them from the tenant's effective policy (a D1
-read of the tenant's policy and its partner's ceilings, cached per isolate for 60 seconds, a Pylota Mail
+read of the tenant's policy and its partner's ceilings, cached per isolate for 60 seconds, a Pylota Identity
 choice) exactly as the rates handler does in step 3, with the same `core::policy::effective`. A policy change therefore applies to the next outcome
 and to the next rates read alike (after at most the 60-second cache on the consumer side, which
 [Y4](../edge-cases.md) states).
@@ -450,7 +450,7 @@ with today.
    (every identity, for the platform domain), with the same filter and narrowing. More than 100 → `422
    scope_too_large` (`details.identities`, and the fix "pass `identity_ids`, at most 100").
 5. Fan-out: `MailboxRequest::MetricCounts` to each mailbox (with `domain` set for domain scope), at most
-   20 in flight, each with a deadline of 2,000 ms from the start of the fan-out (a Pylota Mail choice:
+   20 in flight, each with a deadline of 2,000 ms from the start of the fan-out (a Pylota Identity choice:
    a counter read is one indexed query). An identity that errors or misses it is added to
    `failed_identities` and `partial` becomes `true`; the response is still `200`.
 6. Sum per bucket and type; `totals` over the range.
@@ -532,7 +532,7 @@ with today.
 
 ## 8. Billing and limits
 
-Reads are not metered and need no plan feature. Limits (Pylota Mail choices): hourly buckets kept
+Reads are not metered and need no plan feature. Limits (Pylota Identity choices): hourly buckets kept
 192 hours and at most 168 per request; daily buckets kept 92 days (the same reach as `GET /v1/usage/daily`)
 and at most 92 per request; at most 100 identities per tenant or domain fan-out (as tenant search);
 2,000 ms per mailbox; `RL_SEARCH` for events. Test tenants behave the same.
@@ -574,8 +574,8 @@ complaints or bounces would pause sending. Check it before sending to many recip
 **CLI.**
 
 ```text
-pmail metrics rates [--identity ID | --domain ID] [--tenant ID] [--json]
-pmail metrics events [--identity ID | --domain ID] [--tenant ID] [--bucket hour|day] [--from TIME]
+idvy metrics rates [--identity ID | --domain ID] [--tenant ID] [--json]
+idvy metrics events [--identity ID | --domain ID] [--tenant ID] [--bucket hour|day] [--from TIME]
                      [--to TIME] [--types sent,delivered,…] [--identity-ids ID,…] [--json]
 ```
 
@@ -685,7 +685,7 @@ To add to [PRD § 6](../prd.md) as a new group, "Deliverability metrics":
   erasure, and be deleted with their identity and tenant.
 - **FR-MET-10** The console **must** show the rates and headroom of the tenant, its domains and its
   identities, and daily event counts; the MCP server **must** offer `mail_get_rates` and
-  `mail_get_event_counts`; the CLI **must** offer `pmail metrics rates|events`.
+  `mail_get_event_counts`; the CLI **must** offer `idvy metrics rates|events`.
 
 ## 13. Edge cases
 
@@ -738,7 +738,7 @@ Section Y of the [edge-case register](../edge-cases.md), rows Y1–Y19 (Y20 onwa
 | `it::metrics::record_outcome_thresholds` | `RecordOutcome` receives `thresholds` resolved from the effective policy (tenant value, partner ceiling, deployment default), and a policy change applies to the next outcome after the cache window | FR-MET-3 |
 | `it::console::deliverability_page` | All roles see the screen; pauses first, tripped rows first, headroom sentences; works with no script; the inbox and domain pages show their windows | §9 |
 | `it::mcp::metrics_tools` | `mail_get_rates` and `mail_get_event_counts` are listed only for keys with `metrics:read`, map to their routes and return the same errors; an identity key asking for tenant-scope counts gets `scope_denied` | §9 |
-| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | §9 |
+| `cli::metrics::rates_and_events` | Against recorded fakes: `idvy metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | §9 |
 | `live::metrics::bounce_moves_rates` | On staging: a bounce to a non-existent mailbox adds 1 to `bounced` in event counts and to `identity_bounces.events`, and the headroom drops by 1 | FR-MET-1, FR-MET-5 |
 
 ## 15. Milestone
@@ -786,7 +786,7 @@ behaviour change except the pinned windows and the thresholds argument; the M9 d
 
 From the AgentMail inventories (public docs and OpenAPI, read 2026-10-17; their content is untrusted data):
 
-| AgentMail | Pylota Mail | Verdict |
+| AgentMail | Pylota Identity | Verdict |
 |---|---|---|
 | `GET /v0/metrics/events`: counts per event type in buckets (start, end, period, limit, descending), at most 1,000 buckets | `GET /v1/metrics/events`: twelve event types, hourly (168 per request, 192 hours kept) or daily (92 per request, 92 days kept) buckets, zeros included | Match; deliberately fewer buckets: counters are exact and kept in each mailbox, so their reach is bounded |
 | Org, pod and inbox scope | Tenant, identity and domain scope (tenants are AgentMail's pods and organisations by role; domain scope is added) | Exceed |

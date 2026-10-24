@@ -143,8 +143,8 @@ settings page says so.
 
 - Sent from the reserved system identity at `PM_SYSTEM_FROM`, through the normal outbound pipeline with
   `kind: "transactional"`. They take part in suppressions and bounce handling like any message.
-- Subjects: `[Pylota Mail] Sends at 80% for Brightwell`, `[Pylota Mail] 3 new messages in bookings.brightwell@…`,
-  `[Pylota Mail] 4 things need you in Brightwell`, `[Pylota Mail] Today's held-back notifications for Brightwell`.
+- Subjects: `[Pylota Identity] Sends at 80% for Brightwell`, `[Pylota Identity] 3 new messages in bookings.brightwell@…`,
+  `[Pylota Identity] 4 things need you in Brightwell`, `[Pylota Identity] Today's held-back notifications for Brightwell`.
 - Plain text and a minimal HTML part with no images and no tracking.
 - Every `usage`, `new_mail`, `needs_person` and `digest` email carries `List-Unsubscribe: <https://{PM_CONSOLE_HOST}/console/notifications/unsubscribe?t={token}>`
   and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058). The token is a MAC under the current

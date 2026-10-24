@@ -1,6 +1,6 @@
 # Cloud sign-up, sign-in and first run
 
-How a customer of **Pylota Mail Cloud** goes from the pricing page to a working agent inbox. It covers how
+How a customer of **Pylota Identity Cloud** goes from the pricing page to a working agent inbox. It covers how
 they sign up and sign in, how they pay, which screen they land on, and the first-run checklist. It closes
 open point 6 of [Console and workspaces](console.md#open-points) and extends that design. Money is in
 [Plans, metering and billing](billing.md).
@@ -16,9 +16,9 @@ open point 6 of [Console and workspaces](console.md#open-points) and extends tha
 
 | Person | How they get access | Where they work |
 |---|---|---|
-| **Cloud customer** (a developer or a team buying Pylota Mail) | Self-serve sign-up, this page | The console on Pylota Mail Cloud |
+| **Cloud customer** (a developer or a team buying Pylota Identity) | Self-serve sign-up, this page | The console on Pylota Identity Cloud |
 | **Teammate** of a Cloud customer | An invitation ([Invitations](console.md#invitations)) | The same console, in the inviter's workspace |
-| **Self-hoster** | `pmail setup --owner-email` creates the first owner ([Console](console.md#workspaces)) | The console on their own deployment |
+| **Self-hoster** | `idvy setup --owner-email` creates the first owner ([Console](console.md#workspaces)) | The console on their own deployment |
 | **Pylota car-rental operator** | Never signs in here. The operator's workspace is a tenant of Cloud on `pylotamail.com`, which Pylota's backend creates with Pylota's partner key ([REST API › Partners](../../reference/api.md#partners)) | Inside the Pylota app, which reads and acts on mail through the API |
 
 Self-serve sign-up exists only where `PM_SIGNUP` is `waitlist` or `open` (Cloud). It is `closed` by
@@ -32,7 +32,7 @@ Using `pylota.io` would mix agent mail with Pylota's own sign-in mail and its bo
 
 | Host | Serves | Notes |
 |---|---|---|
-| `pylotamail.com` (apex) and `www.pylotamail.com` | The landing page and docs (the assets-only site Worker, `site/wrangler.jsonc`), and the shared mail domain, `PM_PLATFORM_DOMAIN` | Addresses like `bookings.brightwell@pylotamail.com`. The site adds only web records (Workers Custom Domains); the mail records (MX, SPF and DKIM TXT, `_dmarc`) are separate records that `pmail setup` writes, so the two never collide. Sign-up buttons link to `app.pylotamail.com` |
+| `pylotamail.com` (apex) and `www.pylotamail.com` | The landing page and docs (the assets-only site Worker, `site/wrangler.jsonc`), and the shared mail domain, `PM_PLATFORM_DOMAIN` | Addresses like `bookings.brightwell@pylotamail.com`. The site adds only web records (Workers Custom Domains); the mail records (MX, SPF and DKIM TXT, `_dmarc`) are separate records that `idvy setup` writes, so the two never collide. Sign-up buttons link to `app.pylotamail.com` |
 | `app.pylotamail.com` | The console, `PM_CONSOLE_HOST` | Same Worker as the API. Only console routes answer on this host |
 | `api.pylotamail.com` | REST API, MCP, signed links (`/v1/links/*`), `/hooks/*`, the Stripe webhook (`/billing/stripe/webhook`), `/health`, `PM_API_HOST` | No cookies are ever set or read on this host |
 
@@ -44,7 +44,7 @@ A partner key reaches only the tenants its partner's keys created, so no Pylota 
 customer's mail. Cloud keeps `PM_QUARANTINE_KEY_RELEASE=off`, and Pylota's tenants set
 `quarantine.key_release: true`, so Pylota's app can release held mail through its key
 ([Configuration › Tenant policy](../../reference/configuration.md#tenant-policy)). Amazon SES for Cloud runs
-in `eu-west-2` (London), decided on 2026-10-09. Cloud also sets `PM_BACKUP_BUCKET = "pylota-mail-backup"`
+in `eu-west-2` (London), decided on 2026-10-09. Cloud also sets `PM_BACKUP_BUCKET = "pylota-identity-backup"`
 (the nightly blob copy, [ADR 0016](../adr/0016-plan-items-changed-for-v1.md)), `PM_ALERT_EMAIL` to the
 owner's address and `PM_HEARTBEAT_KEY_ID`, and runs the heartbeat workflow, because one person operates
 it ([ADR 0015](../adr/0015-solo-operator.md)).
@@ -163,11 +163,11 @@ link. They never reveal whether an account exists.
   `users.recovery_codes_sealed` is a `pm1` envelope under `PM_MASTER_KEY` of
   `[{ "hash": SHA-256(code), "used_at": null }]`. They are not keyed hashes under the `link` keyring,
   because a link key is deleted 7 days after rotation and recovery codes live for months. The
-  `pmail secrets rotate-master` re-seal sweep covers them, as it covers `users.totp_sealed`.
+  `idvy secrets rotate-master` re-seal sweep covers them, as it covers `users.totp_sealed`.
 - **When it is asked for.** After any first factor (link, code, Google or GitHub, and the link in an
   invitation email), before any session is created, through the pending step of [§5.1](#51-the-pending-step).
   It is also asked for at re-authentication when enrolled.
-- **Workspace requirement.** An owner can set `require_two_factor` in workspace settings. Pylota Mail Cloud
+- **Workspace requirement.** An owner can set `require_two_factor` in workspace settings. Pylota Identity Cloud
   recommends it for Team workspaces. It is checked on **every** console request, not only on entry: the
   session query reads `tenants.require_two_factor` and `users.totp_enabled_at`
   ([Console › Sessions](console.md#sessions)), and while the active workspace requires it and the person
@@ -230,7 +230,7 @@ response is the same whether or not the address is already on the list. Using th
 with `plan` from the token and `confirmed_at` = now, and shows "You're on the list". An address already
 on the list keeps its row and its place. No account is created.
 
-The operator invites people in batches with `pmail waitlist invite --count 50 [--plan P]`, which calls the
+The operator invites people in batches with `idvy waitlist invite --count 50 [--plan P]`, which calls the
 platform API:
 
 | | |
@@ -342,7 +342,7 @@ Plan and usage, Audit log, Settings (with the workspace policy).
      the default plan ("Finish upgrading to Developer", with a button that starts Checkout for owners;
      [W24](../edge-cases.md)). It reads only the query parameter and the current plan;
    - an allowance used up ("Sends are paused until 1 Nov. Add 1,000 sends for £1 or upgrade");
-   - a domain `failing` or `suspended` ("Sending from bookings@brightwell.example uses your Pylota Mail
+   - a domain `failing` or `suspended` ("Sending from bookings@brightwell.example uses your Pylota Identity
      address until the DNS is fixed");
    - an identity paused for bounces or complaints;
    - two-step verification required but missing;
@@ -388,7 +388,7 @@ to the current time, and the Overview render reads it and leaves the checklist o
 | Create your first inbox | Yes | The workspace has an identity | `/console/inboxes/new`: name it and see its address, for example `bookings.brightwell@pylotamail.com` |
 | Send it a test email | Yes | An inbound message exists | The address with a copy-friendly box, and a "Check for email" button that reloads the step. It reports only that a message arrived |
 | Create an API key | Yes | A key exists | `/console/keys/new`. The secret is shown once |
-| Connect your agent | Yes | A workspace key made an authenticated API or MCP request in the last 7 days (`api_keys.last_used_at`) | `/console/connect`: the `claude mcp add` line, `.mcp.json`, a `curl` request and `pmail login`, with the key ID filled in (never the secret) |
+| Connect your agent | Yes | A workspace key made an authenticated API or MCP request in the last 7 days (`api_keys.last_used_at`) | `/console/connect`: the `claude mcp add` line, `.mcp.json`, a `curl` request and `idvy login`, with the key ID filled in (never the secret) |
 | Add a webhook | No | An endpoint returned `2xx` to a test event | `/console/webhooks` |
 | Connect your own domain | No | A domain is `healthy` | `/console/domains/new`, the method chooser from [Domains on any DNS host](domain-connections.md#which-method-to-choose) |
 | Invite your team | No (Team plan only) | The workspace has a second member | `/console/members` |
@@ -421,9 +421,9 @@ Stripe redirects to `/console/plan/return?session_id={CHECKOUT_SESSION_ID}`.
 | Sign-in mail used as a spam cannon, and code guessing | 3 link or code requests per 10 minutes per address and 10 attempts per code, after which the token is burned ([Sign-in](console.md#sign-in)); 30 failed codes per address per UTC day lock sign-in by code for that address until the next UTC day, links keep working, and the address is told once ([W43](../edge-cases.md)). Plus a rate-limit binding `RL_SIGNIN`: 10 requests per 60 s per client network (`CF-Connecting-IP`; an IPv6 address counts by its /64 prefix, so rotating addresses inside one prefix does not help), on `POST /console/sign-in`, `/console/sign-in/link`, `/console/sign-in/code`, `/console/sign-in/verify`, `/console/sign-up` and `/console/waitlist` and on `GET /console/oauth/{provider}/start`. Plus the form ticket ([§6.2](#62-after-launch-open-sign-up)) and the system-mail budgets ([§10.2](#102-system-mail-budgets)). This closes [Console open point 1](console.md#open-points) |
 | Free workspaces created to send spam | A new-workspace send ramp: the effective tenant daily cap is at most 50 for the first 7 days on Free, lifted on day 7 by a daily evaluation when the bounce and complaint rates are under the auto-pause thresholds, or by a paid plan once its invoice is paid ([§10.1](#101-new-workspace-send-ramp)). The usual auto-pause still applies ([W30](../edge-cases.md)). One self-serve Free workspace per person, `+tag` variants included (`workspace_limit`, [§6.2](#62-after-launch-open-sign-up)), and an automatic breaker for the whole shared domain ([§10.3](#103-shared-domain-breaker), [W46](../edge-cases.md)) |
 | Disposable addresses | `PM_SIGNUP_BLOCKED_DOMAINS` ([W29](../edge-cases.md)) |
-| A console account whose sign-in address is mail this deployment receives | Refused: every key that reads that mailbox could read the sign-in codes. An address is **hosted** when its domain is `PM_PLATFORM_DOMAIN`, or when it is an `addresses` row in state `pending`, `active` or `retiring`. Sign-up (email, Google, GitHub), the waitlist, invitations (`400 invalid_request` on `email`) and workspace owners (`POST /v1/tenants`, `400 invalid_request` on `owner.email`) refuse it; `pmail setup --owner-email` refuses the platform domain. In the other direction, an identity address equal to an existing console user's sign-in address is refused with `409 address_taken` ([Identities and domains › Create](identity-domains.md#create), [W45](../edge-cases.md)) |
+| A console account whose sign-in address is mail this deployment receives | Refused: every key that reads that mailbox could read the sign-in codes. An address is **hosted** when its domain is `PM_PLATFORM_DOMAIN`, or when it is an `addresses` row in state `pending`, `active` or `retiring`. Sign-up (email, Google, GitHub), the waitlist, invitations (`400 invalid_request` on `email`) and workspace owners (`POST /v1/tenants`, `400 invalid_request` on `owner.email`) refuse it; `idvy setup --owner-email` refuses the platform domain. In the other direction, an identity address equal to an existing console user's sign-in address is refused with `409 address_taken` ([Identities and domains › Create](identity-domains.md#create), [W45](../edge-cases.md)) |
 | System mail drained by others | Budgets per recipient, per client network and ASN, and per inviting tenant, and a reserve of the system identity's day for sign-in mail ([§10.2](#102-system-mail-budgets), [W44](../edge-cases.md)) |
-| Who system mail comes from | `PM_SYSTEM_FROM`, for example `Pylota Mail <no-reply@pylotamail.com>`, sent through the platform domain by the system identity ([Identities and domains › The system identity](identity-domains.md#the-system-identity)). It is the identity that other pages name as the sender of sign-in, invitation and notification mail. This closes [Console open point 2](console.md#open-points) |
+| Who system mail comes from | `PM_SYSTEM_FROM`, for example `Pylota Identity <no-reply@pylotamail.com>`, sent through the platform domain by the system identity ([Identities and domains › The system identity](identity-domains.md#the-system-identity)). It is the identity that other pages name as the sender of sign-in, invitation and notification mail. This closes [Console open point 2](console.md#open-points) |
 | Open redirects through `next` | [§7](#7-where-people-land) |
 | Lost access to the sign-in address | No recovery route. Nothing the deployment holds proves who controls a workspace once its sign-in address is gone, and a Free workspace has no billing record either, so moving ownership on request would let anyone who tells a good story take a workspace. Owners should keep a second admin (who still cannot take ownership) and keep their address. The workspace keeps working through its API keys; billing stays reachable through Stripe's own Portal sign-in page (`login_page`, [Billing › Customer Portal](billing.md#customer-portal)), where the owner can cancel |
 | Lost authenticator | Recovery codes only ([§5](#5-two-step-verification), [W28](../edge-cases.md)) |
@@ -476,7 +476,7 @@ sending history ([W30](../edge-cases.md)).
 ### 10.2 System mail budgets
 
 The system identity's mail is shared by everyone: one sender, one platform domain, and Cloudflare's daily
-Email Sending quota, which is per account and on Pylota Mail Cloud shared with Pylota itself. If anyone
+Email Sending quota, which is per account and on Pylota Identity Cloud shared with Pylota itself. If anyone
 could spend it, `system_mail_blocked` would follow and nobody could sign in. Every system-identity send is
 therefore counted, before it is submitted, against exact budgets kept by the default tenant's
 `TenantQuota` (`QuotaRequest::SystemMail`, [Outbound › TenantQuota](outbound.md#tenantquota)), in its
@@ -656,7 +656,7 @@ adds no migration ([Data model](data-model.md#1-d1-control-plane)).
 |---|---|---|
 | `PM_CONSOLE_HOST` | `PM_API_HOST` | Host that serves the console ([§2](#2-hostnames)) |
 | `PM_SIGNUP` | `closed` | `closed`, `waitlist` or `open` |
-| `PM_SYSTEM_FROM` | `Pylota Mail <no-reply@{PM_PLATFORM_DOMAIN}>` | Sender of sign-in, invitation and notification mail |
+| `PM_SYSTEM_FROM` | `Pylota Identity <no-reply@{PM_PLATFORM_DOMAIN}>` | Sender of sign-in, invitation and notification mail |
 | `PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL`, `PM_TERMS_VERSION` | unset | Required when `PM_SIGNUP` is not `closed` |
 | `PM_SIGNUP_BLOCKED_DOMAINS` | unset | Comma-separated domains refused at sign-up, in addition to the built-in list of disposable-mail domains |
 | `PM_OAUTH_GOOGLE_CLIENT_ID` / secret `PM_OAUTH_GOOGLE_CLIENT_SECRET` | unset | Enables Google |
@@ -664,7 +664,7 @@ adds no migration ([Data model](data-model.md#1-d1-control-plane)).
 | Binding `RL_SIGNIN` | 10 per 60 s | Keyed by client network (`CF-Connecting-IP`; an IPv6 address by its /64 prefix), on `POST /console/sign-in`, `/console/sign-in/link`, `/console/sign-in/code`, `/console/sign-in/verify`, `/console/sign-up` and `/console/waitlist`, and `GET /console/oauth/{provider}/start` |
 | `PM_AGENT_SIGNUP` | `off` | `on` or `off`: agent self-sign-up ([Agent self-sign-up](agent-signup.md)); active only while `PM_SIGNUP = "open"`, billing and the console are on and the `agent_signup` switch is `on` |
 | `PM_AGENT_SIGNUP_DAILY_CAP` | `200` | Agent sign-ups per UTC day for the deployment, 1–10,000 (the `signup` budget's deployment key, [§10.2](#102-system-mail-budgets)) |
-| `PM_DAILY_SEND_QUOTA` | unset | Also sizes the system identity's day ([§10.2](#102-system-mail-budgets)) and turns on the shared-domain breaker ([§10.3](#103-shared-domain-breaker)); Pylota Mail Cloud must set it, because its account's quota is shared with Pylota |
+| `PM_DAILY_SEND_QUOTA` | unset | Also sizes the system identity's day ([§10.2](#102-system-mail-budgets)) and turns on the shared-domain breaker ([§10.3](#103-shared-domain-breaker)); Pylota Identity Cloud must set it, because its account's quota is shared with Pylota |
 
 ## 13. Tests
 

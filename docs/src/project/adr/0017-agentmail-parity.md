@@ -9,9 +9,9 @@
 
 ## Context
 
-Pylota is moving its mail off AgentMail, so Pylota Mail must cover everything Pylota uses there. The owner
-asked on 2026-10-17 for AgentMail to be analysed as a product, for Pylota Mail to be compared with it, and
-for every gap that Pylota Mail needs closed to be closed. The bar was to exceed production standards end
+Pylota is moving its mail off AgentMail, so Pylota Identity must cover everything Pylota uses there. The owner
+asked on 2026-10-17 for AgentMail to be analysed as a product, for Pylota Identity to be compared with it, and
+for every gap that Pylota Identity needs closed to be closed. The bar was to exceed production standards end
 to end, handle every edge case, and work with Pylota's agentic OS.
 
 The analysis read AgentMail's public OpenAPI document (180 operations), its AsyncAPI document, 143
@@ -74,7 +74,7 @@ gate and its webhook reconciliation would have nothing to stand on.
 6. **The competitive table is corrected.** [PRD § 4](../prd.md#competitive-landscape) gets the rows below,
    researched on 2026-10-17, in place of the AgentMail cells researched on 2026-10-09:
 
-   | Capability | AgentMail (hosted) | Pylota Mail |
+   | Capability | AgentMail (hosted) | Pylota Identity |
    |---|---|---|
    | Authentication verdicts and quarantine before an agent reads | `authentication_results`; unauthenticated and spam mail hidden by label; DMARC-failing mail dropped under an enforcing policy | Per-message verdicts. Mail that Cloudflare Email Routing rejects for failing authentication never reaches the Worker; failing mail the Worker receives is quarantined with a reason. Nothing is accepted and then dropped silently (U5) |
    | Prompt-injection screening | Agent Armor (Labs, US only): advisory verdict; Hold mode withholds a notification but still lists the mail | Opt-in screening hold (`screening.mode: hold`; the default `monitor` only records verdicts) that hides mail until a verdict; once held, it fails closed by default; release by a person ([Screening](../design/screening.md)) |
@@ -125,7 +125,7 @@ The phase timeline in the build plan has not been re-estimated for the nine mile
   - drafts for every untrusted sender path;
   - screening hold on operator identities;
   - feed-based reconciliation;
-  - Kairos invitations through Pylota Mail;
+  - Kairos invitations through Pylota Identity;
   - the TypeScript SDK in place of a hand-written client.
 - New public claims are allowed only once their tests pass, as § U1–U10 require.
 - AgentMail ships often. The gap register must be re-read against AgentMail's changelog before v1.0

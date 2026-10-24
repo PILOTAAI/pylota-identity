@@ -14,7 +14,7 @@ permission only platform and partner keys can hold. Tenant keys and the console 
 the PRD gives tenants choices that live in the policy: retention (FR-PRV-2), triage categories and rules
 (FR-TRI-1, FR-TRI-2), booking-number patterns (FR-SRCH-4), signed links for large attachments
 (FR-OUT-10) and image text extraction (FR-IN-8), and the guides told customers to "shorten retention". On
-Pylota Mail Cloud every such change would have been a support request to the operator, who is one person.
+Pylota Identity Cloud every such change would have been a support request to the operator, who is one person.
 
 The partner work had already split the fields into classes (platform-only, lower-only with platform
 ceilings, free), so that a partner could not spend the shared sending reputation or AI budget.

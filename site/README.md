@@ -1,4 +1,4 @@
-# Pylota Mail site
+# Pylota Identity site
 
 The landing page and the docs, served together by one assets-only Cloudflare Worker
 (`site/wrangler.jsonc`: no Worker script, no bindings).
@@ -60,9 +60,9 @@ never installs a version that is not in the lockfile.
 
 ### Before the first deploy
 
-- `pylotamail.com` is also Pylota Mail Cloud's shared mail domain. The site only adds web records
+- `pylotamail.com` is also Pylota Identity Cloud's shared mail domain. The site only adds web records
   (the Custom Domains' `A`/`AAAA` records); the mail records (`MX`, SPF and DKIM `TXT`, `_dmarc`) are
-  created by `pmail setup` and are unaffected. Do not add a `CNAME` at the apex or at `www`: a Custom
+  created by `idvy setup` and are unaffected. Do not add a `CNAME` at the apex or at `www`: a Custom
   Domain cannot be created on a hostname that already has one ([Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/),
   read 2026-10-09).
 - Turn on **Always Use HTTPS** for the zone: **SSL/TLS › Edge Certificates › Always Use HTTPS**
@@ -74,7 +74,7 @@ never installs a version that is not in the lockfile.
   ([Always Use HTTPS](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/always-use-https/),
   read 2026-10-09). Until it is on, the deploy job's last step fails.
 - The console (`app.pylotamail.com`) and the API (`api.pylotamail.com`) are served by the main
-  `pylota-mail` Worker, not by this site.
+  `pylota-identity` Worker, not by this site.
 
 ### When a hostname does not resolve
 

@@ -82,8 +82,8 @@ to that tenant, and its scope always comes from the session, never from a form f
   `/console/workspaces` lists the others and switches with a `POST`.
 - Workspaces are created by `POST /v1/tenants` with `owner` (a platform key), which creates the `users`
   row if needed, adds the owner and emails a sign-in link. A self-hosted deployment creates its first owner
-  on the default tenant with `pmail setup --owner-email` (FR-CON-7). Where `PM_SIGNUP` is `waitlist` or
-  `open` (Pylota Mail Cloud), people also create their own workspace at `/console/workspaces/new`
+  on the default tenant with `idvy setup --owner-email` (FR-CON-7). Where `PM_SIGNUP` is `waitlist` or
+  `open` (Pylota Identity Cloud), people also create their own workspace at `/console/workspaces/new`
   ([Cloud sign-up §6](cloud-signup.md#6-sign-up)).
 - Test tenants are workspaces too. Their mail goes to the simulator as usual; the console marks them with a
   "Test" badge.
@@ -165,7 +165,7 @@ Rules:
   `address_suffix`, billing); the policy has its own page, above.
 - **Members list.** Every role can see members and pending invitations, through
   `GET /v1/tenants/{tenant_id}/members`, which needs `members:read` (included in `members:manage`).
-- **Quarantine release** is possible for a signed-in person with the role above. On Pylota Mail Cloud
+- **Quarantine release** is possible for a signed-in person with the role above. On Pylota Identity Cloud
   (`PM_QUARANTINE_KEY_RELEASE=off`) no API key can release, except in a workspace whose policy has
   `quarantine.key_release: true`, which only a platform key or the workspace's partner key can set (so a
   partner such as Pylota can release from its own review screen); a self-hosted deployment can also allow
@@ -232,7 +232,7 @@ Every method ends in the same session creation ([Sessions](#sessions)), and the 
 
 The email goes through the normal outbound pipeline from the **system identity**
 ([Identities and domains › The system identity](identity-domains.md#the-system-identity)), whose address
-is `PM_SYSTEM_FROM` (default `Pylota Mail <no-reply@{PM_PLATFORM_DOMAIN}>`) and whose tenant is the
+is `PM_SYSTEM_FROM` (default `Pylota Identity <no-reply@{PM_PLATFORM_DOMAIN}>`) and whose tenant is the
 default tenant (billing `disabled` or `exempt`, so it is never metered),
 with `Idempotency-Key: signin:{login_token_id}`; tests use the simulator (build plan M21). It contains the
 link `https://{PM_CONSOLE_HOST}/console/sign-in/link?t=<token>`, the code, and the request time. It never
@@ -673,7 +673,7 @@ while a person's other preferences are paused.
 | `/console/workspaces` | Workspace picker and switcher | Signed in |
 | `/console/workspaces/new` | Create your workspace: name, address suffix, time zone ([Cloud sign-up §6.2](cloud-signup.md#62-after-launch-open-sign-up)) | Signed in, with no workspace or pending invitation, when sign-up is open or the person has a valid waitlist invite |
 | `/console` | Overview, the workspace home: banners, the first-run checklist, "Needs a person", usage meters, inboxes and recent activity ([Cloud sign-up §8](cloud-signup.md#8-the-overview-the-screen-people-land-on)). M21 builds a plain home first (the workspace name, the frame and its navigation, and a link to each screen), which M24 replaces with the Overview | All roles (viewers without action buttons) |
-| `/console/connect` | Connect your agent: the `claude mcp add` line, `.mcp.json`, a `curl` request and `pmail login`, with a key ID filled in, never a secret; the Codex, Cursor and Claude Desktop bridge blocks, the Agent SDK snippet and `pmail skills generate` ([SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup)) | Owner, admin |
+| `/console/connect` | Connect your agent: the `claude mcp add` line, `.mcp.json`, a `curl` request and `idvy login`, with a key ID filled in, never a secret; the Codex, Cursor and Claude Desktop bridge blocks, the Agent SDK snippet and `idvy skills generate` ([SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup)) | Owner, admin |
 | `/console/inboxes`, `/console/inboxes/{idn}` | Identities with their addresses and status; one identity's threads with triage, and its signing keys with the JWKS link ([Identity signing keys](#identity-signing-keys)); their pause windows ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)); the identity's message retention (owners and admins change it; shortening needs the confirmation step of the policy page) and its own allow and block list entries, read-only ([Parity additions § 7](parity-additions.md#7-per-identity-message-retention-fr-prv-7), [§ 3.8](parity-additions.md#38-privacy-events-and-interfaces)) | All roles. Create, rotate and revoke signing keys: owner, admin |
 | `/console/inboxes/{idn}/threads/{thr}` | A thread; each message in text view, HTML on request ([Showing untrusted mail](#showing-untrusted-mail)), with the Calendar panel when it has one, and the screening line and feedback form (owner, admin, member); `arc_rescued` messages say "Authenticated by the forwarder {sealer} (ARC)" | All roles |
 | `/console/drafts` | The workspace's drafts that need attention: **Awaiting approval**, **Scheduled** and **Failed** ([Drafts § 16](drafts.md#16-console)) | View: owner, admin, member |
@@ -708,7 +708,7 @@ The schema is in [Data model](data-model.md#1-d1-control-plane). How this design
 
 | Table | Use |
 |---|---|
-| `users` | One row per person, keyed by sign-in address. `status = 'disabled'` blocks sign-in. Created by `owner` on `POST /v1/tenants`, by `pmail setup --owner-email`, or when an invitation is accepted |
+| `users` | One row per person, keyed by sign-in address. `status = 'disabled'` blocks sign-in. Created by `owner` on `POST /v1/tenants`, by `idvy setup --owner-email`, or when an invitation is accepted |
 | `members` | Who is in which workspace, with which role. `members_one_owner` enforces one owner |
 | `invitations` | Pending, accepted, revoked or expired invitations. `invitations_pending` allows one pending invitation per address and workspace. Expired and revoked rows are deleted 30 days after `expires_at`; an accepted row stays, and loses its address when that person deletes their account ([Privacy › People](privacy.md#69-people-console-accounts)) |
 | `login_tokens` | One row per sign-in, re-authentication, sign-up or waitlist request (`purpose`), holding both the link and the code hashes and the attempt count, and for sign-up the plan, `next` and accepted terms version. Deleted 24 hours after expiry |
@@ -769,7 +769,7 @@ the workspace's `tenant_id` and delivered like `webhook.disabled`
    for a console release ([Webhook events](../../reference/events.md)).
 4. **Key-based quarantine release** (FR-CON-6). Closed: `PM_QUARANTINE_KEY_RELEASE`
    ([Configuration](../../reference/configuration.md#variables)) is `on` by default for self-hosting, and
-   Pylota Mail Cloud sets it to `off`, so only a signed-in person can release there, except in a workspace
+   Pylota Identity Cloud sets it to `off`, so only a signed-in person can release there, except in a workspace
    whose policy has `quarantine.key_release: true` (decided 2026-10-10), and there only for a platform key
    or the workspace's partner key, never the workspace's own keys. Only a platform key, or the
    partner key of the workspace's partner, can set that field; Pylota sets it on its operators'
@@ -778,7 +778,7 @@ the workspace's `tenant_id` and delivered like `webhook.disabled`
    and `sessions`, and deletes every person it leaves with no workspace; deleting a person removes their
    `oauth_identities` and any `waitlist` row ([Cloud sign-up §11](cloud-signup.md#11-data-model),
    [Privacy › Tenant scope](privacy.md#66-tenant-scope), [Privacy › People](privacy.md#69-people-console-accounts)).
-6. **Sign-up on Pylota Mail Cloud.** Closed: designed in [Cloud sign-up, sign-in and first run](cloud-signup.md).
+6. **Sign-up on Pylota Identity Cloud.** Closed: designed in [Cloud sign-up, sign-in and first run](cloud-signup.md).
 
 ## Tests
 
@@ -807,7 +807,7 @@ the workspace's `tenant_id` and delivered like `webhook.disabled`
 | `it::console::identity_keys_page` | Every role sees the key list and the JWKS link; only owner and admin can create, rotate and revoke, each after re-authentication with an `identity_key.*` audit row and event; a paused identity's keys can still be revoked | FR-IDN-6, [W18] |
 | `it::console::account_emails` | Turning two-step verification off, linking a sign-in method, transferring ownership, a failed payment (`invoice.payment_failed` fixture) and a code lock (`sign_in_codes_locked`) each send one `account` email after the batch commits, also with `PM_NOTIFICATIONS=off`; it goes through the Notifier of the person's `last_tenant_id` when set, and of the workspace where the event happened otherwise; a redelivered webhook sends nothing more | FR-CON-15 |
 | `it::notify::one_click_unsubscribe`, `it::notify::bounce_pauses_prefs`, `it::notify::member_removed_drops_pending` ([Notifications §10](notifications.md#10-tests)) | Unsubscribe without a session; the bounce banner and **Confirm my address**; member removal deletes preferences | [O17](../edge-cases.md)–[O19](../edge-cases.md) |
-| `cli::setup::owner_email` ([CLI and setup](cli.md)) plus `it::console::first_owner_signin` | `pmail setup --owner-email` creates the default tenant's owner, who receives a link and can sign in | FR-CON-7 |
+| `cli::setup::owner_email` ([CLI and setup](cli.md)) plus `it::console::first_owner_signin` | `idvy setup --owner-email` creates the default tenant's owner, who receives a link and can sign in | FR-CON-7 |
 | `browser::console::no_js`, `browser::console::axe_scan` ([Testing §6.8](testing.md#68-browser-suite-browser)) | Every console route works with `javaScriptEnabled: false`; an axe scan finds no violation of impact `serious` or `critical` | FR-CON-1, M21 |
 | `it::console::drafts_page` ([Drafts § 22](drafts.md#22-tests)) | The three screens for each role; approve needs re-authentication and posts `revision` and `digest`; a stale page is refused and shown again; the Overview items; escaping | [Q54](../edge-cases.md), [Q55](../edge-cases.md) |
 | `it::console::event_consumers_section` ([Event feed § 20](event-feed.md#20-tests)) | Owners and admins see the section and can delete a consumer with the CSRF token; members and viewers get `403`; no payload appears | FR-EVT |

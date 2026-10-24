@@ -159,7 +159,7 @@ setup registers no Email Routing destination address
       tenant owner's address. A destination **routes back into this deployment** when its domain is
       `PM_PLATFORM_DOMAIN` or the name of any `domains` row that is not `removed` (one D1 query, cached
       for 60 seconds per isolate). Such a destination is never used: the owner falls back to
-      `PM_SECURITY_CONTACT`, and a `PM_SECURITY_CONTACT` that routes back counts as unset (`pmail doctor`
+      `PM_SECURITY_CONTACT`, and a `PM_SECURITY_CONTACT` that routes back counts as unset (`idvy doctor`
       reports it as an error, and setup refuses it).
    2. **Loop guard.** A message that already carries `X-Pylota-Mail-Role-Hop`, or whose envelope sender
       is the system identity's address, is refused with `set_reject("550 5.4.6 Routing loop detected")`.
@@ -1508,7 +1508,7 @@ POST {PM_SCANNER_URL}
 Content-Type: application/octet-stream
 X-Pylota-Attachment-Sha256: 9f86d081884c7d65…
 X-Pylota-Sniffed-Type: application/pdf
-User-Agent: PylotaMail/1.0
+User-Agent: PylotaIdentity/1.0
 
 <attachment bytes>
 ```

@@ -53,7 +53,7 @@ private key, or importing a key someone else generated. Private keys never leave
   `identity.key_created`; `POST …/keys` creates one with `201`; `POST …/keys/rotate` creates one with no
   previous key (`previous_kid: null`) and emits `identity.key_created`, not `identity.key_rotated`. The
   revoked key is never reused: a new seed is drawn.
-- **Master-key rotation.** `pmail secrets rotate-master` re-seals `identity_keys.private_enc` and the
+- **Master-key rotation.** `idvy secrets rotate-master` re-seals `identity_keys.private_enc` and the
   `web_bot_auth` seeds like every other sealed value. Signatures and thumbprints do not change ([O8](../edge-cases.md)).
 - **Paused, suspended or deleted identities** cannot sign. The order matches sends ([Outbound › Policy
   pipeline](outbound.md#policy-pipeline)): an identity of a suspended tenant gets `403 tenant_suspended`
@@ -171,7 +171,7 @@ The token is never stored or logged; only a count is kept (`usage_daily.metric =
 
 This is in the [Agents guide](../../guides/agents.md#verifying-an-assertion) for integrators, and in the
 Rust SDK as `verify_assertion` ([Rust workspace §11](rust-workspace.md#11-the-rust-sdk-fr-sdk-1)) and the
-CLI as `pmail assertions verify`:
+CLI as `idvy assertions verify`:
 
 1. Decode the header. `alg` must be `EdDSA` and `typ` must be `agent-assertion+jwt`. Reject anything else
    (no `none`, no algorithm switching).
@@ -279,8 +279,8 @@ read 2026-10-09). Pass: `401` before registration. Fallback: signed HTTP request
 | `GET /.well-known/http-message-signatures-directory` | none | §3.2 |
 
 MCP tools `mail_sign_assertion` and `mail_sign_http_request` (both `identities:sign`) mirror the two POST
-endpoints. CLI: `pmail identity-keys list|create|rotate|revoke`, `pmail assertions create|verify`, and
-`pmail http-sign`.
+endpoints. CLI: `idvy identity-keys list|create|rotate|revoke`, `idvy assertions create|verify`, and
+`idvy http-sign`.
 
 Events: `identity.key_created`, `identity.key_rotated` and `identity.key_revoked`, each with `identity_id`
 and `kid` (`identity.key_rotated` also carries `previous_kid`). They are identity events, written after

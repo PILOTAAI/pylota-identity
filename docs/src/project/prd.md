@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Product | Pylota Mail |
+| Product | Pylota Identity |
 | Document owner | TREFT LTD (the owner, who is the sole developer and the Cloud operator) |
 | Status | Approved for build (v1.0); the additions of [ADR 0017](adr/0017-agentmail-parity.md) and [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md) stay Proposed until the owner accepts those records |
 | Last reviewed | 2026-10-17 |
@@ -14,7 +14,7 @@ The words **must**, **should** and **may** are used as in RFC 2119.
 
 ## 1. Summary
 
-Pylota Mail is an email and identity service for AI agents. Each agent gets an **identity**: a mailbox
+Pylota Identity is an email and identity service for AI agents. Each agent gets an **identity**: a mailbox
 with one or more addresses, authenticated sending, verified inbound mail, threads, attachments with
 extracted text, triage and search, plus signing keys that let it prove who it is to other services. Applications and agents use it through a REST API, an MCP server and
 a CLI. It reports what happened through signed webhooks.
@@ -22,8 +22,8 @@ a CLI. It reports what happened through signed webhooks.
 It is source available under the Functional Source License (FSL-1.1-ALv2), written entirely in Rust (the
 TypeScript SDK is a separate client built in its own repository, [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)), and
 runs as one Cloudflare Worker on the deployer's own Cloudflare account. Pylota also operates it as a hosted
-service, **Pylota Mail Cloud**, with Free, Developer and Team plans (section 13). Pylota (a platform for independent car-rental operators) is the first
-user, as a partner on Pylota Mail Cloud. Pylota gives each operator four agent identities (bookings, inquiry, compliance, maintenance), and
+service, **Pylota Identity Cloud**, with Free, Developer and Team plans (section 13). Pylota (a platform for independent car-rental operators) is the first
+user, as a partner on Pylota Identity Cloud. Pylota gives each operator four agent identities (bookings, inquiry, compliance, maintenance), and
 operators move those identities from a shared platform domain to their own domain over time.
 
 ## 2. Problem
@@ -51,7 +51,7 @@ Pylota's own experience showed the cost of these gaps:
 
 | Persona | Needs |
 |---|---|
-| **Integrator** (a developer building an agent product, e.g. Pylota's API, which uses a partner key on Pylota Mail Cloud) | Provision a tenant and identities per customer, send and receive reliably, get events, change domains, erase data, all through a stable API; on a shared deployment, with a partner key that reaches only its own customers' tenants (FR-KEY-4) |
+| **Integrator** (a developer building an agent product, e.g. Pylota's API, which uses a partner key on Pylota Identity Cloud) | Provision a tenant and identities per customer, send and receive reliably, get events, change domains, erase data, all through a stable API; on a shared deployment, with a partner key that reaches only its own customers' tenants (FR-KEY-4) |
 | **Agent** (an LLM driving tools through MCP or an integrator's tool layer) | Small, well-described tools; search that finds the right email; reads that fit a context window; sends that are safe to retry; content marked untrusted |
 | **Operator** (the integrator's customer, e.g. a car-rental business) | Their agents email from their brand, history survives domain changes, nothing is sent from a broken domain, clear instructions when DNS breaks |
 | **Self-hoster / maintainer** | Deploy to their own Cloudflare account in minutes, upgrade safely, observe health, restore after mistakes |
@@ -76,7 +76,7 @@ Pylota's own experience showed the cost of these gaps:
 8. Privacy by design: EU jurisdiction when chosen, retention policies, erasure with receipts,
    subject-access export.
 9. A console for the people who run the agents: passwordless sign-in (email, Google or GitHub, with
-   optional two-step verification), self-serve sign-up on Pylota Mail Cloud, workspaces with members,
+   optional two-step verification), self-serve sign-up on Pylota Identity Cloud, workspaces with members,
    roles and enforced seats, inbox views, quarantine review, keys, domains, plan and usage, and email
    notifications (usage alerts, new mail, and a daily list of what needs a person). It works with no
    JavaScript.
@@ -101,13 +101,13 @@ Pylota's own experience showed the cost of these gaps:
   headers, but there are no list-management or campaign features.
 - Open tracking. A tracking pixel records when a person read a message without their knowledge, and image
   preloading makes the counts unreliable; delivery events and replies are the signals the service reports.
-- A calendar. Pylota Mail keeps no events, agenda, recurrence engine or reminders; it reads and verifies
+- A calendar. Pylota Identity keeps no events, agenda, recurrence engine or reminders; it reads and verifies
   iCalendar in mail, sends iMIP built by the integrator, and answers verified invitations on request
   ([Calendar invitations](design/calendar-invitations.md)). A second calendar would compete with the
   integrator's own for the same facts.
 - A file drive. Uploads have no paths, folders, downloads or sharing and live at most 7 days; long-lived
   files belong in the integrator's own storage.
-- Attachments fetched from URLs. Pylota Mail never fetches a URL to build an attachment (SSRF, content
+- Attachments fetched from URLs. Pylota Identity never fetches a URL to build an attachment (SSRF, content
   integrity, prompt injection; [Uploads § 1](design/uploads.md#1-what-uploads-are-and-are-not)). Upload
   the file instead.
 - OAuth 2.1 for the MCP endpoint (planned for v1.1; v1.0 uses API keys as bearer tokens; [ADR 0016](adr/0016-plan-items-changed-for-v1.md)).
@@ -147,7 +147,7 @@ goshen-email was not re-read then, so its cells in the rows added on that date s
 operations are "Full-text search", and the plugin cell from its integration pages.
 Re-check before quoting externally. "–" means the capability is not offered or not documented.
 
-| Capability | AgentMail (hosted) | goshen-email (FSL, self-host or hosted) | Pylota Mail |
+| Capability | AgentMail (hosted) | goshen-email (FSL, self-host or hosted) | Pylota Identity |
 |---|---|---|---|
 | Identity separate from address; domain change with rollback | – (the address is the inbox) | – | Yes (U3) |
 | Required idempotency; uncertain sends never resent | Optional keys | Yes | Yes, plus reconciliation (U2) |
@@ -186,9 +186,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 | Delivery | All six provider event types, per-recipient status; deliverability metrics: pause windows with thresholds and headroom, and event counts per hour and day by identity, tenant and domain (FR-MET) | Uncertain-send reconciliation | – |
 | Search | Keyword, semantic, hybrid, agentic; facets; tenant scope | Contacts, find-related | – |
 | Triage | Category, needs-reply, urgency, summary, risk flags; rules | Custom categories | – |
-| Integrations | REST, OpenAPI, MCP (API key), CLI, Rust SDK, webhooks; `wait` long-poll and verification extraction (quarantine rule 5, unsolicited OTP, depends on it: E4, E5); the event feed, durable event consumers and the WebSocket event stream (FR-EVT-1–11); the calendar object on REST, MCP, the CLI and the console (FR-CAL-14) | TypeScript SDK `@pylotahq/mail` (FR-SDK-2–9); agent skills and plugins (FR-SDK-10); MCP annotations from effect classes and client hints (FR-SDK-11); per-key MCP tool allow-list (FR-SDK-12); `pmail mcp stdio` (FR-SDK-13); CLI `--schema`, `--query` and `pmail skills generate` (FR-SDK-14); framework guides (FR-SDK-15); `calendar-reply` on REST, `mail_calendar_reply` and `pmail calendar-reply` (FR-CAL-10, FR-CAL-14); opt-in label events (FR-WH-6); webhook delivery headers (FR-WH-7); documentation links in errors (FR-API-3) | MCP OAuth 2.1; Python SDK; TypeScript agent-assertion verifier |
+| Integrations | REST, OpenAPI, MCP (API key), CLI, Rust SDK, webhooks; `wait` long-poll and verification extraction (quarantine rule 5, unsolicited OTP, depends on it: E4, E5); the event feed, durable event consumers and the WebSocket event stream (FR-EVT-1–11); the calendar object on REST, MCP, the CLI and the console (FR-CAL-14) | TypeScript SDK `@pylotahq/identity` (FR-SDK-2–9); agent skills and plugins (FR-SDK-10); MCP annotations from effect classes and client hints (FR-SDK-11); per-key MCP tool allow-list (FR-SDK-12); `idvy mcp stdio` (FR-SDK-13); CLI `--schema`, `--query` and `idvy skills generate` (FR-SDK-14); framework guides (FR-SDK-15); `calendar-reply` on REST, `mail_calendar_reply` and `idvy calendar-reply` (FR-CAL-10, FR-CAL-14); opt-in label events (FR-WH-6); webhook delivery headers (FR-WH-7); documentation links in errors (FR-API-3) | MCP OAuth 2.1; Python SDK; TypeScript agent-assertion verifier |
 | Privacy | Retention, erasure with receipts, legal hold | Subject-access export; per-identity message expiry (FR-PRV-7) | – |
-| Operations | Setup, deploy, doctor, metrics, DLQ consumers, test mode | Restore drill tooling | A second Pylota Mail Cloud jurisdiction, an owner decision (GAP-25) |
+| Operations | Setup, deploy, doctor, metrics, DLQ consumers, test mode | Restore drill tooling | A second Pylota Identity Cloud jurisdiction, an owner decision (GAP-25) |
 | Console | Sign-in, workspaces, members, roles, seats, inboxes, quarantine release, keys, domains, plan and usage; Cloud sign-up (waitlist and open); Google and GitHub sign-in; two-step verification (TOTP); the Overview; notifications; agent self-sign-up behind `PM_AGENT_SIGNUP` (Cloud, FR-ASU) | – | Passkeys; SSO (SAML/OIDC) |
 | Plans and billing | Plan catalog, metering with holds, `402 billing_limit`, usage API, Stripe checkout and portal, top-ups; usage alerts | – | Annual billing, invoicing; pay-per-call through x402 or MPP (GAP-26) |
 
@@ -216,7 +216,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   (`"secret_replayed": false`).
 - **FR-KEY-3** Tenant and identity scope **must** come from the authenticated key, never from the request body.
 - **FR-KEY-4** A deployment **must** support **partners**: integrators that run their own customers as
-  tenants of a shared deployment (Pylota on Pylota Mail Cloud). A platform key creates, suspends and
+  tenants of a shared deployment (Pylota on Pylota Identity Cloud). A platform key creates, suspends and
   deletes a partner and mints its **partner keys**. A partner key **must** be able to create tenants and
   act on them as a platform key does, and on nothing else: a tenant created by another partner or by no
   partner, and everything in it, **must** answer it as a missing one does. It **must never** mint a partner
@@ -305,7 +305,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   the **service sign-up ledger**: it records the service, the account identifier, the address and the
   purpose, and an operator approves or rejects each entry, in the console or with a key holding
   `accounts:approve`, which identity keys **must not** hold; approval by an API key follows the rule of
-  FR-CON-6. Where the tenant's `accounts.require_approval` is on (the default on Pylota Mail Cloud, which no
+  FR-CON-6. Where the tenant's `accounts.require_approval` is on (the default on Pylota Identity Cloud, which no
   workspace or partner can turn off), a verification code or link **must** reach an agent only when an
   approved entry matches the mail (the authenticated sender's organisational domain and the receiving
   address); other such mail **must** be held for review, never dropped. Entries **must** emit
@@ -605,11 +605,11 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-MCP-1** An MCP server **must** be served at `/mcp` over Streamable HTTP, exposing the tools in
   [MCP reference](../reference/mcp.md). It is authenticated with an API key in v1.0. Tool scope **must**
   follow the key.
-- **FR-CLI-1** The `pmail` CLI **must** cover setup, deploy, doctor, administration and mail operations,
+- **FR-CLI-1** The `idvy` CLI **must** cover setup, deploy, doctor, administration and mail operations,
   with `--json` output for every command.
 - **FR-SDK-1** The Rust SDK **must** cover the whole REST API.
-- **FR-SDK-2** The project **must** ship a TypeScript SDK, the npm package `@pylotahq/mail`, built in its
-  own repository `PILOTAAI/pylota-mail-typescript` ([ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)), with exactly one method per
+- **FR-SDK-2** The project **must** ship a TypeScript SDK, the npm package `@pylotahq/identity`, built in its
+  own repository `PILOTAAI/pylota-identity-typescript` ([ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)), with exactly one method per
   `openapi.yaml` operation not marked `x-sdk: false`, generated from the `openapi.json` a release
   publishes, with no runtime dependencies. It **must** run on every Node.js line from its first release to
   its end of life, starting with Node.js 22, on Cloudflare Workers, on Deno and on Bun, and its
@@ -641,7 +641,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   refuse to run in a browser or against a base URL that is not `https` (localhost excepted), and **must**
   follow no redirect.
 - **FR-SDK-9** The TypeScript SDK's major version **must** be the API's path version, and each SDK
-  release **must** name the Pylota Mail release whose contract it was generated from. It **must** be
+  release **must** name the Pylota Identity release whose contract it was generated from. It **must** be
   published only by the SDK repository's release workflow through npm trusted publishing with
   provenance, from a tarball listed in that repository's owner-signed `SHA256SUMS`, and a pre-release
   **must not** be published.
@@ -658,14 +658,14 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   its permissions and level allow. A tool outside the list **must** be hidden and answer as an unknown
   tool. The list **must** be validated when the key is minted, kept by rotation, returned on the key
   object and on `GET /v1/me`, and recorded in the audit log.
-- **FR-SDK-13** `pmail mcp stdio` **must** bridge a stdio MCP client to the deployment's `/mcp` with the
+- **FR-SDK-13** `idvy mcp stdio` **must** bridge a stdio MCP client to the deployment's `/mcp` with the
   key from the environment or a profile, never from a flag; it **must** only narrow the tool list and
-  **must never** retry `tools/call`. `pmail mcp config` **must** print setup for Claude Code, Claude
+  **must never** retry `tools/call`. `idvy mcp config` **must** print setup for Claude Code, Claude
   Desktop, Cursor, Codex and the Claude Agent SDK without the key.
 - **FR-SDK-14** Every CLI command **must** describe itself with `--schema` (input, output and error
   schemas and exit codes) without reading configuration, needing a key or using the network, and **must**
   accept a JMESPath `--query` that applies only to success documents and never changes the exit code.
-  `pmail skills generate` **must** write the skills of its own version and **must not** overwrite a
+  `idvy skills generate` **must** write the skills of its own version and **must not** overwrite a
   locally modified file unless forced.
 - **FR-SDK-15** The docs **must** include guides for the Vercel AI SDK, the OpenAI Agents SDK, the Claude
   Agent SDK and LangChain, a TypeScript SDK guide, a Python guide and an agent skills guide, whose code
@@ -702,14 +702,14 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 
 ### 6.13 Operations
 
-- **FR-OPS-1** `pmail setup` **must** create every Cloudflare resource idempotently, and **must** be
+- **FR-OPS-1** `idvy setup` **must** create every Cloudflare resource idempotently, and **must** be
   safe to re-run.
-- **FR-OPS-2** `pmail deploy` **must** deploy a prebuilt, checksum-verified Worker bundle by default, so
+- **FR-OPS-2** `idvy deploy` **must** deploy a prebuilt, checksum-verified Worker bundle by default, so
   self-hosters need no Rust toolchain. It **must** also support `--from-source`.
-- **FR-OPS-3** `pmail doctor` **must** check DNS, routing, sending, event subscriptions, bindings, secrets
+- **FR-OPS-3** `idvy doctor` **must** check DNS, routing, sending, event subscriptions, bindings, secrets
   and quota, and print a fix for each failure.
 - **FR-OPS-4** Every queue **must** have a dead-letter queue with a consumer that records and alerts.
-- **FR-OPS-5** Pylota Mail Cloud production **must** be commissioned from the written
+- **FR-OPS-5** Pylota Identity Cloud production **must** be commissioned from the written
   [Cloud commissioning](cloud-commissioning.md) page: its full configuration, scoped and short-lived
   credentials, the partner bootstrap, the checks, and three gated phases (partner-only, waitlist, open),
   so that Pylota's integration runs on Cloud before public sign-up opens.
@@ -740,7 +740,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   `quarantine.key_release: true`, which only a platform key or the workspace's partner key can set; there,
   those two keys can release too, never the workspace's own tenant or identity keys. Self-hosters can allow release by API keys with
   `quarantine:review` everywhere (`on`, the default for self-hosting).
-- **FR-CON-7** A self-hosted deployment **must** create its first owner during `pmail setup`
+- **FR-CON-7** A self-hosted deployment **must** create its first owner during `idvy setup`
   (`--owner-email`). The console **must** be optional (`PM_CONSOLE=off` removes its routes).
 - **FR-CON-8** Self-serve sign-up **must** follow `PM_SIGNUP`: `closed` (the default; no public sign-up),
   `waitlist` or `open`. A waitlist entry **must** be confirmed by email (double opt-in) and creates no
@@ -748,7 +748,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   with a sign-up link valid for 7 days for the waitlisted address only. With email sign-up, the account
   **must** be created only when the link or code is used.
 - **FR-CON-9** Sign-in with Google and GitHub **must** be available when their client credentials are
-  configured (on Pylota Mail Cloud). It **must** accept only a verified email address, use PKCE and a
+  configured (on Pylota Identity Cloud). It **must** accept only a verified email address, use PKCE and a
   `state` bound to the browser by a cookie, and link to an existing person with the same verified email
   only as FR-CON-17 allows.
 - **FR-CON-10** A person **must** be able to enrol two-step verification with an authenticator app (TOTP,
@@ -763,7 +763,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   stored), "Needs a person" (the actions only a person should take, drafts awaiting approval and scheduled
   sends that failed among them) and usage against each allowance.
 - **FR-CON-13** Returning from Stripe Checkout **must** never change the plan: Stripe webhooks are the only
-  source of plan state (FR-BILL-10), and another workspace's Checkout session changes nothing. Pylota Mail
+  source of plan state (FR-BILL-10), and another workspace's Checkout session changes nothing. Pylota Identity
   Cloud **must** apply abuse controls: `RL_SIGNIN`, a new-workspace send ramp (a tenant daily cap of at
   most 50 for the first 7 days on Free, lifted by a daily evaluation of bounce and complaint rates or by a
   paid plan once its invoice is paid), refusal of disposable addresses (`PM_SIGNUP_BLOCKED_DOMAINS`), and
@@ -790,7 +790,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   emailed to that person's address is entered, and a person **must** be able to unlink one. A console
   sign-in address (an account, an invitation or a workspace owner) **must not** be a mailbox that the
   deployment itself receives, and an identity address **must not** equal a console sign-in address.
-- **FR-CON-18** Pylota Mail Cloud **must** protect its shared system mail and shared domain: budgets for
+- **FR-CON-18** Pylota Identity Cloud **must** protect its shared system mail and shared domain: budgets for
   system mail per recipient, per client network and ASN, and per inviting tenant, with a share of each
   day kept for sign-in mail; one self-serve Free workspace per person; and, when the account's daily
   sending quota is configured, a breaker that stops Free and ramped workspaces at 60% of it and every
@@ -804,7 +804,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   for the operator's own tenants, or a partner's tenants that the operator does not bill per workspace) or
   `disabled` (self-hosting without billing: only the daily caps in tenant policy apply). A tenant created
   with a partner key takes its partner's `default_billing_mode`; only a platform key changes it (FR-KEY-4).
-- **FR-BILL-2** The plan catalog **must** be data (`PM_PLAN_CATALOG`), defaulting to the Pylota Mail Cloud
+- **FR-BILL-2** The plan catalog **must** be data (`PM_PLAN_CATALOG`), defaulting to the Pylota Identity Cloud
   plans in section 13. A plan defines allowances for `inboxes`, `sends`, `triage`, `custom_domains`,
   `storage_gb` and `seats`, a price, and whether top-ups are allowed.
 - **FR-BILL-3** Monthly allowances (`sends`, `triage`) **must** reset at the start of each billing period.
@@ -956,7 +956,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   tenant or identity is being erased, **must** be closed within 60 seconds, and no event **may** be sent on a
   connection whose key was last validated more than 60 seconds earlier.
 - **FR-EVT-9** The MCP server **must** offer `mail_events`, a cursor poll of the feed, and the CLI **must**
-  offer `pmail events list`, `pmail events tail` (resuming from a saved cursor or a consumer) and the
+  offer `idvy events list`, `idvy events tail` (resuming from a saved cursor or a consumer) and the
   consumer commands.
 - **FR-EVT-10** Message, thread, counterparty, identity and tenant erasure **must** remove the log's copies
   of erased data, consumers and streams, report `log_events_deleted` and a zero `log_hits` probe, keep the
@@ -1066,7 +1066,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-CAL-12** A verified calendar message without thread headers **must** join the thread that holds a
   calendar message with the same `UID` and `ORGANIZER` (for an attendee's answer, an invitation this
   identity sent that names that attendee); an unverified one **must never** join by `UID`.
-- **FR-CAL-13** Pylota Mail **must not** keep calendar state beyond the message's own row and attachment.
+- **FR-CAL-13** Pylota Identity **must not** keep calendar state beyond the message's own row and attachment.
   Calendar data **must** be retained, erased (including by counterparty erasure of any address the object
   names), held and exported with its message.
 - **FR-CAL-14** The calendar object **must** be readable, and the reply route usable, through the REST API,
@@ -1110,7 +1110,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   uploads as a file store: no paths, no download route and no sharing between identities.
 - **FR-UPL-12** The MCP server **must** offer `mail_create_upload` and `mail_get_upload` and accept
   `upload_id` items in `mail_send`, `mail_reply` and `mail_forward`; the CLI **must** offer
-  `pmail uploads create|list|get|delete` and use uploads for `--attach` files over 1 MiB.
+  `idvy uploads create|list|get|delete` and use uploads for `--attach` files over 1 MiB.
 
 ### 6.21 Deliverability metrics
 
@@ -1145,7 +1145,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   erasure, and be deleted with their identity and tenant.
 - **FR-MET-10** The console **must** show the rates and headroom of the tenant, its domains and its
   identities, and daily event counts; the MCP server **must** offer `mail_get_rates` and
-  `mail_get_event_counts`; the CLI **must** offer `pmail metrics rates|events`.
+  `mail_get_event_counts`; the CLI **must** offer `idvy metrics rates|events`.
 
 ### 6.22 Agent self-sign-up
 
@@ -1297,7 +1297,7 @@ None blocking v1.0. Decisions are recorded in [ADRs](adr/index.md).
 
 ## 13. Business model and pricing
 
-Self-hosting is free under FSL-1.1-ALv2 with no plan limits. Pylota Mail Cloud is Pylota's hosted deployment
+Self-hosting is free under FSL-1.1-ALv2 with no plan limits. Pylota Identity Cloud is Pylota's hosted deployment
 of the same code, with billing on. The plans mirror goshen-email's published plans (read 2026-10-09) with
 every allowance identical. Each price is half goshen's figure and is charged in pounds sterling: goshen's
 $20 and $99 become £10 and £49.50, and its $2 top-up becomes £1.

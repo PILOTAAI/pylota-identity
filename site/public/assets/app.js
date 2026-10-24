@@ -1,5 +1,5 @@
 /*
-  Pylota Mail landing page: theme toggle, code tabs, copy buttons, small-screen menu.
+  Pylota Identity landing page: theme toggle, code tabs, copy buttons, small-screen menu.
   Progressive enhancement only. Without this file every code sample is shown, the
   theme follows the system setting, and the menu still opens.
 */
@@ -11,7 +11,7 @@
 
   /* ---------- Theme: apply a saved choice before first paint ---------- */
 
-  var STORAGE_KEY = 'pylota-mail-theme';
+  var STORAGE_KEY = 'pylota-identity-theme';
 
   function readTheme() {
     try {

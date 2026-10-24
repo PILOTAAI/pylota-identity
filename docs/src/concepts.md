@@ -1,6 +1,6 @@
 # Concepts
 
-This page defines the things Pylota Mail is made of and how they relate. Each section ends with links
+This page defines the things Pylota Identity is made of and how they relate. Each section ends with links
 to the reference and design documents that hold the detail.
 
 ```text
@@ -31,7 +31,7 @@ belongs to exactly one tenant, apart from platform-level settings and the platfo
 |---|---|
 | `slug` | Short name, for example `acme` |
 | `mode` | `live` or `test`. A test tenant's mail never leaves the deployment: it goes to the simulator, or to identities on the same deployment ([FR-OUT-12](project/prd.md#65-outbound)). Its keys start with `pmk_test_` |
-| `address_suffix` | Appended to usernames on the platform domain, `"." + slug` by default. `bookings` in tenant `acme` becomes `bookings.acme@agents.example`. Only the default tenant made by `pmail setup` has an empty suffix |
+| `address_suffix` | Appended to usernames on the platform domain, `"." + slug` by default. `bookings` in tenant `acme` becomes `bookings.acme@agents.example`. Only the default tenant made by `idvy setup` has an empty suffix |
 | `policy` | Caps, quarantine thresholds, retention, triage rules, search settings and more. See [Configuration › Tenant policy](reference/configuration.md#tenant-policy) |
 | `status` | `active`, `suspended`, `erasing` or `erased` |
 | `partner_id` | The partner whose key created the tenant, or `null`. It never changes |
@@ -45,7 +45,7 @@ Reference: [REST API › Tenants](reference/api.md#tenants).
 ## Partners
 
 A **partner** is an integrator that runs its own customers as tenants of a shared deployment, for
-example Pylota with its car-rental operators on Pylota Mail Cloud. The deployment's operator creates the
+example Pylota with its car-rental operators on Pylota Identity Cloud. The deployment's operator creates the
 partner and gives it a **partner key**. With it the partner creates tenants and manages them: their
 identities, domains, keys, webhooks and mail. It reaches only the tenants its own keys created, never
 another customer's ([FR-KEY-4](project/prd.md#61-tenancy-and-access)). Its tenants get the partner's
@@ -161,7 +161,7 @@ pending ─▶ verifying ─▶ healthy ⇄ degraded ─▶ failing ─▶ suspe
 ```
 
 - `healthy` or `degraded`: the domain sends normally, and addresses on it can be promoted.
-- `failing`: an authentication record is broken. Pylota Mail **never sends as a broken domain**.
+- `failing`: an authentication record is broken. Pylota Identity **never sends as a broken domain**.
   Sends fall back to the identity's platform address, keeping the display name and the thread, and
   each such message is flagged `sent_via_fallback` ([FR-DOM-6](project/prd.md#63-domains)).
 - `suspended`: failing for 14 days, or an ownership signal changed (nameservers moved, the ownership
@@ -288,7 +288,7 @@ same key with a different body is refused (`409 idempotency_conflict`). A key is
 characters, and keys are kept for 30 days.
 
 When the transport's answer is lost (a timeout, or a connection that drops after the request was
-written), nobody can know whether the email left. The message becomes **`uncertain`**, and Pylota Mail
+written), nobody can know whether the email left. The message becomes **`uncertain`**, and Pylota Identity
 **never resends it automatically**. It tries to reconcile the send from provider events for 30
 minutes. Otherwise a person decides with `resolve`.
 

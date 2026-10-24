@@ -1,5 +1,5 @@
 [book]
-title = "Pylota Mail"
+title = "Pylota Identity"
 authors = ["Pylota"]
 description = "Email and identity for AI agents. Source available under FSL-1.1-ALv2, written in Rust, runs on your own Cloudflare account."
 language = "en"
@@ -15,8 +15,8 @@ site-url = "/docs/"
 default-theme = "light"
 preferred-dark-theme = "navy"
 additional-css = ["theme/pylota.css"]
-git-repository-url = "https://github.com/PILOTAAI/pylota-mail"
-edit-url-template = "https://github.com/PILOTAAI/pylota-mail/edit/main/docs/{path}"
+git-repository-url = "https://github.com/PILOTAAI/pylota-identity"
+edit-url-template = "https://github.com/PILOTAAI/pylota-identity/edit/main/docs/{path}"
 no-section-label = true
 
 [output.html.search]

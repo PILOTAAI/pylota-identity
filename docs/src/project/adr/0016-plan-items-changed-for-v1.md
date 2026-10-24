@@ -33,8 +33,8 @@ page); R2 has no versioning or replication (R2 S3 API compatibility page, read 2
    needs token counts from every model response and a billing decision, and is reconsidered when
    `ai_neurons` usage shows a workspace whose spend the call limits do not bound.
 3. **Blob backup is a nightly copy, off by default, on for Cloud.** `PM_BACKUP_BUCKET` enables a nightly
-   `backup` job (RPO 24 hours against a bug that deletes objects); Pylota Mail Cloud sets it to
-   `pylota-mail-backup`. Infrastructure loss is covered by R2's durability (RPO 15 minutes, NFR-OPS-2).
+   `backup` job (RPO 24 hours against a bug that deletes objects); Pylota Identity Cloud sets it to
+   `pylota-identity-backup`. Infrastructure loss is covered by R2's durability (RPO 15 minutes, NFR-OPS-2).
    An event-driven copy (an `object-create` notification per object, copied by a queue consumer) was not
    chosen: it doubles queue traffic for every inbound and outbound message, and every copy made after
    an erasure's delete would resurrect the object in the backup, which the nightly job prevents with one

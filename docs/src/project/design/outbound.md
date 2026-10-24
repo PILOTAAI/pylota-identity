@@ -1050,7 +1050,7 @@ domain the counters are hourly instead ([Per-domain outcome counters](#per-domai
 The identity thresholds above are looser than the provider's own enforcement: Amazon SES places an account
 under review at a complaint rate of 0.1% and may pause it at 0.5%, and reviews it at a bounce rate of 5%
 and may pause it at 10% ([SES sending review FAQ](https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html),
-read 2026-10-10). Cloudflare's Email Sending quota and reputation are per account, and on Pylota Mail
+read 2026-10-10). Cloudflare's Email Sending quota and reputation are per account, and on Pylota Identity
 Cloud that account is shared with Pylota. A tenant that spreads its mail over many identities stays under
 every identity threshold while the account is harmed. So `RecordOutcome` also evaluates the tenant and
 each tenant sending domain over the 7 UTC days ending with the current day, the pinned window of
@@ -1199,7 +1199,7 @@ custom MAIL FROM, so during a failover SPF does not align and DMARC passes on DK
 - **Identity limit.** SES allows 10,000 verified identities per AWS Region
   ([quotas](https://docs.aws.amazon.com/ses/latest/dg/quotas.html), read 2026-10-09). The count is the
   `domains` rows with `ses_region` set that are not `removed`, plus the platform identity. At 9,000 the
-  operator alert `ses_identities_90pct` fires and `pmail doctor` warns. At 10,000, creating a domain that
+  operator alert `ses_identities_90pct` fires and `idvy doctor` warns. At 10,000, creating a domain that
   needs an SES identity (`dns_records`, `send_only`, or `smtp_relay` with `inbound: ses`) fails with
   `422 transport_unavailable` and `details.reason = "ses_identity_limit"`.
 
@@ -1209,7 +1209,7 @@ custom MAIL FROM, so during a failover SPF does not align and DMARC passes on DK
 { "FromEmailAddress": "bookings@acme.example.com",
   "Destination": { "ToAddresses": ["jo@example.net"], "CcAddresses": [], "BccAddresses": [] },
   "Content": { "Raw": { "Data": "<base64 of the composed MIME>" } },
-  "ConfigurationSetName": "pylota-mail" }
+  "ConfigurationSetName": "pylota-identity" }
 ```
 
 The MIME is the stored `.eml` (no `Bcc` header; the `Reply-To` header carries the token when the domain
@@ -1235,7 +1235,7 @@ service model, read 2026-10-09). Errors are classified by the error type in the 
 response header (or the body's error type), as in the outcome table (verify the exact location at build
 time, S8). `core::ses::sigv4` is tested against AWS's published SigV4 test vectors.
 
-**Events.** Setup creates the configuration set `pylota-mail` with an SNS event destination for
+**Events.** Setup creates the configuration set `pylota-identity` with an SNS event destination for
 `SEND`, `DELIVERY`, `BOUNCE`, `COMPLAINT`, `REJECT`, `DELIVERY_DELAY` and `RENDERING_FAILURE`, sets
 `SignatureVersion=2` on that topic (the default is 1,
 [SetTopicAttributes](https://docs.aws.amazon.com/sns/latest/api/API_SetTopicAttributes.html), read

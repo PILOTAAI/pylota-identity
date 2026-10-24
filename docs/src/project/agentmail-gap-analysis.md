@@ -1,8 +1,8 @@
 # AgentMail comparison and gap register
 
-This page compares Pylota Mail with AgentMail as AgentMail stood on 2026-10-17. It records every
+This page compares Pylota Identity with AgentMail as AgentMail stood on 2026-10-17. It records every
 capability gap and the decision taken on each one. [ADR 0017](adr/0017-agentmail-parity.md) holds those
-decisions. AgentMail is the hosted agent-email product that Pylota is moving off. Pylota Mail must cover
+decisions. AgentMail is the hosted agent-email product that Pylota is moving off. Pylota Identity must cover
 everything Pylota uses from it. Where it adds a capability, it must be harder to misuse and must say what
 happens in every failure case.
 
@@ -42,7 +42,7 @@ Limits of the method:
    WebSocket.
 3. The responses carry a CDN `age` header, so they are cached and keyed by the inbox address.
 
-Two lessons follow for any demo on Pylota Mail's own site. A demo must be keyed by an unguessable
+Two lessons follow for any demo on Pylota Identity's own site. A demo must be keyed by an unguessable
 capability token, never by the mailbox address. And a demo must not create a mailbox for every page view.
 
 ## 2. AgentMail's model in brief
@@ -105,9 +105,9 @@ capability token, never by the mailbox address. And a demo must not create a mai
   request. Custom domains start at Developer, and the SOC 2 report at Startup. Cold outreach is
   prohibited.
 
-## 3. Where Pylota Mail already goes further
+## 3. Where Pylota Identity already goes further
 
-| Area | AgentMail (2026-10-17) | Pylota Mail |
+| Area | AgentMail (2026-10-17) | Pylota Identity |
 |---|---|---|
 | Identity and address | The address is the inbox | Identities outlive addresses and domains, with rollback (U3) |
 | Unknown send outcomes | Idempotency for 24 h; no notion of an unknown outcome | Idempotency for 30 days, `uncertain` is never resent, and reconciliation follows (U2) |
@@ -132,7 +132,7 @@ Each gap has a decision:
 - **defer**: a later version, with the reason.
 - **refuse**: deliberately not built, with the reason in §5.
 
-| # | Capability | AgentMail | Pylota Mail before this change | Decision | Specified in |
+| # | Capability | AgentMail | Pylota Identity before this change | Decision | Specified in |
 |---|---|---|---|---|---|
 | GAP-1 | Drafts, human approval before send, scheduled send | Drafts with `send_at`, reschedule, unschedule and cancel; approval works only by withholding send permissions; the draft is deleted once sent | Non-goal ("planned for v1.1") | **add**: drafts with approval bound to a content digest, two approval patterns, person-only approval on Cloud unless the partner opts its tenants in (`drafts.key_approval`), the draft kept as a record after sending, schedule driven by Durable Object alarms through the one send pipeline | [Drafts](design/drafts.md) |
 | GAP-2 | Pull feed of events for agents without a public URL | Polling webhooks: a queue with commit offsets, US only, 10 per scope | `wait` long poll (messages only); webhook replay | **add**: an ordered per-tenant event log, `GET /v1/events` with cursors and long poll, durable consumers with commit | [Event feed](design/event-feed.md) |
@@ -177,10 +177,10 @@ Each gap has a decision:
 - **No open tracking (GAP-28).** A tracking pixel reveals when a recipient read a message, so it is
   personal data processed without their knowledge. Apple Mail Privacy Protection preloads images, which
   makes open counts unreliable. Images in first contact also hurt deliverability. AgentMail itself fires
-  opens once per message, not per recipient. Delivery events and replies are the signals Pylota Mail
+  opens once per message, not per recipient. Delivery events and replies are the signals Pylota Identity
   reports.
 - **No calendar store (GAP-29).** A second calendar would compete with the consumer's calendar for the
-  same truth: for Pylota, that is Kairos and its database constraint against double booking. Pylota Mail
+  same truth: for Pylota, that is Kairos and its database constraint against double booking. Pylota Identity
   verifies and carries iCalendar in both directions, and the consumer owns state, SEQUENCE ordering and
   conflicts.
 - **No general drive and no URL fetching (GAP-30, GAP-31).**
@@ -209,16 +209,16 @@ external use; marketing copy may claim only what PRD § U1–U10 list ([PRD § 4
 
 ## 7. Pylota agentic OS
 
-Pylota reaches Pylota Mail Cloud as a partner. Each operator is a tenant, and Pylota's servers hold the
+Pylota reaches Pylota Identity Cloud as a partner. Each operator is a tenant, and Pylota's servers hold the
 partner key ([Pylota integration spec](https://github.com/PILOTAAI/pylota), `docs/plans/pylota-mail-integration.md`).
 The additions map onto Pylota as follows; each design page has a full **Pylota agentic OS** section.
 
-| Pylota need | Pylota Mail feature |
+| Pylota need | Pylota Identity feature |
 |---|---|
 | Mail written by the public-webchat coordinator, or by any untrusted path, must wait for an operator (Pylota's approval gate) | Drafts with `drafts:write` and no `messages:send`; the operator approves in Pylota's app; Pylota's server approves with its partner key and `on_behalf_of` (GAP-1) |
 | Renter and public mail is read by the operator coordinator and 19 specialists | `screening.mode: hold` on operator identities; held mail joins Pylota's held-mail flow (spec § 8.6) (GAP-4) |
 | Webhook monitoring and replay (spec § 8.4, § 8.5) | Reconciliation from a saved cursor on the event feed (GAP-2) |
-| Pick-up and return appointments | Kairos produces iTIP; Pylota Mail sends it as iMIP from the operator's identity; verified replies and invitations go back to Kairos (GAP-5) |
+| Pick-up and return appointments | Kairos produces iTIP; Pylota Identity sends it as iMIP from the operator's identity; verified replies and invitations go back to Kairos (GAP-5) |
 | Pylota's browser agent receives one-time codes at third-party services | Short-lived identities (`retention.message_hours`) with the service sign-up ledger (GAP-17) |
 | Specialists coordinate through labels | Batch updates and `message.labels_changed` (GAP-12, GAP-14) |
 | The fleet-acquisition identity's seller outreach | Identity-scope lists (GAP-13) |

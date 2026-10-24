@@ -9,7 +9,7 @@
 
 ## Context
 
-Pylota Mail parses hostile input (every byte of inbound mail), holds tenants' correspondence, and must
+Pylota Identity parses hostile input (every byte of inbound mail), holds tenants' correspondence, and must
 deploy to a stranger's Cloudflare account with no always-on compute (NFR-COST-1). The REST API, MCP
 server, CLI and SDK should share one contract and as much logic as possible (PRD goal 6). Cloudflare's
 Workers SDK and most examples are TypeScript; Rust runs on Workers as WebAssembly through `workers-rs`.
@@ -68,7 +68,7 @@ Non-Rust artefacts that remain, all of them tools, configuration or data:
   the APIs (worth contributing upstream).
 - Bundle size and startup are a budget, not a given: NFR-SEC-2 requires ≤ 10 MiB compressed and
   startup under 1 s; spike S4 measures it and `cargo xtask build-worker` enforces it.
-- Self-hosters need Node.js for `wrangler`, but no Rust toolchain: `pmail deploy` uses a prebuilt,
+- Self-hosters need Node.js for `wrangler`, but no Rust toolchain: `idvy deploy` uses a prebuilt,
   checksum-verified bundle (FR-OPS-2).
 - Fewer examples exist for Rust Workers; the design documents compensate with exact signatures.
 

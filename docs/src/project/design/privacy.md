@@ -29,7 +29,7 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 |---|---|---|---|---|
 | R2 `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` (with the envelope in its metadata), `inbound-staging/ses/{key}` for the SES source, and `inbound-staging/role/…` for role mail waiting to be relayed | Whole raw message, envelope | Accept mail when the directory lookup fails transiently ([J7](../edge-cases.md)); hand SES mail to the normal pipeline | Until routed; at most 15 days | The inbound consumer deletes an outage copy after the move and a role copy after the relay; SES copies stay for re-drives; the R2 lifecycle rule removes every copy (15 days: longer than the 14 days a dead-letter item is kept, so a pointer redriven from the dead-letter queue still finds its object, [J7](../edge-cases.md)). Not keyed by tenant: erasure cannot find these objects, and section 11 lists them |
 | Amazon S3 `{prefix}-inbound`, keys `in/{messageId}` (only with `inbound = ses`) | Whole raw inbound message, as SES received it | Hand-over from SES receiving to the Worker | Until every recipient is ingested, normally seconds; never longer than 14 days | The inbound consumer calls `DeleteObject` once every `ses_ingest` row of the object is `done`; the bucket's lifecycle rule deletes `in/` after 14 days. The bucket uses SSE-S3 and blocks all public access ([Domains on any DNS host §11](domain-connections.md#11-privacy-and-jurisdiction)) |
-| Amazon SQS `pylota-mail-inbound` (only with `inbound = ses`) | Copies of SES receipt notifications: envelope sender and recipients, the message headers up to 10 KB (including From, To and Subject), verdicts ([notification contents](https://docs.aws.amazon.com/ses/latest/dg/receiving-email-notifications-contents.html), read 2026-10-09) | Backstop for a missed SNS push | Until the every-minute backstop cron handles it; queue retention 14 days | The cron deletes each message after handling it; SQS retention |
+| Amazon SQS `pylota-identity-inbound` (only with `inbound = ses`) | Copies of SES receipt notifications: envelope sender and recipients, the message headers up to 10 KB (including From, To and Subject), verdicts ([notification contents](https://docs.aws.amazon.com/ses/latest/dg/receiving-email-notifications-contents.html), read 2026-10-09) | Backstop for a missed SNS push | Until the every-minute backstop cron handles it; queue retention 14 days | The cron deletes each message after handling it; SQS retention |
 | Amazon SES receipt rules `pm-retired-{n}` (SES domains) | Retired agent addresses, in clear, as rule recipients | Bounce mail to retired addresses with `5.1.6` ([N7](../edge-cases.md)) | While the address is retired; beyond 150 rules the oldest addresses are removed | Removed from the rules by domain removal, identity erasure and tenant erasure (sections 6.5, 6.6) |
 | Amazon SES identities | Domain names | Sending and receiving for SES domains | Life of the domain | Domain removal calls `DeleteEmailIdentity` |
 | Amazon SES account-level suppression list (only with `transport = ses` or SES failover) | Clear recipient addresses that hard-bounced or complained, with the reason | SES refuses later sends to them | Until removed: entries "remain there until you remove them" ([Using the Amazon SES account-level suppression list](https://docs.aws.amazon.com/ses/latest/dg/sending-email-suppression-list.html), read 2026-10-10) | Kept by design and listed in section 11: the list is account-wide, shared by every SES domain of the deployment, so an entry cannot be attributed to one tenant, and our own hashed suppression keeps refusing the address anyway ([I12](../edge-cases.md)) |
@@ -39,7 +39,7 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | R2 `t/{ten}/i/{idn}/out/{msg}.eml` | Composed outbound message | Sent copy, raw download, export | `retention.raw_days` | Retention job; erasure |
 | R2 `…/a/{att}`, `…/a/{att}.md` | Attachment bytes and extracted text | Download, extraction, search | As the message (`retention.message_days`, default kept) | Retention job (message purge); erasure |
 | R2 `t/{ten}/exports/{exp}.zip` | Every message in the export | Subject-access export | 7 days | Retention job sets the export `expired` and deletes the object; every erasure of the tenant expires the tenant's unexpired exports, and an export that was running restarts (section 6.11, [I11](../edge-cases.md)); tenant erasure |
-| R2 backup bucket (`PM_BACKUP_BUCKET`, optional, off by default; set on Pylota Mail Cloud) | Copies of `t/` objects under the same keys | Recovery from a bug that deletes blobs (section 5.4) | As the source object | Every retention and erasure delete is applied to both buckets; tenant erasure sweeps `t/{tenant_id}/` in both; a copy that lands after the source was deleted is removed by the backup job itself (section 5.4, [I11](../edge-cases.md)) |
+| R2 backup bucket (`PM_BACKUP_BUCKET`, optional, off by default; set on Pylota Identity Cloud) | Copies of `t/` objects under the same keys | Recovery from a bug that deletes blobs (section 5.4) | As the source object | Every retention and erasure delete is applied to both buckets; tenant erasure sweeps `t/{tenant_id}/` in both; a copy that lands after the source was deleted is removed by the backup job itself (section 5.4, [I11](../edge-cases.md)) |
 | `IdentityMailbox.messages`, `threads`, `deliveries`, `attachments`, `labels` | Addresses, names, subjects, bodies, filenames, SMTP responses, calendar objects (`calendar_json`, whose `parties` hold truncated keyed hashes only, [Calendar invitations §10](calendar-invitations.md#10-privacy)) | The mailbox | `retention.message_days` (default kept) | Retention job; erasure |
 | `IdentityMailbox.fts`, `fts_tri`, `refs` | Index terms and extracted references (plates, phone numbers, emails, amounts) derived from content | Keyword search | As the message | Deleted in the same transaction as the message row |
 | `IdentityMailbox.contacts` | Counterparty addresses, names, counts | Contacts, known-sender signal | Until the counterparty or identity is erased | Counterparty, identity and tenant erasure |
@@ -93,18 +93,18 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | Queues | Pointers; inbound pointers carry the envelope sender and recipient ([Inbound](inbound.md)) | Async work | Until consumed; dead-letter items at most 14 days | Consumers ack; queue retention |
 | D1 `dlq_items` ([Observability](observability.md#8-dead-letter-queues)) | Pointers as received; inbound pointers include the envelope addresses | Dead-letter records and redrive | 14 days | Global retention job (`dlq` step); counterparty erasure deletes the tenant's rows whose pointer names the address, identity erasure the rows naming the identity, tenant erasure every row of the tenant (sections 6.4–6.6) |
 | Workers Logs | Pseudonyms and IDs only (FR-PRV-6) | Debugging | 7 days (Cloudflare) | Expiry |
-| Analytics Engine `pylota_mail_metrics` | Tenant and domain IDs only | Metrics and alerts | 3 months (Cloudflare) | Expiry |
+| Analytics Engine `pylota_identity_metrics` | Tenant and domain IDs only | Metrics and alerts | 3 months (Cloudflare) | Expiry |
 
 Webhook receivers, AI processing and the email providers are covered in section 11.
 
 ## 3. Jurisdiction and residency
 
-`PM_JURISDICTION` (`eu` or `default`) is chosen at `pmail setup` and applied at creation (FR-PRV-1):
+`PM_JURISDICTION` (`eu` or `default`) is chosen at `idvy setup` and applied at creation (FR-PRV-1):
 
 | Resource | How `eu` is applied | Can it change later? |
 |---|---|---|
-| D1 `pylota-mail` | Created with `jurisdiction: "eu"` | No. Cloudflare sets a D1 jurisdiction only at creation |
-| R2 `pylota-mail-blobs` | Created with the `eu` jurisdiction; the binding names `jurisdiction = "eu"` | No |
+| D1 `pylota-identity` | Created with `jurisdiction: "eu"` | No. Cloudflare sets a D1 jurisdiction only at creation |
+| R2 `pylota-identity-blobs` | Created with the `eu` jurisdiction; the binding names `jurisdiction = "eu"` | No |
 | Every Durable Object | ID from `unique_id_with_jurisdiction("eu")`, stored in D1 (`mailbox_do_id`, `monitor_do_id`, `runner_do_id`, `quota_do_id`, `notify_do_id`) | No. Existing objects keep their IDs |
 
 With `default`, the same resources are created without a jurisdiction and objects use `unique_id()`.
@@ -127,7 +127,7 @@ where the database and objects run. It does not control:
   activity log for 30 days and, when **Email preview** is on, a copy of each sent message for about
   seven days. New sending domains have preview turned on automatically (Cloudflare Email Service docs,
   read 2026-10-09). Domain onboarding therefore sets `preview_enabled: false` on every sending domain
-  through `PATCH /zones/{zone_id}/email/sending/subdomains/{subdomain_id}`, and `pmail doctor` fails if
+  through `PATCH /zones/{zone_id}/email/sending/subdomains/{subdomain_id}`, and `idvy doctor` fails if
   any sending domain has preview enabled.
 - **Workers Logs and Analytics Engine**, which hold no personal data (section 2).
 - **DNS-over-HTTPS** lookups, which send sender and tenant domain names to the configured resolvers
@@ -136,7 +136,7 @@ where the database and objects run. It does not control:
   `dns_records`, `send_only` and `smtp_relay` with `inbound: ses` methods, and SES failover). SES
   processes message content in `PM_SES_REGION`; raw inbound mail rests in the S3 bucket until it is
   ingested (normally seconds, never longer than the 14-day lifecycle rule), with SSE-S3 and no public
-  access; SNS and SQS carry receipt notifications. With `PM_JURISDICTION=eu`, `pmail setup ses` refuses
+  access; SNS and SQS carry receipt notifications. With `PM_JURISDICTION=eu`, `idvy setup ses` refuses
   an SES region outside the EU and the UK unless `--allow-non-eu` is given, and `/health` reports
   `ses_region` ([Domains on any DNS host §11](domain-connections.md#11-privacy-and-jurisdiction)). For
   the SES region, `eu` means "EU or UK": the UK has an EU adequacy decision under the GDPR (European
@@ -152,7 +152,7 @@ where the database and objects run. It does not control:
 
 **DPIA.** Automated processing of business correspondence with AI models is likely to need a data
 protection impact assessment by the deployer. This page and the data inventory are the data-flow input
-for it. Pylota Mail does not provide legal advice and does not act as controller or processor for a
+for it. Pylota Identity does not provide legal advice and does not act as controller or processor for a
 self-hosted deployment.
 
 The processors to list in it:
@@ -346,11 +346,11 @@ bucket locks exist, but a lock rule blocks deletion, so it would stop retention 
 deleting personal data; the design does not use them. Without help, a bug that deletes blobs loses
 them.
 
-The optional backup covers that case. It is **off by default**, and **on for Pylota Mail Cloud**, which
-sets `PM_BACKUP_BUCKET = "pylota-mail-backup"` ([ADR 0016](../adr/0016-plan-items-changed-for-v1.md)
+The optional backup covers that case. It is **off by default**, and **on for Pylota Identity Cloud**, which
+sets `PM_BACKUP_BUCKET = "pylota-identity-backup"` ([ADR 0016](../adr/0016-plan-items-changed-for-v1.md)
 records why a nightly copy replaces the event-driven copy the plan proposed):
 
-- Setting `PM_BACKUP_BUCKET` makes `pmail setup` create that bucket in the deployment's jurisdiction and
+- Setting `PM_BACKUP_BUCKET` makes `idvy setup` create that bucket in the deployment's jurisdiction and
   bind it as `BACKUP` ([Configuration](../../reference/configuration.md#variables)).
 - Once per UTC day the `*/15` cron starts a `backup` job (`jobs.kind = 'backup'`, `tenant_id = NULL`).
   Its one step lists `t/` in key order (cursor = the last key) and copies to `BACKUP`, under the same
@@ -404,7 +404,7 @@ mail is gone within hours whatever the rest of the workspace keeps (FR-PRV-7). W
   `JobRunner`: in slices of at most 100 messages or 20 seconds it plans the due rows, deletes their vectors and
   R2 objects, then in one transaction re-checks each row and runs `EraseRows` with `mode: Expiry`. A failure
   backs off from 30 seconds to 5 minutes, and the daily maintenance alarm re-arms an alarm that was lost.
-- **Timing.** At most 15 minutes after the due time while R2, Vectorize and the mailbox answer (Pylota Mail
+- **Timing.** At most 15 minutes after the due time while R2, Vectorize and the mailbox answer (Pylota Identity
   target); `retention_expiry_overdue:{identity_id}` fires when a due row is more than 1 hour overdue.
 - **A retried send never sends twice.** In `mode: Expiry` an outbound message's idempotency row is kept until
   its own `expires_at`, with no content and a keyed fingerprint; a retry with the same key and body gets
@@ -465,7 +465,7 @@ reason `identity_deleted`), or `DELETE …/messages/{id}` (message scope, reason
   write to an `erasing` or `erased` tenant (or to anything in it) is refused as `*_not_found`
   ([Security § 5.2](security.md#52-order-of-checks), step 4), except the hold routes on a tenant that is
   `erasing` with holds (section 8); reading the tenant and its erasure requests keeps working for its
-  partner key (section 6.10). The CLI command `pmail erasure retry <era_id>` submits the same scope and
+  partner key (section 6.10). The CLI command `idvy erasure retry <era_id>` submits the same scope and
   target again, which resumes the failed request ([CLI and setup](cli.md#19-command-to-endpoint-map)).
 - An erasure request never returns `423 legal_hold`: held items are skipped and listed (FR-PRV-4,
   api.md). Only the single-message `DELETE …/messages/{message_id}` checks the thread's hold first and
@@ -865,7 +865,7 @@ export is created.
 
 R2 keeps the uploaded parts of an incomplete multipart upload until it is completed or aborted, and
 aborts it after 7 days by default ([Upload objects](https://developers.cloudflare.com/r2/objects/upload-objects/),
-read 2026-10-10). `pmail setup` adds a lifecycle rule to `BLOBS` that aborts incomplete multipart uploads
+read 2026-10-10). `idvy setup` adds a lifecycle rule to `BLOBS` that aborts incomplete multipart uploads
 after 1 day (`wrangler r2 bucket lifecycle add … --abort-multipart-days 1`), a backstop for an abort that
 never ran ([I13](../edge-cases.md)).
 
@@ -903,7 +903,7 @@ exp_01JA4….zip
   "scope": "counterparty",
   "counterparty_hash": "5c1e…",
   "generated_at": "2026-10-09T10:20:00Z",
-  "generator": "pylota-mail/1.0.0",
+  "generator": "pylota-identity/1.0.0",
   "identities": ["idn_01J9…", "idn_01JA…"],
   "messages": [
     {
@@ -1038,7 +1038,7 @@ The receipt matches the [erasure request object](../../reference/api.md#erasure-
 | Amazon SES account-level suppression list (SES transport) | Until removed | Clear addresses that hard-bounced or complained. Kept for the same reason; the operator can remove one with SES `DeleteSuppressedDestination` ([I12](../edge-cases.md)) |
 | R2 `inbound-staging/` objects | At most 15 days | Raw messages that were staged because the directory lookup failed, or that came through SES. Not keyed by tenant; a staged message for an erased address is refused (`550 5.1.1`) when it is routed and its object deleted |
 | `tenants` slug and address suffix of an erased tenant | Life of the deployment | Kept so that neither is reused; the basis is in section 3 ("Names kept after tenant erasure") |
-| Restore working files | Until `pmail ops restore cleanup`, which the runbook runs at its end | The D1 exports a restore writes on the operator's machine (mode `0600`) hold every D1 row, including addresses ([Observability › Restore from PITR](observability.md#restore-from-pitr)) |
+| Restore working files | Until `idvy ops restore cleanup`, which the runbook runs at its end | The D1 exports a restore writes on the operator's machine (mode `0600`) hold every D1 row, including addresses ([Observability › Restore from PITR](observability.md#restore-from-pitr)) |
 | Email preview | About 7 days | Disabled by onboarding; residual only if re-enabled by hand |
 | Amazon S3 inbound objects (SES domains) | Until ingested; never longer than 14 days | Deleted by the consumer once every recipient is done, or by the lifecycle rule; a message erased in that window can still sit in S3 until then |
 | Amazon SQS notifications (SES domains) | Until the backstop cron handles them; at most 14 days | Envelope addresses and headers of received mail |
@@ -1058,7 +1058,7 @@ data. The restore runbook ([Observability](observability.md#restore-from-pitr)) 
 
 1. exports the whole D1 database **before** restoring, while the deployment is frozen, and after the
    restore re-applies every change made after the restore point `T` that the restore is not meant to
-   undo, deletions included (`pmail ops restore d1`), so erased D1 rows, suppressions, tombstones, member
+   undo, deletions included (`idvy ops restore d1`), so erased D1 rows, suppressions, tombstones, member
    removals and key revocations made after `T` come back as they were;
 2. re-applies, after a mailbox restore, every erasure request that completed after `T`:
    `POST /v1/platform/erasure-requests/{erasure_id}/reapply` creates a new request with reason
@@ -1078,7 +1078,7 @@ data. The restore runbook ([Observability](observability.md#restore-from-pitr)) 
 
 Logs follow [Security › Logging rules](security.md#12-logging-rules): no content, no clear addresses,
 pseudonyms only, `invocation_logs = false`. Dead-letter records keep pointers in D1 for at most 14 days and
-are never returned by `GET /v1/platform/dlq` (`pmail dlq list`): it shows the queue, kind, tenant and
+are never returned by `GET /v1/platform/dlq` (`idvy dlq list`): it shows the queue, kind, tenant and
 times only. The [I5](../edge-cases.md) test greps the captured output of the whole integration run for
 canaries.
 

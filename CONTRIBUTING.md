@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. Pylota Mail is published under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE.md).
+Thanks for helping. Pylota Identity is published under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE.md).
 
 By contributing you agree that your contribution is licensed to TREFT LTD, the company behind Pylota, under the Apache License 2.0, so that
 Pylota can distribute it under FSL-1.1-ALv2 now and under Apache-2.0 when each release converts. Sign off every

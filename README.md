@@ -1,16 +1,16 @@
-# Pylota Mail
+# Pylota Identity
 
-Email and identity for AI agents. Source available (Fair Source), written in Rust, runs on your own Cloudflare account or on Pylota Mail Cloud.
+Email and identity for AI agents. Source available (Fair Source), written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud.
 
-Pylota Mail gives every agent an **identity**: a stable mailbox with one or more addresses, DKIM-aligned
+Pylota Identity gives every agent an **identity**: a stable mailbox with one or more addresses, DKIM-aligned
 sending, verified inbound mail, threads, attachments, triage and search. You talk to it through a
-**REST API**, an **MCP server** or the **`pmail` CLI**, and it tells you what happened through signed
+**REST API**, an **MCP server** or the **`idvy` CLI**, and it tells you what happened through signed
 **webhooks**.
 
 It was built for [Pylota](https://pylota.io) (an agentic operating system for car-rental operators). The source
 is published under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE.md): you can self-host it for free for
 your own agents, and each release becomes Apache-2.0 two years after it ships. Pylota also runs it as a hosted
-service, **Pylota Mail Cloud**, on the plans below.
+service, **Pylota Identity Cloud**, on the plans below.
 
 ## Why it is different
 
@@ -27,7 +27,7 @@ service, **Pylota Mail Cloud**, on the plans below.
 6. **Your account, your receipts.** Mail stays in the Cloudflare account that runs it (EU jurisdiction optional);
    erasure returns a receipt with per-store counts and empty probe queries.
 7. **Real team seats.** Workspaces have members with roles and an audit log, on Cloud and when self-hosted. Seat
-   counts are enforced where billing is on (Pylota Mail Cloud); a self-hosted deployment with billing off, the
+   counts are enforced where billing is on (Pylota Identity Cloud); a self-hosted deployment with billing off, the
    default, has no seat limit.
 8. **Tested against the edge cases.** A public register of edge cases, each one the service owns mapped to a named
    test, plus a MIME conformance corpus and search-quality gates in CI.
@@ -43,7 +43,7 @@ service, **Pylota Mail Cloud**, on the plans below.
 | Delivery | Delivered, deferred, bounced, complained, rejected and failed events, automatic suppression |
 | Triage | Category, needs-reply score, urgency 0–3, risk flags (payment-change request, suspected prompt injection, phishing) |
 | Search | Keyword (FTS5 + exact references), semantic (Vectorize), hybrid (fusion + reranking) and agentic (plan, search, refine, cited answer) |
-| Integrations | REST API with OpenAPI 3.1, MCP server (Streamable HTTP), `pmail` CLI, Rust SDK, Standard Webhooks |
+| Integrations | REST API with OpenAPI 3.1, MCP server (Streamable HTTP), `idvy` CLI, Rust SDK, Standard Webhooks |
 | Privacy | EU jurisdiction for D1, Durable Objects and R2, retention policies, erasure with receipts, subject-access export |
 | Console | Passwordless sign-in, workspaces with members and roles, inbox views, quarantine review, keys, domains, plan and usage |
 | Plans | Metered allowances with atomic holds, `402 billing_limit` with safe retry after upgrade, Stripe checkout and billing portal (Cloud, or any deployment that turns billing on) |
@@ -60,17 +60,17 @@ You need:
 You do not need a Rust toolchain unless you build from source.
 
 ```bash
-cargo install pylota-mail-cli --locked     # or download a prebuilt pmail from GitHub Releases
+cargo install pylota-identity-cli --locked     # or download a prebuilt idvy from GitHub Releases
 export CLOUDFLARE_API_TOKEN=...            # permissions listed in docs/src/self-hosting.md
-pmail setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example --jurisdiction eu
-pmail keys create --level platform --name first-key \
+idvy setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example --jurisdiction eu
+idvy keys create --level platform --name first-key \
   --permissions tenants:manage,keys:manage,webhooks:manage   # full list: docs/src/self-hosting.md
 ```
 
 `--domain` is the API host. `--mail-domain` is the shared mail domain, and it must be a zone apex,
 because Cloudflare catch-all routing only works on an apex.
 
-`pmail setup` creates every Cloudflare resource:
+`idvy setup` creates every Cloudflare resource:
 
 - D1, R2, Queues and Vectorize;
 - Email Routing catch-all and Email Sending onboarding;
@@ -78,8 +78,8 @@ because Cloudflare catch-all routing only works on an apex.
 
 It also applies migrations, generates secrets, writes `deploy/wrangler.toml` and performs the first deploy of
 a prebuilt, signature-verified Worker bundle. It stores a 24-hour bootstrap key in your CLI profile, which the
-`pmail keys create` line above uses to make your first platform key. Later releases go out with
-`pmail deploy`. The full guide is in
+`idvy keys create` line above uses to make your first platform key. Later releases go out with
+`idvy deploy`. The full guide is in
 [docs/src/self-hosting.md](docs/src/self-hosting.md).
 
 ## Repository layout
@@ -90,7 +90,7 @@ crates/platform      the only crate that touches workers-rs (Cloudflare bindings
 crates/api-types     request/response types and OpenAPI generation
 crates/worker        the Cloudflare Worker: HTTP, email, queue and cron handlers, Durable Objects, MCP endpoint
 crates/sdk           Rust client
-crates/cli           the pmail CLI (setup, deploy, admin, mail)
+crates/cli           the idvy CLI (setup, deploy, admin, mail)
 crates/conformance   MIME corpus and RFC conformance runner
 docs/                product, architecture, design and user docs (mdBook)
 site/                landing page, deployed as an assets-only Worker together with the built docs
@@ -118,7 +118,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Plans
 
-Self-hosting is free under FSL-1.1-ALv2, with no plan limits. Pylota Mail Cloud plans:
+Self-hosting is free under FSL-1.1-ALv2, with no plan limits. Pylota Identity Cloud plans:
 
 | | Free | Developer | Team |
 |---|---|---|---|
@@ -133,7 +133,7 @@ Self-hosting is free under FSL-1.1-ALv2, with no plan limits. Pylota Mail Cloud 
 | Support | GitHub issues | email | priority email |
 
 A top-up unit is one inbox, 1,000 sends or 1,000 triage analyses for the month. Monthly allowances reset on the
-billing date on a paid plan and on the 1st of each month on Free. Pylota Mail Cloud opens with the v1.0 release;
+billing date on a paid plan and on the 1st of each month on Free. Pylota Identity Cloud opens with the v1.0 release;
 there is nothing to sign up for yet. Details: [docs/src/guides/plans.md](docs/src/guides/plans.md).
 
 ## License

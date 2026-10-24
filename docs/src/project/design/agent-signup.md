@@ -1,7 +1,7 @@
 # Agent self-sign-up
 
 Binding for implementation. An AI agent with no key and no person signed in can create its own
-**provisional workspace** on Pylota Mail Cloud with one unauthenticated call, and gets one inbox on the
+**provisional workspace** on Pylota Identity Cloud with one unauthenticated call, and gets one inbox on the
 platform domain and one identity key in the answer. The agent must name the person responsible for it.
 Until that person proves they control their address, by giving the agent a six-digit code or by opening
 the link in the email, the workspace can email that person only, at most 10 messages a day, holds the
@@ -9,7 +9,7 @@ policy's guards strict, and is erased 7 days after it was created. Verification 
 person the accountable human of the identity (FR-IDN-2) and the owner of an ordinary Free workspace,
 which then runs the new-workspace send ramp (FR-CON-13). The feature exists for parity with AgentMail
 (gap GAP-7, [ADR 0017](../adr/0017-agentmail-parity.md)), which also allows sign-up with no person at
-all; Pylota Mail deliberately does not. It is off unless the owner sets `PM_AGENT_SIGNUP = "on"` on a
+all; Pylota Identity deliberately does not. It is off unless the owner sets `PM_AGENT_SIGNUP = "on"` on a
 deployment whose public sign-up is open.
 
 | | |
@@ -67,7 +67,7 @@ from 1 to 10,000 (default 200); any other value is `config_invalid`, as for ever
 ([Rust workspace › Startup rules](rust-workspace.md#61-errors-and-configuration)). `PM_AGENT_SIGNUP = "on"`
 while another condition of the table fails is a valid configuration: the Worker starts, the route answers
 `403 signup_closed`, `GET /v1/platform/status` reports `agent_signup: { "configured": true, "active": false,
-"reason": "signup_not_open" | "billing_off" | "console_off" | "switch_off" }`, and `pmail doctor` warns.
+"reason": "signup_not_open" | "billing_off" | "console_off" | "switch_off" }`, and `idvy doctor` warns.
 Self-hosted deployments keep the default `off`; nothing in this page runs for them.
 
 ## 2. The model
@@ -122,7 +122,7 @@ mail like any `active` tenant), and the one new column `provisional_until` carri
 It is read on every request by key authentication ([Security § 4.2](security.md#42-verification), step 9,
 which already loads the tenant row without a cache) and by every reader of the effective policy, so
 verification takes effect on the next request, with no cache to wait for. AgentMail documents up to five
-minutes of stale limits after verification; Pylota Mail has none ([X28](#24-edge-cases)).
+minutes of stale limits after verification; Pylota Identity has none ([X28](#24-edge-cases)).
 
 ### 2.3 The address and the username
 
@@ -171,7 +171,7 @@ with `details.limit = 4096`).
   "username": "travel-planner",
   "human_email": "sam@brightwell.example",
   "agent_name": "Travel planner",
-  "source": "pylota-mail-python/1.2.0",
+  "source": "pylota-identity-python/1.2.0",
   "accept_terms": true
 }
 ```
@@ -179,7 +179,7 @@ with `details.limit = 4096`).
 | Field | Rule |
 |---|---|
 | `username` | Required. [§2.3](#23-the-address-and-the-username) |
-| `human_email` | Required: the address of the person responsible for the agent. [§3.3](#33-the-human-email-rules). AgentMail makes it optional and gives a receive-only inbox without it; Pylota Mail requires it, because FR-IDN-2 requires an accountable human and an inbox nobody answers for is the thing a spammer wants ([§27](#27-compared-with-agentmail-read-2026-10-17)) |
+| `human_email` | Required: the address of the person responsible for the agent. [§3.3](#33-the-human-email-rules). AgentMail makes it optional and gives a receive-only inbox without it; Pylota Identity requires it, because FR-IDN-2 requires an accountable human and an inbox nobody answers for is the thing a spammer wants ([§27](#27-compared-with-agentmail-read-2026-10-17)) |
 | `agent_name` | Optional. 1–78 characters, Unicode allowed, no CR or LF (the identity display-name rule). The identity's display name and the workspace's name. Never written into system mail ([§5](#5-the-verification-email)) |
 | `source` | Optional. 1–64 characters of `[A-Za-z0-9._/+-]`, for example the SDK and its version. Stored on the sign-up row and shown to the operator. It has no `@`, so no address can be stored in it, and it is never a metric label (its values are unbounded) |
 | `accept_terms` | Required and `true`: the caller accepts the Terms of Service, the Privacy Policy and the Data Processing Addendum (`PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL`, required whenever `PM_SIGNUP` is not `closed`). `PM_TERMS_VERSION` is stored on the sign-up row. The person accepts for themselves when they verify through the console ([§7.2](#72-the-link-path-in-the-console)) |
@@ -262,7 +262,7 @@ then refuses, in this order:
 
 Rules 2 to 4 answer `400 invalid_request` with `details.errors[0].path = "human_email"` and the one
 reason `details.reason = "human_email_not_allowed"`, whose `fix` says "Use the work or personal address of
-the person responsible for this agent. Example, disposable and Pylota Mail addresses are refused." One
+the person responsible for this agent. Example, disposable and Pylota Identity addresses are refused." One
 reason for the three keeps the answer from telling a caller which addresses of a customer's own domain are
 identities, while still telling the agent what to change.
 
@@ -281,7 +281,7 @@ identities, while still telling the agent what to change.
 **What is not refused.** An address that belongs to an existing console user, an owner of workspaces, or a
 person with a pending invitation is accepted exactly like an unknown address ([X19](#24-edge-cases)). The
 answer never depends on whether a person has an account, so the route is no oracle for accounts. AgentMail
-refuses to attach an address that already has a console account; Pylota Mail links it at verification by
+refuses to attach an address that already has a console account; Pylota Identity links it at verification by
 the verified address instead ([§7.1](#71-the-transaction)).
 
 **The base address.** Every count and every refusal is keyed by the keyed hash of the **base address**,
@@ -332,7 +332,7 @@ hashes, never a clear address or IP; the counters are deleted with the day like 
 - **The class share.** `invitation` (20%), `notification` (50%) and now `signup` (5%) together can use at
   most 75% of the system identity's day, so at least 25% stays for `signin` and `account` mail. With the
   default 50,000 a day, 5% is 2,500 code emails, more than the default deployment cap can produce.
-- **Why these numbers** (Pylota Mail choices). Five sign-ups a day per network is more than a developer
+- **Why these numbers** (Pylota Identity choices). Five sign-ups a day per network is more than a developer
   testing an agent needs; an integrator that creates many agents must become a partner (FR-KEY-4). A
   hundred per ASN leaves room for agents on a shared cloud provider while bounding one provider's worth of
   abuse. Three sign-ups and five code emails a day to one person bound harassment of a person who never
@@ -392,7 +392,7 @@ permission the overlay removed answers `403 permission_denied` with `details.req
 `details.reason = "signup_unverified"`, whose `fix` points to `POST /v1/agent-signup/verify`. When the
 tenant is verified the overlay ends on the next request: the key is not rotated or rewritten. The
 platform key that mints the key at sign-up does not exist: the sign-up handler writes the `api_keys` row
-itself, as `pmail setup` writes the bootstrap key, and the `key.create` audit row records
+itself, as `idvy setup` writes the bootstrap key, and the `key.create` audit row records
 `details.granted_without_holding = ["identities:sign"]` and `via: "agent_signup"`, as a partner key's grant
 does ([Security § 4.6](security.md#46-creating-keys-fr-key-1), step 3).
 
@@ -473,7 +473,7 @@ so other tenants pay nothing. Then the rest of the pipeline runs unchanged: step
 (`429 daily_cap_reached`), the `sends` hold of the Free plan, the shared-domain breaker and the
 `free_sending` switch ([X51](#24-edge-cases)).
 
-**Why 10 a day** (a Pylota Mail choice, the same number AgentMail uses). It is enough for an agent to ask
+**Why 10 a day** (a Pylota Identity choice, the same number AgentMail uses). It is enough for an agent to ask
 for the code, report progress several times a day and answer the person, and not enough for a person who
 never asked to be flooded: with `max_recipients` 1 it is at most 10 emails a day to one address, on top
 of at most 5 code emails from the system identity.
@@ -514,21 +514,21 @@ normal outbound pipeline, as sign-in mail is:
   turned into a phishing message.
 
   ```text
-  Subject: [Pylota Mail] An AI agent named you as its accountable human
+  Subject: [Pylota Identity] An AI agent named you as its accountable human
 
-  An AI agent signed up to Pylota Mail and gave this address as the person responsible for it.
+  An AI agent signed up to Pylota Identity and gave this address as the person responsible for it.
   Its address is agent.travel-planner@pylotamail.com.
 
   If you set up this agent, give it this code: 482913
   Or confirm in your browser: https://app.pylotamail.com/console/agent-signup/verify?t=…
 
   Giving the code, or confirming, makes you the owner of the agent's workspace and the person
-  answerable for the mail it sends. Pylota Mail never asks you for this code.
+  answerable for the mail it sends. Pylota Identity never asks you for this code.
   The code expires at 09:00 UTC on 18 October 2026.
 
   Not you? Ignore this email: the agent can only write to you, at most 10 emails a day, and its
   inbox is deleted on 24 October 2026. We will not email you about it again.
-  To stop AI agents naming you on Pylota Mail: https://app.pylotamail.com/console/agent-signup/refuse?t=…
+  To stop AI agents naming you on Pylota Identity: https://app.pylotamail.com/console/agent-signup/refuse?t=…
 
   Terms: https://pylotamail.com/terms · Privacy: https://pylotamail.com/privacy
   ```
@@ -565,7 +565,7 @@ key.
             "emails_left_this_hour": 2, "email": "queued" },
   "permissions": ["identities:read", "messages:read", "messages:send", "messages:write",
                   "attachments:read", "search:read", "events:read", "usage:read"],
-  "verified_at": null, "verified_via": null, "source": "pylota-mail-python/1.2.0",
+  "verified_at": null, "verified_via": null, "source": "pylota-identity-python/1.2.0",
   "created_at": "2026-10-17T09:00:00Z"
 }
 ```
@@ -611,7 +611,7 @@ then `401 key_revoked`.
    `code_seq` that was compared, so a code made stale by a resend or replacement between steps 4 and 7
    verifies nothing ([X59](#24-edge-cases)). `200` with the verified sign-up.
 
-**Why these numbers** (Pylota Mail choices; AgentMail uses 24 hours and 10 attempts). Six digits give
+**Why these numbers** (Pylota Identity choices; AgentMail uses 24 hours and 10 attempts). Six digits give
 10^6 codes. At most 30 wrong codes over a sign-up's life bound an agent that names a stranger and guesses
 to a chance of 30 in 10^6 per sign-up, and each sign-up costs one of five a day per network. 24 hours lets
 a person who reads mail once a day answer.
@@ -810,14 +810,14 @@ consent, because the agent itself holds it.
 
 | Condition | Page | Changes |
 |---|---|---|
-| Not in the key format | "This does not look like a Pylota Mail API key. Paste the whole key, starting with `pmk_live_`." | nothing |
+| Not in the key format | "This does not look like a Pylota Identity API key. Paste the whole key, starting with `pmk_live_`." | nothing |
 | Unknown, wrong secret, revoked or expired (one page for all four, as authentication answers them alike) | "This key is not valid. It may have been revoked, or the inbox may have been deleted." | nothing |
 | A valid key that is not an agent sign-up's: a key of an ordinary workspace, of a partner's tenant (every Pylota-managed tenant), a partner key or a platform key | "This key cannot be used to claim an inbox." | nothing |
 | The sign-up is `verified` | "This inbox has already been confirmed by its owner." | nothing |
 | The sign-up ended, or its tenant is `erasing` or `erased` | "This inbox no longer exists." | nothing |
 | The tenant is `suspended` | "This inbox cannot be claimed." | nothing |
 | The session's address differs from the human address | "This inbox names a different accountable human (s***@brightwell.example). Sign in with that address to claim it." The masked hint tells nothing that the key's holder cannot read from `GET /v1/agent-signup` | nothing |
-| `signup_cannot_verify` (`workspace_limit`) | "You already own a Free workspace (Brightwell). Pylota Mail allows one per person: upgrade or delete it, or create an inbox and a key there for your agent." | nothing |
+| `signup_cannot_verify` (`workspace_limit`) | "You already own a Free workspace (Brightwell). Pylota Identity allows one per person: upgrade or delete it, or create an inbox and a key there for your agent." | nothing |
 | `signup_cannot_verify` (`human_email_hosted`) | "This inbox cannot be claimed." | nothing |
 | Valid | A confirmation page: the agent's address, what claiming means, and **Claim inbox** (a second `POST` with the CSRF token and the key) | nothing yet |
 
@@ -850,7 +850,7 @@ again.
   7 days after its `link` key is rotated.
 
 - **`GET`** changes nothing: it shows "Stop AI agents naming {masked address} as their accountable human on
-  Pylota Mail" with one **Stop** button, a form `POST` to the same URL. **`POST`** verifies the token (the
+  Pylota Identity" with one **Stop** button, a form `POST` to the same URL. **`POST`** verifies the token (the
   `r1` prefix, a known kid inside its verify window, the MAC in constant time, the expiry); any failure
   shows the same expired page. Like the unsubscribe pair, both need no session, the `POST` is exempt from
   the CSRF token and the `Origin` check, and the `POST` never redirects (RFC 8058 §3.1), because a mail
@@ -881,7 +881,7 @@ again.
 
 ## 10. Expiry, abandonment and refusal: erasure
 
-**Expiry after 7 days** (a Pylota Mail choice). It gives a person a full week, a weekend included, and it
+**Expiry after 7 days** (a Pylota Identity choice). It gives a person a full week, a weekend included, and it
 matches the other waits for a person in this design: an invitation, a waitlist invite and a pending
 service-ledger entry all last 7 days. A shorter life would lose sign-ups of people on holiday; a longer one
 would keep unaccountable inboxes on the shared domain.
@@ -996,12 +996,12 @@ A new containment rule joins [Observability § 5.6](observability.md#56-automati
 |---|---|---|---|
 | `agent_signup_off` | Over the last 24 hours of sign-up outcomes ([§13.3](#133-outcomes-of-sign-up-mail)): bounced > 5% with ≥ 50 outcomes; or complained > 0.5% with ≥ 200 outcomes; or 5 or more complaints, whatever the count | The `ops_switches` row `agent_signup` becomes `off` (`set_by = 'auto'`): new sign-ups, resends and replacements get `403 signup_closed` (`paused`), and every send of a provisional tenant gets `403 policy_denied` (`signup_paused`). Verification by code, link and claim, refusals, abandonment and expiry continue. Audit `ops.switch`; page `containment:agent_signup_off` | `PUT /v1/platform/switches` `{"name": "agent_signup", "state": "on"}` (platform key, `platform:ops`) |
 
-The thresholds are Pylota Mail choices. They are evaluated in the delivery consumer, where the outcomes
+The thresholds are Pylota Identity choices. They are evaluated in the delivery consumer, where the outcomes
 are ([Observability § 5.6](observability.md#56-automatic-containment)). The bounce threshold is the
 tenant auto-pause's 5%, SES's review level ([Outbound › Tenant and domain auto-pause](outbound.md#tenant-and-domain-auto-pause-g12)).
 Code emails go to addresses that nobody has confirmed, so the complaint rule has an absolute floor as
 well: five people in a day who reported a sign-up email as spam are enough to stop the feature until the
-owner looks. The operator can also set the switch by hand (`pmail ops switch agent_signup off`).
+owner looks. The operator can also set the switch by hand (`idvy ops switch agent_signup off`).
 
 ### 13.3 Outcomes of sign-up mail
 
@@ -1263,10 +1263,10 @@ through MCP; it signs up over REST (or with the CLI or an SDK) and then uses the
 | MCP `mail_signup_verify` | `POST /v1/agent-signup/verify` (`code`) | Keys of a provisional sign-up |
 | MCP `mail_signup_resend` | `POST /v1/agent-signup/resend` | Keys of a provisional sign-up |
 | MCP `mail_signup_set_human` | `PUT /v1/agent-signup/human` (`human_email`) | Keys of a provisional sign-up |
-| CLI `pmail agent-signup create --username U --human-email E [--agent-name N] [--source S] --accept-terms [--profile P] [--print-key]` | `POST /v1/agent-signup` without a key. Writes the returned key into the profile (the config file's `0600` rules), printing it only with `--print-key` | – |
-| CLI `pmail agent-signup status\|verify <code>\|resend\|set-human <email>\|abandon` | The other five routes (`abandon` asks for the typed address) | – |
-| CLI `pmail agent-signups list [--state S] [--since T] [--network N]` | `GET /v1/platform/agent-signups` (platform key; `--since` is `created_after`, an RFC 3339 time or a date; `--network` the 16-hex network hash of a row) | – |
-| CLI `pmail ops switch agent_signup on\|off` | `PUT /v1/platform/switches` | – |
+| CLI `idvy agent-signup create --username U --human-email E [--agent-name N] [--source S] --accept-terms [--profile P] [--print-key]` | `POST /v1/agent-signup` without a key. Writes the returned key into the profile (the config file's `0600` rules), printing it only with `--print-key` | – |
+| CLI `idvy agent-signup status\|verify <code>\|resend\|set-human <email>\|abandon` | The other five routes (`abandon` asks for the typed address) | – |
+| CLI `idvy agent-signups list [--state S] [--since T] [--network N]` | `GET /v1/platform/agent-signups` (platform key; `--since` is `created_after`, an RFC 3339 time or a date; `--network` the 16-hex network hash of a row) | – |
+| CLI `idvy ops switch agent_signup on\|off` | `PUT /v1/platform/switches` | – |
 
 Annotations: `mail_signup_status` is a read tool (`readOnlyHint: true`, `idempotentHint: true`,
 `openWorldHint: false`); `mail_signup_verify` is `readOnlyHint: false`, `destructiveHint: false`,
@@ -1292,12 +1292,12 @@ agent must not be able to do that from a tool call.
 
 | Alert | Kind | Condition | Runbook step |
 |---|---|---|---|
-| `agent_signup_spike` | ticket | The state-alert evaluator counts `agent_signup.create` audit rows: the last hour has at least 20 and at least three times the hourly average of the previous 7 days | List with `pmail agent-signups list --since <the time an hour ago, RFC 3339>`; look for one network or source, then list that network's sign-ups with `--network <hash>`; if it is abuse, `pmail ops switch agent_signup off` |
+| `agent_signup_spike` | ticket | The state-alert evaluator counts `agent_signup.create` audit rows: the last hour has at least 20 and at least three times the hourly average of the previous 7 days | List with `idvy agent-signups list --since <the time an hour ago, RFC 3339>`; look for one network or source, then list that network's sign-ups with `--network <hash>`; if it is abuse, `idvy ops switch agent_signup off` |
 | `agent_signup_cap_80` | ticket | Today's (UTC) `sysmail:signup:deployment` counter reaches 80% of `PM_AGENT_SIGNUP_DAILY_CAP` | Decide whether to raise the variable |
 | `containment:agent_signup_off` | page | The rule of [§13.2](#132-the-automatic-switch) fired | Read the bounce and complaint counts, look at the sign-ups of the last day, fix the cause, then switch it back on |
 
 `GET /v1/platform/status` gains `agent_signup` (configured, active, the reason when inactive, the switch,
-today's sign-ups against the cap, and the last 24 hours' outcome rates). `pmail doctor` gains the check
+today's sign-ups against the cap, and the last 24 hours' outcome rates). `idvy doctor` gains the check
 `agent_signup`: `warn` when `PM_AGENT_SIGNUP = "on"` but inactive, or when the switch is `off`; `skip` when
 the variable is `off`. The dashboard "Identity and notifications" gains sign-ups by result, verifications
 by path, ends by reason and the outcome rates.
@@ -1307,7 +1307,7 @@ by path, ends by reason and the outcome rates.
 - **Pylota never uses agent self-sign-up.** Each car-rental operator's workspace is created by Pylota's
   partner key (FR-KEY-4; integration spec §4), billed `exempt`, with Pylota's own identities and keys
   (spec §6). No Pylota agent, coordinator or specialist calls `POST /v1/agent-signup`, and none needs to:
-  Pylota's agents never hold a Pylota Mail key in their context.
+  Pylota's agents never hold a Pylota Identity key in their context.
 - **Pylota-managed tenants can never be claimed.** A claim needs an identity key whose tenant has an
   agent sign-up row; a partner's tenant never has one, so a pasted key of an operator's workspace, Pylota's
   partner key, or any of K2–K7 gets "This key cannot be used to claim an inbox" and nothing changes
@@ -1315,7 +1315,7 @@ by path, ends by reason and the outcome rates.
 - **Isolation.** A provisional or verified agent workspace has no partner, so Pylota's partner key gets the
   `404` of a foreign tenant for it, and `signup.verified` never reaches Pylota's partner endpoint.
 - **A stranger's agent naming a Pylota operator.** An operator whose address an outside agent names gets the
-  code email and can refuse in one click; nothing in Pylota changes. An operator's Pylota Mail inbox
+  code email and can refuse in one click; nothing in Pylota changes. An operator's Pylota Identity inbox
   address (on `pylotamail.com` or a custom domain) cannot be named at all: it is hosted
   ([§3.3](#33-the-human-email-rules)).
 - **What Pylota stores and how failures surface.** Nothing: the feature has no Pylota-side state.
@@ -1331,7 +1331,7 @@ For the owner of Pylota's integration spec (`docs/plans/pylota-mail-integration.
    [X60](#24-edge-cases).
 3. The service sign-up ledger already refuses `pylotamail.com` as a `service_domain` (`own_deployment`,
    [E14](../edge-cases.md)); no change, but the spec may cite it next to item 2.
-4. Operator support copy: if an operator reports a "Pylota Mail" email asking them to confirm an AI agent,
+4. Operator support copy: if an operator reports a "Pylota Identity" email asking them to confirm an AI agent,
    it did not come from Pylota; the email's own "Not you?" link stops it.
 
 ## 23. Functional requirements
@@ -1475,7 +1475,7 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 | X57 | The expiry cron is late or fails | The sign-up cannot be verified after its 7 days; the next run starts its erasure | S | `it::signup::x33_verify_races_expiry` |
 | X58 | A sign-up verified on its sixth day sends on the day after | The ramp applies from `verified_at`: the 51st message of a day `429 daily_cap_reached`; the daily evaluation counts 7 days from `verified_at` | S | `it::signup::x28_verify_effects` |
 | X59 | A resend or a replacement commits between the reserved attempt and the verification of the previous code | The older code verifies nothing (`422 signup_code_invalid`, `superseded`) | S | `it::signup::x30_resend_and_replace` |
-| X60 | A page, an email or a webchat user steers a Pylota agent to sign up to Pylota Mail in an operator's name | Pylota's tools refuse requests to `/v1/agent-signup` and `/console/agent-signup/*` ([§22](#22-pylota-agentic-os)) | I | integrator |
+| X60 | A page, an email or a webchat user steers a Pylota agent to sign up to Pylota Identity in an operator's name | Pylota's tools refuse requests to `/v1/agent-signup` and `/console/agent-signup/*` ([§22](#22-pylota-agentic-os)) | I | integrator |
 | X61 | The verified person deletes their console account; the owner deletes a verified agent workspace | Person deletion replaces the row's `human_hash` with the row's ID and keeps the refusal list; tenant erasure deletes the `agent_signups` row and its probe counts zero | S | `it::signup::x61_privacy` |
 | X62 | An `agent_name` or `source` with markup, an address or misleading words | Neither appears in any email the deployment sends; the console escapes both; `source` cannot hold `@` | S | `it::signup::x62_email_content` |
 | X63 | A platform or partner key calls a `/v1/agent-signup` route; a key of a tenant with no sign-up; another tenant's key; the MCP tool list of an ordinary key | `403 scope_denied`; `404 signup_not_found`; `404 signup_not_found`; the four sign-up tools are not listed | S | `it::signup::x23_permission_overlay`, `it::mcp::signup_tools`, `it::security::cross_tenant_matrix` |
@@ -1516,13 +1516,13 @@ New section of the [edge-case register](../edge-cases.md): "X · Agent self-sign
 | `it::signup::x56_policy_view` | A platform key's policy write on a provisional tenant is stored but not effective; the view shows the overlay; after verification the stored value applies | X56 |
 | `it::signup::x61_privacy` | Person deletion scrubs `human_hash` of the rows the person verified and keeps refusals; tenant erasure of a verified workspace deletes the row; no clear address remains in `agent_signups` after verification or an end | X61, FR-ASU-16 |
 | `it::signup::x62_email_content` | The code email of a sign-up with a hostile `agent_name` and `source` contains neither; its subject is fixed; the console escapes both | X62, FR-ASU-8 |
-| `it::signup::platform_listing_and_status` | `GET /v1/platform/agent-signups` filters and shows hints, never an address; `GET /v1/platform/status` and `pmail doctor` report the feature's state; `agent_signup_spike` fires on a fixture of audit rows | FR-ASU-15, [§21](#21-observability) |
+| `it::signup::platform_listing_and_status` | `GET /v1/platform/agent-signups` filters and shows hints, never an address; `GET /v1/platform/status` and `idvy doctor` report the feature's state; `agent_signup_spike` fires on a fixture of audit rows | FR-ASU-15, [§21](#21-observability) |
 | `it::mcp::signup_tools` | The four tools are listed only for sign-up keys, map to their routes and return their errors; no tool abandons | X63 |
 | `it::console::agent_signup_pages` | The verify, claim and refuse pages and the settings notice render without JavaScript, escape untrusted text and join `browser::console::no_js` and `browser::console::axe_scan` | [§19](#19-console) |
 | `it::security::cross_tenant_matrix` (existing) | The new routes join the matrix | X63, NFR-SEC-1 |
 | `it::logs::i5_no_content_in_logs` (existing) | Canaries in the human address, `agent_name`, `source`, the code and the key never appear in captured logs | FR-ASU-16 |
 | `platform::config::startup_rules` (existing) | `PM_AGENT_SIGNUP` and `PM_AGENT_SIGNUP_DAILY_CAP` malformed give `config_invalid`; `on` with sign-up not open starts the Worker | X1 |
-| `cli::agent_signup::create_writes_profile` | `pmail agent-signup create` writes the key into the named profile with mode `0600` and prints it only with `--print-key`; the other subcommands map to their routes | [§20](#20-mcp-and-cli) |
+| `cli::agent_signup::create_writes_profile` | `idvy agent-signup create` writes the key into the named profile with mode `0600` and prints it only with `--print-key`; the other subcommands map to their routes | [§20](#20-mcp-and-cli) |
 | `live::signup::x40_refuse_one_click_headers` | On staging, a code email received in a real mailbox carries both RFC 8058 headers, a DKIM signature whose `h=` covers them, and a refusal by one-click `POST` works | X40, FR-ASU-8 |
 | `live::signup::end_to_end` | On staging: sign up, receive the code in a real mailbox, verify, send to a new recipient within the ramp; a second sign-up abandoned with `DELETE /v1/agent-signup` is erased and its address then answers `550 5.1.1` (expiry itself is proved with the fake clock by `it::signup::x33_verify_races_expiry` and `it::signup::x42_end_and_erasure`) | FR-ASU-2, FR-ASU-10, FR-ASU-14 |
 
@@ -1536,7 +1536,7 @@ rebase them to `project/` (`agent-signup.md` → `design/agent-signup.md`, `#25-
 >
 > **Goal:** an agent with no key creates a provisional Free workspace with one inbox and one key, which
 > can email only the person it names until that person verifies; unverified workspaces are erased after 7
-> days. Behind `PM_AGENT_SIGNUP` (off), on Pylota Mail Cloud only ([Agent self-sign-up](agent-signup.md)).
+> days. Behind `PM_AGENT_SIGNUP` (off), on Pylota Identity Cloud only ([Agent self-sign-up](agent-signup.md)).
 >
 > **Files:** `crates/core/src/signup.rs` (pure: normalisation, the username and human-email rules, the base
 > address, the permission and policy overlays, code and token encodings); `crates/worker/src/signup/{mod.rs,
@@ -1562,7 +1562,7 @@ rebase them to `project/` (`agent-signup.md` → `design/agent-signup.md`, `#25-
 > | `jobs/erasure.rs` (M14) | `agent_signups` in `delete_d1_rows` and in the step-8 probe; person deletion's `human_hash` scrub |
 > | `handlers/uploads.rs` (M33) | `403 permission_denied` (`signup_unverified`) while provisional |
 > | `mcp/tools.rs` (M15) | The four `mail_signup_*` tools and their rows in M15's table test |
-> | `crates/cli/src/commands/agent_signup.rs` (M16) | `pmail agent-signup …`, `pmail agent-signups list` |
+> | `crates/cli/src/commands/agent_signup.rs` (M16) | `idvy agent-signup …`, `idvy agent-signups list` |
 > | `crons/alerts.rs` (M17) | `agent_signup_spike`, `agent_signup_cap_80`, `containment:agent_signup_off` |
 >
 > **Implements:** FR-ASU-1 to FR-ASU-16 and the amended FR-IDN-2; edge rows X1–X59 and X61–X63 (X60 is
@@ -1594,7 +1594,7 @@ M30 (`events:read`, and the feed through which the agent learns of verification)
 
 ## 27. Compared with AgentMail (read 2026-10-17)
 
-| AgentMail behaviour | Pylota Mail behaviour | Verdict |
+| AgentMail behaviour | Pylota Identity behaviour | Verdict |
 |---|---|---|
 | `POST /v0/agent/sign-up` returns an organisation, an inbox and a key; `human_email` optional | `POST /v1/agent-signup` returns a workspace, an inbox and a key; `human_email` required | Deliberately different: FR-IDN-2 requires an accountable human, and an inbox nobody answers for is what spammers want |
 | No human: a receive-only inbox | Not offered | Deliberately different, as above |

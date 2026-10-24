@@ -1049,7 +1049,7 @@ The `JobRunner` walks identities and, per mailbox, calls `index.reindex_step(cur
 Vectors from different models cannot share an index or a vector ID, so each generation has its own
 index. The original is `pm-mail-chunks`; later ones are `pm-mail-chunks-g2`, `pm-mail-chunks-g3`, …
 
-1. You set a new `PM_EMBED_MODEL` in `deploy/wrangler.toml` and run `pmail deploy`. The CLI sees that
+1. You set a new `PM_EMBED_MODEL` in `deploy/wrangler.toml` and run `idvy deploy`. The CLI sees that
    the model differs from the generation in use ([CLI design](cli.md#87-index-generation-changes)),
    embeds a probe string to learn the dimensions, creates the next index with those dimensions,
    `metric: cosine` and the 8 metadata indexes (before any vector is written: vectors upserted before
@@ -1068,12 +1068,12 @@ index. The original is `pm-mail-chunks`; later ones are `pm-mail-chunks-g2`, `pm
    and enqueues `Embed { reason: Reembed }` for messages whose rows still carry the old tag, at most
    200 messages per mailbox per step and newest first. When a mailbox has no old-tag rows left, it
    sets `meta.embed_model` to the new tag.
-5. **Finalise.** When every mailbox has switched, the job completes. The next `pmail deploy` (or
-   `pmail doctor`, which tells you) binds `VECTORS` to the new index, removes `VECTORS_NEXT` and
+5. **Finalise.** When every mailbox has switched, the job completes. The next `idvy deploy` (or
+   `idvy doctor`, which tells you) binds `VECTORS` to the new index, removes `VECTORS_NEXT` and
    `PM_EMBED_MODEL_PREVIOUS`, deploys, and offers to delete the old index.
 6. **Erasure** during the period deletes IDs from both indexes (`DeleteVectors { also_next: true }`).
 7. **Cancel.** Setting `PM_EMBED_MODEL` back to the previous model before completion makes
-   `pmail deploy` cancel the job and unbind `VECTORS_NEXT`. Reads never moved, so nothing breaks.
+   `idvy deploy` cancel the job and unbind `VECTORS_NEXT`. Reads never moved, so nothing breaks.
 
 Cost: `bge-m3` is priced at $0.0118 per million input tokens (model page, read 2026-10-09), so a full
 re-embed costs roughly that rate times the token volume of the indexed text.
@@ -1296,7 +1296,7 @@ varies. The prompt is versioned (`PLANNER_PROMPT_VERSION = 1`) and the version i
 run.
 
 ```text
-You are the search planner inside Pylota Mail, an email service for AI agents. Your job is to answer
+You are the search planner inside Pylota Identity, an email service for AI agents. Your job is to answer
 one question about {SCOPE} by searching it with the read-only tools you have been given. You cannot
 send, change, delete or release anything, and you must not try.
 
@@ -1439,7 +1439,7 @@ filters and `include_quarantined`, and calls the same internal functions as the 
 [
   { "type": "function", "function": {
       "name": "search",
-      "description": "Search the mailbox. q uses the Pylota Mail query language (operators such as from:, ref:, after:, has:attachment, quoted phrases, OR, -). Returns hits with message IDs, snippets and facets.",
+      "description": "Search the mailbox. q uses the Pylota Identity query language (operators such as from:, ref:, after:, has:attachment, quoted phrases, OR, -). Returns hits with message IDs, snippets and facets.",
       "strict": true,
       "parameters": { "type": "object", "additionalProperties": false, "required": ["q"],
         "properties": {
@@ -1571,7 +1571,7 @@ The answer the service returns is model-written text derived from mail, so it is
 response's `answer.untrusted` is always `true`, each kept sentence carries `citation_trust`, and each
 evidence item carries `steering_suspected` ([§11.8](#118-citation-verifier), FR-SRCH-13,
 [F17](../edge-cases.md)). Callers (and the MCP tool description) treat the answer as data to check,
-never as an instruction or as a statement by Pylota Mail.
+never as an instruction or as a statement by Pylota Identity.
 
 Extraction: take `choices[0].message.content`; strip a surrounding Markdown code fence if present;
 parse with `serde_json` into the typed struct with `deny_unknown_fields`. If parsing fails, use the
