@@ -15,7 +15,7 @@ Decided in [ADR 0021](../adr/0021-agent-vault.md); risk tier T2.
 | | |
 |---|---|
 | Requirements | FR-VLT-1 to FR-VLT-30 (this page, [§26](#26-functional-requirements)), FR-IDN-10 (the ledger gains `login_domains` and a vault link), FR-IN-5 and FR-IN-11 (quarantine rule 4b and `wait`), FR-TEN-4 (seven `vault.*` policy fields), FR-CON-6 (two new decisions reserved for people), FR-PRV-3 (erasure receipts), FR-KEY-1 (six permissions) |
-| Edge cases | [U1](../edge-cases.md)–[U90](../edge-cases.md) (section `U · Vault`, [§27](#27-edge-cases)) |
+| Edge cases | [U1](../edge-cases.md)–[U91](../edge-cases.md) (section `U · Vault`, [§27](#27-edge-cases)) |
 | Code | `crates/core/src/vault/{mod.rs, origin.rs, item.rs, policy.rs, digest.rs, ticket.rs, totp.rs, cookies.rs, audit.rs, refuse.rs, consumer.rs}` (origin canonicalisation and matching, item validation and refused kinds, the approval decision, the use digest, the ticket token, RFC 6238, session filtering, the audit row hash, the redemption checks; pure), `crates/core/src/crypto/{hpke.rs, pv1.rs}` (the HPKE suite and the `pv1` field envelope; pure, nonces and ephemeral keys passed in), `crates/api-types/src/vault.rs`, `crates/worker/src/vault/{mod.rs, keys.rs, items.rs, grants.rs, uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs, codes.rs, sessions.rs, versions.rs, sign.rs, reveal.rs, managed.rs, channels.rs, audit.rs, erase.rs}`, `jobs/vault_cron.rs`, `crates/conformance/vault/`, `handlers/vault.rs` (API-key routes), `handlers/vault_consumer.rs` (consumer routes), `auth/consumer.rs` (signed-request verification), `auth/people.rs` (two new `Decision` arms), `mailbox/ingest.rs` (quarantine rule 4b), `mailbox/codes.rs` (`VaultTakeCode`), `handlers/wait.rs` (the strict-mode refusal), `jobs/erasure.rs` and `jobs/retention.rs` (the vault steps), `console/pages/vault.rs`, `mcp/tools.rs` (six tools), `crates/cli/src/commands/vault.rs` |
 | Tables | D1 `vault_keys`, `vault_custody_slots`, `vault_items`, `vault_item_versions`, `vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`, `vault_audit`, `vault_audit_anchors`; new columns `service_accounts.login_domains_json`; mailbox `verifications.vault_item_id` and `verifications.vault_use_id`, the quarantine reason `vault_code`; R2 `t/{tenant_id}/vault/{item_id}/{version}` ([Data model](data-model.md)) |
 | Contracts | The `/v1/…/vault/…` routes and the consumer routes `/v1/vault/consumer/{self, redeem, report, write-back, uses/{use_id}}` ([REST API › Vault](../../reference/api.md#vault)); the permissions `vault:read`, `vault:write`, `vault:request`, `vault:use`, `vault:approve`, `vault:admin`; the consumer signature scheme `pylota-identity-vault-consumer`; the header `X-Pylota-Identity-Vault-Unlock`; 24 `vault.*` event types ([Webhook events › Vault](../../reference/events.md#vault)); 22 error codes ([Errors](../../reference/errors.md)); the policy fields `vault.allowed`, `vault.key_approval`, `vault.min_approval`, `vault.codes_into_fills_only`, `vault.max_items`, `vault.session_max_ttl_days`, `vault.approval_deadline_seconds`; the MCP tools `vault_list_items`, `vault_get_item`, `vault_request_grant`, `vault_list_grants`, `vault_get_use` and `vault_sign`, and a `vault_login` argument on `mail_request_account`; `idvy vault …` ([CLI](../../reference/cli.md#vault)) |
@@ -1053,6 +1053,14 @@ the reports above): a use closed for any reason of [§7.4](#74-what-closes-a-use
 `ticket_valid_until` and refuses every write-back (`410 vault_ticket_expired` with `details.reason` = the close
 reason). Reports and write-backs after closure are authenticated by `ticket_hash` alone; nothing is decrypted.
 
+**A report changes only the version it concerns.** When the use's `ticket_version` is no longer the item's current
+version (a rotation or write-back closed it, `item_rotated`), the report is kept (audit `ticket.reported` with
+`details.stale_version = true`) but changes no item health, so a late report about an old credential never blocks
+a fresh one. One case still acts: `value_exposed` (or `value_exposed_unscannable`) about a version that is the
+item's `previous` version inside its overlap ends that overlap at once (the previous version's row and DEK are
+deleted, `item.rotated` with `details.reason = "previous_exposed"`) and counts in `vault_value_exposed_total`; about
+a version already deleted it is audited only ([U91](#27-edge-cases)).
+
 ### 8.8 Write-back
 
 `POST /v1/vault/consumer/write-back`, `{ "ticket", "kind", … }`, within the window:
@@ -2031,10 +2039,10 @@ section U of the [edge-case register](../edge-cases.md).
 
 ## 27. Edge cases
 
-The rows are section **U · Vault** of the [edge-case register](../edge-cases.md), U1–U90. U1–U72 cover
+The rows are section **U · Vault** of the [edge-case register](../edge-cases.md), U1–U91. U1–U72 cover
 §1–§24; U73–U85 come from the review of Infisical's Agent Vault: placeholder misuse (U73–U77), grants and keys
 (U78, U79), redirects and outbound ranges (U80, U81), early closure (U82), audit flooding (U83), approval links
-(U84) and host canonicalisation (U85); U86–U90 come from the design review of this page: closure and late reports (U86), capture windows (U87), password-change fills (U88), previous versions (U89) and deletion with retained uses (U90).
+(U84) and host canonicalisation (U85); U86–U90 come from the design review of this page: closure and late reports (U86), capture windows (U87), password-change fills (U88), previous versions (U89), deletion with retained uses (U90) and late reports about old versions (U91).
 
 ## 28. Milestones
 
@@ -2065,7 +2073,7 @@ uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs}`, `handlers/vault_consu
 console approval and consumer pages, CLI `grants`, `uses`, `consumers`, `consumer-keys`, `consumer-check`,
 `conformance`. D1 tables `vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`.
 
-**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and rows U22–U40, U64, U65, U71–U82, U84, U86.
+**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and rows U22–U40, U64, U65, U71–U82, U84, U86, U91.
 
 **Acceptance:** the rows; spike S-VLT3; `it::security::cross_tenant_matrix` extended; the conformance fixtures
 pass against a reference consumer built in `crates/conformance` (Rust, CDP mode and proxy mode).

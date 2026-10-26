@@ -29114,7 +29114,7 @@ components:
           type: string
         conversation_id:
           type: string
-        number_id: &id007
+        number_id:
           type: string
           description: The number ID (`pnm_`).
         direction:
@@ -29131,9 +29131,9 @@ components:
         text:
           type: string
           description: Untrusted content; absent on `sms.quarantined`.
-        segments: &id001
+        segments:
           type: integer
-        client_reference: &id006
+        client_reference:
           type:
           - string
           - 'null'
@@ -29172,11 +29172,11 @@ components:
       - trust
       - media
       properties:
-        sms: &id002
+        sms:
           $ref: '#/components/schemas/SmsEventSummary'
-        conversation_id: &id003
+        conversation_id:
           type: string
-        trust: &id004
+        trust:
           type: object
           properties:
             sender_unverified:
@@ -29186,15 +29186,17 @@ components:
               type:
               - object
               - 'null'
-        media: &id005
+        media:
           type: array
           items:
             type: object
             properties:
-              n: *id001
+              n:
+                type: integer
               content_type:
                 type: string
-              size: *id001
+              size:
+                type: integer
     SmsQuarantinedData:
       type: object
       required:
@@ -29204,10 +29206,31 @@ components:
       - media
       - quarantine_reason
       properties:
-        sms: *id002
-        conversation_id: *id003
-        trust: *id004
-        media: *id005
+        sms:
+          $ref: '#/components/schemas/SmsEventSummary'
+        conversation_id:
+          type: string
+        trust:
+          type: object
+          properties:
+            sender_unverified:
+              type: boolean
+              const: true
+            screening:
+              type:
+              - object
+              - 'null'
+        media:
+          type: array
+          items:
+            type: object
+            properties:
+              n:
+                type: integer
+              content_type:
+                type: string
+              size:
+                type: integer
         quarantine_reason:
           type: string
           enum:
@@ -29223,8 +29246,14 @@ components:
       properties:
         sms_id:
           type: string
-        released_by_key_id: *id006
-        released_by_user_id: *id006
+        released_by_key_id:
+          type:
+          - string
+          - 'null'
+        released_by_user_id:
+          type:
+          - string
+          - 'null'
     SmsScreenedData:
       type: object
       required:
@@ -29235,7 +29264,10 @@ components:
           type: string
         status:
           type: string
-        quarantine_reason: *id006
+        quarantine_reason:
+          type:
+          - string
+          - 'null'
         screening:
           type:
           - object
@@ -29249,14 +29281,19 @@ components:
       properties:
         sms_id:
           type: string
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         sender_hint:
           type: string
         kind:
           type: string
           enum:
           - code
-        account_id: *id006
+        account_id:
+          type:
+          - string
+          - 'null'
     SmsSentData:
       type: object
       required:
@@ -29265,7 +29302,8 @@ components:
       properties:
         sms_id:
           type: string
-        segments: *id001
+        segments:
+          type: integer
         sender_used:
           type: string
         sender_substituted:
@@ -29329,7 +29367,7 @@ components:
       - phone_request
       - reason
       properties:
-        phone_request: &id008
+        phone_request:
           $ref: '#/components/schemas/PhoneRequest'
         reason:
           type: string
@@ -29342,7 +29380,8 @@ components:
       - phone_request
       - approved_by
       properties:
-        phone_request: *id008
+        phone_request:
+          $ref: '#/components/schemas/PhoneRequest'
         approved_by:
           type: string
           enum:
@@ -29350,9 +29389,18 @@ components:
           - key
           - standing_budget
           - purchase
-        approved_by_key_id: *id006
-        approved_by_user_id: *id006
-        on_behalf_of: *id006
+        approved_by_key_id:
+          type:
+          - string
+          - 'null'
+        approved_by_user_id:
+          type:
+          - string
+          - 'null'
+        on_behalf_of:
+          type:
+          - string
+          - 'null'
         budget_version:
           type:
           - integer
@@ -29363,7 +29411,8 @@ components:
       - phone_request
       - reason
       properties:
-        phone_request: *id008
+        phone_request:
+          $ref: '#/components/schemas/PhoneRequest'
         reason:
           type: string
           enum:
@@ -29375,7 +29424,8 @@ components:
       - phone_request
       - reason
       properties:
-        phone_request: *id008
+        phone_request:
+          $ref: '#/components/schemas/PhoneRequest'
         reason:
           type: string
     PhoneRequestCompletedData:
@@ -29384,7 +29434,8 @@ components:
       - phone_request
       - result
       properties:
-        phone_request: *id008
+        phone_request:
+          $ref: '#/components/schemas/PhoneRequest'
         result:
           type: object
     PhoneRequestFailedData:
@@ -29393,7 +29444,8 @@ components:
       - phone_request
       - reason
       properties:
-        phone_request: *id008
+        phone_request:
+          $ref: '#/components/schemas/PhoneRequest'
         reason:
           type: string
     PhoneRequestUncertainData:
@@ -29401,7 +29453,8 @@ components:
       required:
       - phone_request
       properties:
-        phone_request: *id008
+        phone_request:
+          $ref: '#/components/schemas/PhoneRequest'
     PhoneNumberStatusChangedData:
       type: object
       required:
@@ -29410,7 +29463,9 @@ components:
       - from
       - to
       properties:
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         identity_id:
           type: string
         from:
@@ -29424,10 +29479,16 @@ components:
           properties:
             status:
               type: string
-            code: *id006
+            code:
+              type:
+              - string
+              - 'null'
             retryable:
               type: boolean
-        reason: *id006
+        reason:
+          type:
+          - string
+          - 'null'
     PhoneNumberCapabilityChangedData:
       type: object
       required:
@@ -29437,7 +29498,9 @@ components:
       - from
       - to
       properties:
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         identity_id:
           type: string
         capability:
@@ -29453,13 +29516,18 @@ components:
           - enabled
           - activating
           - registration_required
+          - not_available
         to:
           type: string
           enum:
           - enabled
           - activating
           - registration_required
-        reason: *id006
+          - not_available
+        reason:
+          type:
+          - string
+          - 'null'
         next_step:
           type:
           - object
@@ -29471,10 +29539,12 @@ components:
       - identity_id
       - release_at
       properties:
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         identity_id:
           type: string
-        release_at: &id009
+        release_at:
           type: string
           format: date-time
     PhoneNumberActionNeededData:
@@ -29483,7 +29553,9 @@ components:
       - number_id
       - action_needed
       properties:
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         action_needed:
           type: object
           properties:
@@ -29504,10 +29576,14 @@ components:
       - port_out_id
       - respond_by
       properties:
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         port_out_id:
           type: string
-        respond_by: *id009
+        respond_by:
+          type: string
+          format: date-time
     PhoneNumberPortOutDecidedData:
       type: object
       required:
@@ -29515,7 +29591,9 @@ components:
       - port_out_id
       - decision
       properties:
-        number_id: *id007
+        number_id:
+          type: string
+          description: The number ID (`pnm_`).
         port_out_id:
           type: string
         decision:
@@ -29524,8 +29602,14 @@ components:
           - authorized
           - rejected
           - provider_authorized
-        decided_by_key_id: *id006
-        decided_by_user_id: *id006
+        decided_by_key_id:
+          type:
+          - string
+          - 'null'
+        decided_by_user_id:
+          type:
+          - string
+          - 'null'
     PhoneRegistrationStatusChangedData:
       type: object
       required:
@@ -29542,7 +29626,10 @@ components:
           type: string
         to:
           type: string
-        failure_reason: *id006
+        failure_reason:
+          type:
+          - string
+          - 'null'
     PhoneComplianceStatusChangedData:
       type: object
       required:
@@ -29594,11 +29681,19 @@ components:
           - tenant
           - identity
           - registration
-        identity_id: *id006
-        percent: *id001
-        used_pence: *id001
-        cap_pence: *id001
-        resets_at: *id009
+        identity_id:
+          type:
+          - string
+          - 'null'
+        percent:
+          type: integer
+        used_pence:
+          type: integer
+        cap_pence:
+          type: integer
+        resets_at:
+          type: string
+          format: date-time
     PhoneSetupStatusChangedData:
       type: object
       required:
@@ -29624,7 +29719,8 @@ components:
       - change
       - decided_by
       properties:
-        version: *id001
+        version:
+          type: integer
         enabled:
           type: boolean
         change:
@@ -29647,7 +29743,7 @@ components:
       properties:
         item:
           $ref: '#/components/schemas/VaultItem'
-        audit: &id010
+        audit:
           $ref: '#/components/schemas/VaultEventAudit'
     VaultItemDeletedData:
       type: object
@@ -29660,7 +29756,8 @@ components:
           type: string
         receipt:
           $ref: '#/components/schemas/VaultShredReceipt'
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultItemRevealedData:
       type: object
       required:
@@ -29675,7 +29772,8 @@ components:
           type: string
         rotated:
           type: boolean
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultItemHealthChangedData:
       type: object
       required:
@@ -29688,8 +29786,12 @@ components:
           type: string
         health:
           $ref: '#/components/schemas/VaultHealth'
-        health_reason: *id006
-        audit: *id010
+        health_reason:
+          type:
+          - string
+          - 'null'
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultGrantEventData:
       type: object
       required:
@@ -29698,7 +29800,8 @@ components:
       properties:
         grant:
           $ref: '#/components/schemas/VaultGrant'
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultUseEventData:
       type: object
       required:
@@ -29707,7 +29810,8 @@ components:
       properties:
         use:
           $ref: '#/components/schemas/VaultUse'
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultTicketIssuedData:
       type: object
       required:
@@ -29716,13 +29820,14 @@ components:
       - consumer_id
       - audit
       properties:
-        use_id: &id011
+        use_id:
           type: string
-        item_id: &id012
+        item_id:
           type: string
-        consumer_id: &id013
+        consumer_id:
           type: string
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultTicketRedeemedData:
       type: object
       required:
@@ -29732,12 +29837,16 @@ components:
       - phase
       - audit
       properties:
-        use_id: *id011
-        item_id: *id012
-        consumer_id: *id013
+        use_id:
+          type: string
+        item_id:
+          type: string
+        consumer_id:
+          type: string
         phase:
           $ref: '#/components/schemas/VaultPhase'
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultTicketRefusedData:
       type: object
       required:
@@ -29748,14 +29857,18 @@ components:
       - reason
       - audit
       properties:
-        use_id: *id011
-        item_id: *id012
-        consumer_id: *id013
+        use_id:
+          type: string
+        item_id:
+          type: string
+        consumer_id:
+          type: string
         phase:
           $ref: '#/components/schemas/VaultPhase'
         reason:
           type: string
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultTicketReportedData:
       type: object
       required:
@@ -29765,16 +29878,20 @@ components:
       - outcome
       - audit
       properties:
-        use_id: *id011
-        item_id: *id012
-        consumer_id: *id013
+        use_id:
+          type: string
+        item_id:
+          type: string
+        consumer_id:
+          type: string
         phase:
           oneOf:
           - $ref: '#/components/schemas/VaultPhase'
           - type: 'null'
         outcome:
           type: string
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultConsumerChangedData:
       type: object
       required:
@@ -29793,7 +29910,8 @@ components:
           - resumed
           - keys_rotated
           - revoked
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
     VaultKeyChangedData:
       type: object
       required:
@@ -29812,7 +29930,8 @@ components:
           enum:
           - operator
           - partner
-        audit: *id010
+        audit:
+          $ref: '#/components/schemas/VaultEventAudit'
 
     # ── Event envelope and payloads ──────────────────────────────────────────────────────────────
 

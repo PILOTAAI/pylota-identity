@@ -5,7 +5,7 @@
 | Status | Proposed |
 | Date | 2026-10-26 |
 | Deciders | The owner (TREFT LTD) |
-| Related | [Agent credential vault](../design/vault.md), FR-VLT-1 to FR-VLT-30, edge rows U1–U90, milestones M42–M45, [ADR 0012](0012-service-sign-up-ledger.md), [ADR 0015](0015-solo-operator.md), [ADR 0019](0019-pylota-identity.md), [ADR 0020](0020-phone-numbers.md) |
+| Related | [Agent credential vault](../design/vault.md), FR-VLT-1 to FR-VLT-30, edge rows U1–U91, milestones M42–M45, [ADR 0012](0012-service-sign-up-ledger.md), [ADR 0015](0015-solo-operator.md), [ADR 0019](0019-pylota-identity.md), [ADR 0020](0020-phone-numbers.md) |
 
 ## Context
 

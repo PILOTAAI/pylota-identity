@@ -2183,7 +2183,7 @@ consumer), CLI `grants`, `uses`, `consumers`, `consumer-keys`, `consumer-check`,
 | `notify/*` (M26) | Vault approvals in "Needs a person" and the daily email, with escaped purpose text |
 | `crons/mod.rs` (M5) | The every-minute vault cron (`jobs/vault_cron.rs`): use deadlines, nonce expiry |
 
-**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and edge rows U22–U40, U64, U65, U71–U82, U84, U86.
+**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and edge rows U22–U40, U64, U65, U71–U82, U84, U86, U91.
 
 **Acceptance:** the rows above; spike S-VLT3 against RFC 9421 Appendix B and the committed fixed vectors (the TypeScript, Python and Go helpers are checked against the same vectors in M46–M48, not here); every `conf::vault::*` fixture passes against the reference consumer
 in CDP and proxy modes; `sdk::coverage::every_operation` passes with the new operations.

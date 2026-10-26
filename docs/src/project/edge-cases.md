@@ -1,7 +1,7 @@
 # Edge-case register
 
-Every row is a required behaviour. The register has 1044 rows in 24 sections (A–L, N, O and W, then Q, R,
-T, V, X, Y and Z, then P and U). The 1036 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
+Every row is a required behaviour. The register has 1045 rows in 24 sections (A–L, N, O and W, then Q, R,
+T, V, X, Y and Z, then P and U). The 1037 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
 integrator-owned rows (C5, E6, E7, K1, K2, K4, X60 and P107) are tested in the integrator's own suites. Section
 W was section M; it was renamed so that its rows (W1–W49) can never be mistaken for build-plan milestones
 (M0–M49). Sections Q to Z were added with [ADR 0017](adr/0017-agentmail-parity.md) and follow section W.
@@ -12,7 +12,7 @@ Sections P (phone numbers, [ADR 0020](adr/0020-phone-numbers.md)) and U (the vau
 phone-number rows: its IDs are always written with the section letter and a number from 1 to 131 (P1–P131), so
 they cannot be mistaken for the priorities P0, P1 and P2, which are never used as row IDs; in prose a row is
 always called 'row P1' and a priority 'priority P1'. Section U holds vault rows, always written with the section
-letter and a number from 1 to 90 (U1–U90), and the PRD's selling points are always called 'selling point U1' in
+letter and a number from 1 to 91 (U1–U91), and the PRD's selling points are always called 'selling point U1' in
 prose; a vault row is 'row U1'.
 The **Owner** column says where the behaviour is enforced:
 
@@ -1227,3 +1227,4 @@ fixtures in `crates/conformance/vault`, `conf::vault::*`, and in the integrator'
 | U88 | `credentials` redeemed on a `password_change` form for a `rotate_fill` use and for a `fill` use | Accepted for `rotate_fill`; `403 vault_refused` (`form_kind_not_allowed`) for `fill` | S | `core::vault::redeem::form_kind_table` |
 | U89 | A `fill` use with `version: "previous"` inside the overlap, after it, and with no previous version | The previous DEK sealed at minting and redemption accepted inside the overlap; `403 vault_refused` (`previous_version_unavailable`) otherwise; a redemption after the overlap ends is `410` (`item_rotated`) | S | `it::vault::previous_version_use` |
 | U90 | Deleting an item with closed and open uses; identity erasure with uses of tenant-scoped items | One batch deletes uses before grants and the item, with no foreign-key failure; receipt counts `uses_deleted` | S | `it::vault::delete_with_uses` |
+| U91 | A `value_exposed` report arrives after rotation closed the use: once for the version now `previous` inside its overlap, once for a version already deleted; a `credentials_rejected` report for an old version | The current version's health is unchanged in every case; the previous version is deleted at once in the first case; audit only in the others (`stale_version: true`) | S | `it::vault::late_report_old_version` |
