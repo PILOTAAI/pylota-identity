@@ -55,6 +55,10 @@ pending_approval ──approve──▶ approved ──close──▶ closed
 | `decided_by_key_id`, `decided_by_user_id`, `decided_at` | Who approved or rejected, and when (both actor columns `NULL` for an expiry) |
 | `closed_by_key_id`, `closed_by_user_id`, `closed_at` | Who closed it, and when |
 | `expires_at` | While `pending_approval`: `created_at` + 7 days. `NULL` otherwise |
+| `phone_number_id` | Optional: the identity's number a service texts codes to (`pnm_`). An entry naming no number matches SMS only when the identity has one live SMS number |
+| `sms_senders` | Optional, up to 10 senders (E.164, short codes, alphanumeric sender IDs) the service's codes come from |
+| `login_domains` | 0–5 organisational domains, besides `service_domain`, where the account signs in (for a service whose sign-in page is on another domain). Shown apart on the approve page, because approving them lets a vault fill happen there. Stored in `login_domains_json` |
+| `vault_login` | Request only, optional: `{ origins, password: { generate } , email_otp, approval }`. Not stored on the entry; kept with the request until the decision |
 
 **Requesting** (`POST /v1/identities/{identity_id}/accounts`, `accounts:request`, any key level): the handler
 validates and normalises the body (`core::accounts::normalise`), then, in one D1 batch, inserts the row
@@ -138,6 +142,12 @@ The expected order for an agent is therefore: request the entry; wait for `accou
 poll the entry; sign up at the service with the entry's `address`; then `wait(kind=verification,
 from=@{service})` for the code.
 
+**Vault logins.** When an entry with `vault_login` is approved, the same D1 batch creates the identity-scoped vault login item
+(generated password; `otp_channel` set to the entry's address and `sender_domains` when `email_otp` is true) and
+an active grant to the requesting identity for `fill` on those origins, expiring after 90 days. The approve page
+says so: "Approving also creates a login this agent can use to sign in at …". A rejected or expired entry creates
+nothing. ([Vault § 3.5](vault.md#35-a-login-born-from-a-ledger-approval))
+
 ## 5. The verification gate
 
 The gate applies only while the tenant's effective `accounts.require_approval` is `true`. It is off in the
@@ -213,6 +223,12 @@ the ledger.
 that lands in that window leaves the message held (fail closed); a closure that lands in it can let that
 one message through, and `wait` still re-checks the entry before releasing its code.
 
+**SMS.** Codes in SMS pass the same gate with a stricter match, because SMS senders cannot be authenticated: the entry
+must name the receiving number (or the identity must have one SMS number), an `sms/wait` naming the entry must
+have been registered within 30 minutes, and a listed sender must match. Codes that match no entry are
+quarantined `account_unapproved`. Codes on a number a vault login item names are withheld for the vault
+([Phone numbers § 11](phone-numbers.md#11-verification-codes-over-sms)).
+
 ## 6. Events
 
 All four are platform events ([Webhooks › Platform events](webhooks.md#platform-events)), written to
@@ -242,6 +258,9 @@ An entry holds the agent's own data: its address, a username at a service, and a
 holds no counterparty data and no mail content. The audit rows keep IDs and `service_domain` only, never
 `account_identifier` or `purpose`.
 
+Closing or deleting an entry archives every vault item linked to it, revokes every grant that relied on it and
+closes every open use (`ledger_closed`), in the batch of the closure ([Vault § 3.3](vault.md#33-ledger-binding)).
+
 ## 8. Console
 
 `/console/accounts` ([Console › Screens](console.md#screens)), for the active workspace:
@@ -270,6 +289,9 @@ holds no counterparty data and no mail content. The audit rows keep IDs and `ser
 
 There is deliberately no MCP tool to approve: approval belongs to people and to the operator's own systems,
 not to agents ([MCP › Tools](mcp.md#4-tools)).
+
+`mail_request_account` and `idvy accounts request` accept `--login-domain` (repeatable) and the `vault_login`
+object.
 
 ## 10. Tests
 
