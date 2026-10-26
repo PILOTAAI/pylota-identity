@@ -637,13 +637,13 @@
           <dl class="modes">
             <div><dt>Codes</dt><dd>Verification codes arrive at the agent’s identity, or go straight into the vault without passing through the model.</dd></div>
             <div><dt>Compliance</dt><dd>Business verification and US 10DLC registration show as states a person can act on.</dd></div>
-            <div><dt>Approval</dt><dd>A person approves every number purchase and every port.</dd></div>
+            <div><dt>Approval</dt><dd>A person sets a monthly budget once. Purchases inside it go through; anything else, and every port, waits for a person.</dd></div>
             <div><dt>Opt-out</dt><dd>STOP and other opt-outs are kept per business.</dd></div>
           </dl>
         </div>
 
         <div class="chan-visual rise-on-scroll">
-          <div class="card numbers" role="img" aria-label="Illustration of the planned phone numbers view for the identity bookings@acme.example.com. A London number, +44 20 7946 0321, takes SMS and voice and is active. A Washington DC number, +1 202 555 0143, takes SMS and voice; its US 10DLC campaign needs a sample message before it can send. A new Dublin number is waiting for a person to approve the purchase. Below, an SMS from Acme Fleet Portal with a sign-in code went to the vault and was not shown to the agent, and a STOP reply from +44 7700 900418 opted that number out for Acme Car Hire.">
+          <div class="card numbers" role="img" aria-label="Illustration of the planned phone numbers view for the identity bookings@acme.example.com. A UK mobile number, +44 7700 900321, takes SMS and voice and is active. A Washington DC number, +1 202 555 0143, takes SMS and voice; its US 10DLC campaign needs a sample message before it can send. A new Dublin number, outside the monthly budget, is waiting for a person to approve the purchase. Below, an SMS from Acme Fleet Portal with a sign-in code went to the vault and was not shown to the agent, and a STOP reply from +44 7700 900418 opted that number out for Acme Car Hire.">
             <div class="num-head">
               <span class="num-title">Numbers</span>
               <span class="num-who">bookings@acme.example.com</span>
@@ -651,7 +651,7 @@
             <ul class="num-list">
               <li>
                 <span class="cc">GB</span>
-                <span class="num-main"><span class="num">+44 20 7946 0321</span><span class="num-place">London</span></span>
+                <span class="num-main"><span class="num">+44 7700 900321</span><span class="num-place">UK mobile</span></span>
                 <span class="num-meta"><span class="chip">sms</span><span class="chip">voice</span><span class="pill pill-green"><i></i>active</span></span>
               </li>
               <li>
@@ -686,13 +686,13 @@
           </div>
             <div class="code code-os">
               <div class="code-head"><span class="code-file">shell · illustrative</span><span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></div>
-<pre tabindex="0"><code><span class="t-c"># a London number that takes SMS and calls</span>
-idvy phone search --country GB --city London --sms --voice
+<pre tabindex="0"><code><span class="t-c"># a UK mobile for the bookings agent, inside the monthly budget</span>
+idvy phone buy --country GB --identity bookings@acme.example.com
+{ <span class="t-k">"number"</span>: <span class="t-s">"+447700900321"</span>, <span class="t-k">"outbound_sms"</span>: <span class="t-s">"enabled"</span>, <span class="t-k">"inbound_calls"</span>: <span class="t-s">"enabled"</span> }
 
-<span class="t-c"># request it for the bookings agent; a person approves the purchase</span>
-idvy phone request number +442079460321 \
-    --identity bookings@acme.example.com
-{ <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span> }</code></pre>
+<span class="t-c"># outside the budget, the purchase waits for a person</span>
+idvy phone buy --country IE --identity bookings@acme.example.com
+{ <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span>, <span class="t-k">"next_step"</span>: <span class="t-s">"a person approves in the console"</span> }</code></pre>
             </div>
         </div>
       </div>
@@ -742,15 +742,15 @@ idvy phone request number +442079460321 \
           </div>
             <div class="code code-os">
               <div class="code-head"><span class="code-file">shell · illustrative</span><span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></div>
-<pre tabindex="0"><code><span class="t-c"># one use of the portal login, for one site and one task</span>
-idvy vault grant acme-portal \
-    --identity bookings@acme.example.com \
-    --site portal.acme-fleet.example \
-    --task <span class="t-s">"Download the October invoices"</span>
+<pre tabindex="0"><code><span class="t-c"># one use of the portal login, on one site, for one task</span>
+idvy vault grants request --identity bookings@acme.example.com \
+    --item vit_01JAD4K8V4 --operation fill --max-uses 1 \
+    --origin https://portal.acme-fleet.example \
+    --purpose <span class="t-s">"Download the October invoices"</span>
 { <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span> }
 
-<span class="t-c"># once a person approves, the browser fills the form</span>
-{ <span class="t-k">"filled"</span>: [<span class="t-s">"username"</span>, <span class="t-s">"password"</span>], <span class="t-k">"revealed"</span>: <span class="t-n">false</span> }</code></pre>
+<span class="t-c"># once a person approves, your browser fills the form; the model never sees the password</span>
+{ <span class="t-k">"outcome"</span>: <span class="t-s">"filled"</span>, <span class="t-k">"phases"</span>: [<span class="t-s">"credentials"</span>, <span class="t-s">"sms_otp"</span>] }</code></pre>
             </div>
         </div>
       </div>
@@ -884,7 +884,7 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
         text=<span class="t-s">"Your car is ready at 9:00."</span>,
         idempotency_key=<span class="t-f">IdempotencyKey</span>(<span class="t-s">"bk-2291-confirm"</span>),
     )
-    <span class="t-f">print</span>(sent.id, <span class="t-s">f"deduplicated={sent.deduplicated}"</span>)</code></pre>
+    <span class="t-f">print</span>(sent[<span class="t-s">"id"</span>], <span class="t-s">f"deduplicated={sent['deduplicated']}"</span>)</code></pre>
               </div>
             </div>
 
@@ -900,7 +900,10 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
 )
 
 <span class="t-kw">func</span> <span class="t-f">confirmBooking</span>(ctx context.Context, key string) error {
-	client := identity.<span class="t-f">NewClient</span>(<span class="t-s">"https://mail.example.com"</span>, key)
+	client, err := identity.<span class="t-f">NewClient</span>(<span class="t-s">"https://mail.example.com"</span>, key)
+	<span class="t-kw">if</span> err != <span class="t-kw">nil</span> {
+		<span class="t-kw">return</span> err
+	}
 	<span class="t-c">// a retry with the same key returns this same message</span>
 	sent, err := client.<span class="t-f">SendMessage</span>(ctx, <span class="t-s">"idn_01J9Z3K8V4"</span>, identity.SendRequest{
 		To:      []string{<span class="t-s">"renter@example.org"</span>},

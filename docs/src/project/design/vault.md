@@ -1645,7 +1645,7 @@ from standard input or a file, never from an argument (so they never reach shell
 | `idvy vault status --tenant T` | `GET /v1/tenants/{tenant_id}/vault` (custody, key `kid`, counts, `retiring_versions`) |
 | `idvy vault items list\|get\|create\|update\|archive\|restore\|delete` | The item routes; `create` reads values with `--password-stdin`, `--totp-uri-file`, `--secret-stdin`, `--session-file` (Playwright `storageState` JSON), or `--generate` |
 | `idvy vault items rotate ITEM` | `POST /v1/vault/items/{item_id}/versions` (`--overlap-hours`) |
-| `idvy vault grants list\|request\|approve\|deny\|revoke` | The grant routes; `approve` prompts with the grant's facts unless `--yes`, and needs `--on-behalf-of` from an API key |
+| `idvy vault grants list\|request\|approve\|deny\|revoke` | The grant routes; `request` takes `--identity`, `--item`, `--operation` and `--origin` (each repeatable), `--max-uses` and `--purpose`, the fields of [§5](#5-grants); `approve` prompts with the grant's facts unless `--yes`, and needs `--on-behalf-of` from an API key |
 | `idvy vault uses list\|get\|approve\|deny\|cancel` | The use routes; `approve` requires `--digest` or prompts with the digest shown |
 | `idvy vault consumers list\|register\|activate\|suspend\|resume\|rotate-keys\|revoke` | The consumer routes |
 | `idvy vault consumer-keys generate --out DIR` | Local only: writes an Ed25519 and an X25519 key pair with mode `0600` and prints the two public JWKs |
