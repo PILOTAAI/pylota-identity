@@ -72,9 +72,12 @@ Who can decrypt, by custody mode ([§4.6](#46-custody-modes)):
 | An agent, a model, an MCP client, an identity or tenant key | No route returns a value | No |
 | A registered consumer | Only the fields of one phase of one ticket it holds, sealed to its own key | The same |
 
-The words "zero-knowledge", "end-to-end" and "we cannot see your passwords" must never appear in Pylota
-Identity's documentation, site or SDK descriptions (`xtask::docs_forbidden_claims` scans `docs/` and
-`site/` for them).
+Pylota Identity's documentation, site and SDK descriptions must never claim that the vault is zero-knowledge
+or end-to-end encrypted, or that the operator cannot see values. `xtask::docs_forbidden_claims` scans `docs/` and
+`site/` sentence by sentence and fails the build on a sentence that contains "zero-knowledge", "zero knowledge"
+or "end-to-end" without a negation (`not`, `no`, `never`, `must not`, `nor`) earlier in the same sentence, and on
+the phrase "we cannot see your passwords" anywhere outside double quotes. Denials such as the statement above
+pass; the check's own test feeds it both forms ([U69](#27-edge-cases)).
 
 ### 1.3 What sits where
 
@@ -1842,7 +1845,7 @@ Each default is the cautious one.
 | `core::crypto::hpke::rfc9180_vectors` | The suite against RFC 9180 vectors (S-VLT1) | §4.3 |
 | `core::crypto::pv1::aad_binding` | A field ciphertext moved to another purpose, version, item or tenant fails to open | §4.3 |
 | `xtask::vault_types_have_no_debug` | No value-holding type derives or implements `Debug` or `Serialize` | §4.5 |
-| `xtask::docs_forbidden_claims` | The forbidden words appear nowhere in `docs/` or `site/` | §1.2 |
+| `xtask::docs_forbidden_claims` | No sentence in `docs/` or `site/` claims zero knowledge or end-to-end encryption without a negation, and the "cannot see" phrase appears only quoted | §1.2 |
 | `it::vault::items_write_only` | No route, idempotency record, event or log line carries a value | §3.1 |
 | `it::vault::ledger_binding` | Items, grants, uses and redemptions refuse without an approved entry; closing an entry archives and closes | §3.3 |
 | `it::vault::grant_decisions` | Who may approve; self-approval; state guards; expiry at the second | §5 |

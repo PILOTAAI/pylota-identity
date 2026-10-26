@@ -3,8 +3,8 @@ For the vault writer and the coordinator, not for pasting: what the phone design
 # Phone design → vault interface
 
 The vault design already offers what the phone design needs. The phone design adopts the vault's
-interfaces as written and asks for no new operation. This page records how each is used, and two small
-points to settle at integration.
+interfaces as written and asks for no new operation. This page records how each is used, and the two
+points the vault writer settled on 2026-10-26.
 
 ## V-1 Port-out PIN: managed secret (vault § 13.2)
 
@@ -31,8 +31,11 @@ delete_managed(ctx, tenant_id, owner_ref = number_id, ManagedPurpose::PortOutPin
 - **Reveal.** Owners and admins reveal the PIN in the console (vault § 13.1). In partner custody, where the
   console cannot reveal, the phone console's **Port PIN** action rotates the PIN and shows the new value once
   to the signed-in person (`Cache-Control: no-store`, audit `phone_number.pin_shown`); this is a phone-side
-  action, not a vault reveal. **Point to settle:** whether the vault prefers to own that "rotate and show once"
-  action for managed secrets in partner custody, so there is one reveal surface.
+  action, not a vault reveal. **Settled (2026-10-26):** the vault owns it. In partner custody the console offers "Show a new value"
+  (`rotate_and_show_managed`) for managed secrets: the vault calls the phone service's registered callback for
+  `ManagedPurpose::PortOutPin`, which sets a new `external_pin` at Telnyx and reads it back, then seals it with
+  `put_managed` and shows it once (vault § 13.2). The phone console's **Port PIN** action calls that, so there
+  is one reveal surface; audit `item.revealed` with `details.rotated = true`.
 - **Erasure.** Tenant erasure's `phone_release` step deletes each number's PIN with `delete_managed` before
   the vault's own tenant step runs; the vault's step deletes any left (for example after a crash). The vault
   receipt counts managed secrets; the phone receipt does not count them again.
@@ -54,8 +57,9 @@ The phone design implements the three needs the vault lists:
 the identity's `active` login items with `otp_channel.kind = "phone"`, as `{item_id, number_id, senders}`.
 Proposed shape, mirroring the email case (`IngestInput.approved_accounts[].vault_items`):
 `vault::phone_channels(tenant_id, identity_id) -> Vec<PhoneChannel { item_id, number_id, senders }>`, a D1 read
-of `vault_items` with no decryption. **Point to settle:** the name and home of that function (the vault crate
-or a shared query in `phone/`).
+of `vault_items` with no decryption. **Settled (2026-10-26):** it lives in the vault crate,
+`crates/worker/src/vault/channels.rs`, as `vault::phone_channels`, beside the email side's facts, so the rule
+lives in one place (vault § 9.3).
 
 **Constraints the phone side relies on:** the vault calls `take` only for a use created at most 10 minutes
 earlier and only inside an open `sms_otp` phase; `senders` has at most 10 entries; `number_id` is a live

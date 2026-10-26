@@ -79,7 +79,7 @@ fixtures in `crates/conformance/vault`, `conf::vault::*`, and in the integrator'
 | U66 | Deleting an item; its R2 delete fails | Rows shredded in one batch with the receipt; the daily sweep deletes the object | S | `it::vault::erasure_scopes` |
 | U67 | Identity erasure with identity-scoped items and grants on tenant-scoped items | Its items shredded, its grants deleted and uses closed, audit rows kept with `run_id` cleared; receipt counts | S | `it::vault::erasure_scopes` |
 | U68 | Tenant erasure in partner custody | Custody slots and tenant keys deleted first, then the rest; the probe finds no row and an empty `t/{tenant_id}/vault/` prefix | S | `it::vault::erasure_scopes` |
-| U69 | "zero-knowledge", "end-to-end" or "we cannot see your passwords" anywhere in `docs/` or `site/` | The build fails | S | `xtask::docs_forbidden_claims` |
+| U69 | A sentence in `docs/` or `site/` claiming the vault is zero-knowledge or end-to-end encrypted without a negation in the sentence; "we cannot see your passwords" outside double quotes; the trust statement, which denies both | The build fails on the first two; the trust statement passes | S | `xtask::docs_forbidden_claims` |
 | U70 | `PM_VAULT` turned off while `vault_code` mail and SMS are hidden | They stay hidden and expire; nothing is released | S | `it::vault::email_codes_rule_4b` |
 | U71 | MCP `tools/list` with each vault permission; each tool's result | Tools listed only by permission; no value, ticket, packet or placeholder in any result; no approving tool | S | `it::vault::mcp_tools` |
 | U72 | `idvy vault items create` with a value as an argument; any command's output | Values only from standard input or a file; never printed; an unlock key shown once | S | `cli::vault::commands` |

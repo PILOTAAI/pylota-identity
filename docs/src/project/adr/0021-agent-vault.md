@@ -65,7 +65,7 @@ The facts the decision rests on:
    because it trades recoverability for a narrower trust boundary, and only a partner that runs its own key
    custody should take that trade.
 6. **Honesty.** The documentation, site and SDK descriptions **must** use the trust statement of the design word for
-   word and **must not** claim zero knowledge or end-to-end encryption; a check in CI refuses the words.
+   word and **must not** claim zero knowledge or end-to-end encryption; a check in CI refuses any such claim that is not a denial.
 7. **Refusals.** The vault **must** refuse payment cards and bank details (by kind and by a Luhn check of every
    value), passkeys and any WebAuthn emulation, CAPTCHA solving and the storage of bot-challenge clearance cookies,
    plaintext export to any agent, model, MCP client or key, and self-approval.
