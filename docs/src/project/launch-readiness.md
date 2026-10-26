@@ -10,7 +10,7 @@ providers), so that nothing that a launch needs lives only in someone's head.
 | | |
 |---|---|
 | Requirement | FR-OPS-6, NFR-OPS-4 ([PRD](prd.md#613-operations)) |
-| Built in | [M49 · Launch](build-plan.md#m49--launch), after M28, M41, M45 and M48 |
+| Built in | [M49 · Launch](build-plan.md#m49--launch-after-m28-m41-m45-and-m48), after M28, M41, M45 and M48 |
 | Related | [Cloud commissioning](cloud-commissioning.md) (checks CC1–CC33, gates A–D, P, V, S), [Security › Pre-release checklist](design/security.md#16-pre-release-checklist), [Observability](design/observability.md), [Privacy](design/privacy.md), [Billing](design/billing.md), [Phone numbers](design/phone-numbers.md), [Agent credential vault](design/vault.md), [ADR 0015](adr/0015-solo-operator.md) |
 | Status as of | 2026-10-26: design phase. `MILESTONES` lists `M0` only |
 

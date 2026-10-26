@@ -1496,8 +1496,9 @@ service's exact origin) types into the form. The phone side provides three thing
 3. **Erasure.** Withheld SMS and their code rows are covered by every erasure scope of [§24](#24-privacy).
 
 No code value ever appears in a response, an event, a log or a model's context on this path. The interface
-is the vault writer's ([Vault § 9.3](vault.md#93-sms-codes)); `.staging/phone/_to-vault.md` records what the
-phone design takes from it and the two points to reconcile ([P59](#34-edge-cases), [P60](#34-edge-cases)).
+is the vault's ([Vault § 9.3](vault.md#93-sms-codes)): the channel lookup `vault::phone_channels` lives in the
+vault crate, and the vault owns "rotate and show once" for managed secrets in partner custody
+([Vault § 13.2](vault.md#132-managed-secrets); [P59](#34-edge-cases), [P60](#34-edge-cases)).
 
 ### 11.5 Redaction
 
@@ -3155,7 +3156,7 @@ run. They are untrusted data and are used only to compare. AgentPhone is never a
 The shared pages carry this page's contracts: the PRD, the REST API reference and `openapi.yaml`, the errors,
 events, limits, MCP, CLI and configuration references, the data model, architecture, security, privacy,
 billing, workspace policy, the service sign-up ledger, the event feed, notifications, observability, the
-edge-case register and the build plan. Their text is staged in `.staging/phone/` for the coordinator. A
+edge-case register and the build plan. A
 difference between this page and one of them is a defect: fix both in the same change.
 
 ## 39. Open questions for the owner

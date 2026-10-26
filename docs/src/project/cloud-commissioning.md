@@ -6,7 +6,7 @@ that open it first to Pylota alone, then to the waitlist, then to everyone. [M20
 proves the software on staging; [M28](build-plan.md#m28--cloud-production-commissioning-after-m20) runs this
 page against production (FR-OPS-5). Phone numbers ([§11](#11-phone-numbers-the-telnyx-account)) and the vault
 ([§12](#12-the-vault)) are commissioned after mail, each behind its own flag and gate, and the SDKs are
-published from the accounts of [§13](#13-sdk-publishing). [M49](build-plan.md#m49--launch) closes the launch;
+published from the accounts of [§13](#13-sdk-publishing). [M49](build-plan.md#m49--launch-after-m28-m41-m45-and-m48) closes the launch;
 [Launch readiness](launch-readiness.md) tracks every gate on one page.
 
 The owner is a solo developer and the only operator. Nothing here relies on a second person. The controls
