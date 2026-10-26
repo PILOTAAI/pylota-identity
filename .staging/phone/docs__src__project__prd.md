@@ -2,13 +2,13 @@ Where this goes: `docs/src/project/prd.md`. Five insertions, each introduced bel
 
 ## 1. In "## 5. Scope and priorities", add this row to the table after the row "Plans and billing"
 
-| Phone numbers (behind `PM_PHONE`, [ADR 0020](adr/0020-phone-numbers.md)) | Catalogue with GB mobile, GB geographic and US local rows; compliance profiles and encrypted write-only KYC documents; phone requests approved by people; ordering with spend intents, attempt-scoped references and reconciliation; numbers on identities with history; release; per-tenant provider resources; signed provider webhooks; inbound and outbound SMS with the consent ledger, caps and the US 10DLC gate; verification codes with the ledger gate and the vault channel; the `vapi` voice route and approved outbound calls with disclosure; emergency settings; the port-out guard; the nightly reconciler; GBP rate card, spend caps, Stripe invoice items and partner statements; adoption for Pylota's migration (FR-PHN-1–23, 25–35, 37–42) | Ireland, Netherlands, US toll-free and the local rows for Germany, France, Spain and Italy; SMS screening by the classifier (FR-PHN-24); `sip` and `forward` routes; toll-free verification; port-in (FR-PHN-36) | Call Control and media streaming routes; alphanumeric sender IDs; outbound MMS; managed provider accounts per partner; a second provider (Twilio) |
+| Phone numbers (behind `PM_PHONE`, [ADR 0020](adr/0020-phone-numbers.md)) | Catalogue with GB mobile, GB geographic and US local rows; compliance profiles and encrypted write-only KYC documents; phone requests approved by people; ordering with spend intents, attempt-scoped references and reconciliation; numbers on identities with history; release; per-tenant provider resources; signed provider webhooks; inbound and outbound SMS with the consent ledger, caps and the US 10DLC gate; verification codes with the ledger gate and the vault channel; the `vapi` voice route and approved outbound calls with disclosure; emergency settings; the port-out guard; the nightly reconciler; GBP rate card, spend caps (with a registration cap), Stripe invoice items and partner statements; adoption for Pylota's migration with a dated exit; phone onboarding once per tenant and country, the standing purchase budget, the one-call purchase, capability facets and throwaway numbers (FR-PHN-1–23, 25–35, 37–54) | Ireland, Netherlands, US toll-free and the local rows for Germany, France, Spain and Italy; SMS screening by the classifier (FR-PHN-24); `sip` and `forward` routes; toll-free verification; port-in (FR-PHN-36) | Call Control and media streaming routes; alphanumeric sender IDs; outbound MMS; managed provider accounts per partner; a second provider (Twilio) |
 
 ## 2. In "### Non-goals (v1.0)", add these bullets after the bullet "Attachments fetched from URLs."
 
 - Becoming a telephony carrier or holding number ranges from a regulator. Numbers are bought from a provider
   (Telnyx) in each tenant's own legal name ([Phone numbers](design/phone-numbers.md)).
-- Phone numbers for individuals or sole traders, and numbers bought by an agent without a person's approval.
+- Phone numbers for individuals; for sole traders until the owner's decision ([Phone numbers § 1.1](design/phone-numbers.md#11-sole-traders-an-owner-decision)); and numbers bought by an agent without a person's approval, given one by one or through a standing budget the person set.
 - Call Control webhooks and media streaming through Pylota Identity (planned for v1.1); alphanumeric sender IDs;
   outbound MMS; WhatsApp, RCS and iMessage.
 
@@ -36,7 +36,8 @@ priority of each requirement is given in brackets; acceptance names the edge row
   cross-tenant quarantine, return a GBP quote and a signed quote token per candidate, and count against a
   daily cap. Acceptance: P1, P2, P39.
 - **FR-PHN-5** (P0) Each tenant **must** have one compliance profile describing a business in whose legal
-  name its numbers are registered; individuals and sole traders **must** be refused in v1; tax identifiers and
+  name its numbers are registered; individuals **must** be refused, and sole traders **must** be refused unless
+  the owner's recorded decision and the row allow them (FR-PHN-54); tax identifiers and
   the representative's contact and birth data **must** be sealed and never returned. Acceptance: P5, P6.
 - **FR-PHN-6** (P0) KYC documents **must** be uploaded with declared size and SHA-256, sniffed and refused when
   risky, encrypted per document under a sealed data key before they reach R2, and never readable through any
@@ -51,7 +52,8 @@ priority of each requirement is given in brackets; acceptance names the edge row
   **must** be single-use and audited. Acceptance: P98, P99.
 - **FR-PHN-9** (P0) Every purchase, port-in, release, compliance submission, US registration, toll-free
   verification, emergency registration, voice-route change and (under policy) outbound call **must** be a phone
-  request, created with a required `Idempotency-Key`, bounded per tenant, and rejected as expired after 7
+  request (a purchase may be approved by the standing budget, FR-PHN-43, and a scheduled release by its
+  purchase, FR-PHN-50), created with a required `Idempotency-Key`, bounded per tenant, and rejected as expired after 7
   days undecided. Acceptance: P15, P19, P22.
 - **FR-PHN-10** (P0) Approving a phone request or deciding a port-out **must** be a decision reserved for
   people (`key_may_decide`, opt-in `phone.key_approval` for platform and own-partner keys only), never by the
@@ -67,8 +69,8 @@ priority of each requirement is given in brackets; acceptance names the edge row
   proves no order; an unknown outcome **must** become `uncertain` and **must not** be retried until an order is
   adopted or absence is proved by two complete listings at least 5 and 10 minutes apart; at most 3 attempts;
   after 24 hours only a platform resolve ends it. Acceptance: P23–P27.
-- **FR-PHN-14** (P0) Numbers **must** follow the state machine of [Phone numbers § 6.2](design/phone-numbers.md#62-the-provisioning-state-machine), with carrier, SMS and voice facets each
-  read back from the provider, `setup_state` and `provisioning { status, code, retryable }` using Pylota's
+- **FR-PHN-14** (P0) Numbers **must** follow the state machine of [§ 6.2](design/phone-numbers.md#62-the-provisioning-state-machine), with carrier, SMS and voice facets each
+  read back from the provider, the capability facets of FR-PHN-45, `setup_state` and `provisioning { status, code, retryable }` using Pylota's
   failure codes unchanged, and no provider IDs for tenant or identity keys. Acceptance: P34.
 - **FR-PHN-15** (P0) Requirements pending, deadlines and long reviews **must** notify people, remind before
   deadlines, back off and alert after 7 days, and end a cancelled order as `failed` so the next request can
@@ -151,7 +153,7 @@ priority of each requirement is given in brackets; acceptance names the edge row
 - **FR-PHN-38** (P0) The provider's state **must** be reconciled continuously and nightly across numbers,
   orders, porting, compliance, A2P, message and call records, webhook deliveries, opt-outs and balance, and on
   request per tenant and per deployment. Acceptance: P96, P97.
-- **FR-PHN-39** (P0) Money **must** follow [Phone numbers § 18](design/phone-numbers.md#18-money): GBP prices from the rate card, one charge per unique source,
+- **FR-PHN-39** (P0) Money **must** follow [§ 18](design/phone-numbers.md#18-money): GBP prices from the rate card, one charge per unique source,
   monthly spend caps per tenant and identity enforced with holds and refused with `402 spend_cap_reached` before
   anything is stored, recurring charges never refused, provider-side daily limits as backstops, balance alerts
   with an automatic pause, Stripe invoice items with idempotency keys, partner statements, and a paid plan or a
@@ -159,17 +161,65 @@ priority of each requirement is given in brackets; acceptance names the edge row
 - **FR-PHN-40** (P0) Erasure scopes **must** cover SMS, media, calls and phone data with the receipt fields of
   [§ 24](design/phone-numbers.md#24-privacy); tenant erasure **must** run `phone_release`; logs **must** pseudonymise phone numbers; every sealed column
   **must** be in the sealed-column registry. Acceptance: P53, P98, P61.
-- **FR-PHN-41** (P0) The MCP server **must** offer the eleven `phone_*` tools of [§ 28](design/phone-numbers.md#28-mcp-and-cli) and no tool that approves,
-  releases, ports, submits KYC, changes a route or shows a PIN; the CLI **must** offer `idvy phone …` and
+- **FR-PHN-41** (P0) The MCP server **must** offer the twelve `phone_*` tools of [§ 28](design/phone-numbers.md#28-mcp-and-cli) and no tool that approves,
+  releases, ports, submits KYC, changes a route, sets a budget or shows a PIN; `phone_buy_number` **must not**
+  take a confirmation flag; the CLI **must** offer `idvy phone …` and
   `idvy setup phone`. Acceptance: `it::mcp::phone_tools`, `cli::phone::commands`.
 - **FR-PHN-42** (P0) A platform key **must** be able to adopt a number already in the provider account into an
   identity, stamping ownership and refusing a number already held; an adopted number registered under a
-  platform group **must** be re-papered under its tenant's profile within 90 days. Acceptance: P100.
+  platform group **must** be re-papered under its tenant's profile by its `legacy_deadline`, and **must never**
+  be released by a deadline (FR-PHN-54). Acceptance: P100, P126.
+- **FR-PHN-43** (P0) A tenant **may** have a standing purchase budget (`phone.auto_approve`), off by default,
+  set or loosened only by a decision reserved for people and tightened by `phone:manage`; a `purchase_number`
+  it covers **must** be created approved with the budget's version recorded, count against a monthly slot
+  taken atomically with the spend hold, and remain subject to the spend caps, the ops switch and quote changes.
+  Acceptance: P108–P111.
+- **FR-PHN-44** (P0) `POST /v1/identities/{identity_id}/phone-numbers` **must** buy a number in one call with a
+  required country and a required `Idempotency-Key`, defaulting the type per country, answering `201` with the
+  number once the provider accepted the order inside the budget, or `202` with the request otherwise; a taken
+  number **must** be replaced by the next candidate up to 5 times for `any`, and answered `409
+  phone_number_taken` with up to 5 alternatives for an exact number. Acceptance: P112–P114.
+- **FR-PHN-45** (P0) Every number **must** report the capability facets `outbound_sms`, `inbound_sms`,
+  `inbound_calls` and `outbound_calls` as `enabled`, `activating`, `registration_required` or `not_available`
+  with a reason and a next step, computed by the same function the send and call gates use, and emit
+  `phone_number.capability_changed` on each change; `setup_state` **must** be `registration_pending` when only a
+  registration is missing. Acceptance: P115, P116.
+- **FR-PHN-46** (P0) A purchase quote **must** carry `follow_on[]` for every registration the number will still
+  need for this tenant, with its price, typical wait and who acts, covered by the digest. Acceptance: P117.
+- **FR-PHN-47** (P0) A purchase for a row the tenant has not finished onboarding **must** be created with
+  `blocked_by` and a next step rather than refused, **must not** be executed while blocked, and **must** run
+  once onboarding completes. Acceptance: P118.
+- **FR-PHN-48** (P0) One-off registration fees **must** count against `phone.spend.registration_cap_pence`
+  instead of the monthly caps; pass-through fees **must** be priced at cost until the owner sets a margin.
+  Acceptance: P119.
+- **FR-PHN-49** (P0) Phone onboarding **must** report one status per tenant and country with its steps, fees,
+  waits and next step through REST and the MCP tool `phone_setup_status`; agents **may** draft the registration
+  text, which **must** hold no tax identifier, personal data or document and **must** be submitted only by a
+  person. Acceptance: P120, P121.
+- **FR-PHN-50** (P0) A purchase **may** carry `expires_at`; its approval **must** cover the release at that time,
+  which **must** run with every release safety rule; extending or removing the expiry **must** need
+  `phone:manage`. Acceptance: P122.
+- **FR-PHN-51** (P0) The profile **must** name the company register (with its region where a country has
+  several), and document requirements **must** be mapped per registration country, never guessed.
+  Acceptance: P123.
+- **FR-PHN-52** (P0) A US number of a tenant registered outside the US **must** report `outbound_sms:
+  not_available` until GB brands are proved and allowed, and `outbound_calls: not_available` without a US
+  emergency address; SMS **must** be refused to destinations the sending row has not tested. Acceptance: P124,
+  P125.
+- **FR-PHN-53** (P0) The provider account's level **must** be probed and recorded, and a row that needs a level
+  the account lacks **must** report `platform_prerequisite`; US rows **must** stay off until the enablement
+  sequence of [§ 2.5](design/phone-numbers.md#25-us-enablement) is complete. Acceptance: P127.
+- **FR-PHN-54** (P0) The owner's decision on sole traders **must** be recorded before M41's acceptance; under any
+  option an adopted number **must** keep working with a dated exit (re-paper or port out) and be suspended for
+  outbound only, never released, at its deadline; a US sole-proprietor brand **must** take its one-time code
+  only from a person. Acceptance: P6, P126.
 
 ## 4. In "## 10. Risks", add these rows to the table after the last row
 
 | Telephony is regulated, and TREFT may count as a provider (Ofcom General Conditions, emergency calling, caller ID) | Numbers registered in each tenant's own name; agent routes never dial emergency numbers; tenants warned before purchase; each legal question listed for counsel and answered before the feature opens in production ([Phone numbers § 32](design/phone-numbers.md#32-questions-for-counsel)) |
 | One Telnyx account serves every tenant: a suspension stops all of them, and limits are shared | Per-tenant provider-side spend limits; the `phone` ops switch; balance alerts; `provider_account_id` on every row so a partner can move to its own managed account; a provider trait that admits a second provider |
+| Buying a number needs regulatory work an agent cannot do, so agents stall waiting on people | Onboarding once per tenant and country with one status and the person who must act; a standing budget a person sets; a one-call purchase; purchases that wait on onboarding instead of failing ([Phone numbers § 4.7](design/phone-numbers.md#47-phone-onboarding), [§ 5.7](design/phone-numbers.md#57-the-standing-purchase-budget), [§ 6.7](design/phone-numbers.md#67-one-call-purchase)) |
+| US texting for businesses registered outside the US, and for sole traders, is unproven | US numbers sold for receiving and calls only to such tenants until a staging registration and counsel's answer; the sole-trader decision recorded before M41 ([§ 13.1](design/phone-numbers.md#131-us-sole-proprietor-brands), [§ 13.2](design/phone-numbers.md#132-brands-registered-outside-the-us)) |
 | Provider costs are in US dollars and customers pay in pounds | A rate card with a currency buffer; an alert at 5% exchange-rate drift; 30 days' notice before existing numbers are re-priced |
 | Telnyx's documents contradict themselves on prices, statuses and rules | Every external behaviour has a contract test against the real API before code depends on it; the catalogue fails a release when a row is unverified for 180 days |
 
@@ -179,4 +229,4 @@ priority of each requirement is given in brackets; acceptance names the edge row
   per-segment and per-minute usage, all in GBP from a published rate card built from the provider's USD list
   prices with a margin and a currency buffer ([Phone numbers § 18](design/phone-numbers.md#18-money)). They
   need a paid plan, or a partner that pays for its tenants, and are capped per workspace and per identity each
-  month. Charges are added to the next Stripe invoice, or to the partner's monthly statement.
+  month. Regulatory pass-through fees (the US texting registration) are priced at cost and capped separately. Charges are added to the next Stripe invoice, or to the partner's monthly statement.

@@ -10,7 +10,13 @@ minutes) were read from Telnyx's documentation on 2026-10-24 and can change.
 | Limit | Value |
 |---|---|
 | Numbers per identity, per tenant | 5 and 20 by default (policy); at most 20 and 200 |
-| Requests per tenant | 20 `pending_approval`; 10 running (`executing`, `in_progress`, `action_needed`, `uncertain`) |
+| Requests per tenant | 20 `pending_approval` (blocked ones included); 10 running (`executing`, `in_progress`, `action_needed`, `uncertain`) |
+| Blocked request lifetime | 7 days after it is unblocked, at most 30 days after creation |
+| Standing budget | `max_numbers_per_identity` 1–20; `max_new_numbers_per_month` 1–200 |
+| One-call purchase | Inline run up to 15 seconds; up to 5 candidates when a number is taken; `details.alternatives` up to 5 |
+| `expires_at` | 1 hour to 365 days after the purchase |
+| Onboarding drafts | One per tenant and country; 2–5 sample messages of 20–1,024 characters; other text fields 1–1,000 characters; deleted after 30 days untouched |
+| Sole-proprietor one-time code | 5 resends a day |
 | Pending request lifetime | 7 days, then `rejected` (`expired`) |
 | Quote token | 30 minutes |
 | Searches | 300 a day per tenant; `limit` 1–20 per search |

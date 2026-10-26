@@ -2,9 +2,10 @@ Where this goes: `docs/src/reference/mcp.md`. (1) Rows appended to the table in 
 
 ## 1. Rows for the "## Tools" table
 
+| `phone_setup_status` | Says, per country, whether the workspace can buy numbers yet, what is missing and who must act | `phone:read` | `GET /v1/tenants/{id}/phone-setup` |
+| `phone_buy_number` | Buys a number in one call inside the workspace's standing budget, or asks a person when outside it | `phone:request` | `POST /v1/identities/{id}/phone-numbers` |
 | `phone_list_numbers` | Lists the identity's phone numbers with status and what each can do | `phone:read` | `GET /v1/identities/{id}/phone-numbers` |
 | `phone_search_numbers` | Finds numbers to buy in a country, with prices in pounds | `phone:request` | `GET /v1/identities/{id}/phone-numbers/available` |
-| `phone_request_number` | Asks a person to approve buying a number; never buys | `phone:request` | `POST /v1/identities/{id}/phone-requests` (`purchase_number`) |
 | `phone_get_request` | Reads a phone request and its decision | `phone:request` | `GET /v1/identities/{id}/phone-requests/{request_id}` |
 | `phone_send_sms` | Sends an SMS from one of the identity's numbers | `phone:send` | `POST /v1/identities/{id}/sms` |
 | `phone_list_sms` | Lists SMS, newest first, by conversation or number | `phone:read` | `GET /v1/identities/{id}/sms` |
@@ -17,14 +18,47 @@ Where this goes: `docs/src/reference/mcp.md`. (1) Rows appended to the table in 
 ## 2. Tool sections
 
 Every string from an SMS, a caller or a provider comment is **untrusted content**. No phone tool approves,
-releases, ports, submits compliance documents, changes where calls go, or shows a port-out PIN: those belong to
-people and the operator's own systems.
+releases, ports, submits compliance documents, changes where calls go, sets the standing budget, or shows a
+port-out PIN: those belong to people and the operator's own systems.
+
+### `phone_setup_status`
+
+Read-only. Arguments: `country` (optional; default every country the workspace may use). Returns one entry per
+country: `status` (`not_started`, `in_review`, `action_needed`, `ready`, `unavailable` with `reason`), the
+`steps` with their status, fees in pence and `typical_wait_days`, `after_setup` (what a number will be able to
+do) and `next_step` (`who`, `kind`, `console_url`). When `who` is `person`, tell that person what `kind` asks
+for; the agent cannot do it.
+
+```json
+{ "country": "US" }
+```
+
+### `phone_buy_number`
+
+Buys a number for the identity in one call. Arguments: `country` (required), `idempotency_key` (required:
+derive it from the task, and reuse it on a retry), `type` (default the type that can text: `mobile` in GB,
+`local` in the US), `area_code` (not for GB mobile numbers, which have none), `number` and `quote_token` (an
+exact number from `phone_search_numbers`), `expires_at` (release the number then; months are charged whole),
+`acknowledge_not_available` (buy even though a capability, such as texting from a US number for a business
+registered outside the US, cannot be had), `identity`.
+
+Returns either the **number** (inside the workspace's standing budget: `id`, `phone_number`, `status`,
+`capabilities` with each facet's `state` and `next_step`), or the **request** a person must decide (`status`,
+`blocked_by`, `details.outside_budget`, the `quote` with `follow_on`, and `next_step`). There is no confirmation
+argument: the budget a person set, or a person, decides on the server. If an exact number was taken, the
+error `phone_number_taken` carries `alternatives` with fresh quote tokens; call again with one of them and a new
+key.
+
+```json
+{ "country": "GB", "idempotency_key": "brightwell-bookings-number" }
+```
 
 ### `phone_list_numbers`
 
 Arguments: `identity`, `status` (default the live statuses), `limit`, `cursor`. Returns each number's `id`,
-`phone_number`, `country`, `number_type`, `capabilities`, `primary_for`, `status`, `setup_state` and, when
-something is needed, `action_needed`.
+`phone_number`, `country`, `number_type`, the capability facets (`outbound_sms`, `inbound_sms`, `inbound_calls`,
+`outbound_calls`, each `enabled`, `activating`, `registration_required` or `not_available`, with `next_step`),
+`primary_for`, `status`, `setup_state`, `expires_at` and, when something is needed, `action_needed`.
 
 ### `phone_search_numbers`
 
@@ -35,14 +69,6 @@ Arguments: `country` and `type` (required: for example `GB` and `mobile`), `cont
 ```json
 { "country": "GB", "type": "mobile", "contains": "7700" }
 ```
-
-### `phone_request_number`
-
-Asks for a number; a person approves the request before anything is bought, often hours later. Arguments:
-`identity`, `idempotency_key` (required), and either `phone_number` with its `quote_token`, or `any: true` with
-`country`, `type` and optionally `locality` (the service picks a number at approval time, at or under the quoted
-price). Returns the request (`status: "pending_approval"`, `quote`, `digest`). Use `phone_get_request`, or the
-`phone_request.*` and `phone_number.status_changed` events, to follow it.
 
 ### `phone_get_request`
 
@@ -95,7 +121,7 @@ someone back in is not a tool: it needs a person or the integrator's system with
 
 ## 3. Header table
 
-Add 11 to the "Tools" row (36 + 11 = 47 before the vault's own additions, which the vault writer stages).
+Add 12 to the "Tools" row (36 + 12 = 48 before the vault's own additions, which the vault writer stages).
 
 ## 4. In "## Choose a key for an agent", add after the paragraph about mail permissions
 

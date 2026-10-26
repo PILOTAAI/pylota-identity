@@ -44,28 +44,34 @@ level (provider costs only to platform and partner endpoints).
 | Type | When | `data` |
 |---|---|---|
 | `phone_request.requested` | A request was created, or returned to `pending_approval` because its price rose | `phone_request`, `reason` (`created` or `quote_changed`) |
-| `phone_request.approved` | A person (or an allowed key) approved it | `phone_request`, `approved_by_key_id` or `approved_by_user_id`, `on_behalf_of` |
+| `phone_request.approved` | A person, an allowed key or the tenant's standing budget approved it | `phone_request`, `approved_by` (`person`, `key`, `standing_budget`, `purchase`), `approved_by_key_id` or `approved_by_user_id`, `on_behalf_of`, `budget_version` (with `standing_budget`) |
 | `phone_request.rejected` | Rejected, or expired after 7 days | `phone_request`, `reason` (`operator` or `expired`) |
 | `phone_request.canceled` | Canceled by the requester, or by erasure | `phone_request`, `reason` |
 | `phone_request.completed` | The provider work ended successfully | `phone_request`, `result` |
 | `phone_request.failed` | The provider work ended without success | `phone_request`, `reason` |
 | `phone_request.uncertain` | A billable call's outcome is unknown; the service is reconciling | `phone_request` |
 | `phone_number.status_changed` | A number changed status | `number_id`, `identity_id`, `from`, `to`, `setup_state`, `provisioning` (`status`, `code`, `retryable`), `reason` (for example `moved`, `adopted`, `released`, `missing_at_provider`) |
+| `phone_number.capability_changed` | One of the number's capability facets changed state (for example `outbound_sms` from `activating` to `enabled` when a US registration became ready) | `number_id`, `identity_id`, `capability` (`outbound_sms`, `inbound_sms`, `inbound_calls`, `outbound_calls`), `from`, `to`, `reason`, `next_step` |
+| `phone_number.expiring` | A number bought with `expires_at` will be released within 24 hours | `number_id`, `identity_id`, `release_at` |
 | `phone_number.action_needed` | The provider needs information before a deadline | `number_id`, `action_needed` (`kind`, `message` as untrusted text, `deadline_at`) |
 | `phone_number.port_out_requested` | Another carrier asked for the number | `number_id`, `port_out_id`, `respond_by` |
 | `phone_number.port_out_decided` | A person authorised or rejected it, or the provider authorised it | `number_id`, `port_out_id`, `decision` (`authorized`, `rejected`, `provider_authorized`), `decided_by_key_id` or `decided_by_user_id` |
 | `phone_registration.status_changed` | A US 10DLC brand, campaign or number assignment, or a toll-free verification, changed status | `registration_id`, `kind`, `from`, `to`, `failure_reason` |
 | `phone_compliance.status_changed` | The compliance profile's status for a country, number type and action changed | `country`, `number_type`, `action`, `from`, `to` (no personal data) |
 | `phone_consent.changed` | A counterparty opted out or in | `number_hint` (masked), `state`, `purpose`, `source` |
-| `phone_spend.warning` | Phone spend reached 80% or 100% of a monthly cap | `scope`, `identity_id`, `percent`, `used_pence`, `cap_pence`, `resets_at` |
+| `phone_spend.warning` | Phone spend reached 80% or 100% of a monthly cap | `scope` (`tenant`, `identity`, `registration`), `identity_id`, `percent`, `used_pence`, `cap_pence`, `resets_at` |
+| `phone_setup.status_changed` | The tenant's onboarding status for a country changed | `country`, `from`, `to`, `next_step` (no personal data) |
+| `phone_budget.changed` | The tenant's standing purchase budget was set, loosened, tightened or turned off | `version`, `enabled`, `change` (`set`, `loosened`, `tightened`, `disabled`), `decided_by` (`person`, `key`) |
 
 ## 2. In "### Ordering"
 
 - In the sentence listing per-identity mailbox events, add `sms.*` and `call.*` after `quota.warning`.
 - In the sentence listing platform events with `sequence: null`, add `phone_request.*`, `phone_number.*`,
-  `phone_registration.*`, `phone_compliance.*`, `phone_consent.changed` and `phone_spend.warning`.
+  `phone_registration.*`, `phone_compliance.*`, `phone_consent.changed`, `phone_spend.warning`,
+  `phone_setup.status_changed` and `phone_budget.changed`.
 
 ## 3. In "## Reading events without an endpoint", add after "A key sees an event only when it could read its subject through the API"
 
 : SMS and call events need `phone:read` (held SMS events also `quarantine:review`), request, number,
-registration, consent and spend events need `phone:read`, and compliance events need `phone:compliance`
+registration, consent, spend, setup and budget events need `phone:read`, and compliance events need
+`phone:compliance`

@@ -4,7 +4,9 @@ Binding for implementation. An identity can hold **phone numbers** as well as em
 is another address of the identity, bought in the tenant's own legal name, that receives and sends SMS
 and carries voice calls to a route the tenant chooses. Pylota Identity is not a carrier. It buys numbers
 from one provider, Telnyx, behind a provider trait, and adds what an agentic OS needs on top: a person
-approves every purchase, port, release, KYC submission and registration fee; every billable provider call
+approves every purchase (one by one, or once through a standing budget the person sets), and every port,
+release, KYC submission and registration fee; once a tenant has finished a one-time set-up per country, an
+agent gets a number with one call ([§6.7](#67-one-call-purchase)); every billable provider call
 has its own idempotency, a spend-intent record and a reconciler, so a retry never buys two numbers or sends
 two texts; KYC documents are encrypted, write-only and erased with receipts; inbound SMS is untrusted input,
 screened like mail; verification codes can go to the vault without passing through the model; and a
@@ -16,11 +18,11 @@ data, tenant isolation, provider credentials) ([ADR 0020](../adr/0020-phone-numb
 
 | | |
 |---|---|
-| Requirements | FR-PHN-1 to FR-PHN-42 (this page, [§33](#33-functional-requirements)); it extends FR-IDN-2, FR-IDN-4, FR-IDN-10, FR-IN-5, FR-IN-11, FR-SCR-1, FR-PRV-1 to FR-PRV-6, FR-BILL-1 to FR-BILL-6, FR-TEN-4, FR-CON-6 and FR-KEY-4 |
-| Edge cases | [P1](#34-edge-cases)–[P107](#34-edge-cases) (section `P · Phone numbers` of the [edge-case register](../edge-cases.md); P107 is integrator-owned) |
-| Code | `crates/core/src/phone/{mod.rs, e164.rs, catalogue.rs, requests.rs, numbers.rs, orders.rs, sms.rs, segments.rs, consent.rs, verify.rs, a2p.rs, voice.rs, porting.rs, money.rs, telnyx.rs}` (validation, state machines, the quote digest, the policy pipeline, segment counting, status and error mapping from Telnyx; pure), `crates/core/data/phone-catalogue.json`, `crates/core/data/phone-rate-card.json`; `crates/worker/src/phone/{mod.rs, provider.rs, telnyx/{client.rs, webhook.rs, mapping.rs}, vapi.rs, fake.rs, execute.rs, orders.rs, numbers.rs, tenant_resources.rs, compliance.rs, documents.rs, sms_out.rs, sms_in.rs, a2p.rs, voice.rs, porting.rs, port_out.rs, reconcile.rs, money.rs, invoicing.rs}`; `handlers/phone/{catalogue.rs, numbers.rs, requests.rs, compliance.rs, sms.rs, wait.rs, calls.rs, consent.rs, routes.rs, connectors.rs, port_outs.rs, charges.rs, platform.rs}`; `handlers/hooks_telnyx.rs`; `consumers/phone.rs` (the `pm-phone` consumer); `mailbox/sms.rs`, `mailbox/calls.rs`; `crons/phone.rs`; `jobs/phone_reconcile.rs`; `console/pages/phone/*.rs`; `mcp/tools.rs` (eleven tools); `crates/cli/src/commands/phone.rs`; hooks in other milestones' files listed in [§36](#36-milestones) |
-| Tables | D1: `phone_tenants`, `phone_numbers`, `phone_number_releases`, `phone_requests`, `phone_compliance_profiles`, `phone_compliance_documents`, `phone_requirement_groups`, `phone_registrations`, `phone_voice_connectors`, `phone_voice_routes`, `phone_port_outs`, `phone_consent`, `phone_charges`, `phone_provider_events`, `phone_message_index` (new); `service_accounts.sms_senders_json` (new column). Mailbox: `sms_conversations`, `sms_messages`, `sms_media`, `sms_verifications` (with `vault_item_id`, `vault_consumed_at`, `vault_use_id` for the vault's code source), `calls` (new); `idempotency.sms_id` (new column). `TenantQuota`: counters `phone_spend:*`, `sms:*`, holds of feature `phone_spend`. R2: `phone-staging/…`, `t/{ten}/phone/docs/{cpd}`, `t/{ten}/i/{idn}/sms/{sms}/m/{n}` ([§24](#24-privacy), [Data model](data-model.md)) |
-| Contracts | The routes of [§28](#28-mcp-and-cli) and the [REST API](../../reference/api.md) (catalogue, search, requests, numbers, routes, connectors, compliance, documents, SMS, `sms/wait`, calls, consent, port-outs, charges, platform reconcile and adopt); `POST /hooks/telnyx` (no key; Ed25519 signature); the permissions `phone:read`, `phone:request`, `phone:send`, `phone:call`, `phone:approve`, `phone:manage`, `phone:compliance`; the events of [§25](#25-events-and-audit); the policy fields of [§19](#19-policy); the errors of [§22](#22-failure-handling); the ID prefixes `pnm_ phr_ cpp_ cpd_ sms_ smc_ cal_ vcn_ vrt_ pto_ pti_ a2p_ chg_ pev_`; the variables `PM_PHONE`, `PM_TELNYX_API_KEY`, `PM_TELNYX_PUBLIC_KEY`, `PM_TELNYX_API_BASE`, `PM_TELNYX_ACCOUNT_ID`, `PM_PHONE_CATALOGUE`, `PM_PHONE_RATE_CARD`, `PM_PHONE_KYC_RETENTION_DAYS`; the queue binding `Q_PHONE` (queues `pm-phone`, `pm-phone-dlq`); the ops switch `phone` |
+| Requirements | FR-PHN-1 to FR-PHN-54 (this page, [§33](#33-functional-requirements)); it extends FR-IDN-2, FR-IDN-4, FR-IDN-10, FR-IN-5, FR-IN-11, FR-SCR-1, FR-PRV-1 to FR-PRV-6, FR-BILL-1 to FR-BILL-6, FR-TEN-4, FR-CON-6 and FR-KEY-4 |
+| Edge cases | [P1](#34-edge-cases)–[P127](#34-edge-cases) (section `P · Phone numbers` of the [edge-case register](../edge-cases.md); P107 is integrator-owned) |
+| Code | `crates/core/src/phone/{mod.rs, e164.rs, catalogue.rs, requests.rs, budget.rs, onboarding.rs, capabilities.rs, numbers.rs, orders.rs, sms.rs, segments.rs, consent.rs, verify.rs, a2p.rs, voice.rs, porting.rs, money.rs, telnyx.rs}` (validation, state machines, the quote digest, the standing budget, onboarding status, capability facets, the policy pipeline, segment counting, status and error mapping from Telnyx; pure), `crates/core/data/phone-catalogue.json`, `crates/core/data/phone-rate-card.json`; `crates/worker/src/phone/{mod.rs, provider.rs, telnyx/{client.rs, webhook.rs, mapping.rs}, vapi.rs, fake.rs, execute.rs, buy.rs, onboarding.rs, orders.rs, numbers.rs, tenant_resources.rs, compliance.rs, documents.rs, sms_out.rs, sms_in.rs, a2p.rs, voice.rs, porting.rs, port_out.rs, reconcile.rs, money.rs, invoicing.rs}`; `handlers/phone/{catalogue.rs, numbers.rs, buy.rs, setup.rs, budget.rs, requests.rs, compliance.rs, sms.rs, wait.rs, calls.rs, consent.rs, routes.rs, connectors.rs, port_outs.rs, charges.rs, platform.rs}`; `handlers/hooks_telnyx.rs`; `consumers/phone.rs` (the `pm-phone` consumer); `mailbox/sms.rs`, `mailbox/calls.rs`; `crons/phone.rs`; `jobs/phone_reconcile.rs`; `console/pages/phone/*.rs`; `mcp/tools.rs` (twelve tools); `crates/cli/src/commands/phone.rs`; hooks in other milestones' files listed in [§36](#36-milestones) |
+| Tables | D1: `phone_tenants`, `phone_numbers`, `phone_number_releases`, `phone_requests`, `phone_onboarding_drafts`, `phone_compliance_profiles`, `phone_compliance_documents`, `phone_requirement_groups`, `phone_registrations`, `phone_voice_connectors`, `phone_voice_routes`, `phone_port_outs`, `phone_consent`, `phone_charges`, `phone_provider_events`, `phone_message_index` (new); `service_accounts.sms_senders_json` (new column). Mailbox: `sms_conversations`, `sms_messages`, `sms_media`, `sms_verifications` (with `vault_item_id`, `vault_consumed_at`, `vault_use_id` for the vault's code source), `calls` (new); `idempotency.sms_id` (new column). `TenantQuota`: counters `phone_spend:*`, `sms:*`, holds of feature `phone_spend`. R2: `phone-staging/…`, `t/{ten}/phone/docs/{cpd}`, `t/{ten}/i/{idn}/sms/{sms}/m/{n}` ([§24](#24-privacy), [Data model](data-model.md)) |
+| Contracts | The routes of [§28](#28-mcp-and-cli) and the [REST API](../../reference/api.md) (catalogue, setup, budget, one-call purchase, search, requests, numbers, routes, connectors, compliance, documents, SMS, `sms/wait`, calls, consent, port-outs, charges, platform reconcile and adopt); `POST /hooks/telnyx` (no key; Ed25519 signature); the permissions `phone:read`, `phone:request`, `phone:send`, `phone:call`, `phone:approve`, `phone:manage`, `phone:compliance`; the events of [§25](#25-events-and-audit); the policy fields of [§19](#19-policy), among them the standing budget `phone.auto_approve` and the registration cap; the errors of [§22](#22-failure-handling); the ID prefixes `pnm_ phr_ pdr_ cpp_ cpd_ sms_ smc_ cal_ pvc_ vrt_ pto_ pti_ a2p_ chg_ pev_` (`pvc_` for voice connectors, because the vault design uses `vcn_` for its consumers); the variables `PM_PHONE`, `PM_TELNYX_API_KEY`, `PM_TELNYX_PUBLIC_KEY`, `PM_TELNYX_API_BASE`, `PM_TELNYX_ACCOUNT_ID`, `PM_PHONE_CATALOGUE`, `PM_PHONE_RATE_CARD`, `PM_PHONE_KYC_RETENTION_DAYS`; the queue binding `Q_PHONE` (queues `pm-phone`, `pm-phone-dlq`); the ops switch `phone` |
 | Limits | [§26](#26-limits), to be copied to [Limits › Phone numbers](../../reference/limits.md) |
 | Built in | [M38](#m38--phone-numbers-requests-and-compliance-after-m5-m6-m8-m14-m17-foundation-m21-m22-and-m27) (numbers, requests, compliance, money core), [M39](#m39--sms-after-m38-m30-and-m31) (SMS, consent, verification, US A2P), [M40](#m40--voice-routes-and-calls-after-m38) (voice routes, calls, emergency settings), [M41](#m41--porting-port-out-guard-reconciliation-invoicing-and-migration-after-m38-m39-m40-and-the-vault-core-m42) (porting, the port-out guard, the nightly reconciler, invoicing, Pylota's migration) |
 
@@ -50,16 +52,23 @@ compliance profile: its company name, registration and addresses, never TREFT LT
 ([§4](#4-compliance-profiles-and-kyc-documents)). TREFT is the reseller of record with Telnyx and keeps the
 KYC records the reseller terms require; it never sub-allocates numbers registered in its own name.
 
-**Business end users only, in v1.** A tenant's compliance profile describes a business (a company, a
-limited liability partnership or a registered partnership). Individuals and sole traders are refused
-(`422 compliance_incomplete`, `details.reason = "entity_type"`): several number types are business-only
-(Ireland mobile, German and French toll-free), and individual KYC multiplies the personal data held
-(Telnyx DID requirement articles for IE, DE, FR, read 2026-10-24).
+**Business end users, and sole traders by owner decision.** A tenant's compliance profile describes a
+business (a company, a limited liability partnership or a registered partnership). Several number types are
+business-only (Ireland mobile, German and French toll-free), and individual KYC multiplies the personal data
+held (Telnyx DID requirement articles for IE, DE, FR, read 2026-10-24). Whether a **sole trader** may hold
+numbers is an open owner decision with counsel ([§1.1](#11-sole-traders-an-owner-decision)); until it is
+recorded, a sole-trader profile is refused (`422 compliance_incomplete`, `details.reason = "entity_type"`)
+and individuals are always refused.
 
-**Agents ask; people decide.** An agent can search for numbers, ask for one, send SMS within policy, place
-calls within policy or approval, and wait for a code. It can never buy, port, release, submit KYC, pay a
-registration fee or change where calls go. Those are **phone requests** that a person approves
-([§5](#5-phone-requests-approval-for-everything-that-costs-money-or-cannot-be-undone)). No agent and no
+**Agents ask; people decide; set-up is once.** An agent can search for numbers, buy one inside a standing
+budget a person set ([§5.7](#57-the-standing-purchase-budget)) or ask for one outside it, send SMS within
+policy, place calls within policy or approval, and wait for a code. It can never port, release (other than a
+release its purchase already scheduled, [§6.8](#68-throwaway-numbers)), submit KYC, pay a registration fee,
+change where calls go or set its own budget. Those are **phone requests** that a person approves
+([§5](#5-phone-requests-approval-for-everything-that-costs-money-or-cannot-be-undone)). The slow, legally
+required steps (the tenant's regulatory identity for a country, the US texting registration) happen once per
+tenant and country in **phone onboarding** ([§4.7](#47-phone-onboarding)), so a later purchase is one call
+([§6.7](#67-one-call-purchase)). No agent and no
 tenant ever holds a Telnyx credential; the Telnyx key is a Worker secret, and the provider's hosted MCP
 server, whose one generic `invoke_api_endpoint` tool reaches every billable operation, is never exposed
 (Telnyx remote MCP documentation, read 2026-10-24).
@@ -78,6 +87,36 @@ within their own customer application" (vonage.com/legal/communications-apis/ter
 search on 2026-10-24). Holding number ranges from a regulator (Ofcom, ComReg, BNetzA, ARCEP, CNMC, AGCOM,
 ACM) is out of scope: the licensing, emergency and interception duties do not fit a service run by one
 person ([ADR 0015](../adr/0015-solo-operator.md)).
+
+### 1.1 Sole traders: an owner decision
+
+Independent businesses are often sole traders, and the first tenants to hold numbers (Pylota's car-rental
+operators, [§31](#31-pylota-agentic-os-parity-and-migration)) include them. The decision is the owner's,
+with counsel ([§32](#32-questions-for-counsel), question 10), and must be recorded in
+[ADR 0020](../adr/0020-phone-numbers.md) before M41's acceptance. The options:
+
+| Option | Effect | Cost |
+|---|---|---|
+| (a) Allow `sole_trader` profiles for GB and US rows | A sole trader's profile holds the proprietor's name, trading name, address and, for the US, the details of a sole-proprietor 10DLC brand ([§13.1](#131-us-sole-proprietor-brands)); the proprietor is the representative, whose data is sealed as today | More personal data held and erased; per-country rules for individuals to map; counsel's answer on question 10 |
+| (b) Allow `sole_trader` for the US only | US sole-proprietor brands only (one number, an SMS one-time code to the proprietor's US or Canadian mobile); GB stays business-only | GB sole traders get no number from Pylota Identity |
+| (c) Refuse sole traders (the cautious default until a decision is recorded) | New purchases need a business profile | Sole-trader tenants cannot buy, and adopted numbers need the exit path below |
+
+**Adoption never strands a number.** Under every option, a number adopted from a platform-wide group
+([§7.6](#76-adoption-for-pylotas-migration)) whose tenant cannot have an eligible profile keeps working, with
+a dated exit:
+
+1. The number's `legacy_deadline` is the later of its adoption plus 90 days and the date the sole-trader
+   decision is recorded plus 90 days. Until the decision is recorded the deadline is `null`, and only the
+   60-, 30- and 7-day reminders wait; everything else about the number works.
+2. Before the deadline the tenant either re-papers under an eligible profile, or **ports the number out** to a
+   carrier of its own choosing (its own mobile contract keeps the number). Pylota Identity helps with the
+   port-out: a person sees the PIN in the console ([§16](#16-the-port-out-guard)) and the port-out is
+   authorised the moment it arrives, because the tenant asked for it.
+3. At the deadline a number still legacy is **not released**. It moves to `suspended` with
+   `reason = "legacy_unpapered"`: inbound keeps working (the number's owner can still be reached and can still
+   port it away), outbound SMS and calls are refused with `409 phone_number_not_ready`
+   (`details.reason = "legacy_unpapered"`), and the monthly charge continues until the tenant re-papers, ports
+   out or approves a release. No timer ever releases a number.
 
 ## 2. The provider
 
@@ -115,6 +154,14 @@ move between accounts without porting is not documented (open question for Telny
   recordings and speech-to-text; the setting can be changed once and never reversed; whether KYC documents
   and addresses follow it is not documented (Telnyx data locality documentation, read 2026-10-24). The
   recommendation is EU, because the first tenants are in the UK and Ireland ([§39](#39-open-questions-for-the-owner)).
+
+**Status on Pylota Identity Cloud** (reported by the owner on 2026-10-26): TREFT's Telnyx account orders and
+runs GB mobile numbers today; US is pending. The account level is not assumed from that report:
+`idvy setup phone` probes it (a Verified-only read answered with 10038 means not Verified) and records the
+result in `platform_state.phone_account` as `{level, probed_at, us_enabled}` through `POST /v1/platform/phone/probe`. A catalogue row whose country
+needs the Verified level reports `eligible: false` with `reason = "platform_prerequisite"` in
+`GET /v1/phone/countries` and in the setup status ([§4.7](#47-phone-onboarding)) until the probe passes and
+the operator turns the row on ([§2.5](#25-us-enablement)).
 
 ### 2.2 The `PhoneProvider` trait
 
@@ -214,6 +261,24 @@ the reseller annex, the account level). It writes nothing else to the account: t
 created per tenant ([§8](#8-tenant-provider-resources)). `idvy doctor` re-checks every item, plus the
 signature of a test webhook (`POST /hooks/telnyx` of a Telnyx test event).
 
+### 2.5 US enablement
+
+GB is in place; the US rows stay `eligible: false` (`platform_prerequisite`) until each step below is done,
+in this order. Each step names its proof.
+
+| Step | Who | Proof |
+|---|---|---|
+| 1. The Telnyx account at the Verified level, which orders numbers outside the account's own country and enables 10DLC and toll-free verification ([§2.1](#21-one-account-and-provider_account_id-everywhere)) | Owner (KYC of TREFT LTD and Telnyx's agent evaluation) | `idvy setup phone` records `level = "verified"` |
+| 2. 10DLC as an ISV on the account: brand and campaign webhooks to `/hooks/telnyx`, every path under `/v2` ([§13](#13-us-a2p-10dlc-and-toll-free-verification)) | Build (M39) | `live::phone::a2p_paths` and `live::phone::a2p_events` pass on staging |
+| 3. The US local row turned on, with each number reporting `outbound_sms` ([§6.4](#64-readiness-capabilities-and-pylotas-failure-codes)) | Operator (`PM_PHONE_CATALOGUE`, or the release that flips the row) | `GET /v1/phone/countries` lists US local as eligible for a ready tenant |
+| 4. Emergency addresses for numbers that place calls ([§14.8](#148-emergency-calling)) | Build (M40) | `it::phone::us_emergency` and `live::phone::e911_address` |
+| 5. One real US business onboarded end to end on staging (brand, campaign, a number, a text delivered), and one GB-registered business's US brand ([§13.2](#132-brands-registered-outside-the-us)) | Owner and build | `live::phone::us_onboarding_end_to_end`, `live::phone::uk_brand_registration` |
+| 6. The standing budget and the one-call route ([§5.7](#57-the-standing-purchase-budget), [§6.7](#67-one-call-purchase)) | Build (M38) | `it::phone::buy_within_budget` |
+
+Until step 5's second test passes and counsel has answered question 11, a US number bought by a tenant whose
+profile is registered outside the US is sold for receiving and inbound calls only: its `outbound_sms` is
+`not_available` with `reason = "brand_country_not_supported"`, and its quote says so.
+
 ## 3. The country catalogue
 
 ### 3.1 Rows and fields
@@ -234,6 +299,10 @@ What can be bought, where, with which capabilities and on which conditions is da
 | `pre_approval` | Whether a group can be approved before ordering (Italy cannot) |
 | `local_presence` | `none`, `address_in_country`, `address_in_area`, `physical_presence` |
 | `sender_rules` | Long-code sending rules for SMS sent from the number: `us_a2p` (10DLC or toll-free verification), `none`; and per destination `sender_substitution_risk` notes |
+| `destinations` | Per destination country, whether SMS from this row reaches it: `tested_ok` (a contract test delivered a text, with its date), `untested`, or `not_supported` (with the source). A send to an `untested` or `not_supported` destination is refused ([§12.2](#122-policy-pipeline) step 6) ([§3.5](#35-sending-across-borders)) |
+| `default_for_country` | `true` on the row a purchase uses when it names only the country: GB mobile, US local ([§6.7](#67-one-call-purchase)) |
+| `entity_types` | The profile entity types the row may be bought under (`business`, and `sole_trader` once the owner allows it for the row, [§1.1](#11-sole-traders-an-owner-decision)) |
+| `registration` | For rows whose SMS needs a registration before sending (`us_a2p`): the fee items (rate-card keys) and `typical_wait_days` shown in quotes and the setup status ([§5.3](#53-quotes-and-the-digest)) |
 | `quiet_hours` | For marketing SMS **to** the country: time zone, local start and end, days off, dated holidays per year (France: no marketing on Sundays, on public holidays or from 22:00 to 08:00; Telnyx France SMS guideline 6531603, read 2026-10-24) |
 | `emergency` | `{numbers, outbound_supported, address_registration}` ([§14.8](#148-emergency-calling)) |
 | `rate_card_key` | The rate card row ([§18.1](#181-prices-currency-and-the-rate-card)) |
@@ -279,8 +348,10 @@ another rule set to keep current.
   `details.local_presence` ([P3](#34-edge-cases)).
 - **No sub-allocation from TREFT's name.** Every order carries the requirement group of the tenant's own
   profile where the row has `requirement_group` other than `none`, and the profile's legal entity is the
-  tenant. A request whose tenant has no approved profile for that row is refused
-  (`409 compliance_not_approved`), so no number is ever activated under TREFT's identity
+  tenant. A purchase whose tenant has no approved profile for that row waits on onboarding
+  (`blocked_by: ["compliance"]`, [§5.8](#58-requests-that-wait-on-onboarding)) and is never executed until
+  the group is approved; other request kinds that need an approved profile (`port_in`) are refused with
+  `409 compliance_not_approved`. Either way no number is ever activated under TREFT's identity
   ([P5](#34-edge-cases)). Pylota's platform-wide requirement group
   is not carried over except for numbers adopted during migration, each of which must be re-papered under
   its tenant's profile within 90 days ([§7.6](#76-adoption-for-pylotas-migration)).
@@ -296,6 +367,24 @@ A row moves between statuses only by a release (or by the operator's `PM_PHONE_C
 `requirements` set applies to the next submission; a profile already approved for the row stays approved
 until the provider says otherwise (a requirement group can become `no-longer-eligible`, [§4.4](#44-states-expiry-and-re-papering)).
 
+### 3.5 Sending across borders
+
+A tenant may hold numbers in several countries, and `phone.sms.allowed_destination_countries` lets it text
+any of them. Whether a text from one country's long code reaches another country's handsets is not the
+same question, and the evidence is thin:
+
+- AgentPhone's API reference says its verification codes go "through carrier-registered sender IDs, so it
+  reaches countries where plain application SMS from a US long code is not deliverable (e.g. Greece, UAE, the
+  Philippines, the UK)" (npm `agentphone` 1.0.25, `reference.md`, Verification, read 2026-10-26). The US local
+  row therefore marks GB `not_supported`.
+- Whether US carriers filter A2P traffic from a GB mobile number to US handsets was not found in what was
+  read. The GB mobile row marks US `untested`.
+
+A row's `destinations` change only by a catalogue release that cites `live::phone::cross_border_sms`
+(`gb_mobile_to_us`, `us_local_to_gb`), which sends a text each way on staging and records delivery receipts.
+A same-country destination is always `tested_ok` once the row's own contract tests pass. The guide tells a
+tenant that texts customers in two countries to hold a number in each.
+
 ## 4. Compliance profiles and KYC documents
 
 ### 4.1 The profile
@@ -307,8 +396,9 @@ name the tenant's numbers are registered. It is created and edited by a key hold
 | Field | Rule |
 |---|---|
 | `legal_name`, `trading_name` | 1–200 characters |
-| `entity_type` | `limited_company`, `llp`, `partnership`, `public_company`, `non_profit`. Individuals and sole traders are refused in v1 |
+| `entity_type` | `limited_company`, `llp`, `partnership`, `public_company`, `non_profit`; `sole_trader` only where the owner's decision and the row's `entity_types` allow it ([§1.1](#11-sole-traders-an-owner-decision)). Individuals are refused |
 | `registration_country`, `company_number` | ISO country; the registry number (Companies House for a UK company, accepted by Telnyx toll-free verification as `businessRegistrationType: "Companies House"`) |
+| `company_registry` | `{country, region, name}`: the register that holds `company_number`. For a UK company `{GB, null, "Companies House"}`; for a US company the state, because US companies are registered with a state (`{US, "US-DE", "Delaware Division of Corporations"}`); for an Irish company `{IE, null, "Companies Registration Office"}`. `region` is an ISO 3166-2 code. Required when `registration_country` has more than one register |
 | `tax_ids` | Per country: VAT, CIF, SIREN, Italian VAT, US EIN. **Sealed** (`tax_ids_sealed`) |
 | `website`, `use_case` | The business use case text required by several countries; 1–1,000 characters |
 | `representative` | Name, role, email and phone of the authorised representative; email and phone **sealed** (`representative_sealed`); some countries also need date and place of birth, nationality and a personal tax code (Italy), kept in the same sealed object and asked for only when a row needs them |
@@ -349,6 +439,20 @@ Worker caches the set per (country, type, action, version) for 24 hours in `phon
 a profile field or a document kind. A requirement it cannot map stops submission with
 `422 compliance_incomplete` and `details.missing[]` naming it, and raises `phone_requirement_unmapped` for
 the operator ([P11](#34-edge-cases)).
+
+The mapping depends on where the tenant is registered as well as on the number's country, because a
+provider requirement names a kind of document, not the document a given country issues.
+`core::phone::catalogue::document_for(requirement, registration_country, company_registry)` returns the
+document kinds that satisfy a requirement and the wording shown to the person:
+
+| Requirement (as the provider names it) | GB-registered | US-registered | IE-registered | Elsewhere |
+|---|---|---|---|---|
+| Company registration document | Companies House certificate of incorporation (`company_registration_certificate`) | The state's certificate of incorporation or formation, or the articles (`company_registration_certificate`, `company_registry.region` required) | CRO certificate of incorporation | `company_registration_certificate`, and the submission waits for the operator's review (`phone_requirement_unmapped`) |
+| Proof of address under 3 months | A utility bill or bank statement (`proof_of_address`, `valid_until` set to its date + 3 months) | The same, for a US address | The same | The same |
+| Business registration number for toll-free verification (`businessRegistrationType`) | `"Companies House"` (Telnyx toll-free verification guide, read 2026-10-24) | The value Telnyx accepts for a state registration, found by `live::phone::toll_free_registration_types` before US-registered tenants can submit | Found by the same test | Found by the same test |
+
+A requirement mapped to `other` for a registration country is never guessed: the submission stops with
+`422 compliance_incomplete` and `details.missing[]` until a catalogue release maps it.
 
 Submitting a profile for a (country, number type, action) is a **phone request** of kind
 `submit_compliance` that a person approves, because it sends personal data and identity documents to a
@@ -425,6 +529,72 @@ Identity keys and agents never read any of it: a compliance route answers an ide
   audit row naming the operator and the reason (1–500 characters). It is the only path by which document
   bytes leave the Worker other than submission to the provider.
 
+### 4.7 Phone onboarding
+
+The regulatory work a country needs is done **once per tenant and country**, not once per number. Phone
+onboarding is the guided view of that work: the profile, the documents, the requests a person approves, the
+provider's reviews and the platform's own prerequisites, as one status per country, so that an agent always
+knows what is missing and who must act.
+
+| Country | Once per tenant | Then, for every number |
+|---|---|---|
+| GB | A business profile and its documents; one `submit_compliance` for GB mobile ordering, approved by a person; the provider's review (about 72 hours, [§3.2](#32-the-launch-catalogue)) | Every GB mobile order carries the tenant's approved requirement group |
+| US | A profile (US local needs no documents to order); for texting, one `register_us_a2p` (brand and campaign) approved by a person, and carrier vetting; for calls, an emergency address per calling number | Every US number joins the tenant's campaign at configuration ([§13](#13-us-a2p-10dlc-and-toll-free-verification)) |
+
+**The status.** `GET /v1/tenants/{tenant_id}/phone-setup` (`phone:read`, every key level: an identity key may
+read it, because it holds no personal data) returns one entry per catalogue country the tenant's policy
+allows:
+
+```json
+{ "country": "US", "status": "action_needed",
+  "steps": [
+    { "kind": "platform_prerequisite", "status": "done" },
+    { "kind": "profile", "status": "done" },
+    { "kind": "register_us_a2p", "status": "not_started", "who": "person",
+      "fee": { "setup_pence": 2839, "monthly_pence": 823 }, "typical_wait_days": [7, 15] },
+    { "kind": "enable_emergency", "status": "optional", "who": "person", "applies_to": "numbers that place calls" } ],
+  "after_setup": { "outbound_sms": "enabled", "inbound_sms": "enabled", "inbound_calls": "enabled",
+                   "outbound_calls": "registration_required" },
+  "next_step": { "who": "person", "kind": "register_us_a2p",
+                 "console_url": "https://console.example.com/phone/setup/US", "draft_id": "pdr_01JB…" } }
+```
+
+| `status` | Meaning |
+|---|---|
+| `not_started` | Nothing submitted |
+| `in_review` | Everything a person must do is done; the provider or the carriers are reviewing |
+| `action_needed` | A person must act (fill a field, upload a document, approve a request, answer a rejection); `next_step` names it |
+| `ready` | A purchase for the country's default row can execute, and every capability that needs a registration has it |
+| `unavailable` | The platform cannot offer the country to this tenant (`platform_prerequisite`, `local_presence_required`, `entity_type`, or `brand_country_not_supported` for US texting) with `reason` |
+
+`steps[].kind` is one of `platform_prerequisite`, `profile`, `documents`, `submit_compliance`,
+`register_us_a2p`, `verify_toll_free` and `enable_emergency`; each step's `status` is `not_started`,
+`draft`, `waiting_for_person`, `in_review`, `done`, `rejected` (with the provider's comments as escaped
+text), `optional` or `not_applicable`. `typical_wait_days` comes from the catalogue row's `registration`
+([§3.1](#31-rows-and-fields)); the only public figure read for US 10DLC is AgentPhone's "Carrier approval
+typically takes 7-10 business days" (npm `agentphone` 1.0.25, `reference.md`, Registration, read 2026-10-26),
+which the catalogue widens to 7–15 calendar days until `live::phone::us_onboarding_end_to_end` measures
+it. `core::phone::onboarding::status(facts) -> SetupStatus` is pure; the handler loads the profile, its group
+states, the registrations and `platform_state.phone_account`. The MCP tool `phone_setup_status` returns the
+same object.
+
+**Agents draft; people submit.** An agent knows what the business does and how it talks to its customers,
+so it may draft the text a registration needs: `PUT /v1/tenants/{tenant_id}/phone-setup/{country}/draft`
+(`phone:request`, every key level, `Idempotency-Key` optional) stores a **draft** (`phone_onboarding_drafts`,
+`pdr_`) with the use-case description, the business description, 2–5 sample messages (each 20–1,024
+characters and containing the brand name, the rule AgentPhone's registration states for US campaigns: npm
+`agentphone` 1.0.25, `RegistrationRequest`, read 2026-10-26), the opt-in consent description, the website,
+the privacy policy and terms URLs. A draft never holds a tax identifier, a representative's personal data or a
+document, and a field outside its schema is refused (`400 invalid_request`). Drafts are untrusted text,
+shown escaped, with `drafted_by_key_id`. A person opens the console's **Phone › Setup** page, sees the
+draft beside the profile, edits it, attaches documents and submits, which creates the `submit_compliance` or
+`register_us_a2p` request and approves it in the same step (the person who submits is the person who decides,
+after re-authentication). A draft is deleted when its request is created, and after 30 days untouched.
+
+**Prefill.** An integrator that already holds a tenant's business details (Pylota holds its operators')
+writes them with `PATCH …/phone-compliance` and the draft route through its partner key, so most people see a
+confirmation screen rather than a blank form.
+
 ## 5. Phone requests: approval for everything that costs money or cannot be undone
 
 ### 5.1 Kinds
@@ -438,7 +608,7 @@ application, undecided requests expire after 7 days, and the tenant's queue appe
 
 | Kind | Created by | What approval lets happen | Billable at the provider |
 |---|---|---|---|
-| `purchase_number` | `phone:request` (any key level, agents included) | Order one number (exact, or any number matching criteria at or under a price) and configure it | Yes: one-time and monthly charges |
+| `purchase_number` | `phone:request` (any key level, agents included), directly or through the one-call route ([§6.7](#67-one-call-purchase)) | Order one number (exact, or any number matching criteria at or under a price) and configure it; with `expires_at`, also release it then ([§6.8](#68-throwaway-numbers)). Inside the tenant's standing budget the request is created already approved ([§5.7](#57-the-standing-purchase-budget)) | Yes: one-time and monthly charges |
 | `port_in` | `phone:request` with `phone:compliance` for the losing-carrier details | Submit porting orders for the listed numbers | Provider charges only for changes, rejections and expedites ([§15](#15-porting-in)) |
 | `release_number` | `phone:request` | Remove the voice route and delete the number at the provider | No; it cannot be undone |
 | `submit_compliance` | `phone:compliance` | Send the profile and documents to the provider for a (country, type, action) | No; it moves personal data to a processor |
@@ -472,12 +642,15 @@ pending_approval ───────────▶ approved ─────�
 | `quote` | The prices the approver sees, in GBP pence, with `valid_until` ([§5.3](#53-quotes-and-the-digest)) |
 | `digest` | 64 hex characters binding `kind`, `identity_id`, `payload` and `quote` |
 | `status` | As above |
-| `reason` | For `rejected` (`operator`, `expired`), `failed` (a code of [§6.4](#64-readiness-and-pylotas-failure-codes) or of [§22](#22-failure-handling)), `canceled` (`requester`, `identity_deleted`, `tenant_erasing`) |
+| `reason` | For `rejected` (`operator`, `expired`), `failed` (a code of [§6.4](#64-readiness-capabilities-and-pylotas-failure-codes) or of [§22](#22-failure-handling)), `canceled` (`requester`, `identity_deleted`, `tenant_erasing`) |
 | `requested_by_key_id`, `requested_by_user_id` | Who asked |
 | `decided_by_key_id`, `decided_by_user_id`, `on_behalf_of`, `note`, `decided_at` | Who decided, for whom, why |
 | `attempt`, `customer_reference`, `spend_intent_at` | The current execution attempt ([§6.3](#63-spend-intent-customer_reference-and-uncertain)) |
 | `exec_token`, `exec_until` | The execution lease ([§5.5](#55-execution-leases-and-attempts)) |
 | `next_check_at`, `checks` | When the reconciler looks next, and how often it has |
+| `blocked_by` | For `purchase_number`: the onboarding steps the purchase waits on (`compliance`, `platform_prerequisite`), empty when none. The executor never claims a blocked request ([§5.8](#58-requests-that-wait-on-onboarding)) |
+| `approved_by` | `person`, `key` (under `phone.key_approval`), `standing_budget` (with `budget_version`) or `purchase` (a release scheduled by an approved purchase) |
+| `release_at` | For `purchase_number` with `expires_at`: when the scheduled release runs ([§6.8](#68-throwaway-numbers)) |
 | `result` | IDs created (`number_id`, `port_in_ids`, `registration_id`), never provider IDs for tenant and identity keys |
 | `expires_at` | While `pending_approval`: `created_at` + 7 days |
 
@@ -498,7 +671,29 @@ Every request that leads to a charge carries a **quote** computed from the rate 
 ```
 
 For `purchase_number` with `selection.mode = "any"`, the quote is a ceiling (`max_setup_pence`,
-`max_monthly_pence`). The quote is valid for 7 days, the life of a pending request. `digest` is
+`max_monthly_pence`). The quote is valid for 7 days, the life of a pending request.
+
+**What comes next is in the quote.** A number is not always usable for everything its row promises the
+moment it is bought: a US number texts only after the tenant's 10DLC registration, and places calls only
+after an emergency address. So a `purchase_number` quote carries `follow_on[]`, one entry per capability that
+will still need a registration for this tenant when the number arrives:
+
+```json
+"follow_on": [
+  { "capability": "outbound_sms", "kind": "register_us_a2p", "setup_pence": 2839, "monthly_pence": 823,
+    "typical_wait_days": [7, 15], "who": "person", "once_per": "tenant" },
+  { "capability": "outbound_calls", "kind": "enable_emergency", "monthly_pence": 173, "who": "person",
+    "once_per": "number" } ]
+```
+
+An entry is left out when the tenant has already done it (its registration is `ready`), and an entry whose
+capability cannot be had at all for this tenant says so (`"kind": "not_available", "reason":
+"brand_country_not_supported"`). The approval page and the one-call route's answer show `follow_on` beside
+the price, and the digest covers it, so a person who approves a US number has seen what making it text costs.
+
+**Expiry is in the quote.** A purchase with `expires_at` shows the setup price, the monthly price of every
+month started before `expires_at` (months are charged whole, [§18.2](#182-what-is-charged)), and the
+scheduled release. `digest` is
 `hex(sha256(canonical_json({kind, identity_id, payload, quote})))` (`core::phone::requests::digest`), as a
 draft's digest is ([Drafts § 2.4](drafts.md#24-revision-etag-and-digest)). An approval must name the
 current digest. If execution finds a higher price than the quote (the rate card changed, or the provider's
@@ -575,6 +770,73 @@ The every-minute cron sets `pending_approval` requests past `expires_at` to `rej
 cancel, complete, fail}`) and a platform event ([§25](#25-events-and-audit)) in the same D1 batch as the
 change, with `tenant_id` and `identity_id` set and `sequence` null, as the service ledger's events are
 ([Service sign-up ledger § 6](service-accounts.md#6-events)).
+
+### 5.7 The standing purchase budget
+
+**This amends an owner rule, subject to the owner's sign-off on the pull request that carries it.** The rule
+"a person approves every purchase" becomes "a person approves every purchase, one by one or through a
+standing budget a person sets" ([ADR 0020](../adr/0020-phone-numbers.md), decision 12). Without a standing
+budget a person stands in every purchase's path, and buying a number cannot be one call. Every other kind of
+request (port, release, KYC, registration fees, routes, emergency addresses, calls) keeps per-request
+approval.
+
+`phone.auto_approve` is a tenant policy object of the **guard** class:
+
+```json
+{ "enabled": true, "countries": ["GB", "US"], "number_types": ["mobile", "local"],
+  "max_numbers_per_identity": 2, "max_new_numbers_per_month": 10,
+  "max_setup_pence_per_number": 300, "max_monthly_pence_per_number": 300,
+  "expiring_only": false, "version": 4, "set_by": { "user_id": "usr_…", "key_id": null, "on_behalf_of": null },
+  "set_at": "2026-10-26T09:00:00Z" }
+```
+
+| Field | Rule |
+|---|---|
+| `enabled` | Default `false` on every deployment and every tenant |
+| `countries`, `number_types` | Subsets of the tenant's `phone.countries` and the catalogue's offered types |
+| `max_numbers_per_identity` | 1–20; at most `phone.max_numbers_per_identity` |
+| `max_new_numbers_per_month` | 1–200 per UTC month for the tenant, counted in `TenantQuota` (`phone_budget:t:{YYYY-MM}`) with a hold taken in the same transaction as the spend hold, so two racing purchases cannot both pass the last slot |
+| `max_setup_pence_per_number`, `max_monthly_pence_per_number` | Ceilings on the quote; a candidate above them is outside the budget |
+| `expiring_only` | When `true`, only purchases with `expires_at` are covered |
+
+**Who sets it.** Setting it, or loosening any field, is a decision reserved for people
+(`Decision::SetPhoneBudget`, one new arm of `key_may_decide`): a signed-in owner or admin in the console after
+re-authentication, or a platform key or the tenant's partner key under `phone.key_approval` with
+`on_behalf_of` (Pylota sets its operators' budgets from its own app). Tightening any field, or `enabled:
+false`, is allowed to any key holding `phone:manage`. Identity keys never change it. `PUT
+/v1/tenants/{tenant_id}/phone-budget` replaces the object (`Idempotency-Key` required); `GET` reads it with this
+month's use. Every change bumps `version` and writes the audit row `phone_budget.set` and the event
+`phone_budget.changed`.
+
+**What it covers.** At creation, `core::phone::budget::covers(budget, request, counts) -> Result<(), Outside>`
+decides, purely: the budget is `enabled`; the kind is `purchase_number`; the row's country and type are in the
+budget; the identity's live numbers plus this one fit `max_numbers_per_identity`; the month's count has room;
+the quote (or, for `selection.mode = "any"`, its ceiling) is within both price ceilings; `expires_at` is set when
+`expiring_only`; and the request carries no `follow_on` entry of kind `not_available` that the caller did not
+acknowledge (`acknowledge_not_available: true`). When it covers, the request is created `approved` with
+`approved_by = "standing_budget"` and `budget_version`, in one D1 batch with the audit row
+`phone_request.approve` (`details.standing_budget = version`) and the event `phone_request.approved`, and
+executes at once. When it does not, the request is created `pending_approval` and `details.outside_budget`
+names the first rule that failed, so the agent can tell a person why it is asking.
+
+The spend caps of [§18.3](#183-spend-caps) still apply to a covered purchase, the ops switch and
+`phone.allowed` still stop it, and a later quote change at execution returns the request to
+`pending_approval` with the budget no longer applying ([§5.3](#53-quotes-and-the-digest)). The budget is not a
+key's approval of its own request: it is a person's earlier decision, recorded with its version.
+
+### 5.8 Requests that wait on onboarding
+
+A `purchase_number` for a row the tenant has not finished onboarding (no approved group for the row, or a
+platform prerequisite missing) is not refused. It is created with `blocked_by` naming what it waits on, its
+status as the budget or a person decides, and the answer's `next_step` pointing at the onboarding step
+([§4.7](#47-phone-onboarding)), so the agent has one thing to hand a person instead of a dead end. The
+executor never claims a request whose `blocked_by` is not empty. When onboarding completes (a group becomes
+`approved`, the prerequisite is recorded), the same D1 batch clears `blocked_by` on the tenant's waiting
+requests for that row and, for those already approved, queues `Execute`. A blocked request's 7-day expiry
+waits too: it expires 7 days after it is unblocked, or 30 days after creation if it never is, whichever is
+sooner. A blocked request counts against the tenant's 20 pending requests. The refusals that remain refusals
+are the ones no onboarding can fix: `422 country_not_offered`, `422 local_presence_required` and
+`422 compliance_incomplete` with `details.reason = "entity_type"`.
 
 ## 6. Getting a number
 
@@ -666,7 +928,7 @@ reconciling. So every order attempt is bracketed by Pylota Identity's own record
      state; `phone_request` becomes `in_progress`.
    - **Definitive refusal** (`4xx` with a provider error, or a `402`): before clearing anything, list orders
      by the reference. An empty, complete listing proves no order exists: the spend intent is cleared, the
-     hold released, the number row `failed` with its code ([§6.4](#64-readiness-and-pylotas-failure-codes))
+     hold released, the number row `failed` with its code ([§6.4](#64-readiness-capabilities-and-pylotas-failure-codes))
      and the request `failed`. A listing that finds an order adopts it as if accepted. A listing that is
      incomplete or fails leaves the attempt `uncertain` (never a guess) ([P25](#34-edge-cases)).
    - **Unknown** (timeout, lost connection, `5xx`): the number and the request become `uncertain`; the hold
@@ -690,7 +952,7 @@ different references, so one's recovery never adopts the other's order (a duplic
 becomes unnecessary and is kept as a check: two live orders for one
 reference raise `phone_order_duplicate` and stop the request for the operator).
 
-### 6.4 Readiness and Pylota's failure codes
+### 6.4 Readiness, capabilities and Pylota's failure codes
 
 Three facets are read back from the provider and stored separately (Pylota parity 3):
 
@@ -700,9 +962,30 @@ Three facets are read back from the provider and stored separately (Pylota parit
 | `sms_status` | `not_applicable`, `pending`, `configuring`, `ready`, `failed` | `PATCH /phone_numbers/{id}/messaging` set the tenant's messaging profile and a read-back returned the same profile |
 | `voice_status` | `not_applicable`, `pending`, `configuring`, `ready`, `failed` | The voice route of [§14](#14-voice) was created and read back |
 
-The number object reports them with `setup_state` (`ready`, `carrier_pending`, `configuring_sms`,
-`configuring_voice`) and `provisioning { status, code, retryable }`, so Pylota's mobile copy, keyed to its
-code list (`apps/mobile/lib/phone-provision-errors.ts`), keeps working. The code set is Pylota's, unchanged:
+**What the number can do.** The facets say whether configuration finished; they do not say whether an
+agent can text from the number now, because a US number also needs the tenant's 10DLC registration and a
+calling number an emergency address. So every number carries four **capability facets**, computed by
+`core::phone::capabilities::of(row, facets, registrations, emergency, legacy) -> Capabilities` on every read:
+
+| Facet | `enabled` | `activating` | `registration_required` | `not_available` |
+|---|---|---|---|---|
+| `outbound_sms` | `sms_status = ready`, and for a US sender `a2p_status = ready` (or toll-free `Verified`) | Configuration or a submitted registration is in progress | The tenant has no registration for this sender; `next_step` names `register_us_a2p` or `verify_toll_free` | The row has no `sms`, `sms_use` forbids sending, or the registration cannot be had for this tenant (`reason = "brand_country_not_supported"`), or the number is `legacy_unpapered` |
+| `inbound_sms` | `sms_status = ready` | `sms_status` pending or configuring | – | The row has no `sms` |
+| `inbound_calls` | `voice_status = ready` and a route other than `none` | Route provisioning in progress | No route set yet; `next_step` names `set_voice_route` | The row has no `voice` |
+| `outbound_calls` | A `vapi` route ready, and for a US number a registered emergency address | As above | `next_step` names `enable_emergency` or `set_voice_route` | The row has no `voice`, the route kind cannot place calls, or a US number of a tenant with no US address (`reason = "no_us_emergency_address"`, [§14.8](#148-emergency-calling)) |
+
+Each facet is `{ "state", "reason"?, "next_step"? }`, where `next_step` is `{ "who": "person" | "operator" |
+"agent", "kind", "request_id"?, "console_url"? }`. The values are AgentPhone's for its own `outboundSms`
+field (`enabled`, `activating`, `registration_required`; npm `agentphone` 1.0.25, `PhoneNumberResponse`, read
+2026-10-26), so an agent that has met one meets the other. The send pipeline's A2P gate
+([§12.2](#122-policy-pipeline) step 8) and the call routes read the same function, so a facet never says
+`enabled` for something a route would refuse.
+
+The number object also reports `setup_state` (`ready`, `carrier_pending`, `configuring_sms`,
+`configuring_voice`, and `registration_pending` when only a registration stands between the number and
+everything its row promises) and `provisioning { status, code, retryable }`, so an integrator's existing copy
+keyed to the codes keeps working. `ready` means every capability of the row is `enabled`. The code set is
+Pylota's, unchanged:
 
 | `code` | When | Terminal |
 |---|---|---|
@@ -754,6 +1037,85 @@ Four movers, each idempotent and safe under the execution lease (Pylota parity 6
    never calls the provider itself) and writes `next_check_at = now + 60 s`, so a client polling every
    5 seconds causes one provider read a minute at most (Pylota parity: written backoff).
 4. **The nightly reconciler** ([§17](#17-reconciliation)).
+
+### 6.7 One-call purchase
+
+For an agent on a tenant that has finished onboarding for the country, inside its standing budget, getting a
+number is one call, with no search first and no person in the path:
+
+```text
+POST /v1/identities/{identity_id}/phone-numbers   { "country": "GB" }                      → 201, the number
+POST /v1/identities/{identity_id}/phone-numbers   { "country": "US", "area_code": "512" }  → 201, the number
+```
+
+The design follows AgentPhone's `POST /v1/numbers`, whose fields are all optional and which buys at once from
+a prepaid balance (npm `agentphone` 1.0.25, `CreateNumberRequest` and `reference.md`, read 2026-10-26), with
+three differences: the country is required (tenants here are UK-first, so a silent US default would buy the
+wrong number); the approval is enforced on the server by the budget or a person, never by a flag the caller
+sets (AgentPhone's MCP tool `buy_number` takes `confirm: true` from the agent itself, `agentphone-mcp` `src/tools.ts`
+at `a78c5df`, read 2026-10-26); and the number is registered in the tenant's own name.
+
+`POST /v1/identities/{identity_id}/phone-numbers` (`phone:request`, every key level; an identity key only for
+its own identity; `Idempotency-Key` **required**):
+
+| Field | Rule |
+|---|---|
+| `country` | Required, ISO 3166-1 alpha-2 |
+| `type` | Default: the country's row with `default_for_country` (GB `mobile`, US `local`) |
+| `area_code`, `contains`, `locality` | Optional search criteria. A row without area codes (GB mobile) refuses them (`400 invalid_request`, `details.reason = "location_not_supported"`), as AgentPhone's search does for UK numbers, rather than ignoring them |
+| `number`, `quote_token` | Optional: an exact number from a search ([§6.1](#61-search)); otherwise `selection.mode = "any"` |
+| `expires_at` | Optional ([§6.8](#68-throwaway-numbers)) |
+| `primary_for` | Optional `["sms"]`, `["voice"]` or both |
+| `acknowledge_not_available` | Optional `true`: buy even though a `follow_on` entry says a capability cannot be had for this tenant (for example texting from a US number for a GB-registered tenant) |
+| `client_reference` | Optional, 1–128 printable ASCII, echoed in events |
+
+The handler creates the `purchase_number` request exactly as `POST …/phone-requests` would, with the same
+checks, quote, digest, budget decision ([§5.7](#57-the-standing-purchase-budget)) and onboarding block
+([§5.8](#58-requests-that-wait-on-onboarding)). Then:
+
+- **Covered and not blocked**: it claims the request and runs the execution inline, up to the order call and
+  its answer, within 15 seconds (`buy_inline_budget_ms`), under the same lease, spend intent and
+  `customer_reference` as the queued executor ([§6.3](#63-spend-intent-customer_reference-and-uncertain)).
+  When the provider accepts the order it answers **`201`** with the number object (status `under_review`,
+  `configuring` or `active`, its capability facets, and the request ID). The rest (configuration,
+  reviews) continues in the queue and is reported by `phone_number.status_changed`. If the 15 seconds run out
+  first, the run continues in the queue and the answer is `202`.
+- **Pending approval or blocked**: **`202`** with the request (`status`, `blocked_by`, `details.outside_budget`,
+  the quote with `follow_on`, and `next_step` naming who must act).
+- **Refused**: the request's errors ([§22](#22-failure-handling)).
+
+**A taken number is not the agent's problem.** With `selection.mode = "any"`, a provider answer that the
+number was taken (85001) is a definitive refusal proved by the reference listing; the run then searches again
+and orders the next candidate within the same request, up to 5 candidates (these attempts are separate from
+the 3 allowed for uncertain outcomes), and only then fails with `no_numbers_available`. With an exact
+`number`, the answer is `409 phone_number_taken` with `details.alternatives[]`: up to 5 fresh candidates in the
+search's shape, each with its quote and `quote_token`, so the agent picks one and calls again with a new
+`Idempotency-Key`, as AgentPhone's purchase answers `409` "with fresh alternatives in this same shape"
+(`reference.md`, Numbers, read 2026-10-26).
+
+The request routes stay for integrators that want a person to review every purchase, and for the console.
+
+### 6.8 Throwaway numbers
+
+An agent sometimes needs a number for one task (a sign-up whose code arrives by text) and none afterwards.
+A forgotten number keeps billing, so a purchase may carry `expires_at` (from 1 hour to 365 days after the
+request), as AgentPhone's purchase does ("`expires_at` auto-releases", PyPI `agentphone` 0.20.1,
+`async_client.py`, read 2026-10-26):
+
+- The approval of the purchase (a person's, or the budget's) covers the release at `expires_at`: the digest
+  includes it, and the request stores `release_at`.
+- 24 hours before (or at purchase, when the life is shorter), `phone_number.expiring` is emitted and the
+  tenant's owners see it in "Needs a person" when the number has SMS from the last 24 hours.
+- At `release_at` the every-minute cron creates a `release_number` request already `approved`
+  (`approved_by = "purchase"`, linked to the purchase) and queues it. The release follows every rule of
+  [§7.4](#74-release) (ownership stamp, pending orders, route removal) and the 90-day quarantine of
+  [§7.5](#75-quarantine-of-released-numbers). A release that cannot run (a pending port-out) waits and
+  retries; it never skips a safety rule.
+- `PATCH …/phone-numbers/{number_id}` with an earlier `expires_at` is allowed to `phone:request` (an agent
+  may give a number up sooner); a later one, or `null` (keep it), needs `phone:manage`, because it extends
+  spending.
+- Months are charged whole ([§18.2](#182-what-is-charged)): a number kept for one hour costs its setup
+  price and one month. The quote says so.
 
 ## 7. Numbers on identities
 
@@ -837,9 +1199,13 @@ the directory or carrying another tenant's stamp, writes the ownership stamp and
 number to the tenant's messaging profile and connection (reading each back), records the Vapi number for
 the `vapi` route ([§14.2](#142-vapi)), and creates the row `active` with `adopted_at`. An adopted number
 whose order used Pylota's platform-wide requirement group gets `compliance_status = "legacy_group"`, and its
-tenant must have the number re-papered under its own approved profile within 90 days
+tenant must have the number re-papered under its own approved profile by its `legacy_deadline`
 (`phone_compliance_legacy` notifications at 60, 30 and 7 days), because no number may stay registered in
-TREFT's name ([§3.3](#33-rules-the-catalogue-enforces)). Adoption is audited
+TREFT's name ([§3.3](#33-rules-the-catalogue-enforces)). A tenant that cannot have an eligible profile (a
+sole trader while the decision of [§1.1](#11-sole-traders-an-owner-decision) is not recorded, or under option
+(c)) keeps its number working and gets the dated exit path of §1.1; no adopted number is ever released by a
+deadline. Adoption pre-fills the tenant's onboarding ([§4.7](#47-phone-onboarding)) from the platform group's
+non-sensitive fields, so re-papering is a confirmation and a document upload, not a new form. Adoption is audited
 (`phone_number.adopt`) and emits `phone_number.status_changed` with `reason: "adopted"`. If the owner
 chooses a different Telnyx account, numbers move by port-in instead ([§15](#15-porting-in)).
 
@@ -1183,8 +1549,10 @@ is pure and takes the facts the handler loaded):
 5. **Sender.** `from` as above, and the number has the `sms` capability with `sms_use = two_way` or
    `a2p_only`.
 6. **Destination.** `to`'s country is in `phone.sms.allowed_destination_countries`, else `403
-   policy_denied` (`details.reason = "destination_country"`). Premium-rate and short-code destinations are
-   refused (`403 destination_blocked`).
+   policy_denied` (`details.reason = "destination_country"`); and the sending number's catalogue row marks
+   that country `tested_ok`, else `403 policy_denied` (`details.reason = "destination_untested"` or
+   `"destination_not_supported"`, [§3.5](#35-sending-across-borders)). Premium-rate and short-code
+   destinations are refused (`403 destination_blocked`).
 7. **Consent.** `opted_out` for this tenant's profile: `403 recipient_opted_out`. `kind: "marketing"`
    without a marketing `opted_in` entry: `403 consent_required`.
 8. **US A2P.** When `from` is a US number: a long code needs `a2p_status = ready` for the number (its 10DLC
@@ -1285,9 +1653,14 @@ Syniverse one-off fees; resubmission $15: Telnyx pricing, read 2026-10-24) is pa
 sealed `tax_ids` and is opened only in the executor at submission (Pylota parity 10). The status view
 `GET /v1/tenants/{tenant_id}/phone-registrations` returns
 `{configured, brand_status, campaign_status, numbers_registered[], failure_reasons[]}` (Pylota parity 10);
-the enforce switch is the send gate itself and cannot be turned off for US senders. Whether The Campaign
-Registry accepts a brand whose registration country is not the US, and with which identifier, is checked at
-build time before a UK tenant can submit.
+the enforce switch is the send gate itself and cannot be turned off for US senders. A tenant registers once:
+every US long code it buys later is assigned to its campaign by the configure step, so `outbound_sms` of a
+new number goes from `activating` to `enabled` without another person's decision (one registration per
+customer, as AgentPhone's `POST /v1/register` is: npm `agentphone` 1.0.25, `reference.md`, Registration, read
+2026-10-26). The fees of a `register_us_a2p` hold count against `phone.spend.registration_cap_pence`, not the
+monthly cap ([§18.3](#183-spend-caps)). An update to an approved registration (new sample messages, a new
+website) is a new `register_us_a2p` request with no brand fee, and the numbers keep sending under the current
+approval while the update is reviewed.
 
 **Toll-free verification** (`verify_toll_free` request): business identity, use case, volume, samples and
 opt-in description, and the business registration fields (`businessRegistrationNumber`, `Type`,
@@ -1296,6 +1669,51 @@ opt-in description, and the business registration fields (`businessRegistrationN
 takes 1–3 business days to start and 5–10 with the carriers (Telnyx toll-free verification guide, read
 2026-10-24). **Conflict**: the schema says the registration fields are required from January 2026, the guide
 says 17 February 2026; both dates have passed, so they are always sent.
+
+### 13.1 US sole-proprietor brands
+
+The Campaign Registry has a `SOLE_PROPRIETOR` brand type for a person trading without an EIN. Telnyx's API
+creates it like any brand and then verifies it with a one-time code sent by text to the proprietor's mobile
+number: "Only allowed for Sole Proprietor (`SOLE_PROPRIETOR`) brands … Campaigns cannot be created until OTP
+verification is complete … US/CA numbers only for real OTPs" (Telnyx OpenAPI `team-telnyx/openapi`
+`openapi/spec3.json` at `aeedb6553ea4`, `/10dlc/brand/{brandId}/smsOtp`, read 2026-10-26). AgentPhone sells the
+same type with a limit of one number per registration (npm `agentphone` 1.0.25, `RegistrationRequest`, read
+2026-10-26). Where the owner's decision allows US sole traders ([§1.1](#11-sole-traders-an-owner-decision),
+options (a) and (b)):
+
+1. The profile's `entity_type` is `sole_trader`, `registration_country` `US`, and its representative is the
+   proprietor, whose mobile must be a US or Canadian number (`422 compliance_incomplete`,
+   `details.reason = "otp_mobile_country"`).
+2. The `register_us_a2p` request creates the brand, then triggers the code. The code goes to the proprietor's
+   own handset, never to an agent or a number the tenant holds here: a person types it into the console's
+   **Phone › Setup** page, which calls `POST /v1/tenants/{tenant_id}/phone-registrations/{registration_id}/otp`
+   (`phone:compliance`, a decision reserved for people; `{ "pin" }`, never logged or stored). A code that is
+   wrong or expired answers `422 phone_registration_otp_invalid`; `…/otp/resend` triggers a new one, at most
+   5 times a day.
+3. The tenant's US numbers are limited to one with `outbound_sms` (`phone_number_limit_reached`,
+   `details.limit = "sole_proprietor_sms"`); others may receive.
+
+`live::phone::sole_prop_otp` runs the flow on staging with a mock brand (the spec allows non-US numbers for
+mock brands) before the path is offered.
+
+### 13.2 Brands registered outside the US
+
+A tenant registered in the UK that buys a US number needs a brand whose country is GB. Telnyx's brand schema
+takes `country` as any ISO 3166-1 alpha-2 code and requires `ein` only for non-profits (`CreateBrand`, Telnyx
+OpenAPI at `aeedb6553ea4`, read 2026-10-26), so the API accepts such a brand; whether The Campaign Registry and
+the carriers vet one, and which identifier they want in place of an EIN (the Companies House number is the
+candidate), was not found in what was read. Until `live::phone::uk_brand_registration` has registered a
+GB-registered business's brand and campaign on staging and counsel has answered question 11
+([§32](#32-questions-for-counsel)):
+
+- the catalogue's `us_a2p.brand_countries` is `["US"]`;
+- a US number bought by a tenant registered elsewhere reports `outbound_sms: not_available` with
+  `reason = "brand_country_not_supported"`, its quote's `follow_on` says so, and the one-call route needs
+  `acknowledge_not_available: true` to buy it ([§6.7](#67-one-call-purchase));
+- `register_us_a2p` from such a tenant answers `422 compliance_incomplete` with
+  `details.reason = "brand_country_not_supported"`.
+
+When both are done, a catalogue release adds `GB` to `brand_countries` and maps the identifier.
 
 ## 14. Voice
 
@@ -1318,7 +1736,7 @@ in Pylota's own runtime (Telnyx study, recommendation 6).
 
 ### 14.2 `vapi`
 
-The tenant registers a **voice connector** (`phone_voice_connectors`, `vcn_`): its Vapi private API key,
+The tenant registers a **voice connector** (`phone_voice_connectors`, `pvc_`): its Vapi private API key,
 **sealed** (`api_key_sealed`), and its Vapi region (`us` or `eu`). Registering, rotating and deleting a
 connector needs `phone:manage`; the key is shown never again (a one-time secret, [Security § 6.1](security.md#61-inventory)).
 The route's configuration is `{connector_id, assistant_id | squad_id, server_url, server_secret}`:
@@ -1439,7 +1857,13 @@ Each catalogue row has an `emergency` setting. In v1:
 - **United States**: a number that places calls needs a registered emergency address, or Telnyx treats its
   emergency calls as unregistered and charges a $100 penalty (Telnyx E911 setup guide, read 2026-10-24).
   An `enable_emergency` request (validated address from the profile, $1.50 a month) registers it; until then
-  the number's routes never place calls.
+  the number's routes never place calls. The address must be in the US: E911 routes a caller to the
+  emergency service for the registered location. A tenant registered outside the US whose profile holds no
+  verified US address therefore cannot place calls from a US number: `outbound_calls` is `not_available`
+  with `reason = "no_us_emergency_address"`, inbound calls work, and `enable_emergency` with a non-US
+  address answers `422 compliance_address_invalid` (`details.reason = "emergency_address_country"`). Whether
+  Telnyx offers any registration for such a tenant is a question for Telnyx ([§39](#39-open-questions-for-the-owner),
+  question 6), checked by `live::phone::e911_address`.
 - **United Kingdom and EU countries**: how emergency address registration works for these numbers is not
   documented in what was read (unknown 7.3.2 of the study). Outbound calls from agent numbers never dial
   emergency numbers (refused at step 2 of [§14.5](#145-outbound-calls)), and the tenant is told, clearly and
@@ -1575,7 +1999,10 @@ margin     = 0.40    (owner decision; placeholder)
 ```
 
 Where Telnyx's pages give two prices for one item, the card uses the higher (UK SMS $0.050 or $0.055:
-$0.055). Illustrative rows with the placeholder margin (the owner sets the real margin, [§39](#39-open-questions-for-the-owner)):
+$0.055). Regulatory pass-through fees (10DLC brand, vetting, campaign and resubmission fees) are priced at
+cost, `ceil(usd × fx × (1 + fx_buffer) × 100)`, without the margin, until the owner decides otherwise
+([§39](#39-open-questions-for-the-owner), question 1): brand and campaign up front $34.50 → £28.39; the
+campaign's $10 a month → £8.23. Illustrative rows with the placeholder margin (the owner sets the real margin, [§39](#39-open-questions-for-the-owner)):
 
 | Item | Telnyx USD (2026-10-24) | GBP price |
 |---|---|---|
@@ -1619,10 +2046,19 @@ Two caps per UTC month, enforced in the tenant's `TenantQuota` with holds, as pl
 - `phone.spend.tenant_monthly_cap_pence` (lower-only; Cloud default 2,000, £20) and
 - `phone.spend.identity_monthly_cap_pence` (lower-only; Cloud default 1,000, £10).
 
+And one cap for one-off registration fees, which a monthly cap sized for numbers and texts would otherwise
+block for good (the up-front 10DLC fees alone, $34.50, are £28.39 at cost through the card's exchange rate and
+buffer, above the £20 tenant default):
+
+- `phone.spend.registration_cap_pence` (lower-only; Cloud default 6,000, £60; `null`, no cap, in the built-in
+  defaults), per UTC month, counted in `phone_spend:reg:{YYYY-MM}`. The holds of `register_us_a2p` and
+  `verify_toll_free` count against it **instead of** the tenant and identity caps; the campaign's recurring
+  monthly fee is a recurring charge like a number's, never refused ([§13](#13-us-a2p-10dlc-and-toll-free-verification)).
+
 Every billable action takes a `phone_spend` hold of its estimated price before it runs (`Hold {feature:
 "phone_spend", units: pence, ref}` against both caps in one transaction), settles at the actual charge, and
-releases the rest. A refused hold answers `402 spend_cap_reached` with `details.scope` (`tenant` or
-`identity`), `cap_pence`, `used_pence` and `resets_at`, before any idempotency record or row is written, so
+releases the rest. A refused hold answers `402 spend_cap_reached` with `details.scope` (`tenant`,
+`identity` or `registration`), `cap_pence`, `used_pence` and `resets_at`, before any idempotency record or row is written, so
 the same key works after a person raises the cap ([P73](#34-edge-cases)). Monthly number charges are never
 refused (refusing would lose the number): they are counted, and a tenant over its cap from recurring
 charges alone gets `phone_spend.warning` at 100% and an email, but keeps its numbers. `phone_spend.warning`
@@ -1677,6 +2113,8 @@ New fields of the [tenant policy](../../reference/configuration.md#tenant-policy
 | `phone.countries` | every catalogue country | Lower-only (fewer is stricter) | Countries the tenant may buy in |
 | `phone.max_numbers_per_identity`, `phone.max_numbers_per_tenant` | 5, 20 | Lower-only | [§7.2](#72-roles-moves-and-limits) |
 | `phone.spend.tenant_monthly_cap_pence`, `phone.spend.identity_monthly_cap_pence` | 2,000, 1,000 on Cloud; `null` (no cap) in the built-in defaults | Lower-only | [§18.3](#183-spend-caps) |
+| `phone.spend.registration_cap_pence` | 6,000 on Cloud; `null` in the built-in defaults | Lower-only | One-off registration fees ([§18.3](#183-spend-caps)) |
+| `phone.auto_approve` | `{ "enabled": false }` | Guard (setting or loosening is a decision reserved for people; tightening needs `phone:manage`) | The standing purchase budget ([§5.7](#57-the-standing-purchase-budget)) |
 | `phone.sms.identity_daily_cap`, `phone.sms.tenant_daily_cap`, `phone.sms.tenant_monthly_cap` | 200, 2,000, `null` | Lower-only | Segments; [§12.2](#122-policy-pipeline) step 11 |
 | `phone.sms.allowed_destination_countries` | the tenant's catalogue countries | Lower-only | Step 6; also the messaging profile's allowed destinations |
 | `phone.sms.brand_name` | the profile's trading name | Free | Used in auto-responses and disclosures |
@@ -1697,12 +2135,12 @@ New fields of the [tenant policy](../../reference/configuration.md#tenant-policy
 
 | Permission | Allows | Key levels |
 |---|---|---|
-| `phone:read` | The catalogue; the identity's numbers, requests, SMS (with `quarantine:review` for held ones), media, calls, usage; `sms/wait`; the tenant's lookup, registrations view and charges (tenant level and above) | every level |
-| `phone:request` | Search; create and cancel its own `purchase_number`, `port_in` (without secrets), `release_number` requests; portability checks | every level |
+| `phone:read` | The catalogue; the setup status; the standing budget and its use; the identity's numbers, requests, SMS (with `quarantine:review` for held ones), media, calls, usage; `sms/wait`; the tenant's lookup, registrations view and charges (tenant level and above) | every level |
+| `phone:request` | Search; the one-call purchase; create and cancel its own `purchase_number`, `port_in` (without secrets), `release_number` requests; portability checks; onboarding drafts; an earlier `expires_at` | every level |
 | `phone:send` | Send SMS, resolve uncertain SMS, record an opt-out | every level |
 | `phone:call` | Place calls or create `outbound_call` requests | every level |
 | `phone:approve` | Approve and reject phone requests; authorise and reject port-outs (each a decision reserved for people). Includes `phone:read` | platform, partner, tenant |
-| `phone:manage` | Number roles and moves; voice connectors; `set_voice_route` and `enable_emergency` requests; record opt-ins; tenant reconcile | platform, partner, tenant |
+| `phone:manage` | Number roles and moves; voice connectors; `set_voice_route` and `enable_emergency` requests; record opt-ins; tenant reconcile; tightening the standing budget; a later or no `expires_at` | platform, partner, tenant |
 | `phone:compliance` | The compliance profile and documents; `submit_compliance`, `register_us_a2p`, `verify_toll_free` requests; losing-carrier details of a port-in | platform, partner, tenant |
 
 An identity key acts only for its own identity. No permission returns a provider credential, a sealed
@@ -1715,6 +2153,8 @@ permission_denied`, `details.reason = "signup_unverified"`).
 | Operation | Pylota Identity's own idempotency | Provider idempotency | Unknown outcome |
 |---|---|---|---|
 | Create a request | `Idempotency-Key` required; D1 `idempotency_records` (scoped per key and tenant) | – | Safe to retry with the same key |
+| One-call purchase | `Idempotency-Key` required; the request it creates; the inline run holds the same claim as the queue | – | A replay returns the stored `201` or `202`; an inline run cut short continues in the queue |
+| Standing budget slot | The `phone_budget:t:{YYYY-MM}` hold, taken with the spend hold in one `TenantQuota` transaction | – | Released when the request fails or is canceled |
 | Approve, reject, cancel | `Idempotency-Key` required; the guarded state change | – | Safe to retry |
 | Order a number | The claim, the spend intent, `customer_reference` per attempt | None | `uncertain`; reconciled before any new attempt ([§6.3](#63-spend-intent-customer_reference-and-uncertain)) |
 | Tenant resources, addresses, documents, groups | The claim | None | The next run lists by name and tag before creating |
@@ -1753,7 +2193,7 @@ New error codes ([Errors](../../reference/errors.md)), each with `retryable` fix
 | 403 | `destination_blocked` | no | An emergency, short-code or premium-rate destination |
 | 404 | `phone_number_not_found`, `phone_request_not_found`, `sms_not_found`, `call_not_found`, `phone_document_not_found`, `port_out_not_found`, `voice_connector_not_found` | no | Missing or outside the key's scope |
 | 409 | `phone_number_not_ready` | yes while configuring | The number is not `active`, or lacks the capability (`details.reason`) |
-| 409 | `phone_number_unavailable` | no | The chosen number was taken before the order |
+| 409 | `phone_number_taken` | no | The exact number asked for was taken before the order (`details.alternatives[]`: up to 5 fresh candidates with quotes and quote tokens) |
 | 409 | `phone_request_not_pending` | no | Approve, reject or cancel in a state that cannot be decided (`details.status`) |
 | 409 | `phone_request_digest_mismatch` | no | The approval names a digest that is not current (`details.current_digest`) |
 | 409 | `compliance_not_approved` | no | The tenant's profile is not approved for the row and action |
@@ -1767,10 +2207,15 @@ New error codes ([Errors](../../reference/errors.md)), each with `retryable` fix
 | 422 | `country_not_offered`, `local_presence_required` | no | [§3.3](#33-rules-the-catalogue-enforces) |
 | 422 | `compliance_incomplete` | no | Missing profile fields or documents (`details.missing[]`), or an entity type v1 refuses |
 | 422 | `phone_number_limit_reached`, `phone_request_limit_reached` | no | [§7.2](#72-roles-moves-and-limits), [§5.2](#52-the-request-and-its-states) |
+| 422 | `phone_registration_otp_invalid` | no | A sole-proprietor brand's one-time code is wrong or expired ([§13.1](#131-us-sole-proprietor-brands)) |
 
 Existing codes reused: `403 invalid_signature` on `/hooks/telnyx`; `403 policy_denied` with the new
-`details.reason` values `phone_not_allowed`, `plan_required`, `destination_country`, `calls_off`,
-`codes_into_fills_only`, `account_not_approved`; `429 daily_cap_reached` with `details.cap` `phone_search`,
+`details.reason` values `phone_not_allowed`, `plan_required`, `destination_country`, `destination_untested`,
+`destination_not_supported`, `calls_off`, `codes_into_fills_only`, `account_not_approved`; `400 invalid_request`
+with `location_not_supported`; `402 spend_cap_reached` with `details.scope = "registration"`;
+`409 phone_number_not_ready` with `legacy_unpapered`; `422 compliance_incomplete` with `entity_type`,
+`otp_mobile_country` and `brand_country_not_supported`; `422 compliance_address_invalid` with
+`emergency_address_country`; `422 phone_number_limit_reached` with `details.limit = "sole_proprietor_sms"`; `429 daily_cap_reached` with `details.cap` `phone_search`,
 `sms_identity`, `sms_tenant`, `sms_tenant_month`; `502 upstream_error` and `503 unavailable` with
 `details.reason` `provider`, `phone_paused`, `provider_balance`. SMS failures after `202` are statuses and
 reasons, never HTTP errors, as for mail.
@@ -1787,6 +2232,9 @@ and the owner's sign-off before merge ([ADR 0020](../adr/0020-phone-numbers.md))
 |---|---|
 | An agent spends money, ports, releases or submits KYC on its own, or is steered to by an SMS | Every such action is a request approved by a person (`key_may_decide`); identity keys cannot hold `phone:approve`, `phone:manage` or `phone:compliance`; a key never approves its own request ([§5](#5-phone-requests-approval-for-everything-that-costs-money-or-cannot-be-undone)) |
 | An approval is replayed onto a different purchase | The approval names the digest of the exact payload and quote; a changed price re-opens approval |
+| An agent raises its own standing budget, or a compromised key buys up to the budget | Setting or loosening `phone.auto_approve` is a decision reserved for people; identity keys never change it; the budget is bounded per number, per identity and per month, sits under the spend caps, is off by default, and is audited with its version on every purchase it covers; the ops switch and `enabled: false` stop it at once |
+| An agent's drafted registration text carries instructions or links to the person who reviews it | Drafts are untrusted text, shown escaped, never rendered as links or markup; a person edits and submits; drafts never hold tax IDs, personal data or documents ([§4.7](#47-phone-onboarding)) |
+| A sole-proprietor brand's one-time code reaches an agent | The code goes to the proprietor's own handset and is typed by a person into the console; no tool or route returns it ([§13.1](#131-us-sole-proprietor-brands)) |
 | Provider credentials leak to tenants or agents | The Telnyx key is a Worker secret used only by the provider client; no route returns it; agents get narrow tools, never the provider's MCP server; Vapi receives SIP credentials of one tenant connection, never a Telnyx key |
 | Cross-tenant routing on the shared account (an SMS, a receipt or an order event lands in the wrong tenant) | The owner comes from facts the provider controls, cross-checked with a second fact; a mismatch is dropped and alerted ([§9.4](#94-resolving-the-tenant)); one messaging profile, connection and billing group per tenant; ownership stamps checked before release |
 | A forged webhook injects SMS, receipts, port-outs or order completions | Ed25519 over timestamp and raw body in every environment, a 5-minute window, deduplication by event ID; events trigger state reads where money moves (an order completion is confirmed with `GET /number_orders/{id}` before a number is activated) |
@@ -1823,6 +2271,8 @@ correlated is logged as `HMAC-SHA256(PM_HASH_KEY, e164)` truncated to 16 hex cha
 | D1 `phone_consent` | Keyed hash and masked hint | While the tenant exists; opt-outs survive counterparty erasure as hashes | Tenant erasure |
 | D1 `phone_compliance_profiles`, `phone_compliance_documents`, R2 `t/{ten}/phone/docs/` | Company data, representative's identity data, identity documents | [§4.6](#46-retention-and-erasure) | Crypto-shred and delete; receipt |
 | D1 `phone_numbers` | The tenant's own numbers (business data) | Life of the identity | Identity deletion, tenant erasure |
+| D1 `phone_onboarding_drafts` | Business descriptions, sample messages and URLs an agent drafted; no personal data by schema | Until its request is created, or 30 days untouched | Deleted then; tenant erasure |
+| D1 `phone_compliance_profiles` of a `sole_trader` | The proprietor's name, address, mobile (sealed) and tax data (sealed) | As any profile ([§4.6](#46-retention-and-erasure)) | As any profile |
 | D1 `phone_requests` | Port-in losing-carrier secrets (sealed) | Cleared when the port ends; the row for 400 days after it ends | Retention job; tenant erasure |
 | D1 `phone_provider_events`, `phone_message_index` | Provider IDs, no content | 30 days | Retention job |
 | D1 `phone_charges` | None beyond IDs | 400 days after invoicing | Retention job; tenant erasure keeps only aggregate lines on the Stripe invoice |
@@ -1853,9 +2303,9 @@ and call detail records (numbers, times, costs) under its own retention, outside
 message content is not kept at Telnyx when the profile's redaction is on (verified by
 `live::phone::redaction_levels`); KYC documents and addresses are deleted at the provider after the last
 number ([§4.6](#46-retention-and-erasure)); Vapi keeps the call data of `vapi` routes under the tenant's own
-Vapi account. Renter erasure requests reach these processors through the tenant (for Vapi) and through the
-documented provider settings (for Telnyx), which closes Pylota's gap where SMS held at Telnyx was never
-considered (Pylota `docs/runbooks/renter-access-request.md:82`, do-better 11).
+Vapi account. Erasure requests from a tenant's own customers reach these processors through the tenant
+(for Vapi) and through the documented provider settings (for Telnyx), so text held at the provider is part of
+every erasure plan.
 
 **Subject-access export** includes `sms.json` and `calls.json` (the identity's, or a counterparty's
 across identities) in the export ZIP.
@@ -1893,13 +2343,18 @@ An SMS withheld as `vault_code` emits no event at all ([§11.4](#114-codes-for-t
 `phone_request.uncertain`; `phone_number.status_changed` (`from`, `to`, `setup_state`, `provisioning`,
 `reason`); `phone_number.action_needed`; `phone_number.port_out_requested`, `phone_number.port_out_decided`;
 `phone_registration.status_changed`; `phone_compliance.status_changed` (no personal data);
-`phone_consent.changed` (masked hint); `phone_spend.warning` (`scope`, `percent`, `used_pence`, `cap_pence`).
+`phone_consent.changed` (masked hint); `phone_spend.warning` (`scope`, `percent`, `used_pence`, `cap_pence`);
+`phone_number.capability_changed` (`number_id`, `capability`, `from`, `to`, `reason`), emitted when a
+capability facet changes state, so an agent waiting for a US number to text learns of it without polling;
+`phone_number.expiring` (`number_id`, `release_at`); `phone_setup.status_changed` (`country`, `from`, `to`,
+`next_step`); `phone_budget.changed` (`version`, `enabled`, the decider's kind; no prices beyond the
+ceilings).
 
 Event feed visibility ([Event feed](event-feed.md)): SMS and call events need `phone:read`, held SMS events
 also `quarantine:review`; request, number and registration events need `phone:read`; compliance events need
 `phone:compliance`. Audit rows: `phone_request.*`, `phone_number.{move, adopt, primary}`,
 `phone_route.set`, `phone_connector.{create, rotate, delete}`, `phone_compliance.{update, document_upload,
-document_delete, export}`, `phone_port_out.{authorize, reject}`, `phone_consent.{opt_in, opt_out}`,
+document_delete, export}`, `phone_budget.set`, `phone_setup.draft`, `phone_registration.otp`, `phone_port_out.{authorize, reject}`, `phone_consent.{opt_in, opt_out}`,
 `phone_request.resolve` (platform).
 
 ## 26. Limits
@@ -1907,7 +2362,13 @@ document_delete, export}`, `phone_port_out.{authorize, reject}`, `phone_consent.
 | Limit | Value |
 |---|---|
 | Numbers per identity, per tenant | 5 and 20 by default (policy); at most 20 and 200 |
-| Requests per tenant | 20 `pending_approval`; 10 running (`executing`, `in_progress`, `action_needed`, `uncertain`) |
+| Requests per tenant | 20 `pending_approval` (blocked ones included); 10 running (`executing`, `in_progress`, `action_needed`, `uncertain`) |
+| Blocked request lifetime | 7 days after it is unblocked, at most 30 days after creation |
+| Standing budget | `max_numbers_per_identity` 1–20; `max_new_numbers_per_month` 1–200 |
+| One-call purchase | Inline run up to 15 seconds; up to 5 candidates when a number is taken; `details.alternatives` up to 5 |
+| `expires_at` | 1 hour to 365 days after the purchase |
+| Onboarding drafts | One per tenant and country; 2–5 sample messages of 20–1,024 characters; other text fields 1–1,000 characters; deleted after 30 days untouched |
+| Sole-proprietor one-time code | 5 resends a day |
 | Pending request lifetime | 7 days, then `rejected` (`expired`) |
 | Quote token | 30 minutes |
 | Searches | 300 a day per tenant; `limit` 1–20 per search |
@@ -1930,8 +2391,13 @@ document_delete, export}`, `phone_port_out.{authorize, reject}`, `phone_consent.
 
 Console pages, server-rendered and working without JavaScript ([Console](console.md)):
 
-- **Phone › Numbers**: per identity and per tenant; status, `setup_state`, capabilities, route, deadlines,
-  action needed; move and primary (owners and admins).
+- **Phone › Setup**: one card per country with the status of [§4.7](#47-phone-onboarding), the steps, the
+  agent's draft beside the profile, the fees and waits; submitting creates and approves the request in one
+  step after re-authentication; the sole-proprietor code entry.
+- **Phone › Budget**: the standing budget, this month's use, and its history of versions; saving a looser
+  budget needs a sign-in within the last 10 minutes.
+- **Phone › Numbers**: per identity and per tenant; status, `setup_state`, the four capability facets with
+  their next steps, route, `expires_at`, deadlines, action needed; move and primary (owners and admins).
 - **Phone › Requests**: the tenant's queue with each quote, digest and payload summary (untrusted text
   escaped); approve and reject require a sign-in within the last 10 minutes, as policy saves do
   ([Workspace policy § 6](workspace-policy.md#6-the-console-page)).
@@ -1945,7 +2411,10 @@ Console pages, server-rendered and working without JavaScript ([Console](console
 Account emails ([Notifications](notifications.md)): `phone_port_out` (urgent, to owners, admins and the
 identity's accountable human; not subject to the daily cap), `phone_action_needed`,
 `phone_requirements_deadline` (72 and 24 hours), `phone_compliance_expiring` (30 and 7 days),
-`phone_compliance_legacy`, `phone_spend` (80% and 100%), `phone_request_uncertain` (after 24 hours). They
+`phone_compliance_legacy`, `phone_spend` (80% and 100%), `phone_request_uncertain` (after 24 hours),
+`phone_setup_action_needed` (a person must act on onboarding, at most once a day per country),
+`phone_number_ready` (a number became able to do everything its row promises, for example a US number once
+its registration is ready). They
 carry no SMS text and no counterparty number.
 
 ## 28. MCP and CLI
@@ -1956,6 +2425,12 @@ carry no SMS text and no counterparty number.
 | Route | Permission |
 |---|---|
 | `GET /v1/phone/countries` | `phone:read` |
+| `GET /v1/tenants/{tenant_id}/phone-setup`, `GET …/phone-setup/{country}` | `phone:read` |
+| `PUT`, `GET`, `DELETE /v1/tenants/{tenant_id}/phone-setup/{country}/draft` | `phone:request` |
+| `GET /v1/tenants/{tenant_id}/phone-budget` | `phone:read` |
+| `PUT /v1/tenants/{tenant_id}/phone-budget` | `phone:manage` to tighten; loosening is a decision reserved for people |
+| `POST /v1/identities/{identity_id}/phone-numbers` (one-call purchase) | `phone:request` |
+| `POST /v1/tenants/{tenant_id}/phone-registrations/{registration_id}/otp`, `…/otp/resend` | `phone:compliance` (a person) |
 | `GET /v1/identities/{identity_id}/phone-numbers/available` | `phone:request` |
 | `POST /v1/identities/{identity_id}/phone-numbers/portability` | `phone:request` |
 | `GET /v1/identities/{identity_id}/phone-numbers`, `GET …/phone-numbers/{number_id}` | `phone:read` |
@@ -1984,18 +2459,23 @@ carry no SMS text and no counterparty number.
 | `GET /v1/tenants/{tenant_id}/phone-charges`, `GET /v1/partners/{partner_id}/phone-statement` | `phone:read` |
 | `POST /v1/tenants/{tenant_id}/phone/reconcile`, `POST /v1/platform/phone/reconcile` | `phone:manage`; `platform:ops` |
 | `POST /v1/platform/phone-numbers/adopt` | `platform:ops` |
+| `POST /v1/platform/phone/probe` (the account-level probe of [§2.1](#21-one-account-and-provider_account_id-everywhere), run by `idvy setup phone` and `idvy doctor`) | `platform:ops` |
 | `POST /hooks/telnyx` | no key; Ed25519 signature |
 
-**MCP tools** (eleven, filtered by permission like the mail tools; [MCP server](mcp.md)): `phone_list_numbers`
-(`phone:read`), `phone_search_numbers` (`phone:request`, read-only annotation), `phone_request_number`
-(`phone:request`; creates a request a person approves, never buys), `phone_get_request` (`phone:request`),
+**MCP tools** (twelve, filtered by permission like the mail tools; [MCP server](mcp.md)): `phone_list_numbers`
+(`phone:read`), `phone_search_numbers` (`phone:request`, read-only annotation), `phone_buy_number`
+(`phone:request`; the one-call purchase of [§6.7](#67-one-call-purchase): `country` required, `type`,
+`area_code`, `number`, `expires_at` optional, `idempotency_key` required; returns the number, or the request
+with who must act and why. It has **no** `confirm` argument: the standing budget or a person decides on the
+server, never a flag the agent sets), `phone_setup_status` (`phone:read`; the setup status of
+[§4.7](#47-phone-onboarding) for one country or all, read-only), `phone_get_request` (`phone:request`),
 `phone_send_sms` (`phone:send`; `idempotency_key` required), `phone_list_sms` and `phone_get_sms`
 (`phone:read`), `phone_wait_sms` (`phone:read`; never returns a code claimed by a vault item),
 `phone_place_call` (`phone:call`; returns the request when approval is required), `phone_list_calls`
 (`phone:read`), `phone_record_opt_out` (`phone:send`). There is no tool to approve, release, port, submit
-KYC, change a route or reveal a PIN.
+KYC, change a route, set a budget or reveal a PIN.
 
-**CLI** (`idvy phone …`, [CLI](cli.md)): `countries`, `search`, `request number|port-in|release|route|emergency|a2p|toll-free|compliance`,
+**CLI** (`idvy phone …`, [CLI](cli.md)): `countries`, `setup status|draft`, `budget get|set`, `buy`, `search`, `request number|port-in|release|route|emergency|a2p|toll-free|compliance`,
 `requests list|get|approve|reject|cancel|resolve`, `numbers list|get|update|move|lookup|adopt`, `route get`,
 `connectors create|list|rotate|delete`, `compliance get|update`, `documents upload|list|delete`, `export`,
 `sms send|list|get|wait|resolve|release`, `calls create|list|get`, `consent get|set`, `port-outs list|authorize|reject`,
@@ -2013,7 +2493,10 @@ Metrics ([Observability](observability.md)): `phone_webhook_total{type,result}`,
 `sms_inbound_total{status}`, `sms_wait_total{result}`, `sms_vault_code_total{result}`, `phone_spend_pence_total{kind}`,
 `phone_spend_cap_denied_total{scope}`, `phone_charge_drift_pence`, `phone_provider_balance_usd`,
 `phone_provider_errors_total{code}`, `phone_reconcile_drift_total{step}`, `phone_webhook_missed_total`,
-`phone_port_out_open`, `call_total{direction,route,outcome}`. Labels never hold numbers, tenant names or
+`phone_port_out_open`, `call_total{direction,route,outcome}`, `phone_buy_total{result}` (`created`,
+`pending`, `blocked`, `refused`), `phone_buy_inline_ms`, `phone_budget_covered_total{result}` (`covered`,
+`outside`), `phone_setup_status{country,status}` (tenant counts), `phone_capability_wait_seconds{capability}`
+(purchase to `enabled`), `phone_expiring_release_total{result}`. Labels never hold numbers, tenant names or
 text.
 
 Alerts: page `phone_port_out_pending`, `phone_port_out_deadline` (75% and 90%), `phone_provider_balance_low`,
@@ -2021,9 +2504,16 @@ Alerts: page `phone_port_out_pending`, `phone_port_out_deadline` (75% and 90%), 
 `phone_order_uncertain_stuck`, `phone_reconcile_drift`, `phone_orphan_number`, `phone_status_unknown`,
 `phone_requirement_unmapped`, `phone_review_long`, `phone_webhook_signature_failures` (more than 10 in an
 hour), `phone_fx_drift`, `phone_provider_limit_hit`, `phone_pin_missing`, `phone_recording_undeclared`,
-`phone_release_unattributable`, `phone_order_duplicate`.
+`phone_release_unattributable`, `phone_order_duplicate`, `phone_registration_slow` (a US registration in
+review for more than 21 days), `phone_expiring_release_stuck` (a scheduled release not done 24 hours after
+`release_at`).
 
 ## 30. Rollout, telemetry and rollback
+
+**The standing budget** is off on every tenant until a person sets it; on Pylota Identity Cloud the owner
+turns it on for Pylota's operators first, with Pylota's own budgets, and watches `phone_budget_covered_total`
+and the purchases it covered for seven days before offering it to others. `enabled: false` on a tenant, or the
+ops switch at `paused_purchases`, stops covered purchases at once.
 
 **Flags.** `PM_PHONE` (`off` by default; `on` enables the routes, the hook and the consumer). With it `off`,
 every phone route answers `404 route_not_found`, `/hooks/telnyx` answers `503`, and no cron step runs. Per
@@ -2057,7 +2547,7 @@ A schema rollback is not needed: no existing column changes meaning (the one add
 |---|---|---|
 | 1 | GB mobile and US local, voice and SMS verified on the number; refusal for GB non-mobile SMS; region from the tenant's market | Catalogue rows GB mobile and US local with both capabilities required in search ([§3.2](#32-the-launch-catalogue), [§6.1](#61-search)); `422 country_not_offered` and capability errors are legible; the request names the country, chosen by Pylota from the operator's market (there is no default country) |
 | 2 | At least one number per tenant; E.164 → tenant on active numbers, for SMS and voice webhooks; E.164 unique | Numbers per identity with tenant limits; the routing directory and `GET /v1/phone-numbers/lookup` match live numbers only; a unique live index ([§7.1](#71-the-directory-and-history)) |
-| 3 | Three readiness facets read back; order status, requirements status, deadline; `provisioned`, `setup_state`, `provisioning{status,code,retryable}`; the code taxonomy and terminal set; no provider IDs to operators | All kept, the code set unchanged ([§6.4](#64-readiness-and-pylotas-failure-codes)); provider IDs only for platform and partner keys |
+| 3 | Three readiness facets read back; order status, requirements status, deadline; `provisioned`, `setup_state`, `provisioning{status,code,retryable}`; the code taxonomy and terminal set; no provider IDs to operators | All kept, the code set unchanged ([§6.4](#64-readiness-capabilities-and-pylotas-failure-codes)); provider IDs only for platform and partner keys |
 | 4 | Lease shared with erasure; deletion-pending refusal; fail-closed preflight before spend; spend intent; `customer_reference` recovery and duplicate refusal; no re-order on uncertainty; no-spend mock mode; missing key is a configuration error | The execution lease and the erasure step's wait; claims refuse erasing tenants and deleting identities; the preflight of [§5.5](#55-execution-leases-and-attempts); spend intent with attempt-scoped references; reconciliation before any new attempt; test tenants and the simulator as the hard no-spend boundary; `not_configured` |
 | 5 | Requirement-group discovery and per-country override; per-number attachment; porting groups refused; reviewable statuses non-terminal; the admin bundle flow | Per-tenant profiles and groups per (country, type, action) replace the platform group ([§4](#4-compliance-profiles-and-kyc-documents)); `porting` groups are used only by port-ins; review is non-terminal; the platform-wide group survives only for adopted numbers for 90 days ([§7.6](#76-adoption-for-pylotas-migration)) |
 | 6 | Reconcile worker; read-repair with backoff; order webhooks by `customer_reference`; idempotent and lease-safe | The four movers of [§6.6](#66-who-moves-an-order) |
@@ -2133,12 +2623,19 @@ each question.
    marketing needs a recorded opt-in with evidence.
 9. **Port-outs.** On what grounds may a port-out be rejected in the UK and the EU, and may a PIN be required?
    Default: never rejected automatically; a person decides.
-10. **Business-only scope.** Is excluding sole traders consistent with the consumer and telecoms rules that
-    apply to the tenants' own customers? Default: sole traders refused in v1.
-11. **US registrations by a UK ISV.** What does The Campaign Registry require of a UK ISV registering brands
-    for US businesses, and of a UK business registering a US brand? Default: checked at build time before a
-    UK tenant can submit.
-12. **Tax.** VAT on resold telecommunications services to UK and EU businesses (place of supply), and
+10. **Sole traders** (blocking: the owner's decision of [§1.1](#11-sole-traders-an-owner-decision) waits on
+    it, and must be recorded before M41's acceptance). May TREFT register numbers in a sole trader's own name
+    in the UK and the US, what does that add to the KYC records it keeps, and is excluding them consistent with
+    the consumer and telecoms rules that apply to the tenants' own customers? Default: refused for new
+    purchases; adopted numbers keep working under the dated exit path.
+11. **US registrations by a UK ISV** (blocking for texting from US numbers by tenants registered outside the
+    US). What does The Campaign Registry require of a UK ISV registering brands for US businesses, and of a UK
+    business registering a US brand? Default: `brand_countries = ["US"]` until answered and
+    `live::phone::uk_brand_registration` passes ([§13.2](#132-brands-registered-outside-the-us)).
+12. **Standing budgets.** Does a purchase made under a budget a person set in advance satisfy the reseller
+    terms and the tenant's own records as "the tenant's decision" in the same way as a purchase approved one
+    by one? Default: yes, with the budget's version and decider recorded on every purchase it covers.
+13. **Tax.** VAT on resold telecommunications services to UK and EU businesses (place of supply), and
     whether Stripe Tax covers it, is a question for the accountant as well as counsel.
 
 
@@ -2163,7 +2660,8 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
   cross-tenant quarantine, return a GBP quote and a signed quote token per candidate, and count against a
   daily cap. Acceptance: P1, P2, P39.
 - **FR-PHN-5** (P0) Each tenant **must** have one compliance profile describing a business in whose legal
-  name its numbers are registered; individuals and sole traders **must** be refused in v1; tax identifiers and
+  name its numbers are registered; individuals **must** be refused, and sole traders **must** be refused unless
+  the owner's recorded decision and the row allow them (FR-PHN-54); tax identifiers and
   the representative's contact and birth data **must** be sealed and never returned. Acceptance: P5, P6.
 - **FR-PHN-6** (P0) KYC documents **must** be uploaded with declared size and SHA-256, sniffed and refused when
   risky, encrypted per document under a sealed data key before they reach R2, and never readable through any
@@ -2178,7 +2676,8 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
   **must** be single-use and audited. Acceptance: P98, P99.
 - **FR-PHN-9** (P0) Every purchase, port-in, release, compliance submission, US registration, toll-free
   verification, emergency registration, voice-route change and (under policy) outbound call **must** be a phone
-  request, created with a required `Idempotency-Key`, bounded per tenant, and rejected as expired after 7
+  request (a purchase may be approved by the standing budget, FR-PHN-43, and a scheduled release by its
+  purchase, FR-PHN-50), created with a required `Idempotency-Key`, bounded per tenant, and rejected as expired after 7
   days undecided. Acceptance: P15, P19, P22.
 - **FR-PHN-10** (P0) Approving a phone request or deciding a port-out **must** be a decision reserved for
   people (`key_may_decide`, opt-in `phone.key_approval` for platform and own-partner keys only), never by the
@@ -2195,7 +2694,7 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
   adopted or absence is proved by two complete listings at least 5 and 10 minutes apart; at most 3 attempts;
   after 24 hours only a platform resolve ends it. Acceptance: P23–P27.
 - **FR-PHN-14** (P0) Numbers **must** follow the state machine of § 6.2, with carrier, SMS and voice facets each
-  read back from the provider, `setup_state` and `provisioning { status, code, retryable }` using Pylota's
+  read back from the provider, the capability facets of FR-PHN-45, `setup_state` and `provisioning { status, code, retryable }` using Pylota's
   failure codes unchanged, and no provider IDs for tenant or identity keys. Acceptance: P34.
 - **FR-PHN-15** (P0) Requirements pending, deadlines and long reviews **must** notify people, remind before
   deadlines, back off and alert after 7 days, and end a cancelled order as `failed` so the next request can
@@ -2286,16 +2785,62 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
 - **FR-PHN-40** (P0) Erasure scopes **must** cover SMS, media, calls and phone data with the receipt fields of
   § 24; tenant erasure **must** run `phone_release`; logs **must** pseudonymise phone numbers; every sealed column
   **must** be in the sealed-column registry. Acceptance: P53, P98, P61.
-- **FR-PHN-41** (P0) The MCP server **must** offer the eleven `phone_*` tools of § 28 and no tool that approves,
-  releases, ports, submits KYC, changes a route or shows a PIN; the CLI **must** offer `idvy phone …` and
+- **FR-PHN-41** (P0) The MCP server **must** offer the twelve `phone_*` tools of § 28 and no tool that approves,
+  releases, ports, submits KYC, changes a route, sets a budget or shows a PIN; `phone_buy_number` **must not**
+  take a confirmation flag; the CLI **must** offer `idvy phone …` and
   `idvy setup phone`. Acceptance: `it::mcp::phone_tools`, `cli::phone::commands`.
 - **FR-PHN-42** (P0) A platform key **must** be able to adopt a number already in the provider account into an
   identity, stamping ownership and refusing a number already held; an adopted number registered under a
-  platform group **must** be re-papered under its tenant's profile within 90 days. Acceptance: P100.
+  platform group **must** be re-papered under its tenant's profile by its `legacy_deadline`, and **must never**
+  be released by a deadline (FR-PHN-54). Acceptance: P100, P126.
+- **FR-PHN-43** (P0) A tenant **may** have a standing purchase budget (`phone.auto_approve`), off by default,
+  set or loosened only by a decision reserved for people and tightened by `phone:manage`; a `purchase_number`
+  it covers **must** be created approved with the budget's version recorded, count against a monthly slot
+  taken atomically with the spend hold, and remain subject to the spend caps, the ops switch and quote changes.
+  Acceptance: P108–P111.
+- **FR-PHN-44** (P0) `POST /v1/identities/{identity_id}/phone-numbers` **must** buy a number in one call with a
+  required country and a required `Idempotency-Key`, defaulting the type per country, answering `201` with the
+  number once the provider accepted the order inside the budget, or `202` with the request otherwise; a taken
+  number **must** be replaced by the next candidate up to 5 times for `any`, and answered `409
+  phone_number_taken` with up to 5 alternatives for an exact number. Acceptance: P112–P114.
+- **FR-PHN-45** (P0) Every number **must** report the capability facets `outbound_sms`, `inbound_sms`,
+  `inbound_calls` and `outbound_calls` as `enabled`, `activating`, `registration_required` or `not_available`
+  with a reason and a next step, computed by the same function the send and call gates use, and emit
+  `phone_number.capability_changed` on each change; `setup_state` **must** be `registration_pending` when only a
+  registration is missing. Acceptance: P115, P116.
+- **FR-PHN-46** (P0) A purchase quote **must** carry `follow_on[]` for every registration the number will still
+  need for this tenant, with its price, typical wait and who acts, covered by the digest. Acceptance: P117.
+- **FR-PHN-47** (P0) A purchase for a row the tenant has not finished onboarding **must** be created with
+  `blocked_by` and a next step rather than refused, **must not** be executed while blocked, and **must** run
+  once onboarding completes. Acceptance: P118.
+- **FR-PHN-48** (P0) One-off registration fees **must** count against `phone.spend.registration_cap_pence`
+  instead of the monthly caps; pass-through fees **must** be priced at cost until the owner sets a margin.
+  Acceptance: P119.
+- **FR-PHN-49** (P0) Phone onboarding **must** report one status per tenant and country with its steps, fees,
+  waits and next step through REST and the MCP tool `phone_setup_status`; agents **may** draft the registration
+  text, which **must** hold no tax identifier, personal data or document and **must** be submitted only by a
+  person. Acceptance: P120, P121.
+- **FR-PHN-50** (P0) A purchase **may** carry `expires_at`; its approval **must** cover the release at that time,
+  which **must** run with every release safety rule; extending or removing the expiry **must** need
+  `phone:manage`. Acceptance: P122.
+- **FR-PHN-51** (P0) The profile **must** name the company register (with its region where a country has
+  several), and document requirements **must** be mapped per registration country, never guessed.
+  Acceptance: P123.
+- **FR-PHN-52** (P0) A US number of a tenant registered outside the US **must** report `outbound_sms:
+  not_available` until GB brands are proved and allowed, and `outbound_calls: not_available` without a US
+  emergency address; SMS **must** be refused to destinations the sending row has not tested. Acceptance: P124,
+  P125.
+- **FR-PHN-53** (P0) The provider account's level **must** be probed and recorded, and a row that needs a level
+  the account lacks **must** report `platform_prerequisite`; US rows **must** stay off until the enablement
+  sequence of § 2.5 is complete. Acceptance: P127.
+- **FR-PHN-54** (P0) The owner's decision on sole traders **must** be recorded before M41's acceptance; under any
+  option an adopted number **must** keep working with a dated exit (re-paper or port out) and be suspended for
+  outbound only, never released, at its deadline; a US sole-proprietor brand **must** take its one-time code
+  only from a person. Acceptance: P6, P126.
 
 ## 34. Edge cases
 
-Section `P · Phone numbers` of the [edge-case register](../edge-cases.md) (rows P1–P107; P107 is
+Section `P · Phone numbers` of the [edge-case register](../edge-cases.md) (rows P1–P127; P107 is
 integrator-owned):
 
 | # | Case | Required behaviour | Owner | Test |
@@ -2304,8 +2849,8 @@ integrator-owned):
 | P2 | A candidate whose provider cost exceeds the row's ceiling (vanity, premium) | Dropped from results; never orderable | S | `it::phone::search_drops_premium` |
 | P3 | Search or request for a `not_offered` row, or a `requires_local_presence` row without the presence | `422 country_not_offered`; `422 local_presence_required` with `details.local_presence`; nothing stored | S | `core::phone::catalogue::eligibility`, `it::phone::catalogue_refusals` |
 | P4 | `phone.allowed` false; a Free-plan tenant on a Stripe deployment; `PM_PHONE` off | `403 policy_denied` (`phone_not_allowed`, `plan_required`); with the flag off every phone route `404 route_not_found` | S | `it::phone::gates` |
-| P5 | A purchase for a row needing an approved profile, without one | `409 compliance_not_approved` at creation and again at execution; no provider call | S | `it::phone::compliance_required` |
-| P6 | A profile with an individual or sole-trader entity type | `422 compliance_incomplete`, `details.reason = "entity_type"` | S | `core::phone::requests::profile_validate` |
+| P5 | A purchase for a row needing an approved profile, without one; a port-in without one | The purchase is created with `blocked_by: ["compliance"]` and never executed while blocked; the port-in gets `409 compliance_not_approved`; no provider call | S | `it::phone::compliance_required` |
+| P6 | A profile with an individual entity type; a sole-trader one before the owner's decision, or for a row whose `entity_types` lack it | `422 compliance_incomplete`, `details.reason = "entity_type"` | S | `core::phone::requests::profile_validate` |
 | P7 | Document: wrong content type, over 20,971,520 bytes, checksum mismatch, executable or macro sniffed | `400 invalid_request`, `400 upload_size_mismatch`, `400 upload_checksum_mismatch`, `422 attachment_risky`; nothing stored | S | `it::phone::document_upload_rules` |
 | P8 | Reading a document | Metadata only on every route; no route returns bytes; the R2 object is ciphertext under a per-document sealed key | S | `it::phone::documents_write_only` |
 | P9 | Deleting a document a live provider group needs | `409 phone_document_in_use`; deletion of an unused one shreds the key, then deletes the object | S | `it::phone::document_delete` |
@@ -2323,7 +2868,7 @@ integrator-owned):
 | P21 | Two approvals racing, a redelivered `execute`, a cron sweep, and a run whose lease lapsed | One run at a time; the stale run's guarded writes change nothing and it stops | S | `core::phone::requests::claim_rules`, `it::phone::claim_and_fencing` |
 | P22 | The 21st pending request of a tenant, or the 11th running | `422 phone_request_limit_reached` | S | `it::phone::request_limits` |
 | P23 | Two tenants order the same number at once | The second fails at the directory's unique live index before any provider call; no spend | S | `it::phone::same_number_two_tenants` |
-| P24 | The number is taken between search and order (85001) | Listing proves no order; spend intent cleared; hold released; number `failed` (`no_numbers_available`); request `failed` | S | `it::phone::number_taken` |
+| P24 | The number is taken between search and order (85001) | Listing proves no order; spend intent cleared; hold released; with `selection.mode = "any"` the run orders the next candidate (up to 5), else the number `failed` (`no_numbers_available`) and the request `failed` | S | `it::phone::number_taken` |
 | P25 | A definitive refusal whose reference listing is incomplete or fails | The attempt is `uncertain`; nothing cleared by guess | S | `core::phone::orders::absence_proved`, `it::phone::refusal_needs_listing` |
 | P26 | The order call times out and the order exists | `uncertain`; the reconciler finds it by reference and adopts it; exactly one order | S | `it::phone::uncertain_found` |
 | P27 | The order call times out and no order exists; or nothing can be proved for 24 hours | Two complete empty listings (≥ 5 min, then ≥ 10 min) prove absence; the next attempt uses a new reference (at most 3); otherwise `carrier_order_uncertain`, `phone_order_uncertain_stuck`, and only the platform resolve ends it | S | `core::phone::orders::absence_proved`, `it::phone::uncertain_absent_and_stuck` |
@@ -2399,7 +2944,7 @@ integrator-owned):
 | P97 | A webhook delivery that failed at the provider | Found in `webhook_deliveries`; the resource re-read; counted | S | `it::phone::missed_webhooks` |
 | P98 | Tenant erasure with numbers, open requests, documents and campaigns | `phone_release` cancels, releases, deactivates, deletes resources and connectors, shreds documents except retained ones, listed in the receipt | S | `it::phone::tenant_erasure` |
 | P99 | KYC after the last number; a platform export | Deleted after `PM_PHONE_KYC_RETENTION_DAYS`; export behind a single-use link with an audit row | S | `it::phone::kyc_retention_and_export` |
-| P100 | Adopting a number already in the directory or stamped for another tenant; a legacy-group number | Refused; adopted with `legacy_group` and notifications at 60, 30 and 7 days | S | `it::phone::adopt` |
+| P100 | Adopting a number already in the directory or stamped for another tenant; a legacy-group number | Refused; adopted with `legacy_group`, a `legacy_deadline` and notifications at 60, 30 and 7 days | S | `it::phone::adopt` |
 | P101 | The ops switch at `paused_purchases` and `paused`; `PM_PHONE` turned off and on | Refusals as § 30; no number released; on re-enable the reconciler runs first | S | `it::phone::switch_and_rollback` |
 | P102 | `put_managed` fails at activation | The number stays `configuring`; retried; `phone_pin_missing` after an hour | S | `it::phone::pin_vault_unavailable` |
 | P103 | Every phone route with keys of another tenant, another identity and another partner | The same `404` body as a missing resource | S | `it::phone::scope_matrix` |
@@ -2407,6 +2952,26 @@ integrator-owned):
 | P105 | An opt-in recorded by an identity key; an opt-out by an identity key with `phone:send` | `403 permission_denied`; recorded | S | `it::phone::consent_permissions` |
 | P106 | A dry-run send | `would_send`, segments and price; no hold and no row | S | `it::phone::sms_dry_run` |
 | P107 | Pylota moves from its own Telnyx integration | Its handler takes Pylota Identity's signed events keyed on `evt_`; it sends no STOP confirmation; its old Telnyx key and `TELNYX_*` environment are retired | I | Pylota's `phone-identity-cutover` suite |
+| P108 | A purchase covered by the standing budget; the same purchase with the budget off | Created `approved` with `approved_by = "standing_budget"` and `budget_version`, executed at once, audited; with the budget off, `pending_approval` with `details.outside_budget = "disabled"` | S | `core::phone::budget::covers`, `it::phone::buy_within_budget` |
+| P109 | Each budget rule exceeded in turn (country, type, numbers per identity, month count, setup ceiling, monthly ceiling, `expiring_only`) | `pending_approval` with `details.outside_budget` naming the first failed rule | S | `core::phone::budget::covers` |
+| P110 | Two covered purchases race for the month's last slot | One is covered; the other is `pending_approval` (`month_count`); no slot is counted twice | S | `it::phone::budget_last_slot` |
+| P111 | An identity key or a tenant key loosens the budget; a tenant key tightens it; a partner key under `phone.key_approval` loosens it with `on_behalf_of` | `403 permission_denied` (`person_required`); allowed; allowed and audited | S | `it::phone::budget_who` |
+| P112 | `POST …/phone-numbers` with `country: "GB"` inside the budget | `201` with the number (type mobile) once the order is accepted; configuration continues in the queue; a replay with the same key returns the same `201` | S | `it::phone::buy_one_call` |
+| P113 | The one-call purchase whose inline run exceeds 15 seconds; outside the budget; blocked on onboarding | `202` with the request, the run continuing in the queue; `202` `pending_approval` with the quote and `follow_on`; `202` with `blocked_by` and `next_step` | S | `it::phone::buy_one_call_202` |
+| P114 | An exact number taken (85001); `any` with the first three candidates taken; `area_code` on GB | `409 phone_number_taken` with up to 5 alternatives and quote tokens; the fourth candidate ordered; `400 invalid_request` (`location_not_supported`) | S | `it::phone::buy_taken_alternatives` |
+| P115 | A US number before the tenant's campaign is `MNO_PROVISIONED`, then after | `outbound_sms: registration_required` (or `activating` once submitted), `setup_state: registration_pending`; then `enabled`, `ready`, `phone_number.capability_changed` and `phone_number_ready` | S | `core::phone::capabilities::of`, `it::phone::capability_facets` |
+| P116 | A facet says `enabled` while the send gate would refuse | Impossible: both read `core::phone::capabilities::of`; a property test over every combination of facets, registrations and rows | S | `core::phone::capabilities::agrees_with_gates` |
+| P117 | A US purchase quote for a tenant without 10DLC, with it, and for a GB-registered tenant | `follow_on` lists `register_us_a2p` with fee and wait; omits it; lists `not_available` (`brand_country_not_supported`); the digest changes with `follow_on` | S | `it::phone::quote_follow_on` |
+| P118 | A blocked purchase whose group is approved later; one never unblocked | Unblocked in the group's batch and executed if approved; expires at 30 days | S | `it::phone::blocked_purchase` |
+| P119 | `register_us_a2p` on a tenant at its monthly cap; above the registration cap | Accepted against the registration cap; `402 spend_cap_reached` with `details.scope = "registration"` | S | `it::phone::registration_cap` |
+| P120 | The setup status for GB ready, US not started, US unavailable at the platform | Statuses and steps as specified; `next_step` names the person and the console page; `unavailable` with `platform_prerequisite` | S | `core::phone::onboarding::status`, `it::phone::setup_status` |
+| P121 | An agent drafts registration text with a tax ID field, a link in the description, and a valid draft | `400 invalid_request`; stored as escaped text, never a link; stored; a person submits it and the request is approved in the same step; the draft deleted | S | `it::phone::onboarding_draft` |
+| P122 | A purchase with `expires_at`; an agent extends it; an agent shortens it; release at the time with a pending port-out | Release request created `approved_by = "purchase"` at `release_at`; `403 permission_denied`; allowed; the release waits and retries, never skipping a rule | S | `it::phone::expiring_number` |
+| P123 | A US-registered profile without `company_registry.region`; a requirement unmapped for the registration country | `422 compliance_incomplete` (`company_registry`); `422 compliance_incomplete` with `details.missing[]`, `phone_requirement_unmapped` | S | `core::phone::catalogue::document_for`, `it::phone::registry_mapping` |
+| P124 | A GB-registered tenant's US number; its `register_us_a2p`; its call with no US address | `outbound_sms: not_available` (`brand_country_not_supported`), buy needs `acknowledge_not_available`; `422 compliance_incomplete` (`brand_country_not_supported`); `outbound_calls: not_available` (`no_us_emergency_address`) | S | `it::phone::non_us_tenant_us_number` |
+| P125 | SMS from a US number to a GB handset; from a GB number to a US handset before the cross-border test | `403 policy_denied` (`destination_not_supported`); `403 policy_denied` (`destination_untested`) | S | `it::phone::cross_border_destinations`, `live::phone::cross_border_sms` |
+| P126 | A legacy-group number of a sole-trader tenant: before the decision, at its deadline, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
+| P127 | The provider account not at the Verified level | US rows `eligible: false` (`platform_prerequisite`) in the catalogue and the setup status; a US purchase blocked on `platform_prerequisite` | S | `it::phone::account_level_probe` |
 
 ## 35. Tests
 
@@ -2441,8 +3006,18 @@ and a fake only confirms what its author believed).
 | `live::phone::vapi_route` | Bring-your-own SIP trunk credential, number, translated number, an inbound test call reaching the assistant | §14.2 |
 | `live::phone::vapi_call_list` | Listing a Vapi number's calls by time and customer number | §14.5 |
 | `live::phone::stripe_invoice_item` | An invoice item in GBP with an idempotency key lands on the next invoice (Stripe test mode) | §18.5 |
-| `it::mcp::phone_tools` | The eleven tools are listed only with their permissions; there is no approving tool | §28 |
-| `cli::phone::commands` | Against recorded fakes: `setup phone`, `search`, `request number`, `requests approve` (prompts without `--digest`), `sms send` with a derived key, `documents upload` | §28 |
+| `core::phone::budget::covers` | Every rule of the standing budget and the order they are checked in | §5.7 |
+| `core::phone::onboarding::status` | The setup status from every combination of profile, group, registration and platform facts | §4.7 |
+| `core::phone::capabilities::of` | The four facets from every combination of row, facets, registrations, emergency address and legacy state | §6.4 |
+| `live::phone::uk_brand_registration` | A GB-registered business's brand and campaign registered on staging; the identifier TCR accepts in place of an EIN | §13.2 |
+| `live::phone::sole_prop_otp` | A mock sole-proprietor brand: code triggered, verified, campaign created | §13.1 |
+| `live::phone::us_onboarding_end_to_end` | A real US business onboarded: brand, campaign, a number assigned, a text delivered; the days each step took | §2.5, §4.7 |
+| `live::phone::cross_border_sms` | `gb_mobile_to_us` and `us_local_to_gb`: a text each way with its receipt | §3.5 |
+| `live::phone::e911_address` | An emergency address registered on a US number; a non-US address refused | §14.8 |
+| `live::phone::toll_free_registration_types` | The `businessRegistrationType` values Telnyx accepts per registration country | §4.3 |
+| `live::phone::account_level` | The probe that tells the Verified level apart | §2.1 |
+| `it::mcp::phone_tools` | The twelve tools are listed only with their permissions; there is no approving tool; `phone_buy_number` has no confirmation argument | §28 |
+| `cli::phone::commands` | Against recorded fakes: `setup phone`, `phone setup status`, `phone budget set` (prompts before loosening), `phone buy`, `search`, `request number`, `requests approve` (prompts without `--digest`), `sms send` with a derived key, `documents upload` | §28 |
 | `xtask::phone_catalogue` | A release fails when a catalogue row's `verified_at` is older than 180 days | §3.1 |
 
 ## 36. Milestones
@@ -2457,31 +3032,35 @@ M5 for the router, `key_may_decide` and the `TenantQuota` stubs; M6 for identiti
 fan-out; M14 for the erasure and retention jobs; M17 Foundation for metrics and alerts; M21 for the console;
 M22 for holds and Stripe; M27 for the service ledger that §11.2 extends.
 
-**Files:** `crates/core/src/phone/{mod.rs, e164.rs, catalogue.rs, requests.rs, numbers.rs, orders.rs, money.rs,
-telnyx.rs}`, `crates/core/data/{phone-catalogue.json, phone-rate-card.json}`, `crates/worker/src/phone/{provider.rs,
-telnyx/*, fake.rs, execute.rs, orders.rs, numbers.rs, tenant_resources.rs, compliance.rs, documents.rs,
-money.rs}`, `handlers/phone/{catalogue.rs, numbers.rs, requests.rs, compliance.rs, charges.rs, platform.rs}`,
+**Files:** `crates/core/src/phone/{mod.rs, e164.rs, catalogue.rs, requests.rs, budget.rs, onboarding.rs,
+capabilities.rs, numbers.rs, orders.rs, money.rs, telnyx.rs}`, `crates/core/data/{phone-catalogue.json,
+phone-rate-card.json}`, `crates/worker/src/phone/{provider.rs, telnyx/*, fake.rs, execute.rs, buy.rs,
+onboarding.rs, orders.rs, numbers.rs, tenant_resources.rs, compliance.rs, documents.rs, money.rs}`,
+`handlers/phone/{catalogue.rs, setup.rs, budget.rs, buy.rs, numbers.rs, requests.rs, compliance.rs, charges.rs,
+platform.rs}`,
 `handlers/hooks_telnyx.rs`, `consumers/phone.rs` (kinds `provider_event`, `execute`, `reconcile`, `configure`),
-`crons/phone.rs`, `console/pages/phone/{numbers.rs, requests.rs, compliance.rs, charges.rs}`,
-`crates/cli/src/commands/phone.rs` (setup, countries, search, request, requests, numbers, compliance, documents,
-charges). D1 tables of [Data model](data-model.md) for numbers, releases, requests, profiles, documents,
+`crons/phone.rs`, `console/pages/phone/{setup.rs, budget.rs, numbers.rs, requests.rs, compliance.rs, charges.rs}`,
+`crates/cli/src/commands/phone.rs` (setup, countries, setup status and drafts, budget, buy, search, request,
+requests, numbers, compliance, documents, charges). D1 tables of [Data model](data-model.md) for numbers, releases, requests, profiles, documents,
 requirement groups, tenants, provider events and charges.
 
 | File (owner milestone) | Hook |
 |---|---|
 | `deploy/wrangler.toml.tmpl`, `lib.rs` (M5) | The binding `Q_PHONE`, queues `pm-phone` and `pm-phone-dlq`, the R2 lifecycle rule for `phone-staging/`; an exception to "no milestone adds a binding", as M31's `Q_SCREEN` is |
-| `quota/mod.rs` (M5, M22) | `QuotaRequest::PhoneSpendHold`, `PhoneSpendSettle`, `PhoneSpendRelease` and the counters `phone_spend:*`, `phone_search`; an exception to "no new variants", as M35's is |
-| `auth/people.rs` (M5) | `Decision::ApprovePhoneRequest`, `Decision::DecidePortOut` |
+| `quota/mod.rs` (M5, M22) | `QuotaRequest::PhoneSpendHold`, `PhoneSpendSettle`, `PhoneSpendRelease` (the hold taking the budget slot `phone_budget:t:*` with the spend in one transaction) and the counters `phone_spend:*`, `phone_spend:reg:*`, `phone_budget:t:*`, `phone_search`; an exception to "no new variants", as M35's is |
+| `auth/people.rs` (M5) | `Decision::ApprovePhoneRequest`, `Decision::DecidePortOut`, `Decision::SetPhoneBudget` |
 | `auth/routespec.rs`, `router.rs` (M5) | The phone routes and the seven permissions |
 | `core/src/sealed.rs` (M17) | The sealed columns of §23 |
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `phone_release`, the document steps, receipt fields; retention of requests, events, index and charges |
 | `billing/*` (M22) | The `phone_spend` hold feature |
 | `handlers/identities.rs` (M6) | `409 identity_has_phone_numbers` |
 | `observability/catalogue.rs` (M17) | The metrics and alerts of §29 |
-| `mcp/tools.rs` (M15) | `phone_list_numbers`, `phone_search_numbers`, `phone_request_number`, `phone_get_request` |
+| `mcp/tools.rs` (M15) | `phone_list_numbers`, `phone_search_numbers`, `phone_buy_number`, `phone_setup_status`, `phone_get_request` |
 
 **Implements:** FR-PHN-1 to FR-PHN-20, FR-PHN-22 (order events), FR-PHN-39 (number charges and caps), FR-PHN-40,
-FR-PHN-41 (its tools), and edge rows P1–P41, P73–P76, P98, P99, P101, P103, P104.
+FR-PHN-41 (its tools), FR-PHN-43, FR-PHN-44, FR-PHN-45 (the facets that need no registration), FR-PHN-46,
+FR-PHN-47, FR-PHN-49 (GB onboarding and the status route), FR-PHN-50, FR-PHN-51, FR-PHN-53, and edge rows P1–P41,
+P73–P76, P98, P99, P101, P103, P104, P108–P114, P117, P118, P120–P123, P127.
 
 **Order.** The first pull request is `live::phone::order_contract` and `live::phone::webhook_signature` with the
 pure mapping tables, so the status tables rest on the real API before any state machine is built.
@@ -2505,11 +3084,16 @@ sms_in.rs, a2p.rs, codes.rs}`, `handlers/phone/{sms.rs, wait.rs, consent.rs}`, `
 | `vault/*` (vault milestone M42) | `SmsCodeSource` and rule 2b land with whichever of M39 and M42 comes second, with `it::phone::vault_code_withheld` and `it::vault::sms_otp_phase` |
 | `mcp/tools.rs` (M15) | `phone_send_sms`, `phone_list_sms`, `phone_get_sms`, `phone_wait_sms`, `phone_record_opt_out` |
 
-**Implements:** FR-PHN-21 to FR-PHN-31 and edge rows P42–P72, P77 (SMS charges in the job's input), P80–P84,
-P105, P106.
+**Implements:** FR-PHN-21 to FR-PHN-31, FR-PHN-45 (`outbound_sms` with registrations), FR-PHN-48, FR-PHN-49 (US
+onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), FR-PHN-54 (the
+sole-proprietor brand, where the decision allows it), and edge rows P42–P72, P77 (SMS charges in the job's input),
+P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125.
 
 **Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of §12.3 are enabled;
-`live::phone::redaction_levels` recorded in §8.
+`live::phone::redaction_levels` recorded in §8; `live::phone::a2p_paths`, `live::phone::sole_prop_otp`,
+`live::phone::cross_border_sms` and `live::phone::us_onboarding_end_to_end` pass on staging (the last gates step 5
+of [§2.5](#25-us-enablement), and its measured waits replace the catalogue's `typical_wait_days`);
+`live::phone::uk_brand_registration` is run and its result recorded, whatever it is.
 
 ### M40 · Voice routes and calls (after M38)
 
@@ -2517,10 +3101,11 @@ P105, P106.
 `handlers/phone/{routes.rs, connectors.rs, calls.rs}`, `mailbox/calls.rs`, CLI `connectors`, `route`, `calls`,
 `usage`; MCP `phone_place_call`, `phone_list_calls`.
 
-**Implements:** FR-PHN-32 to FR-PHN-35 and edge rows P85–P91.
+**Implements:** FR-PHN-32 to FR-PHN-35, FR-PHN-52 (calls from US numbers for tenants registered elsewhere) and
+edge rows P85–P91, P124 (calls half).
 
-**Acceptance:** the rows above; `live::phone::vapi_route`, `live::phone::vapi_call_list` and
-`live::phone::forwarding` pass on staging.
+**Acceptance:** the rows above; `live::phone::vapi_route`, `live::phone::vapi_call_list`,
+`live::phone::forwarding` and `live::phone::e911_address` pass on staging.
 
 ### M41 · Porting, port-out guard, reconciliation, invoicing and migration (after M38, M39, M40 and the vault core M42)
 
@@ -2528,26 +3113,39 @@ P105, P106.
 invoicing.rs}`, `handlers/phone/port_outs.rs`, `jobs/phone_reconcile.rs`, `console/pages/phone/port_outs.rs`,
 the adopt route, CLI `port-outs`, `reconcile`, `statement`, `numbers adopt`.
 
-**Implements:** FR-PHN-36 to FR-PHN-38, FR-PHN-39 (invoicing and statements), FR-PHN-42, and edge rows P77–P79,
-P92–P97, P100, P102. A backfill step sets a vault PIN on every number activated before this milestone.
+**Implements:** FR-PHN-36 to FR-PHN-38, FR-PHN-39 (invoicing and statements), FR-PHN-42, FR-PHN-54 (the recorded
+decision and the legacy exit path), and edge rows P77–P79, P92–P97, P100, P102, P126. A backfill step sets a vault
+PIN on every number activated before this milestone.
 
 **Acceptance:** the rows above; a staging rehearsal of Pylota's migration (adopt or port a test number, send and
 receive, place an approved call, release); `live::phone::stripe_invoice_item`; seven days of the telemetry of
-§30 on staging before `PM_PHONE` is turned on in production.
+§30 on staging before `PM_PHONE` is turned on in production; the sole-trader decision recorded in ADR 0020;
+no adopted number left without a lawful path (each legacy number has a `legacy_deadline` or a recorded
+re-papering).
 
 ## 37. Compared with AgentPhone
 
-AgentPhone facts were read on 2026-10-24 from its public site, documentation, OpenAPI documents and packages;
-they are untrusted data and are used only to compare.
+AgentPhone facts were first read on 2026-10-24 from its public site, documentation, OpenAPI documents and
+packages, and re-read on 2026-10-26 from its published artifacts: npm `agentphone` 1.0.25 (the TypeScript SDK,
+whose `reference.md` carries the server's endpoint descriptions), PyPI `agentphone` 0.20.1 (the Python SDK),
+and the source of `github.com/AgentPhone-AI/agentphone-mcp` at `a78c5df` (v0.8.0), all MIT-licensed; nothing was
+run. They are untrusted data and are used only to compare. AgentPhone is never a supplier
+([§1](#1-what-a-phone-number-is-here)).
 
 | Topic | AgentPhone | Pylota Identity |
 |---|---|---|
-| Countries | US and Canada self-serve; UK mobile SMS-only behind an account flag; no EU | GB, US, and an EU catalogue with local-presence rules |
-| Regulatory identity | None collected | Each tenant's own profile and groups |
-| Approval | `buy_number` needs `confirm: true` in its MCP tool | A person approves every purchase, port, release, KYC submission and fee |
+| Countries | US and Canada self-serve; UK mobile SMS-only "on accounts where available"; no EU | GB, US, and an EU catalogue with local-presence rules |
+| Buying | `POST /v1/numbers` with every field optional (country default US, area code, agent, `expiresAt`), paid from a prepaid balance | `POST …/phone-numbers` with the country required and the type defaulted per country ([§6.7](#67-one-call-purchase)) |
+| Approval | The MCP tool `buy_number` buys only with `confirm: true`, which the agent passes itself; the REST route has no confirmation | The standing budget or a person decides on the server; `phone_buy_number` has no confirmation flag ([§5.7](#57-the-standing-purchase-budget)) |
+| A taken number | `409` "with fresh alternatives in this same shape" | The next candidate for `any`; `409 phone_number_taken` with alternatives for an exact number |
+| Regulatory identity | None collected for numbers; UK numbers sold at once | Each tenant's own profile and groups, done once per country in onboarding ([§4.7](#47-phone-onboarding)) |
+| US texting | One registration per account (sub-account per registration): `sole_proprietor` or `standard_brand` $25, `high_volume` $70; "typically 7-10 business days" | One registration per tenant, every later number joins its campaign; fees at cost in GBP under a registration cap ([§13](#13-us-a2p-10dlc-and-toll-free-verification), [§18.3](#183-spend-caps)) |
+| What a number can do | `outboundSms`: `enabled`, `activating`, `registration_required` | The same three values plus `not_available`, for four capabilities, with a reason and a next step ([§6.4](#64-readiness-capabilities-and-pylotas-failure-codes)) |
+| Throwaway numbers | `expiresAt` auto-releases | `expires_at`, the release approved with the purchase and run with every safety rule ([§6.8](#68-throwaway-numbers)) |
+| Status for agents | The MCP tool `account_overview` lists agents, numbers and the webhook and says what to do next | `phone_setup_status` per country, with the person who must act ([§4.7](#47-phone-onboarding)) |
 | Idempotency | None on sends or calls; its TypeScript SDK retries `POST`s | Required keys everywhere; attempt-scoped references; provider keys on SMS; `uncertain` never resent |
 | Opt-out | Not exposed | One profile per tenant; a ledger per brand |
-| Verification codes | Not extracted | Extracted; ledger-gated; vault-only channel |
+| Verification codes | Not extracted; a separate Verify API sends codes "through carrier-registered sender IDs" because "plain application SMS from a US long code is not deliverable" to some countries, the UK among them | Extracted; ledger-gated; vault-only channel; cross-border destinations gated by tests ([§3.5](#35-sending-across-borders)) |
 | Port-out | Not offered | PIN in the vault; alerts; a person decides |
 | Erasure | By email request | Scopes with receipts, KYC included; processor settings |
 | Agent ergonomics | `llms.txt`, Markdown docs, plain failure reasons, test webhooks | Kept: narrow tools, plain reasons with `retryable`, the guide written for agents ([Phone guide](../../guides/phone.md)) |
@@ -2562,21 +3160,36 @@ difference between this page and one of them is a defect: fix both in the same c
 
 ## 39. Open questions for the owner
 
-Gathered here so they can be answered in one pass.
+Gathered here so they can be answered in one pass. Items 1, 2 and 10 to 12 block M38 or M41 as marked.
 
-1. The margin and currency buffer of the rate card (placeholders 40% and 10%), and whether monthly fees are
-   prorated (the design charges whole months, matching the provider).
-2. The Cloud default spend caps (£20 a tenant, £10 an identity a month) and whether phone needs a paid plan
-   for self-serve workspaces (designed: yes).
+1. The margin and currency buffer of the rate card (placeholders 40% and 10%), whether monthly fees are
+   prorated (the design charges whole months, matching the provider), and whether regulatory pass-through fees
+   carry the margin (designed: at cost).
+2. The Cloud default spend caps (£20 a tenant, £10 an identity, £60 for registration fees a month) and whether
+   phone needs a paid plan for self-serve workspaces (designed: yes).
 3. Whether Pylota Identity Cloud's Telnyx account is Pylota's existing TREFT account (numbers adopted, no
-   porting) or a new one (numbers ported) ([§7.6](#76-adoption-for-pylotas-migration)).
+   porting) or a new one (numbers ported) ([§7.6](#76-adoption-for-pylotas-migration)). The owner's report that
+   GB is set up on TREFT's account points to adoption.
 4. The account's data locality (recommended: EU), set once and irreversible.
-5. When to seek the Telnyx Verified level and its KYC of TREFT, which gates US and EU numbers.
-6. Questions to ask Telnyx: emergency address registration for GB and EU numbers; whether numbers move
-   between managed accounts without porting; whether each managed account has its own signing key; the
-   released-number hold period; the redaction levels; the `customer_reference` length and listing lag.
+5. The Telnyx Verified level for TREFT: step 1 of US enablement ([§2.5](#25-us-enablement)); apply now.
+6. Questions to ask Telnyx: emergency address registration for GB and EU numbers, and for US numbers of a
+   tenant with no US location; whether numbers move between managed accounts without porting; whether each
+   managed account has its own signing key; the released-number hold period; the redaction levels; the
+   `customer_reference` length and listing lag; whether TCR vets GB-registered brands and with which
+   identifier.
 7. Whether to offer GB geographic numbers before the address conflict is settled (designed:
    `requires_local_presence`).
 8. The sequencing of section letters: the edge-case section is `P`, which the register's preamble reserves
    in spirit to avoid confusion with priorities `P0`–`P2` (as `U` for the vault collides with the selling
    points `U1`–`U10`); the coordinator may prefer another letter.
+9. **The standing budget** ([§5.7](#57-the-standing-purchase-budget)): sign-off on the amended rule "a person
+   approves every purchase, one by one or through a standing budget a person sets" (recommended), and the
+   default budget Pylota sets for its operators (suggested: GB and US, 2 numbers per identity, 10 a month,
+   £3 setup and £3 a month per number).
+10. **Sole traders** ([§1.1](#11-sole-traders-an-owner-decision)): option (a), (b) or (c), after counsel's answer
+    to question 10 of [§32](#32-questions-for-counsel); blocks M41's acceptance. Before choosing, count the
+    tenants it affects (for Pylota, its operators that are sole traders).
+11. Whether a US number may be sold to a tenant registered outside the US for receiving and inbound calls only
+    while GB brands are unproved (designed: yes, with `acknowledge_not_available`).
+12. The default lifetime limits for throwaway numbers (designed: 1 hour to 365 days) and whether expiring
+    numbers should be the only kind a budget covers by default (designed: no).

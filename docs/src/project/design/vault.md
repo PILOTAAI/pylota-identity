@@ -14,13 +14,13 @@ Decided in [ADR 0021](../adr/0021-agent-vault.md); risk tier T2.
 
 | | |
 |---|---|
-| Requirements | FR-VLT-1 to FR-VLT-25 (this page), FR-IDN-10 (the ledger gains `login_domains` and a vault link), FR-IN-5 and FR-IN-11 (quarantine rule 4b and `wait`), FR-TEN-4 (seven `vault.*` policy fields), FR-CON-6 (two new decisions reserved for people), FR-PRV-3 (erasure receipts), FR-KEY-1 (six permissions) |
-| Edge cases | [U1](../edge-cases.md)–[U72](../edge-cases.md) (section `U · Vault`) |
-| Code | `crates/core/src/vault/{mod.rs, origin.rs, item.rs, policy.rs, digest.rs, ticket.rs, totp.rs, cookies.rs, audit.rs, refuse.rs, consumer.rs}` (origin canonicalisation and matching, item validation and refused kinds, the approval decision, the use digest, the ticket token, RFC 6238, session filtering, the audit row hash, the redemption checks; pure), `crates/core/src/crypto/{hpke.rs, pv1.rs}` (the HPKE suite and the `pv1` field envelope; pure, nonces and ephemeral keys passed in), `crates/api-types/src/vault.rs`, `crates/worker/src/vault/{mod.rs, keys.rs, items.rs, grants.rs, uses.rs, tickets.rs, consumers.rs, redeem.rs, codes.rs, sessions.rs, audit.rs, erase.rs}`, `handlers/vault.rs` (API-key routes), `handlers/vault_consumer.rs` (consumer routes), `auth/consumer.rs` (signed-request verification), `auth/people.rs` (two new `Decision` arms), `mailbox/ingest.rs` (quarantine rule 4b), `mailbox/codes.rs` (`VaultTakeCode`), `handlers/wait.rs` (the strict-mode refusal), `jobs/erasure.rs` and `jobs/retention.rs` (the vault steps), `console/pages/vault.rs`, `mcp/tools.rs` (six tools), `crates/cli/src/commands/vault.rs` |
+| Requirements | FR-VLT-1 to FR-VLT-30 (this page, [§26](#26-functional-requirements)), FR-IDN-10 (the ledger gains `login_domains` and a vault link), FR-IN-5 and FR-IN-11 (quarantine rule 4b and `wait`), FR-TEN-4 (seven `vault.*` policy fields), FR-CON-6 (two new decisions reserved for people), FR-PRV-3 (erasure receipts), FR-KEY-1 (six permissions) |
+| Edge cases | [U1](../edge-cases.md)–[U85](../edge-cases.md) (section `U · Vault`, [§27](#27-edge-cases)) |
+| Code | `crates/core/src/vault/{mod.rs, origin.rs, item.rs, policy.rs, digest.rs, ticket.rs, totp.rs, cookies.rs, audit.rs, refuse.rs, consumer.rs}` (origin canonicalisation and matching, item validation and refused kinds, the approval decision, the use digest, the ticket token, RFC 6238, session filtering, the audit row hash, the redemption checks; pure), `crates/core/src/crypto/{hpke.rs, pv1.rs}` (the HPKE suite and the `pv1` field envelope; pure, nonces and ephemeral keys passed in), `crates/api-types/src/vault.rs`, `crates/worker/src/vault/{mod.rs, keys.rs, items.rs, grants.rs, uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs, codes.rs, sessions.rs, versions.rs, sign.rs, reveal.rs, managed.rs, channels.rs, audit.rs, erase.rs}`, `jobs/vault_cron.rs`, `crates/conformance/vault/`, `handlers/vault.rs` (API-key routes), `handlers/vault_consumer.rs` (consumer routes), `auth/consumer.rs` (signed-request verification), `auth/people.rs` (two new `Decision` arms), `mailbox/ingest.rs` (quarantine rule 4b), `mailbox/codes.rs` (`VaultTakeCode`), `handlers/wait.rs` (the strict-mode refusal), `jobs/erasure.rs` and `jobs/retention.rs` (the vault steps), `console/pages/vault.rs`, `mcp/tools.rs` (six tools), `crates/cli/src/commands/vault.rs` |
 | Tables | D1 `vault_keys`, `vault_custody_slots`, `vault_items`, `vault_item_versions`, `vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`, `vault_audit`, `vault_audit_anchors`; new columns `service_accounts.login_domains_json`; mailbox `verifications.vault_item_id` and `verifications.vault_use_id`, the quarantine reason `vault_code`; R2 `t/{tenant_id}/vault/{item_id}/{version}` ([Data model](data-model.md)) |
-| Contracts | The `/v1/…/vault/…` routes and the consumer routes `/v1/vault/consumer/{self, redeem, report, write-back}` ([REST API › Vault](../../reference/api.md#vault)); the permissions `vault:read`, `vault:write`, `vault:request`, `vault:use`, `vault:approve`, `vault:admin`; the consumer signature scheme `pylota-identity-vault-consumer`; the header `X-Pylota-Identity-Vault-Unlock`; 22 `vault.*` event types ([Webhook events › Vault](../../reference/events.md#vault)); 21 error codes ([Errors](../../reference/errors.md)); the policy fields `vault.allowed`, `vault.key_approval`, `vault.min_approval`, `vault.codes_into_fills_only`, `vault.max_items`, `vault.session_max_ttl_days`, `vault.approval_deadline_seconds`; the MCP tools `vault_list_items`, `vault_get_item`, `vault_request_grant`, `vault_list_grants`, `vault_get_use` and `vault_sign`, and a `vault_login` argument on `mail_request_account`; `idvy vault …` ([CLI](../../reference/cli.md#vault)) |
+| Contracts | The `/v1/…/vault/…` routes and the consumer routes `/v1/vault/consumer/{self, redeem, report, write-back, uses/{use_id}}` ([REST API › Vault](../../reference/api.md#vault)); the permissions `vault:read`, `vault:write`, `vault:request`, `vault:use`, `vault:approve`, `vault:admin`; the consumer signature scheme `pylota-identity-vault-consumer`; the header `X-Pylota-Identity-Vault-Unlock`; 24 `vault.*` event types ([Webhook events › Vault](../../reference/events.md#vault)); 22 error codes ([Errors](../../reference/errors.md)); the policy fields `vault.allowed`, `vault.key_approval`, `vault.min_approval`, `vault.codes_into_fills_only`, `vault.max_items`, `vault.session_max_ttl_days`, `vault.approval_deadline_seconds`; the MCP tools `vault_list_items`, `vault_get_item`, `vault_request_grant`, `vault_list_grants`, `vault_get_use` and `vault_sign`, and a `vault_login` argument on `mail_request_account`; `idvy vault …` ([CLI](../../reference/cli.md#vault)) |
 | Limits | [Limits › Vault](../../reference/limits.md#vault) and [§19](#19-billing-and-limits) |
-| Built in | M42 (core, keys, items, audit, erasure), M43 (grants, uses, approval, consumers, tickets), M44 (one-time codes and sessions), M45 (rotation, signing, reveal, custody, tooling and the Pylota cut-over) ([Build plan](../build-plan.md)) |
+| Built in | M42 (core, keys, items, audit, erasure), M43 (grants, uses, approval, consumers, tickets), M44 (one-time codes and sessions), M45 (rotation, signing, reveal, tooling and the Pylota cut-over) ([§28](#28-milestones), [Build plan](../build-plan.md)) |
 
 ## 1. What the vault is, and what it is not
 
@@ -103,6 +103,12 @@ and return the response. It is P2, for five reasons:
 1. **The response is the leak.** A host on the item that echoes a request (a debug endpoint, an error page
    that repeats the `Authorization` header) returns the secret to the caller. Redacting exact, base64 and
    URL-encoded forms is best effort; a host can return a hash, a substring or a reversible transform.
+   Infisical's open-source Agent Vault, a credentialed-fetch proxy, shows the failure in practice: it streams
+   upstream response bodies back to the agent unmodified, and it replaces a declared placeholder wherever the
+   placeholder appears in a declared request surface, so an agent that writes the placeholder into a field the
+   service stores and displays publishes the secret there (`Infisical/agent-vault` at `d5836ec`, v0.40.2:
+   `internal/mitm/forward.go` and `internal/brokercore/substitution.go`, and its services documentation, read
+   2026-10-26).
 2. **The vault would become a general HTTP proxy** on Cloudflare's addresses for tenant-chosen destinations,
    with the SSRF guard of [Security § 9](security.md#9-ssrf-controls), redirect handling, response size and
    time limits, and the abuse and attribution questions of traffic that third parties see as coming from
@@ -233,7 +239,8 @@ so an agent signs in only where a person approved that account:
   the entry's `service_domain` or one of its `login_domains`, a new ledger field of at most 5 organisational
   domains where the account signs in (for a service whose sign-in page is on another domain). The console's
   approve page lists `login_domains` apart, as it lists extra `sender_domains`, because approving them lets a
-  fill happen there ([Service sign-up ledger](service-accounts.md); staged change).
+  fill happen there ([Service sign-up ledger](service-accounts.md); staged change). An origin outside both is refused with
+  `422 invalid_request` and `details.reason = "origin_not_in_ledger"`.
 - **Closing the entry** archives every item linked to it (`state = "archived"`, `health_reason` unchanged),
   revokes every grant that relied on it and closes every open ticket (`close_reason = "ledger_closed"`), in the
   D1 batch of the closure. Deleting the entry does the same and sets `account_id` to `NULL` on its items.
@@ -425,7 +432,8 @@ vault, the old operator-sealed row stays recoverable from D1 Time Travel for 30 
 
 **Presenting.** The header is accepted only from the tenant's own partner keys, only on the unwrapping routes
 (`POST …/vault/uses` when it mints, `POST /v1/vault/uses/{use_id}/ticket`, `…/signature`,
-`POST /v1/tenants/{tenant_id}/vault/rotate-key` and `DELETE …/vault/custody`), and only over the API host. On
+`POST /v1/tenants/{tenant_id}/vault/rotate-key`, `POST /v1/vault/items/{item_id}/versions` when it carries
+fields over, and `DELETE …/vault/custody`), and only over the API host. On
 any other route, or from any other key, it is `400 invalid_request` (`details.reason = "unlock_not_accepted"`),
 so clients do not spread it. Missing where needed: `403 vault_unlock_required`. A key that opens no slot (the
 AES-GCM tag fails): `403 vault_unlock_invalid`, counted in `vault_unlock_failures_total` and limited by `RL_API`.
@@ -547,7 +555,10 @@ covers `vault.min_approval`, which joins the guard fields of
 
 ### 6.2 Creating a use
 
-`POST /v1/identities/{identity_id}/vault/uses` (`vault:use`, any key level; `Idempotency-Key` required):
+`POST /v1/identities/{identity_id}/vault/uses` (`vault:use`, a platform, partner or tenant key, never an identity
+key, [§17.2](#172-what-each-kind-of-key-may-hold); the one exception is `operation: "sign"`, which takes
+`vault:request` and may come from an identity key for its own identity, [§12](#12-signing); `Idempotency-Key`
+required):
 
 ```json
 { "item_id": "vit_01JAD4…", "operation": "fill", "phases": ["credentials", "email_otp"],
@@ -633,12 +644,20 @@ name; the purpose, as untrusted text in a quoted, escaped block; and, for `per_r
 sign-ins by this agent in this run for 60 minutes". There is no "approve all" control, in the console or the
 API: every use is decided on its own row.
 
+**No agent-written link.** Nothing an agent or a key writes (a grant's or use's `purpose`, an item's `title`, a
+decision's `note`) is rendered as a link, an image or markup on any approval surface: the console, the
+notification email, and the `vault.*.approval_requested` data an integrator's app shows. A URL in such text
+appears as escaped text and is never made clickable. The guide tells integrators to do the same in their own
+approval screens, because an agent steered by what it read can put a look-alike sign-in link in front of the
+person whose approval it needs ([U84](#27-edge-cases)).
+
 ### 6.6 Reading
 
 `GET /v1/identities/{identity_id}/vault/uses` (`vault:read`; filters `status`, `item_id`, `run_id`),
 `GET /v1/tenants/{tenant_id}/vault/uses` (`vault:read`; platform, partner or tenant key; default
 `status=pending_approval`, oldest first: the approval queue) and `GET /v1/vault/uses/{use_id}`. A use never
-shows its ticket, its ticket hash or its sealed DEK.
+shows its ticket, its ticket hash or its sealed DEK. A use outside the key's scope, or of another identity for an
+identity key, is `404 vault_use_not_found`.
 
 ## 7. Tickets and phases
 
@@ -719,7 +738,7 @@ has run.
 | `hosting` | `self_hosted`, or `third_party` with `provider` (1–64 characters, for example `browserbase`) |
 | `signing_jwk` | The Ed25519 public key that signs its requests (`kty: OKP`, `crv: Ed25519`); its RFC 7638 thumbprint is the `keyid` |
 | `encryption_jwk` | The X25519 public key packets are sealed to (`kty: OKP`, `crv: X25519`) |
-| `contract` | `vault-consumer/1`, the version of [§8.5](#85-the-consumer-contract) it accepts |
+| `contract` | `vault-consumer/1`, the version of [§8.5](#85-the-consumer-contract) it accepts; any other value is `400 invalid_request` (`contract_unsupported`) |
 | `declarations` | Its statements at registration: `session_recording`, `session_logging`, `captcha_solving` (`off`), `extensions` (`none`), `honest_identity` (`web_bot_auth`, `user_agent` or `none`), `observation_paused_during_fill` (`true`), `post_fill_check` (`true`), `modes` (`cdp`, `proxy`) |
 | `status` | `pending_activation`, `active`, `suspended` or `revoked` |
 
@@ -761,7 +780,7 @@ Signature-Input: sig1=("@method" "@authority" "@path" "content-digest");created=
 Signature:       sig1=:<base64 Ed25519 signature over the signature base>:
 ```
 
-`auth::consumer::verify`, before any other work on the four consumer routes (`Auth::ConsumerSignature` in the
+`auth::consumer::verify`, before any other work on the five consumer routes (`Auth::ConsumerSignature` in the
 router table; [Security §5.1](security.md#51-deny-by-default-router-table)):
 
 1. Exactly one signature, labelled `sig1`, with `tag = "pylota-identity-vault-consumer"` and `alg = "ed25519"`,
@@ -809,7 +828,12 @@ it can observe (marked **V**) and records the rest as the consumer's declaration
   form kind, from field types and `autocomplete` tokens (`current-password` → `login`; `new-password` alone →
   `signup`; both → `password_change`; `one-time-code`, or a short numeric field after a password step →
   `otp`; a password prompt on an already signed-in page → `reauth`); and that the page belongs to the ticket's
-  run. It reports them in `context`. **V**: [§8.6](#86-redemption-checks) step 6.
+  run. It reports them in `context`. It also records, for the proxy mode of C11, the form's `action` URL path
+  and the `name` of each field it will fill. Every origin it compares (here, in C11 and in C17) is first
+  canonicalised with the vault's own function, shipped in the consumer SDKs as
+  `canonicalise_origin` ([§3.2](#32-exact-origins): lower case, IDNA A-label, trailing dot removed, port 443
+  dropped, userinfo refused), so `HTTPS://TFL.GOV.UK.:443` and `https://tfl.gov.uk` are one origin and no
+  consumer writes its own comparison. **V**: [§8.6](#86-redemption-checks) step 6.
 - **C5.** It must never fill into a frame whose origin differs from the top-level page's, nor on a top-level
   origin other than the ticket's. **V**.
 - **C6.** The browser that fills must run with session recording, session logging and CAPTCHA solving off and no
@@ -832,12 +856,27 @@ it can observe (marked **V**) and records the rest as the consumer's declaration
   value through page-world JavaScript, and never pass a value through a Live View input channel.
 - **C11. Proxy mode.** The browser types a placeholder the orchestrator gave it (`pidv1-` followed by 26
   Crockford base32 characters, unique to the use and field, not secret). The proxy must substitute the value
-  only in the body of one `POST` whose URL origin equals the ticket's origin, within the phase's window, at
-  most once per placeholder; drop any request that carries a placeholder to another origin, in a header or a
-  URL, or a second time; and remove the value (exact, URL-encoded, base64 and JSON-escaped forms) from the
-  response before the browser sees it. When the placeholder does not appear in a request within 30 seconds,
+  only when **every** condition holds:
+  1. the request is a `POST` over TLS (`https`) whose canonical URL origin equals the ticket's origin, on its
+     canonical port;
+  2. its URL path equals the form `action` path recorded at C4 for this phase;
+  3. its body is `application/x-www-form-urlencoded`, `multipart/form-data` or `application/json`, not
+     compressed (`Content-Encoding` absent or `identity`), and the placeholder is the **whole value** of exactly
+     one form field or JSON string, whose name (or JSON key) equals the field name recorded at C4;
+  4. it is inside the phase's window, and the placeholder has not been substituted before.
+
+  It must drop, and report `placeholder_misplaced`, any request that carries a placeholder and fails any
+  condition: another origin, plain `http`, another path, another field, a header, a URL, a compressed body, a
+  second use. It must never substitute inside WebSocket frames: a value is never sent over a WebSocket, and a
+  placeholder seen in a frame in either direction closes that socket with `placeholder_misplaced`. It must not
+  follow a redirect itself; the browser's next request after a `3xx` is checked afresh, so a placeholder in a
+  redirected `POST` to another origin is dropped. It must remove the value from everything returned to the
+  browser, as C17 describes for secrets. When the placeholder does not appear in a request within 30 seconds,
   because the page transforms the value before sending it, the consumer reports `form_not_found`; the
-  orchestrator may try again in CDP mode with a new use.
+  orchestrator may try again in CDP mode with a new use. Infisical's Agent Vault substitutes a declared
+  placeholder anywhere it appears in a declared surface (`internal/brokercore/substitution.go` at `d5836ec`,
+  read 2026-10-26); conditions 2 and 3 are what stop a page or a model from moving the placeholder into a field
+  the site publishes ([U73](#27-edge-cases)).
 - **C12.** After the attempt, in an isolated world, it must clear every filled field still present, then search
   the DOM text, attribute values, the accessibility tree, the URL and the title for each value and its
   URL-encoded and base64 forms. A match is reported as `value_exposed`; the run stops and is handed to a person.
@@ -856,9 +895,20 @@ it can observe (marked **V**) and records the rest as the consumer's declaration
 
 **Secrets**
 
-- **C17.** It must use an `inject` secret only on requests to the ticket's origin with the item's scheme; remove
-  the secret (exact, URL-encoded and base64 forms) from every response before a model or a log sees it; and
-  discard it at `closes_at`.
+- **C17.** It must use an `inject` secret only on `https` requests to the ticket's canonical origin, in the
+  header the item's `inject` scheme names and nowhere else; never on plain `http`, never in a URL, a body or a
+  WebSocket frame. It must not follow redirects on a request that carries a secret (Go:
+  `CheckRedirect` returning `http.ErrUseLastResponse`; `fetch`: `redirect: "manual"`; Python `requests`:
+  `allow_redirects=False`; Rust `reqwest`: `redirect::Policy::none()`), and treats a `3xx` as a failure of that
+  call: Go's `http.Client` re-sends a request body to the new location on `307` and `308` and strips only
+  headers across hosts (`net/http/client.go`, Go 1.24.7 source, read 2026-10-26), so a followed redirect can
+  carry a secret placed in a body to another host. On a request that carries a value it sets
+  `Accept-Encoding: identity`; a response that still arrives compressed is decompressed within a 16 MiB cap and
+  scanned, or dropped and reported `value_exposed_unscannable`. It scans response headers (`Location`,
+  `Set-Cookie` and every other) and the body for the value in its exact, URL-encoded, base64, base64url and
+  JSON-escaped forms, carrying across chunk boundaries a window as long as the longest encoded form, replaces a
+  match with `[redacted]` and reports `value_exposed`. It must discard the secret at `closes_at` or as soon as
+  the use is closed (C21), whichever comes first.
 
 **Reports and incidents**
 
@@ -868,6 +918,18 @@ it can observe (marked **V**) and records the rest as the consumer's declaration
   without values, for 30 days.
 - **C20.** It must pass the consumer conformance fixtures ([§24](#24-tests)) before activation and after each
   release.
+
+**Closure**
+
+- **C21.** A consumer that holds a value beyond one request (an `inject` secret for a run window, a loaded
+  session attached by a proxy, an open tunnel or WebSocket that carries a cookie or header from a packet) must
+  re-check the use with `GET /v1/vault/consumer/uses/{use_id}` ([§8.9](#89-use-status-for-consumers)) at least
+  every 30 seconds and before opening each new upstream connection that would carry the value. On `closed`, it
+  discards the value, closes every tunnel and WebSocket that carries it, and stops attaching cookies, within 30
+  seconds of the closure. Every `report` and `write-back` answer also carries `closed`, so a consumer that is
+  reporting learns at once. Infisical's Agent Vault checks the proxy session only when a `CONNECT` tunnel opens
+  and never again for the life of the tunnel (`internal/mitm/connect.go` at `d5836ec`, read 2026-10-26), so a
+  revoked token keeps working inside an open connection; C21 closes that window ([U82](#27-edge-cases)).
 
 ### 8.6 Redemption checks
 
@@ -963,6 +1025,8 @@ The packet's plaintext:
 | `credentials_rejected`, `otp_rejected` | `health = "needs_attention"` with that reason, `vault.item.health_changed`, and an entry in "Needs a person" |
 | `session_rejected` | A session item: `health = "needs_auth"`; the same notices ([§10.4](#104-health-and-hand-off)) |
 | `value_exposed` | `health = "needs_rotation"` (`value_exposed`); the use closes; the item refuses uses until a new version is written; `vault_value_exposed_total` pages the operator |
+| `value_exposed_unscannable` | As `value_exposed`: a response that might carry the value could not be scanned (C17), so the value is treated as seen |
+| `placeholder_misplaced` | The proxy dropped a request that carried a placeholder outside C11's conditions, or closed a WebSocket that carried one. The use closes (`refused`); `vault_placeholder_misplaced_total` raises `vault_placeholder_misplaced` for the operator at the first occurrence per tenant and day, because it is either a page that moves values or an agent trying to |
 | `origin_mismatch`, `frame_mismatch`, `form_not_found`, `aborted` | Counted in `vault_consumer_reports_total{outcome}`; with `final`, the use closes |
 | `password_changed`, `password_change_failed` | [§11.3](#113-rotate_fill-p1) |
 
@@ -985,6 +1049,24 @@ is one per use (`409 vault_phase_spent` for a second), and writes `write_back.ac
 
 `GET /v1/vault/consumer/self` returns the consumer's own record (status, key IDs, level and reach), so a consumer
 can check its registration without an API key.
+
+### 8.9 Use status for consumers
+
+`GET /v1/vault/consumer/uses/{use_id}`, signed as [§8.4](#84-authenticating-a-consumer) (three components, no
+body), answers for a use bound to the calling consumer only (any other: `404 vault_ticket_not_found`, the same
+body as an unknown ID):
+
+```json
+{ "use_id": "vus_01JAD6…", "status": "in_use", "closed": false, "close_reason": null,
+  "closes_at": "2026-10-24T08:30:00Z", "remaining_phases": [] }
+```
+
+`closed` is `true` for `closed`, `expired`, `denied` and `canceled` uses, with `close_reason`. The answer reads
+the live switches as redemption does ([§7.4](#74-what-closes-a-use-early)), so a kill switch shows as
+`closed: true, close_reason: "kill_switch"` before the batch that closes the use has run. It is read-only, needs
+no ticket (the consumer may have zeroised it) and is limited to 6 requests a minute per use (`RL_VAULT_STATUS`);
+C21's 30-second cadence uses 2. The `report` and `write-back` answers carry the same `closed` and
+`close_reason`.
 
 ## 9. One-time codes
 
@@ -1073,8 +1155,19 @@ channel. The vault needs from it:
 DMARC proves who sent a text. A matched sender is a filter, not proof. The vault therefore delivers an SMS code
 only into an `sms_otp` phase that is open, for a use created at most 10 minutes earlier, and never treats an
 unsolicited SMS code as usable. `sms_otp` phases are P1 and ship with the phone milestones; until then a use
-naming `sms_otp` is `400 invalid_request` (`reason = "sms_not_available"`). The interface is reconciled with the
-phone design at integration.
+naming `sms_otp` is `400 invalid_request` (`reason = "sms_not_available"`).
+
+**Reconciled with the phone design** ([Phone numbers § 11.4](phone-numbers.md#114-codes-for-the-vault)):
+
+- The phone side implements `SmsCodeSource` as `phone::codes::SmsCodes`, by `MailboxRequest::VaultTakeSmsCode`
+  to the mailbox of the number's identity, consuming a code once and failing closed, as the email source does.
+- The phone consumer learns which numbers are vault channels from one D1 read, owned by the vault:
+  `vault::phone_channels(tenant_id, identity_id) -> Vec<PhoneChannel { item_id, number_id, senders }>` in
+  `crates/worker/src/vault/channels.rs`, the `active` login items with `otp_channel.kind = "phone"`, no
+  decryption. The email side gets the same facts through `IngestInput.approved_accounts[].vault_items`; both are
+  answered by the vault crate so the rule lives in one place.
+- Withholding is the phone design's quarantine rule 2b (`quarantine_reason = 'vault_code'`), the SMS twin of
+  inbound rule 4b.
 
 ## 10. Sessions
 
@@ -1263,21 +1356,35 @@ pub async fn delete_managed(ctx: &VaultCtx, tenant_id: &str, owner_ref: &str, pu
 - Created, rotated and deleted only by the phone service (`owner_ref` is the phone design's number ID), with
   `managed_by: "phone"`. API routes list them with their metadata (`vault:read`) and refuse every write, grant
   and use (`422 invalid_request`, `reason = "managed_item"`).
-- `use_managed` lends the value to a closure inside the Worker (for example to re-apply the PIN at Telnyx) and
-  zeroises it; it needs the tenant key, so in partner custody the phone service cannot re-apply a PIN without the
-  partner's unlock key, and the phone design must say what it does then.
+- `use_managed` lends the value to a closure inside the Worker and zeroises it; it needs the tenant key. The
+  phone service never calls it: every PIN change generates a new value, sets it at Telnyx, reads the number back
+  and then calls `put_managed`, which seals with the public key only and replaces the item (one live managed
+  secret per `owner_ref` and purpose). So nothing the phone service does needs a partner's unlock key.
 - A person reveals the PIN in the console ([§13.1](#131-human-reveal-p1)) when they port the number out
   legitimately.
+- **Rotate and show once.** Where reveal is not available (partner custody, [§4.6](#46-custody-modes)), the vault
+  owns one more console action for managed secrets, so there is one reveal surface: **Show a new value**
+  (`rotate_and_show_managed`), offered to an owner or admin signed in within the last 10 minutes. The vault asks
+  the owning service for a new value through a callback the service registered with its purpose
+  (`ManagedPurpose::PortOutPin` → the phone service sets a new `external_pin` at Telnyx and reads it back), seals
+  it with `put_managed`, and shows the new value once on a `Cache-Control: no-store` page. Audit
+  `item.revealed` with `details.rotated = true`, event `vault.item.revealed`; it counts against the same 10
+  reveals a day. The phone design's "Port PIN" action calls it.
 - Deleted with the number (release, port-out completed) and by erasure.
 
-The interface is reconciled with the phone design's request at integration.
+Reconciled with the phone design's use of it ([Phone numbers § 16](phone-numbers.md#16-the-port-out-guard)).
 
 ## 14. Audit and events
 
 ### 14.1 The audit row
 
 `vault_audit` is append-only: no route or job updates a row; rows are deleted only by retention and erasure
-([§16](#16-retention-and-erasure)).
+([§16](#16-retention-and-erasure)). Retention deletes by **age only** (400 days): never by row count, by rate or to
+free space, so no volume of requests, refusals or reports can push an older row out. A tenant that writes
+rows fast is rate limited (`RL_VAULT`), never trimmed. Infisical's Agent Vault keeps its request log as plain
+rows, at most 10,000 per vault with the oldest deleted first (`internal/requestlog/retention.go` at `d5836ec`,
+read 2026-10-26), so a burst of cheap requests evicts the record of what came before; this rule is what keeps
+that from happening here ([U83](#27-edge-cases)).
 
 | Column | Holds |
 |---|---|
@@ -1394,7 +1501,7 @@ incident"):
 | Grants: `denied`, `revoked`, `expired` | 90 days after the decision | The global retention job's new `vault` step |
 | Uses: closed, `denied`, `expired`, `canceled` | 90 days after they ended; their ticket hash and sealed DEK are cleared when they end | The same step |
 | `vault_consumer_nonces` | Until 60 seconds after the signature's `expires` | The every-minute vault cron |
-| `vault_audit` | 400 days | The same step; before deleting the oldest rows of a tenant it stores the last deleted row's `seq` and `row_hash` in `vault_audit_anchors`, so the chain stays verifiable from the anchor |
+| `vault_audit` | 400 days, by age only (never by count, [§14.1](#141-the-audit-row)) | The same step; before deleting the oldest rows of a tenant it stores the last deleted row's `seq` and `row_hash` in `vault_audit_anchors`, so the chain stays verifiable from the anchor |
 | Revoked consumers | 400 days after revocation, for the audit trail | The same step |
 | Hidden `vault_code` mail and its `verifications` rows | 24 hours | Mailbox maintenance |
 
@@ -1436,4 +1543,545 @@ Receipts gain `vault_items_deleted`, `vault_versions_shredded`, `vault_keys_shre
 step adds: no `vault_items`, `vault_item_versions`, `vault_keys` or `vault_custody_slots` row of the scope remains,
 and `t/{tenant_id}/vault/` lists empty for a tenant scope.
 
-<!-- PART4 -->
+## 17. Who can start a fill
+
+### 17.1 Three actors, three credentials
+
+| Actor | Is | Holds | Can |
+|---|---|---|---|
+| The agent | A model with tools, acting for one identity | An identity key (MCP or REST) | List and read item metadata, ask for grants, read grants and uses, give up its own grant, ask for a signature (P1). Never a value, a ticket, a packet or an unlock key |
+| The orchestrator | The integrator's own server code that runs the agent's browser or tools | A tenant, partner or platform key with `vault:use` | Create uses from deterministic triggers, mint tickets, hand each ticket to its consumer over an internal channel |
+| The consumer | A registered component that fills, loads or injects | Its own Ed25519 signing key and X25519 encryption key | Redeem the tickets bound to it, report, write back, read use status |
+
+A value leaves the vault only when all three agree: the agent's identity has an active grant a person approved,
+the orchestrator created and minted a use a person approved where the level requires one, and the consumer named
+in that use redeems with its own key at the exact origin. No single credential of the three is enough.
+
+### 17.2 What each kind of key may hold
+
+| Permission | Platform | Partner | Tenant | Identity |
+|---|---|---|---|---|
+| `vault:read` | yes | yes | yes | yes, its own identity's items, grants and uses |
+| `vault:write` | yes | yes | yes | yes, items of its own identity, values write-only |
+| `vault:request` | yes | yes | yes | yes, for its own identity |
+| `vault:use` | yes | yes | yes | **no** |
+| `vault:approve` | yes | yes | yes | **no** |
+| `vault:admin` | yes | yes | yes | **no** |
+
+Listing `vault:use`, `vault:approve` or `vault:admin` on an identity key is `400 invalid_request` with
+`details.reason = "permission_not_allowed_for_level"` ([Security §4.6](security.md#46-creating-keys-fr-key-1)),
+whoever asks. That is the structural reason an agent can never approve its own grant and never start a use: its
+key cannot hold the permission, whatever a person or a misconfiguration grants. Infisical's Agent Vault blocks
+self-approval only for actors given its `proxy` role; an agent token raised to `member` approves proposals,
+its own included, and reads values (`internal/server/server.go` `requireProposalReview` and
+`internal/server/handle_credentials.go` at `d5836ec`, read 2026-10-26). Here the level decides, not the role
+([U79](#27-edge-cases)).
+
+### 17.3 Who can start a fill
+
+A fill starts with a **use** ([§6.2](#62-creating-a-use)). The rules:
+
+1. **Only an orchestrator key.** `POST …/vault/uses` needs `vault:use`, which no identity key holds
+   ([§17.2](#172-what-each-kind-of-key-may-hold)). There is no MCP tool that creates a use, mints a ticket or
+   redeems one ([§18.1](#181-mcp-tools)).
+2. **From a trigger the orchestrator observed.** `trigger` is an enumeration ([§6.2](#62-creating-a-use)); the
+   consumer reports what it saw from the browser, never from page content (C4), and redemption refuses a
+   context whose `trigger` or `form_kind` does not fit ([§8.6](#86-redemption-checks) step 6). An orchestrator
+   that creates a use because a model asked for one gains nothing the model could not already get from the
+   grant: the use still needs a person where the level says so, the ticket still goes to the orchestrator, and
+   the consumer still fills only at the exact origin on a form of the right kind.
+3. **The orchestrator contract** (accepted with the first `vault:use` key a tenant mints, shown in the console
+   and in the [guide](../../guides/vault.md#the-orchestrator)):
+   - **O1.** Create a use only from the integrator's own code observing a trigger in the browser or tool it
+     runs, never from a model's tool call, a message, a page or an SMS naming an item.
+   - **O2.** Pass a ticket only to the consumer named in the use, over an authenticated internal channel; never
+     put it in a model's context, a prompt, a log, an event or a tool result.
+   - **O3.** Choose `item_id` from the grant list of the identity whose run it is, never from text the model
+     produced.
+   - **O4.** Show the person who approves a use the data of [§6.5](#65-what-the-approver-sees) and nothing
+     written by an agent as a link (the "no agent-written link" rule).
+4. **A model may ask, never start.** An agent that needs to sign in tells its orchestrator in its own protocol
+   (Pylota: the browser task's step result); the orchestrator decides from the page it controls.
+5. **Self-service workspaces.** While a workspace is a provisional agent sign-up
+   ([Agent self-sign-up §4.1](agent-signup.md#41-permissions)), no `vault:*` permission is effective
+   (`403 permission_denied`, `details.reason = "signup_unverified"`), as for `phone:*`.
+
+## 18. MCP and CLI
+
+### 18.1 MCP tools
+
+Six tools, each listed only to a key holding its permission ([MCP server](mcp.md)). None returns a value, a
+ticket, a packet, a placeholder map or a seed, and none approves, mints, redeems, reveals or deletes.
+
+| Tool | Does | Permission | REST |
+|---|---|---|---|
+| `vault_list_items` | Lists the identity's usable items: kind, title, origins, health, whether a grant covers it | `vault:read` | `GET /v1/identities/{id}/vault/items` |
+| `vault_get_item` | Reads one item's metadata, its grants for this identity and its health | `vault:read` | `GET /v1/vault/items/{item_id}` |
+| `vault_request_grant` | Asks a person to let this identity use an item for some operations at some origins | `vault:request` | `POST /v1/identities/{id}/vault/grants` |
+| `vault_list_grants` | Lists this identity's grants and their status | `vault:read` | `GET /v1/identities/{id}/vault/grants` |
+| `vault_get_use` | Reads a use's status, phases done and outcome, never its ticket | `vault:read` | `GET /v1/vault/uses/{use_id}` |
+| `vault_sign` (P1) | Gets an HMAC or SigV4 signature made with an `api_key` item, through the item's approval level | `vault:request` | `POST /v1/identities/{id}/vault/uses` (`operation: sign`) and `…/signature` |
+
+`mail_request_account` gains an optional `vault_login` argument, the same object as the REST field
+([§3.5](#35-a-login-born-from-a-ledger-approval)). Tool annotations: the five reads `readOnlyHint: true`;
+`vault_request_grant` and `vault_sign` `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`,
+`openWorldHint: false`. Every `title`, `purpose`, `username`, `note` and `health_reason` in a tool result is
+fenced as untrusted content ([Security §8.3](security.md#83-fencing-content-for-models)).
+
+`vault_sign` is the one tool whose result depends on a secret. It is allowed because a signature is not the
+secret, and it is bounded like every use: a grant with `sign`, the item's approval level, `RL_VAULT`, and a
+`message_base64` of at most 65,536 bytes.
+
+### 18.2 CLI
+
+`idvy vault …` ([CLI](../../reference/cli.md#vault)), every command a thin client of the REST routes, values read
+from standard input or a file, never from an argument (so they never reach shell history), and never printed:
+
+| Command | Route |
+|---|---|
+| `idvy vault status --tenant T` | `GET /v1/tenants/{tenant_id}/vault` (custody, key `kid`, counts, `retiring_versions`) |
+| `idvy vault items list\|get\|create\|update\|archive\|restore\|delete` | The item routes; `create` reads values with `--password-stdin`, `--totp-uri-file`, `--secret-stdin`, `--session-file` (Playwright `storageState` JSON), or `--generate` |
+| `idvy vault items rotate ITEM` | `POST /v1/vault/items/{item_id}/versions` (`--overlap-hours`) |
+| `idvy vault grants list\|request\|approve\|deny\|revoke` | The grant routes; `approve` prompts with the grant's facts unless `--yes`, and needs `--on-behalf-of` from an API key |
+| `idvy vault uses list\|get\|approve\|deny\|cancel` | The use routes; `approve` requires `--digest` or prompts with the digest shown |
+| `idvy vault consumers list\|register\|activate\|suspend\|resume\|rotate-keys\|revoke` | The consumer routes |
+| `idvy vault consumer-keys generate --out DIR` | Local only: writes an Ed25519 and an X25519 key pair with mode `0600` and prints the two public JWKs |
+| `idvy vault consumer-check --key DIR` | Signs `GET /v1/vault/consumer/self` with the files in `DIR` and prints the answer: proves a consumer's keys and clock before activation |
+| `idvy vault conformance --consumer DIR [--fixture NAME]` | Local only: runs the fixture server of [§24.3](#243-consumer-conformance-fixtures) and the consumer under test against it, and prints a report the activation page can show |
+| `idvy vault custody enrol\|release --slots 1\|2` | `POST`/`DELETE …/vault/custody`; prints unlock keys once, to standard output only |
+| `idvy vault rotate-key --tenant T` | `POST …/vault/rotate-key` |
+| `idvy vault revoke-all --tenant T [--shred-sessions] [--archive-items]` | `POST …/vault/revoke-all`; asks for the tenant's slug to be typed back |
+| `idvy vault audit --tenant T [--verify]` | `GET …/vault/audit`; `--verify` recomputes the chain over every page read and exits 1 on a break |
+| `idvy ops switch vault_redeem on\|off` | The ops switch ([§15](#15-kill-switches-and-incident-response)) |
+
+There is no `reveal` command and no flag that prints a value, a ticket or an unlock key after it was first shown
+([§13.1](#131-human-reveal-p1)).
+
+## 19. Billing and limits
+
+**Plans.** On a deployment with `PM_BILLING=stripe`, the vault is available to a tenant on a paid plan, or to an
+`exempt` tenant of a partner; a Free-plan tenant gets `403 policy_denied` with `details.reason = "plan_required"`
+on every vault route, as phone does ([Phone numbers § 18.5](phone-numbers.md#185-invoicing)). There is no
+separate vault price and no metered vault charge in v1: the plan catalog's six features are unchanged
+([Billing › Plan catalog](billing.md#plan-catalog)). Whether to price the vault on its own is a question for the
+owner ([§29](#29-open-questions-for-the-owner)). With `PM_BILLING=off` every limit below still applies.
+
+**Limits** (copied to [Limits › Vault](../../reference/limits.md#vault)):
+
+| Limit | Value |
+|---|---|
+| Items | 100 per identity; `vault.max_items` per tenant, default 1,000, lower-only, at most 10,000 |
+| Origins | 1–10 per item and per grant; `login_domains` at most 5 per ledger entry |
+| Values | Password 1–1,024 bytes; secret 1–16,384 bytes; recovery codes 1–20 of at most 64 characters; TOTP secret 16–128 base32 characters |
+| Session state | 1,048,576 bytes of filtered JSON, 500 cookies, 10 origins; TTL 1 hour to `vault.session_max_ttl_days` (default 30) |
+| Grants | 20 pending per identity; 50 non-terminal per item; pending 7 days; active 1 hour to 90 days (default 7 days); `max_uses` 1–100,000 |
+| Uses | `RL_VAULT`: 120 a minute per identity; 100 `pending_approval` per tenant; approval deadline 60–900 seconds (default 600) |
+| Tickets | First redemption within 60 seconds of minting; window 10 minutes for `fill` and `rotate_fill`, 300–7,200 seconds (default 1,800) for `session_load`, `session_capture` and `inject` |
+| Long poll for codes | `wait_seconds` 0–60 |
+| Consumers | 10 platform-level, 10 per partner, 5 per tenant (not counting `revoked`) |
+| Consumer requests | Body 1,572,864 bytes; signature `created` within 30 seconds, `expires` within 60 seconds of `created`; nonces kept 60 seconds past `expires`; use status 6 a minute per use (`RL_VAULT_STATUS`) |
+| Reveal | 10 a person a UTC day; re-authentication within 10 minutes |
+| Versions | `current`, `previous` (overlap 0–168 hours), `pending` |
+| Signing (P1) | `message_base64` 1–65,536 bytes; SigV4 `headers` at most 50, `timestamp` within 5 minutes |
+| Audit | Kept 400 days by age; never trimmed by count |
+
+The D1 rows and R2 objects the vault adds are small next to mail: an item and its two versions are under 8 KB,
+and a session object at most 1 MiB. They do not count toward `storage_gb`; the item limits bound them.
+
+## 20. Permissions and key levels
+
+The six permissions join FR-KEY-1's list ([Security §4.6](security.md#46-creating-keys-fr-key-1)) with the level
+rules of [§17.2](#172-what-each-kind-of-key-may-hold):
+
+| Permission | Allows |
+|---|---|
+| `vault:read` | Item metadata, grants, uses, the tenant's vault status (tenant level and above); the `vault.item.*`, `vault.grant.*`, `vault.use.*` and `vault.ticket.*` events |
+| `vault:write` | Create, update, archive, restore and rotate items (values write-only); import a session |
+| `vault:request` | Request grants; revoke its own identity's grants; `sign` uses (P1) |
+| `vault:use` | Create, cancel and mint tickets for uses; never holds a value |
+| `vault:approve` | Approve and deny grants and uses, create grants already approved, loosen an item's approval level, under `key_may_decide(Decision::ApproveVault, …)`. Includes `vault:read` |
+| `vault:admin` | Delete items, register and manage consumers, rotate the tenant key, change custody, `revoke-all`; the `vault.consumer.changed` and `vault.key.changed` events. Includes `vault:read` |
+
+`audit:read` reads the vault audit ([§14.3](#143-who-reads-it)). Two new arms of `auth::people::Decision`:
+`ApproveVault` (grants, uses, looser levels) and `ActivateConsumer` (activation and resume,
+[§8.2](#82-registration-activation-and-suspension)). They join the decisions reserved for people
+([Workspace policy §3](workspace-policy.md#3-decisions-reserved-for-people)).
+
+## 21. Concurrency and idempotency
+
+| Operation | Pylota Identity's guard | Unknown outcome |
+|---|---|---|
+| Create an item | Optional `Idempotency-Key`; the `INSERT … SELECT … WHERE` limit guard; the audit sequence | Safe to retry with the same key; the record stores the item without values |
+| Rotate, write back | The audit sequence; `current_version` compare in the `WHERE` | A lost answer is safe to retry with the same key; a write-back is once per use (`409 vault_phase_spent`) |
+| Request a grant | Optional key; `vault_grant_exists` guard | Safe to retry |
+| Approve, deny, revoke | `Idempotency-Key` required; `UPDATE … WHERE status = 'pending_approval'`; same decision again answers `200` and writes nothing | Safe to retry |
+| Create a use | `Idempotency-Key` **required**; a replay returns the use with `ticket: null` and `ticket_replayed: false` | Safe to retry; mint a fresh ticket |
+| Mint a ticket | None: minting again replaces the previous ticket, which stops matching at once | Mint again |
+| Redeem a phase | The phase is spent at the commit; the TOTP step guard; `VaultTakeCode` consumes once | A lost answer is a spent phase: create a new use ([§8.6](#86-redemption-checks)) |
+| Report | Once per outcome per phase (a repeat answers `200` and writes nothing) | Safe to retry |
+| Consumer signatures | `vault_consumer_nonces` primary key | A replayed nonce is `401` |
+| Tenant key creation | Unique index `vault_keys_one_active`; the loser zeroises and reads the winner | – |
+| Audit append | `(tenant_id, seq)` unique; three tries, then `503` | Retryable |
+
+Every write that changes vault state is one D1 batch with its audit row and event ([§14.2](#142-appending)); a
+batch that fails changes nothing and decrypts nothing.
+
+## 22. Pylota agentic OS
+
+Pylota is the first integrator. This section describes what Pylota Identity offers it; Pylota's own plan for
+moving is in its repository.
+
+### 22.1 How Pylota uses the vault
+
+| Pylota component | Vault role |
+|---|---|
+| Its server, acting for operators | The orchestrator: a partner key with `vault:use`, `vault:approve` (under `vault.key_approval`, with `on_behalf_of` naming the operator user who approved in Pylota's app) and `vault:admin` for its own consumers |
+| Its browser fleet supervisor | A `browser` consumer, `self_hosted` or `third_party` (`provider` naming the hosted browser service) |
+| Its browser egress proxy | An `egress_proxy` consumer, mode `proxy`, under C11, C17 and C21 |
+| Its tool executor for supplier APIs | An `executor` consumer for `inject` |
+| Its own site policy | C8: the consumer checks Pylota's list of allowed and prohibited automation targets before every redemption |
+| Its operators' approvals | Pylota's review screen calls the approve routes with the use's `digest`; it shows the data of [§6.5](#65-what-the-approver-sees) and no agent-written link |
+
+### 22.2 Parity
+
+What a browser session store gives an agentic OS, and where each lives in the vault:
+
+| Need | Vault |
+|---|---|
+| Keep a signed-in session per operator and site, sealed at rest | `session` items, identity- or tenant-scoped, one per site's origins ([§10](#10-sessions)) |
+| Load it into a browser run | `session_load` uses and C15 |
+| Save the session at the end of a run | Write-back, rotation after use ([§10.3](#103-write-back-and-rotation-after-use)) |
+| Capture a session after a person signs in during a hand-off | `session_capture` uses with a person's approval ([§10.4](#104-health-and-hand-off)) |
+| Expire sessions and notice when a site signs the agent out | TTL, `needs_auth`, "Needs a person" ([§10.4](#104-health-and-hand-off)) |
+| Revoke everything for an operator or site | Grant revoke, item archive or delete, `revoke-all` ([§15](#15-kill-switches-and-incident-response)) |
+| Keep only the site's cookies, never an identity provider's or an advertiser's | The cookie filter ([§10.1](#101-what-a-session-item-holds)) |
+| Never keep bot-challenge clearance | The clearance list ([§3.6](#36-refused-items-and-values)) |
+| Sign in again without a person, where allowed | A `login` item and a `fill` with `capture_into` ([§3.5](#35-a-login-born-from-a-ledger-approval)) |
+| Erase with proof | Crypto-shred with receipts ([§16](#16-retention-and-erasure)) |
+
+### 22.3 Migrating from `browser_sealed_sessions`
+
+The vault replaces Pylota's `browser_sealed_sessions`. Pylota Identity offers, for that move:
+
+1. **Set-up.** The platform sets `vault.allowed: true` and `vault.key_approval: true` on Pylota's operators'
+   tenants; Pylota registers its consumers (`idvy vault consumer-keys generate`, `POST /v1/vault/consumers`) and
+   the operator activates them after review (`Decision::ActivateConsumer`); `idvy vault consumer-check` passes
+   from each consumer's host; each consumer passes the conformance fixtures ([§24.3](#243-consumer-conformance-fixtures)).
+2. **Ledger.** Every site a session is kept for needs an approved ledger entry for the identity
+   ([§3.3](#33-ledger-binding)). Pylota creates the entries with `POST /v1/identities/{id}/accounts` and approves
+   them through its partner key under `accounts.require_approval`'s rule, with `on_behalf_of`.
+3. **Import.** For each session to keep, `POST /v1/identities/{identity_id}/vault/items` with `kind: "session"`,
+   the state, and `"import": { "source": "pylota_sealed_session", "source_ref": "<Pylota's row ID>" }`
+   ([§10.5](#105-importing-an-existing-session)). Filtering applies; the response counts what was dropped, and
+   the audit row keeps `source_ref`, so Pylota can reconcile its list against `vault.item.created` events.
+   `Idempotency-Key` = `pylota-import-{row ID}` makes a re-run safe.
+4. **Dual running.** Pylota reads from the vault first behind its own flag, falling back to its old store only
+   for a session not yet imported; a run that writes back writes to the vault only.
+5. **Cut-over.** When every live session is imported (Pylota's count equals the vault's `vault.item.created`
+   events with `source = "pylota_sealed_session"`), Pylota turns off the fallback, then deletes its old rows.
+6. **Rollback.** Until step 5's delete, turning Pylota's flag off returns it to its old store; sessions written
+   back to the vault meanwhile are lost to the old store, so a rolled-back run signs in again through a person.
+   After the delete there is no rollback: the vault is the only copy, by design.
+
+Credentials that Pylota keeps today for third-party logins move the same way, as `login` items created with
+values from standard input (the CLI) or the API, never through a model.
+
+## 23. Questions for counsel
+
+Each default is the cautious one.
+
+1. **Using credentials on a person's behalf.** May an agent sign in to a third-party service with credentials an
+   operator gave it, where the service's terms forbid sharing or automated access? Which services' terms make
+   this a breach the operator must avoid? Default: the ledger records the operator's approval of each service,
+   the refused-domain list starts with GOV.UK One Login, and the guide tells operators to check each service's
+   terms.
+2. **Government identity services** beyond GOV.UK One Login (HMRC, DVLA, the EU's eIDAS schemes, US Login.gov):
+   refused by default or allowed with authority? Default: candidates for `PM_VAULT_REFUSED_DOMAINS`, decided
+   per service.
+3. **Controller and processor.** For vault values, which are credentials of the tenant's own accounts, is TREFT a
+   processor under the tenant's instructions, and do the sub-processors (Cloudflare, a hosted-browser provider
+   chosen by the tenant) need naming in the DPA? Default: processor; Cloudflare named; the hosted-browser
+   provider is the tenant's own choice and named by the tenant.
+4. **Breach notification.** Is a `value_exposed` report, or a suspected consumer-key leak, a personal-data breach
+   to notify, and to whom, within what time? Default: the operator treats every `value_exposed` on an item that
+   holds a person's credentials as a candidate breach and notifies the tenant within 24 hours.
+5. **Retention of the audit.** Are 400 days of audit rows (IDs, sites, times) proportionate, and may they be
+   kept after an identity's erasure with the identity ID only? Default: as designed; run IDs cleared on identity
+   erasure.
+6. **Partner custody and compelled access.** In partner custody, what may TREFT be compelled to produce, and does
+   the honest statement of [§1.2](#12-the-trust-model) need changing for any jurisdiction? Default: the statement
+   as written.
+7. **The words used.** Is "not zero-knowledge and not end-to-end encrypted" enough to avoid misleading
+   consumers and businesses under the UK's CMA guidance and the FTC Act? Default: the statement and the forbidden
+   words, checked by `xtask::docs_forbidden_claims`.
+8. **Payment cards.** Is the Luhn-based refusal enough to keep the vault out of PCI DSS scope? Default: cards
+   refused; counsel and a QSA confirm before launch.
+
+## 24. Tests
+
+### 24.1 Spikes
+
+| Spike | Proves | Fallback |
+|---|---|---|
+| **S-VLT1** | `hpke` 0.14.1 (`default-features = false`; `x25519`, `aes`, `alloc`) builds for `wasm32-unknown-unknown`, takes randomness from `platform::Rng` through `rand_core`, passes the RFC 9180 test vectors for DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM in base mode, and seals and opens a 1 MiB plaintext in a Worker within 50 ms of CPU | [ADR 0021](../adr/0021-agent-vault.md) decision 4: the same suite implemented in `core::crypto::hpke` from the already-pinned `x25519-dalek`, `hkdf`, `sha2` and `aes-gcm`, against the same vectors; the wire format is RFC 9180's either way, so no stored value changes |
+| **S-VLT2** | The audit-sequence guard of [§14.2](#142-appending) holds under 50 concurrent writers to one tenant in `wrangler dev` and on staging D1: no gap, no duplicate `seq`, every change has its row | Serialise vault writes per tenant through the tenant's `TenantQuota` object |
+| **S-VLT3** | RFC 9421 verification with `ed25519-dalek` 3.0.0 `verify_strict` over the signature base of `core::httpsig`, against the RFC 9421 Appendix B Ed25519 example and against signatures made by the TypeScript, Python and Go consumer SDK helpers | None needed: the Web Bot Auth path already uses the same base builder |
+
+### 24.2 Named tests
+
+| Test | Proves | Section |
+|---|---|---|
+| `core::vault::origin::canonical_forms` | Scheme, userinfo, path, query, IDNA, case, trailing dot, port rules; IP literals and internal names refused; confusables refused | §3.2 |
+| `core::vault::refuse::cards_and_kinds` | Luhn detection with spaces and dashes; refused kinds; clearance cookie names | §3.6 |
+| `core::vault::policy::approval_needed` | Every combination of item level, tenant floor, operation floor and prior run approval | §6.1 |
+| `core::vault::digest::stable` | The digest over canonical JSON is stable and changes with every bound field | §6.3 |
+| `core::vault::ticket::format_and_hash` | Ticket format, constant-time compare, lookup collisions | §7.1 |
+| `core::vault::totp::rfc6238_vectors` | RFC 6238 appendix B for SHA1, SHA256 and SHA512; next-step codes | §9.1 |
+| `core::vault::cookies::filter` | Host, parent-domain and public-suffix rules; local storage by exact origin; counts | §10.1 |
+| `core::vault::audit::row_hash_chain` | Row hashing, anchors, verification from any point | §14.1 |
+| `core::crypto::hpke::rfc9180_vectors` | The suite against RFC 9180 vectors (S-VLT1) | §4.3 |
+| `core::crypto::pv1::aad_binding` | A field ciphertext moved to another purpose, version, item or tenant fails to open | §4.3 |
+| `xtask::vault_types_have_no_debug` | No value-holding type derives or implements `Debug` or `Serialize` | §4.5 |
+| `xtask::docs_forbidden_claims` | The forbidden words appear nowhere in `docs/` or `site/` | §1.2 |
+| `it::vault::items_write_only` | No route, idempotency record, event or log line carries a value | §3.1 |
+| `it::vault::ledger_binding` | Items, grants, uses and redemptions refuse without an approved entry; closing an entry archives and closes | §3.3 |
+| `it::vault::grant_decisions` | Who may approve; self-approval; state guards; expiry at the second | §5 |
+| `it::vault::identity_key_levels` | `vault:use`, `vault:approve`, `vault:admin` refused on identity keys at mint time | §17.2 |
+| `it::vault::use_lifecycle` | Create, approve with digest, mint, redeem each phase, report, close; every early-close cause | §6–§7 |
+| `it::vault::redemption_binding` | Every row of §8.6 step 6 refuses and closes the use | §8.6 |
+| `it::vault::consumer_signatures` | Missing, wrong tag, wrong components, stale, expired, digest mismatch, replayed nonce, rotated key in and out of overlap: one byte-identical `401` | §8.4 |
+| `it::vault::consumer_reach` | Tickets of other consumers and out-of-reach tenants answer as unknown | §8.3 |
+| `it::vault::use_status_closure` | `closed` after revoke, kill switch and window end; status route reach and rate | §8.9 |
+| `it::vault::email_codes_rule_4b` | Rule 4b hides the code from every agent surface and API key; delivery into the phase once; strict mode | §9.2 |
+| `it::vault::sms_otp_phase` | The SMS code source, consumed once, only into an open phase of a recent use | §9.3 |
+| `it::vault::sessions` | Filter, bounds, one `in_use` load per item, write-back rotation and old-version deletion | §10 |
+| `it::vault::rotation_versions` | Overlaps, `previous` use, the cron, `rotate_fill` confirm and failure | §11 |
+| `it::vault::custody` | Enrol, present, wrong key, release; reveal unavailable; rotate-and-show for managed secrets | §4.6, §13 |
+| `it::vault::managed_secrets` | Only the owning service writes; API refuses grants and uses | §13.2 |
+| `it::vault::audit_chain_and_age_only` | Every change has its row in its batch; retention by age only; a flood never deletes a row | §14, §16.1 |
+| `it::vault::kill_switches` | Each switch and its speed | §15 |
+| `it::vault::erasure_scopes` | Identity and tenant scopes, receipts, probes, R2 sweep | §16 |
+| `it::vault::mcp_tools` | The six tools listed by permission; no tool returns a value, ticket or packet | §18.1 |
+| `it::security::cross_tenant_matrix` (extended) | Every vault route and consumer route across tenants and partners | §20 |
+| `cli::vault::commands` | Against recorded fakes: values only from stdin or files, never printed; `audit --verify` | §18.2 |
+| `it::vault::gates` | `PM_VAULT`, `vault.allowed` (platform-only), the paid-plan rule | §19 |
+| `it::vault::export_excludes_values` | Subject-access exports carry item metadata only | §16 |
+| `it::vault::tenant_key_race`, `it::vault::tenant_key_rotation` | One tenant key under racing first writes; rotation and the re-wrap sweep | §4.2 |
+| `it::vault::totp_step_once` | One code per step per item across uses | §9.1 |
+| `it::vault::session_import` | The import route: filter, audit `source_ref`, idempotent replay | §10.5, §22.3 |
+| `it::vault::signing` | HMAC-SHA256 (RFC 4231) and SigV4 test-suite vectors; origin and skew refusals | §12 |
+| `it::security::ssrf_embedded_ipv4` | NAT64, 6to4 and metadata destinations refused by the embedded IPv4 | §24.3, [Security §9.1](security.md#91-url-rules-at-create-update-and-every-attempt) |
+| `browser::vault::reveal_rules` | Re-authentication, the daily limit, no seed, no session; `no-store` | §13.1 |
+| `browser::vault::approval_no_links` | Agent-written text is escaped on every approval page | §6.5 |
+
+### 24.3 Consumer conformance fixtures
+
+`crates/conformance/vault/` holds fixtures a consumer runs against a **fixture server** that plays both the vault
+and a set of sites (`idvy vault conformance --consumer DIR`), the C20 gate. Each fixture is also the test
+`conf::vault::{fixture}`, run in CI against the reference consumer of M43:
+
+| Fixture | The consumer must |
+|---|---|
+| `login_same_origin` | Fill username and password in CDP mode and report `signed_in` |
+| `cross_origin_iframe` | Refuse a password field in a frame of another origin (`frame_mismatch`) |
+| `top_level_mismatch` | Refuse a page on another origin (`origin_mismatch`) |
+| `signup_after_first_use` | Not fill a sign-up form once the item has been used |
+| `exposure_check` | Find a value the page copied into the DOM, an attribute, the title and the URL, and report `value_exposed` |
+| `proxy_placeholder_ok` | Substitute in the recorded form field of one `POST` to the recorded path |
+| `proxy_second_form` | Drop a `POST` carrying the placeholder to another path or in another field (`placeholder_misplaced`) |
+| `proxy_http` | Drop the placeholder on plain `http` |
+| `proxy_header_url_websocket` | Drop it in a header, a URL and a WebSocket frame |
+| `proxy_redirect_307` | Not re-send a substituted body to the target of a `307` |
+| `echo_plain`, `echo_gzip`, `echo_split_chunk`, `echo_location` | Redact the value from an echoing response in each form, or report `value_exposed_unscannable` |
+| `inject_scheme_only` | Put an `inject` secret only in the scheme's header, only over `https` |
+| `closure_mid_run` | Tear down a tunnel and a WebSocket carrying a value within 30 seconds of a revoke |
+| `canonical_origin` | Treat `HTTPS://TFL.GOV.UK.:443` as the ticket's origin and a look-alike `xn--` host as another |
+| `totp_not_before` | Wait for `not_before` before typing a next-step TOTP code |
+| `no_value_in_logs` | Leave no value, ticket, packet or placeholder in the consumer's own log file after the run |
+| `session_scope` | Load cookies only for the packet's origins; export only those; drop clearance cookies |
+
+### 24.4 Live tests
+
+| Test | Proves |
+|---|---|
+| `live::vault::hpke_wasm` | S-VLT1 inside the deployed staging Worker |
+| `live::vault::d1_audit_contention` | S-VLT2 on staging D1 |
+| `live::vault::browserbase_settings` | A hosted browser created with `recordSession: false`, `logSession: false`, `solveCaptchas: false` reports them back as set (C6) |
+| `live::vault::email_code_into_fill` | A real verification email from a test service is withheld and delivered into an `email_otp` phase |
+
+## 25. Sources read for this page
+
+| Source | Read |
+|---|---|
+| Cloudflare: Workers security model; Workers secrets; D1 limits (Time Travel); Cloudflare cookies (`cf_clearance`) | 2026-10-24 |
+| RFC 9180 (HPKE), RFC 9421 (HTTP message signatures), RFC 9530 (Digest fields), RFC 6238 (TOTP), RFC 4231 (HMAC-SHA256 vectors), RFC 7638 (JWK thumbprint), RFC 3986 | 2026-10-24 |
+| crates.io: `hpke` 0.14.1, `x25519-dalek` 3.0.0, `ed25519-dalek` 3.0.0 | 2026-10-24 |
+| Browserbase "Create a session" (`recordSession`, `logSession`, `solveCaptchas` default `true`) | 2026-10-24 |
+| Chrome DevTools Protocol WebAuthn domain (`devtools-protocol@0.0.1367902`) | 2026-10-24 |
+| GOV.UK One Login terms and conditions | 2026-10-24 |
+| Google on Device Bound Session Credentials (2026-04-09) | 2026-10-24 |
+| FIDO Alliance, agentic authentication working group (formed 2026-04-28) | 2026-10-24 |
+| 1Password's security model and agent features (the comparison of decryption inside an attested enclave) | 2026-10-24 |
+| Infisical Agent Vault, `github.com/Infisical/agent-vault` at `d5836ec3bb23` (v0.40.2, MIT outside `ee/`): `internal/mitm/{forward,connect,websocket}.go`, `internal/brokercore/{credential,substitution}.go`, `internal/broker/broker.go`, `internal/server/{server,handle_credentials,handle_proposals}.go`, `internal/requestlog/retention.go`, `internal/netguard/netguard.go`, `docs/learn/{security,services}.mdx`, `.goreleaser.yml` | 2026-10-26 |
+| Go `net/http` source, Go 1.24.7 (`client.go`, redirect handling) | 2026-10-26 |
+
+## 26. Functional requirements
+
+Behind `PM_VAULT` ([ADR 0021](../adr/0021-agent-vault.md)). Priorities in brackets; acceptance names rows of
+section U of the [edge-case register](../edge-cases.md).
+
+- **FR-VLT-1** (P0) The vault **must** be off unless `PM_VAULT` is `on` and the tenant's `vault.allowed` is
+  `true`; `vault.allowed` is set only by a platform key; turning the vault off **must not** release a withheld
+  code. Acceptance: U1, U2, U70.
+- **FR-VLT-2** (P0) No route, MCP tool, event, log, audit row, idempotency record or export **may** return or
+  contain a vault value, ticket, packet, unlock key or TOTP seed; value-holding types **must not** implement
+  `Debug` or `Serialize`. Acceptance: U3, U4, U5.
+- **FR-VLT-3** (P0) Items **must** be one of `login`, `api_key` or `session` (and the internal
+  `managed_secret`), bound to 1–10 exact `https` origins canonicalised as specified; wildcards, IP literals,
+  internal names and confusable hosts **must** be refused. Acceptance: U6, U7, U8, U85.
+- **FR-VLT-4** (P0) The vault **must** refuse payment cards, bank details, passkeys and WebAuthn keys, and
+  **must** drop bot-challenge clearance cookies. Acceptance: U9, U10, U11.
+- **FR-VLT-5** (P0) Every usable item **must** be bound to an approved service-ledger entry whose registrable
+  domain (or `login_domains`) covers each origin, re-checked at grant approval, use creation and redemption;
+  closing the entry **must** archive the item and close its uses. Acceptance: U12, U13, U14, U15.
+- **FR-VLT-6** (P0) Values **must** be sealed per item version under a fresh DEK, with AAD binding tenant, item,
+  version and purpose, the DEK sealed by HPKE to the tenant's X25519 key, and the tenant key sealed under the
+  master key (and, in partner custody, under the partner's unlock key). Acceptance: U16, U17, U18.
+- **FR-VLT-7** (P1) A tenant's own partner key **must** be able to move the tenant into partner custody and back,
+  with one or two unlock keys shown once; unwrapping routes **must** require the unlock key in that mode.
+  Acceptance: U19, U20, U21.
+- **FR-VLT-8** (P0) An agent **must** obtain use of an item only through a grant a person approves (or a
+  platform or partner key under `vault.key_approval` with `on_behalf_of`); the requesting key **must never**
+  approve; identity keys **must never** hold `vault:use`, `vault:approve` or `vault:admin`; a later change to an
+  item **must not** widen a live grant. Acceptance: U22, U23, U24, U78, U79.
+- **FR-VLT-9** (P0) Uses **must** be created only by `vault:use` keys from an enumerated trigger, with the
+  approval level computed as the strictest of item, tenant floor and operation floor, and approval bound to the
+  use's digest. Acceptance: U25, U26, U27, U28.
+- **FR-VLT-10** (P0) Tickets **must** be one-use per phase, bound to one consumer, the run, the origin and a
+  60-second first-redemption window, stored only as a hash, and closed early by every cause listed.
+  Acceptance: U29, U30, U31, U32.
+- **FR-VLT-11** (P0) Consumers **must** authenticate every request with an RFC 9421 Ed25519 signature with nonce
+  replay protection, be activated by a person or platform key, and receive values only HPKE-sealed to their
+  current encryption key. Acceptance: U33, U34, U35, U36.
+- **FR-VLT-12** (P0) Redemption **must** refuse and close the use on any mismatch of run, top-level origin,
+  frame origin, trigger, form kind, browser declarations, hosting or mode, and on any live-state change.
+  Acceptance: U37, U38, U39.
+- **FR-VLT-13** (P0) The consumer contract `vault-consumer/1` (C1–C21) **must** be published, versioned and
+  tested by conformance fixtures that a consumer passes before activation. Acceptance: U40, U73–U77, U80, U82.
+- **FR-VLT-14** (P1) TOTP codes **must** be computed inside the vault, one code per step per item, with the seed
+  never returned. Acceptance: U41, U42.
+- **FR-VLT-15** (P0) Verification email for a vault login item's channel **must** be withheld from every agent
+  surface and API key and delivered only into an open `email_otp` phase, once; a strict mode **must** extend
+  this to every verification mail. Acceptance: U43, U44, U45, U46.
+- **FR-VLT-16** (P1) SMS codes **must** follow FR-VLT-15 through the phone design's code source, only into an
+  `sms_otp` phase of a use created at most 10 minutes before. Acceptance: U47, U48.
+- **FR-VLT-17** (P0) Session items **must** be filtered to their origins, bounded, loaded by one run at a time,
+  rotated at write-back with the previous version deleted, and expired by TTL. Acceptance: U49, U50, U51, U52.
+- **FR-VLT-18** (P1) Items **must** keep at most `current`, `previous` and `pending` versions; rotation by hand,
+  `rotate_fill` and write-back of rotated API keys **must** close open uses. Acceptance: U53, U54, U55.
+- **FR-VLT-19** (P1) `api_key` items with a sign scheme **must** produce HMAC-SHA256 and AWS SigV4 signatures
+  through grants and approval, without returning the secret. Acceptance: U56.
+- **FR-VLT-20** (P1) A person **must** be able to reveal a value only in the console, re-authenticated, at most
+  10 times a day, never a TOTP seed or session cookies; no API, MCP or CLI route **may** reveal. Acceptance:
+  U57, U58.
+- **FR-VLT-21** (P0) The vault **must** keep internal managed secrets for other services (the port-out PIN),
+  writable only by their owner service, with rotate-and-show-once where reveal is unavailable. Acceptance: U59,
+  U60.
+- **FR-VLT-22** (P0) Every vault change **must** write a hash-chained audit row in the same batch, with typed
+  fields only, kept 400 days by age and never trimmed by count; every row except authentication failures
+  **must** emit an event carrying the chain head. Acceptance: U61, U62, U63, U83.
+- **FR-VLT-23** (P0) The kill switches and `revoke-all` **must** stop redemption at the next request.
+  Acceptance: U64, U65.
+- **FR-VLT-24** (P0) Item deletion **must** crypto-shred with a receipt, and identity and tenant erasure **must**
+  remove vault rows and objects with receipt fields and probes. Acceptance: U66, U67, U68.
+- **FR-VLT-25** (P0) Documentation, the site and SDK descriptions **must** use the honest trust statement and
+  **must not** claim zero knowledge or end-to-end encryption. Acceptance: U69.
+- **FR-VLT-26** (P0) Approval surfaces **must not** render any agent- or key-written text as a link or markup.
+  Acceptance: U84.
+- **FR-VLT-27** (P1) The MCP server **must** offer the six vault tools only by permission, none of which returns a
+  value or approves; the CLI **must** read values only from standard input or files. Acceptance: U71, U72.
+- **FR-VLT-28** (P0) A consumer holding a value across requests **must** learn of a use's early closure within 30
+  seconds through the use status route, and drop the value and its connections. Acceptance: U82.
+- **FR-VLT-29** (P1) Pylota Identity **must** offer the session import route that lets an integrator migrate an
+  existing sealed session store with idempotent, auditable imports. Acceptance: U50.
+- **FR-VLT-30** (P1) Every outbound fetch the platform makes, and every consumer fetch in the conformance
+  fixtures, **must** refuse NAT64, 6to4 and cloud-metadata destinations by the embedded IPv4. Acceptance: U81.
+
+## 27. Edge cases
+
+The rows are section **U · Vault** of the [edge-case register](../edge-cases.md), U1–U85. U1–U72 cover
+§1–§24; U73–U85 come from the review of Infisical's Agent Vault: placeholder misuse (U73–U77), grants and keys
+(U78, U79), redirects and outbound ranges (U80, U81), early closure (U82), audit flooding (U83), approval links
+(U84) and host canonicalisation (U85).
+
+## 28. Milestones
+
+To add to the [build plan](../build-plan.md). Production keeps `PM_VAULT` off until M45's acceptance passes.
+
+### M42 · Vault core: keys, items, audit and erasure (after M5, M6, M14, M17 Foundation and M27)
+
+**Files:** `crates/core/src/vault/{mod.rs, origin.rs, item.rs, refuse.rs, cookies.rs, audit.rs}`,
+`crates/core/src/crypto/{hpke.rs, pv1.rs}`, `crates/api-types/src/vault.rs`, `crates/worker/src/vault/{mod.rs,
+keys.rs, items.rs, audit.rs, erase.rs, channels.rs, managed.rs}`, `handlers/vault.rs` (item, status, audit and
+custody routes), `jobs/erasure.rs` and `jobs/retention.rs` (vault steps), `console/pages/vault.rs` (items, audit),
+CLI `vault status|items|audit|custody|rotate-key`. D1 tables `vault_keys`, `vault_custody_slots`, `vault_items`,
+`vault_item_versions`, `vault_audit`, `vault_audit_anchors`; `service_accounts.login_domains_json`.
+
+**Order.** The first pull request is spike S-VLT1 with `core::crypto::hpke::rfc9180_vectors`, then S-VLT2.
+
+**Implements:** FR-VLT-1–7, FR-VLT-21, FR-VLT-22, FR-VLT-24, FR-VLT-25 and rows U1–U21, U59–U63, U66–U69, U83,
+U85.
+
+**Acceptance:** the rows with their tests; `xtask::vault_types_have_no_debug` and
+`xtask::docs_forbidden_claims` in CI.
+
+### M43 · Grants, uses, approval, consumers and tickets (after M42, M15, M16, M21 and M25)
+
+**Files:** `crates/core/src/vault/{policy.rs, digest.rs, ticket.rs, consumer.rs}`, `crates/worker/src/vault/{grants.rs,
+uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs}`, `handlers/vault_consumer.rs`, `auth/consumer.rs`,
+`auth/people.rs` (`ApproveVault`, `ActivateConsumer`), `mcp/tools.rs` (six tools), `crates/conformance/vault/`,
+console approval and consumer pages, CLI `grants`, `uses`, `consumers`, `consumer-keys`, `consumer-check`,
+`conformance`. D1 tables `vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`.
+
+**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and rows U22–U40, U64, U65, U71–U82, U84.
+
+**Acceptance:** the rows; spike S-VLT3; `it::security::cross_tenant_matrix` extended; the conformance fixtures
+pass against a reference consumer built in `crates/conformance` (Rust, CDP mode and proxy mode).
+
+### M44 · One-time codes and sessions (after M43, M30 and M31; the SMS arm with the phone milestone M39)
+
+**Files:** `crates/core/src/vault/totp.rs`, `crates/worker/src/vault/{codes.rs, sessions.rs}`, `mailbox/ingest.rs`
+(rule 4b), `mailbox/codes.rs` (`VaultTakeCode`), `handlers/wait.rs` (strict mode), `mailbox/sms.rs`
+(`VaultTakeSmsCode`, with M39). Mailbox columns `verifications.vault_item_id`, `verifications.vault_use_id`,
+`verifications.vault_consumed_at`.
+
+**Implements:** FR-VLT-14–17 and rows U41–U49, U51, U52, U70.
+
+**Acceptance:** the rows; `live::vault::email_code_into_fill` on staging.
+
+### M45 · Rotation, signing, reveal, tooling and the Pylota cut-over (after M44)
+
+**Files:** `crates/worker/src/vault/{versions.rs, sign.rs, reveal.rs}`, console reveal and "Show a new value",
+`jobs/vault_cron.rs` (every minute: deadlines, overlaps, nonces, re-wrap sweep; daily: session expiry, orphan
+objects, rotation reminders), the import route, CLI `revoke-all`, `idvy ops switch vault_redeem`, the runbook
+"Vault incident".
+
+**Implements:** FR-VLT-18–20, FR-VLT-29 and rows U50, U53–U58.
+
+**Acceptance:** the rows; `live::vault::browserbase_settings`; a staging rehearsal of [§22.3](#223-migrating-from-browser_sealed_sessions)
+with a test integrator (register and activate consumers, import 20 sessions, load and write back, revoke-all);
+seven days of the vault telemetry on staging with no `vault_audit_append_failures_total`, no
+`vault_value_exposed_total` outside fixtures and no unexplained `placeholder_misplaced` before `PM_VAULT` is
+turned on in production.
+
+## 29. Open questions for the owner
+
+1. Whether the vault is priced on its own, or stays inside the paid plans (designed: inside, no metering).
+2. Whether partner custody is offered at launch or after (designed: P1, built in M42, enabled per tenant).
+3. The first entries of `PM_VAULT_REFUSED_DOMAINS` beyond GOV.UK One Login, after counsel's answer to §23.2.
+4. Whether `third_party` hosted browsers are allowed for fills at launch (designed: yes, activated only by a
+   platform key after review of the provider's settings).
+5. Whether Pylota's existing sealed sessions are imported, or every operator signs in again once through a
+   person (designed: imported; signing in again is the rollback).
+6. Whether to publish the consumer conformance fixtures as a separate open-source package so other agent
+   platforms can certify consumers (designed: they ship in this repository under its licence).
