@@ -112,7 +112,7 @@ Pylota's own experience showed the cost of these gaps:
   the file instead.
 - Becoming a telephony carrier or holding number ranges from a regulator. Numbers are bought from a provider
   (Telnyx) in each tenant's own legal name ([Phone numbers](design/phone-numbers.md)).
-- Phone numbers for individuals; for sole traders until the owner's decision ([Phone numbers § 1.1](design/phone-numbers.md#11-sole-traders-an-owner-decision)); and numbers bought by an agent without a person's approval, given one by one or through a standing budget the person set.
+- Phone numbers for individuals and for sole traders (owner decision of 2026-10-26, [Phone numbers § 1.1](design/phone-numbers.md#11-sole-traders-refused-owner-decision-2026-10-26)); and numbers bought by an agent without a person's approval, given one by one or through a standing budget the person set.
 - Call Control webhooks and media streaming through Pylota Identity (planned for v1.1); alphanumeric sender IDs;
   outbound MMS; WhatsApp, RCS and iMessage.
 - Showing a vault value to an agent, a model or an API key, in any form. Agents use credentials through
@@ -1480,10 +1480,10 @@ priority of each requirement is given in brackets; acceptance names the edge row
 - **FR-PHN-53** (P0) The provider account's level **must** be probed and recorded, and a row that needs a level
   the account lacks **must** report `platform_prerequisite`; US rows **must** stay off until the enablement
   sequence of [§ 2.5](design/phone-numbers.md#25-us-enablement) is complete. Acceptance: P127.
-- **FR-PHN-54** (P0) The owner's decision on sole traders **must** be recorded before M41's acceptance; under any
-  option an adopted number **must** keep working with a dated exit (re-paper or port out) and be suspended for
-  outbound only, never released, at its deadline; a US sole-proprietor brand **must** take its one-time code
-  only from a person. Acceptance: P6, P126.
+- **FR-PHN-54** (P0) Sole traders **must** be refused (owner decision of 2026-10-26, ADR 0020 decision 15); an
+  adopted number of a sole-trader tenant **must** keep working with a dated exit (re-paper or port out), no
+  earlier than 2027-01-24, and be suspended for outbound only, never released, at its deadline. Acceptance: P6,
+  P126.
 
 ### 6.24 Vault
 

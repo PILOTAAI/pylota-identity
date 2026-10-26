@@ -130,7 +130,7 @@ joins the registration automatically. A number that places calls also needs a US
   and calls, and the purchase says so before you buy (`acknowledge_not_available`).
 
 **Who can hold numbers.** Businesses: companies, LLPs, partnerships, public companies and non-profits.
-Whether sole traders can is an open decision; until it is made, a sole-trader profile is refused. Documents are
+Sole traders and individuals cannot hold numbers: their profiles are refused. Documents are
 PDF, PNG or JPEG up to 20 MB, encrypted and **write-only**: nothing returns them.
 
 ## The standing budget

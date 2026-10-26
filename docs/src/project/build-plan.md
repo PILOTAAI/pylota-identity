@@ -2083,8 +2083,7 @@ sms_in.rs, a2p.rs, codes.rs}`, `handlers/phone/{sms.rs, wait.rs, consent.rs}`, `
 | `mcp/tools.rs` (M15) | `phone_send_sms`, `phone_list_sms`, `phone_get_sms`, `phone_wait_sms`, `phone_record_opt_out` |
 
 **Implements:** FR-PHN-21 to FR-PHN-31, FR-PHN-45 (`outbound_sms` with registrations), FR-PHN-48, FR-PHN-49 (US
-onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), FR-PHN-54 (the
-sole-proprietor brand, where the decision allows it), and edge rows P42–P72, P77 (SMS charges in the job's input),
+onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), and edge rows P42–P72, P77 (SMS charges in the job's input),
 P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125, P128.
 
 **Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of [Phone numbers § 12.3](design/phone-numbers.md#123-dispatch-provider-idempotency-and-uncertain) are enabled;
@@ -2121,7 +2120,7 @@ PIN on every number activated before this milestone.
 
 **Acceptance:** the rows above; a staging rehearsal of Pylota's migration (adopt or port a test number, send and
 receive, place an approved call, release); `live::phone::stripe_invoice_item`; seven days of the telemetry of
-[Phone numbers § 30](design/phone-numbers.md#30-rollout-telemetry-and-rollback) on staging before `PM_PHONE` is turned on in production; the sole-trader decision recorded in ADR 0020;
+[Phone numbers § 30](design/phone-numbers.md#30-rollout-telemetry-and-rollback) on staging before `PM_PHONE` is turned on in production; the sole-trader refusal enforced (ADR 0020 decision 15);
 no adopted number left without a lawful path (each legacy number has a `legacy_deadline` or a recorded
 re-papering).
 

@@ -82,7 +82,7 @@ The facts the decision rests on, each read on 2026-10-24:
     listed for counsel and **must** be answered before the corresponding feature is opened to tenants in
     production ([Phone numbers § 32](../design/phone-numbers.md#32-questions-for-counsel)).
 
-12. **Standing purchase budget** (amends decision 4; owner sign-off on the pull request that carries it). A
+12. **Standing purchase budget** (amends decision 4; approved by the owner on 2026-10-26). A
     person **may** approve purchases in advance through `phone.auto_approve`: off by default, set or loosened
     only by a decision reserved for people, bounded by country, type, numbers per identity, numbers per month
     and price per number, under the spend caps, and recorded by version on every purchase it covers. It covers
@@ -98,12 +98,12 @@ The facts the decision rests on, each read on 2026-10-24:
     purchase that waits on onboarding is kept with `blocked_by`, not refused. Every number reports four
     capability facets (`enabled`, `activating`, `registration_required`, `not_available`) from the same
     function the send and call gates use, and a quote lists the registrations still to come.
-15. **Sole traders: open.** The owner chooses, with counsel, between allowing sole traders for GB and US rows,
-    for US rows only (a sole-proprietor 10DLC brand verified by a code to the proprietor's US or Canadian
-    mobile), or refusing them; the cautious default until then is refusal for new purchases. Under every
-    option a number adopted from Pylota's platform-wide group keeps working with a dated exit (re-paper, or
-    port out to a carrier the tenant chooses) and is never released by a deadline. The decision **must** be
-    recorded here before M41's acceptance.
+15. **Sole traders: refused** (owner decision, 2026-10-26). Sole traders cannot hold numbers, for GB or US
+    rows; no US sole-proprietor 10DLC brand is registered. A number adopted from Pylota's platform-wide group
+    whose tenant is a sole trader keeps working with a dated exit (re-paper under an eligible business, or port
+    out to a carrier the tenant chooses) no earlier than 2027-01-24, and is never released by a deadline. The
+    options of allowing sole traders for GB and US rows, or for US rows only, were weighed and are kept in
+    [Phone numbers §1.1](../design/phone-numbers.md#11-sole-traders-refused-owner-decision-2026-10-26) for a later decision.
 
 ## Risk tier, flag, telemetry and rollback
 
@@ -161,8 +161,8 @@ binding and spend safety, and the owner's sign-off before each milestone merges.
   standing budget of decision 12 differs: a person sets it, the server enforces it, it covers purchases only,
   and it is bounded and audited.
 - **Approval of every purchase one by one, with no budget.** Keeps a person in every purchase's path, so
-  buying a number for an agent can never be one call. Replaced by decision 12, subject to the owner's
-  sign-off.
+  buying a number for an agent can never be one call. Replaced by decision 12, which the owner
+  approved on 2026-10-26.
 - **Refusing a purchase until onboarding is complete.** Leaves the agent at a dead end with nothing to hand a
   person. Replaced by `blocked_by` (decision 14).
 - **Call Control as the v1 voice route.** It would give Pylota Identity the call events and recording control,

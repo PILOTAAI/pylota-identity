@@ -52,13 +52,12 @@ compliance profile: its company name, registration and addresses, never TREFT LT
 ([§4](#4-compliance-profiles-and-kyc-documents)). TREFT is the reseller of record with Telnyx and keeps the
 KYC records the reseller terms require; it never sub-allocates numbers registered in its own name.
 
-**Business end users, and sole traders by owner decision.** A tenant's compliance profile describes a
-business (a company, a limited liability partnership or a registered partnership). Several number types are
+**Business end users only; sole traders refused (owner decision, 2026-10-26).** A tenant's compliance
+profile describes a business (a company, a limited liability partnership or a registered partnership). Several number types are
 business-only (Ireland mobile, German and French toll-free), and individual KYC multiplies the personal data
-held (Telnyx DID requirement articles for IE, DE, FR, read 2026-10-24). Whether a **sole trader** may hold
-numbers is an open owner decision with counsel ([§1.1](#11-sole-traders-an-owner-decision)); until it is
-recorded, a sole-trader profile is refused (`422 compliance_incomplete`, `details.reason = "entity_type"`)
-and individuals are always refused.
+held (Telnyx DID requirement articles for IE, DE, FR, read 2026-10-24). The owner chose to refuse **sole
+traders** ([§1.1](#11-sole-traders-refused-owner-decision-2026-10-26), option (c)): a sole-trader profile is refused
+(`422 compliance_incomplete`, `details.reason = "entity_type"`), as an individual's always is.
 
 **Agents ask; people decide; set-up is once.** An agent can search for numbers, buy one inside a standing
 budget a person set ([§5.7](#57-the-standing-purchase-budget)) or ask for one outside it, send SMS within
@@ -88,26 +87,28 @@ search on 2026-10-24). Holding number ranges from a regulator (Ofcom, ComReg, BN
 ACM) is out of scope: the licensing, emergency and interception duties do not fit a service run by one
 person ([ADR 0015](../adr/0015-solo-operator.md)).
 
-### 1.1 Sole traders: an owner decision
+### 1.1 Sole traders: refused (owner decision, 2026-10-26)
 
 Independent businesses are often sole traders, and the first tenants to hold numbers (Pylota's car-rental
-operators, [§31](#31-pylota-agentic-os-parity-and-migration)) include them. The decision is the owner's,
-with counsel ([§32](#32-questions-for-counsel), question 10), and must be recorded in
-[ADR 0020](../adr/0020-phone-numbers.md) before M41's acceptance. The options:
+operators, [§31](#31-pylota-agentic-os-parity-and-migration)) include them. **The owner chose option (c) on
+2026-10-26** ([ADR 0020](../adr/0020-phone-numbers.md) decision 15): sole traders are refused for every row,
+GB and US, and adopted numbers of sole-trader tenants take the dated exit below. Options (a) and (b) are kept
+here so a later decision can revisit them; counsel's question 10 ([§32](#32-questions-for-counsel)) now asks
+only whether the refusal is consistent with the rules that bind the tenants. The options that were weighed:
 
 | Option | Effect | Cost |
 |---|---|---|
 | (a) Allow `sole_trader` profiles for GB and US rows | A sole trader's profile holds the proprietor's name, trading name, address and, for the US, the details of a sole-proprietor 10DLC brand ([§13.1](#131-us-sole-proprietor-brands)); the proprietor is the representative, whose data is sealed as today | More personal data held and erased; per-country rules for individuals to map; counsel's answer on question 10 |
 | (b) Allow `sole_trader` for the US only | US sole-proprietor brands only (one number, an SMS one-time code to the proprietor's US or Canadian mobile); GB stays business-only | GB sole traders get no number from Pylota Identity |
-| (c) Refuse sole traders (the cautious default until a decision is recorded) | New purchases need a business profile | Sole-trader tenants cannot buy, and adopted numbers need the exit path below |
+| (c) Refuse sole traders (**chosen**, 2026-10-26) | New purchases need a business profile | Sole-trader tenants cannot buy, and adopted numbers need the exit path below |
 
 **Adoption never strands a number.** Under every option, a number adopted from a platform-wide group
 ([§7.6](#76-adoption-for-pylotas-migration)) whose tenant cannot have an eligible profile keeps working, with
 a dated exit:
 
-1. The number's `legacy_deadline` is the later of its adoption plus 90 days and the date the sole-trader
-   decision is recorded plus 90 days. Until the decision is recorded the deadline is `null`, and only the
-   60-, 30- and 7-day reminders wait; everything else about the number works.
+1. The number's `legacy_deadline` is the later of its adoption plus 90 days and the decision's date plus 90
+   days, so never before **2027-01-24** (2026-10-26 + 90 days); the 60-, 30- and 7-day reminders count down to
+   it, and everything else about the number works until then.
 2. Before the deadline the tenant either re-papers under an eligible profile, or **ports the number out** to a
    carrier of its own choosing (its own mobile contract keeps the number). Pylota Identity helps with the
    port-out: a person sees the PIN in the console ([§16](#16-the-port-out-guard)) and the port-out is
@@ -301,7 +302,7 @@ What can be bought, where, with which capabilities and on which conditions is da
 | `sender_rules` | Long-code sending rules for SMS sent from the number: `us_a2p` (10DLC or toll-free verification), `none`; and per destination `sender_substitution_risk` notes |
 | `destinations` | Per destination country, whether SMS from this row reaches it: `tested_ok` (a contract test delivered a text, with its date), `untested`, or `not_supported` (with the source). A send to an `untested` or `not_supported` destination is refused ([§12.2](#122-policy-pipeline) step 6) ([§3.5](#35-sending-across-borders)) |
 | `default_for_country` | `true` on the row a purchase uses when it names only the country: GB mobile, US local ([§6.7](#67-one-call-purchase)) |
-| `entity_types` | The profile entity types the row may be bought under (`business`, and `sole_trader` once the owner allows it for the row, [§1.1](#11-sole-traders-an-owner-decision)) |
+| `entity_types` | The profile entity types the row may be bought under (`business` only: sole traders are refused, [§1.1](#11-sole-traders-refused-owner-decision-2026-10-26)) |
 | `registration` | For rows whose SMS needs a registration before sending (`us_a2p`): the fee items (rate-card keys) and `typical_wait_days` shown in quotes and the setup status ([§5.3](#53-quotes-and-the-digest)) |
 | `quiet_hours` | For marketing SMS **to** the country: time zone, local start and end, days off, dated holidays per year (France: no marketing on Sundays, on public holidays or from 22:00 to 08:00; Telnyx France SMS guideline 6531603, read 2026-10-24) |
 | `emergency` | `{numbers, outbound_supported, address_registration}` ([§14.8](#148-emergency-calling)) |
@@ -399,7 +400,7 @@ name the tenant's numbers are registered. It is created and edited by a key hold
 | Field | Rule |
 |---|---|
 | `legal_name`, `trading_name` | 1–200 characters |
-| `entity_type` | `limited_company`, `llp`, `partnership`, `public_company`, `non_profit`; `sole_trader` only where the owner's decision and the row's `entity_types` allow it ([§1.1](#11-sole-traders-an-owner-decision)). Individuals are refused |
+| `entity_type` | `limited_company`, `llp`, `partnership`, `public_company`, `non_profit`; `sole_trader` is refused (owner decision, [§1.1](#11-sole-traders-refused-owner-decision-2026-10-26)). Individuals are refused |
 | `registration_country`, `company_number` | ISO country; the registry number (Companies House for a UK company, accepted by Telnyx toll-free verification as `businessRegistrationType: "Companies House"`) |
 | `company_registry` | `{country, region, name}`: the register that holds `company_number`. For a UK company `{GB, null, "Companies House"}`; for a US company the state, because US companies are registered with a state (`{US, "US-DE", "Delaware Division of Corporations"}`); for an Irish company `{IE, null, "Companies Registration Office"}`. `region` is an ISO 3166-2 code. Required when `registration_country` has more than one register |
 | `tax_ids` | Per country: VAT, CIF, SIREN, Italian VAT, US EIN. **Sealed** (`tax_ids_sealed`) |
@@ -784,7 +785,7 @@ change, with `tenant_id` and `identity_id` set and `sequence` null, as the servi
 
 ### 5.7 The standing purchase budget
 
-**This amends an owner rule, subject to the owner's sign-off on the pull request that carries it.** The rule
+**This amends an owner rule; the owner approved it on 2026-10-26.** The rule
 "a person approves every purchase" becomes "a person approves every purchase, one by one or through a
 standing budget a person sets" ([ADR 0020](../adr/0020-phone-numbers.md), decision 12). Without a standing
 budget a person stands in every purchase's path, and buying a number cannot be one call. Every other kind of
@@ -1215,8 +1216,7 @@ whose order used Pylota's platform-wide requirement group gets `compliance_statu
 tenant must have the number re-papered under its own approved profile by its `legacy_deadline`
 (`phone_compliance_legacy` notifications at 60, 30 and 7 days), because no number may stay registered in
 TREFT's name ([§3.3](#33-rules-the-catalogue-enforces)). A tenant that cannot have an eligible profile (a
-sole trader while the decision of [§1.1](#11-sole-traders-an-owner-decision) is not recorded, or under option
-(c)) keeps its number working and gets the dated exit path of §1.1; no adopted number is ever released by a
+sole trader, refused under [§1.1](#11-sole-traders-refused-owner-decision-2026-10-26)) keeps its number working and gets the dated exit path of §1.1; no adopted number is ever released by a
 deadline. Adoption pre-fills the tenant's onboarding ([§4.7](#47-phone-onboarding)) from the platform group's
 non-sensitive fields, so re-papering is a confirmation and a document upload, not a new form. Adoption is audited
 (`phone_number.adopt`) and emits `phone_number.status_changed` with `reason: "adopted"`. If the owner
@@ -1695,8 +1695,9 @@ number: "Only allowed for Sole Proprietor (`SOLE_PROPRIETOR`) brands … Campaig
 verification is complete … US/CA numbers only for real OTPs" (Telnyx OpenAPI `team-telnyx/openapi`
 `openapi/spec3.json` at `aeedb6553ea4`, `/10dlc/brand/{brandId}/smsOtp`, read 2026-10-26). AgentPhone sells the
 same type with a limit of one number per registration (npm `agentphone` 1.0.25, `RegistrationRequest`, read
-2026-10-26). Where the owner's decision allows US sole traders ([§1.1](#11-sole-traders-an-owner-decision),
-options (a) and (b)):
+2026-10-26). **Not offered:** the owner refused sole traders ([§1.1](#11-sole-traders-refused-owner-decision-2026-10-26),
+option (c)), so no sole-proprietor brand is registered and M39 does not build this path. It stays specified so a
+later decision for options (a) or (b) can switch it on; it would then work as follows:
 
 1. The profile's `entity_type` is `sole_trader`, `registration_country` `US`, and its representative is the
    proprietor, whose mobile must be a US or Canadian number (`422 compliance_incomplete`,
@@ -2640,11 +2641,10 @@ each question.
    marketing needs a recorded opt-in with evidence.
 9. **Port-outs.** On what grounds may a port-out be rejected in the UK and the EU, and may a PIN be required?
    Default: never rejected automatically; a person decides.
-10. **Sole traders** (blocking: the owner's decision of [§1.1](#11-sole-traders-an-owner-decision) waits on
-    it, and must be recorded before M41's acceptance). May TREFT register numbers in a sole trader's own name
-    in the UK and the US, what does that add to the KYC records it keeps, and is excluding them consistent with
-    the consumer and telecoms rules that apply to the tenants' own customers? Default: refused for new
-    purchases; adopted numbers keep working under the dated exit path.
+10. **Sole traders** (no longer blocking: the owner refused them on 2026-10-26, [§1.1](#11-sole-traders-refused-owner-decision-2026-10-26)).
+    Is excluding sole traders consistent with the consumer and telecoms rules that apply to the tenants' own
+    customers, and with the dated exit given to adopted numbers? A different answer would reopen options (a)
+    and (b).
 11. **US registrations by a UK ISV** (blocking for texting from US numbers by tenants registered outside the
     US). What does The Campaign Registry require of a UK ISV registering brands for US businesses, and of a UK
     business registering a US brand? Default: `brand_countries = ["US"]` until answered and
@@ -2850,10 +2850,10 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
 - **FR-PHN-53** (P0) The provider account's level **must** be probed and recorded, and a row that needs a level
   the account lacks **must** report `platform_prerequisite`; US rows **must** stay off until the enablement
   sequence of § 2.5 is complete. Acceptance: P127.
-- **FR-PHN-54** (P0) The owner's decision on sole traders **must** be recorded before M41's acceptance; under any
-  option an adopted number **must** keep working with a dated exit (re-paper or port out) and be suspended for
-  outbound only, never released, at its deadline; a US sole-proprietor brand **must** take its one-time code
-  only from a person. Acceptance: P6, P126.
+- **FR-PHN-54** (P0) Sole traders **must** be refused (owner decision of 2026-10-26, ADR 0020 decision 15); an
+  adopted number of a sole-trader tenant **must** keep working with a dated exit (re-paper or port out), no
+  earlier than 2027-01-24, and be suspended for outbound only, never released, at its deadline. Acceptance: P6,
+  P126.
 
 ## 34. Edge cases
 
@@ -2867,7 +2867,7 @@ integrator-owned):
 | P3 | Search or request for a `not_offered` row, or a `requires_local_presence` row without the presence | `422 country_not_offered`; `422 local_presence_required` with `details.local_presence`; nothing stored | S | `core::phone::catalogue::eligibility`, `it::phone::catalogue_refusals` |
 | P4 | `phone.allowed` false; a Free-plan tenant on a Stripe deployment; `PM_PHONE` off | `403 policy_denied` (`phone_not_allowed`, `plan_required`); with the flag off every phone route `404 route_not_found` | S | `it::phone::gates` |
 | P5 | A purchase for a row needing an approved profile, without one; a port-in without one | The purchase is created with `blocked_by: ["compliance"]` and never executed while blocked; the port-in gets `409 compliance_not_approved`; no provider call | S | `it::phone::compliance_required` |
-| P6 | A profile with an individual entity type; a sole-trader one before the owner's decision, or for a row whose `entity_types` lack it | `422 compliance_incomplete`, `details.reason = "entity_type"` | S | `core::phone::requests::profile_validate` |
+| P6 | A profile with an individual or a sole-trader entity type | `422 compliance_incomplete`, `details.reason = "entity_type"` | S | `core::phone::requests::profile_validate` |
 | P7 | Document: wrong content type, over 20,971,520 bytes, checksum mismatch, executable or macro sniffed | `400 invalid_request`, `400 upload_size_mismatch`, `400 upload_checksum_mismatch`, `422 attachment_risky`; nothing stored | S | `it::phone::document_upload_rules` |
 | P8 | Reading a document | Metadata only on every route; no route returns bytes; the R2 object is ciphertext under a per-document sealed key | S | `it::phone::documents_write_only` |
 | P9 | Deleting a document a live provider group needs | `409 phone_document_in_use`; deletion of an unused one shreds the key, then deletes the object | S | `it::phone::document_delete` |
@@ -2987,7 +2987,7 @@ integrator-owned):
 | P123 | A US-registered profile without `company_registry.region`; a requirement unmapped for the registration country | `422 compliance_incomplete` (`company_registry`); `422 compliance_incomplete` with `details.missing[]`, `phone_requirement_unmapped` | S | `core::phone::catalogue::document_for`, `it::phone::registry_mapping` |
 | P124 | A GB-registered tenant's US number; its `register_us_a2p`; its call with no US address | `outbound_sms: not_available` (`brand_country_not_supported`), buy needs `acknowledge_not_available`; `422 compliance_incomplete` (`brand_country_not_supported`); `outbound_calls: not_available` (`no_us_emergency_address`) | S | `it::phone::non_us_tenant_us_number` |
 | P125 | SMS from a US number to a GB handset; from a GB number to a US handset before the cross-border test | `403 policy_denied` (`destination_not_supported`); `403 policy_denied` (`destination_untested`) | S | `it::phone::cross_border_destinations`, `live::phone::cross_border_sms` |
-| P126 | A legacy-group number of a sole-trader tenant: before the decision, at its deadline, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
+| P126 | A legacy-group number of a sole-trader tenant: before its deadline (never before 2027-01-24), at it, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
 | P127 | The provider account not at the Verified level | US rows `eligible: false` (`platform_prerequisite`) in the catalogue and the setup status; a US purchase blocked on `platform_prerequisite` | S | `it::phone::account_level_probe` |
 | P128 | A send while the ops switch `phone` is at `paused_purchases` (set by hand or by low provider balance); the same send at `paused` | Sent at `paused_purchases`; `503 unavailable` (`phone_paused`) at `paused`; a purchase at `paused_purchases` is refused | S | `it::phone::sms_under_paused_purchases` |
 | P129 | A Worker dies after the spend intent and before the order's outcome is stored; the lease lapses | The next claim takes the `executing` request, reconciles the attempt by `customer_reference` first, adopts a found order or proves absence, and never orders twice | S | `it::phone::stale_executing_reclaimed` |
@@ -3031,7 +3031,7 @@ and a fake only confirms what its author believed).
 | `core::phone::onboarding::status` | The setup status from every combination of profile, group, registration and platform facts | §4.7 |
 | `core::phone::capabilities::of` | The four facets from every combination of row, facets, registrations, emergency address and legacy state | §6.4 |
 | `live::phone::uk_brand_registration` | A GB-registered business's brand and campaign registered on staging; the identifier TCR accepts in place of an EIN | §13.2 |
-| `live::phone::sole_prop_otp` | A mock sole-proprietor brand: code triggered, verified, campaign created | §13.1 |
+| `live::phone::sole_prop_otp` | A mock sole-proprietor brand: code triggered, verified, campaign created. Built only if a later decision allows sole traders (§13.1 is not offered) | §13.1 |
 | `live::phone::us_onboarding_end_to_end` | A real US business onboarded: brand, campaign, a number assigned, a text delivered; the days each step took | §2.5, §4.7 |
 | `live::phone::cross_border_sms` | `gb_mobile_to_us` and `us_local_to_gb`: a text each way with its receipt | §3.5 |
 | `live::phone::e911_address` | An emergency address registered on a US number; a non-US address refused | §14.8 |
@@ -3106,8 +3106,7 @@ sms_in.rs, a2p.rs, codes.rs}`, `handlers/phone/{sms.rs, wait.rs, consent.rs}`, `
 | `mcp/tools.rs` (M15) | `phone_send_sms`, `phone_list_sms`, `phone_get_sms`, `phone_wait_sms`, `phone_record_opt_out` |
 
 **Implements:** FR-PHN-21 to FR-PHN-31, FR-PHN-45 (`outbound_sms` with registrations), FR-PHN-48, FR-PHN-49 (US
-onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), FR-PHN-54 (the
-sole-proprietor brand, where the decision allows it), and edge rows P42–P72, P77 (SMS charges in the job's input),
+onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), and edge rows P42–P72, P77 (SMS charges in the job's input),
 P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125, P128.
 
 **Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of §12.3 are enabled;
@@ -3140,7 +3139,7 @@ PIN on every number activated before this milestone.
 
 **Acceptance:** the rows above; a staging rehearsal of Pylota's migration (adopt or port a test number, send and
 receive, place an approved call, release); `live::phone::stripe_invoice_item`; seven days of the telemetry of
-§30 on staging before `PM_PHONE` is turned on in production; the sole-trader decision recorded in ADR 0020;
+§30 on staging before `PM_PHONE` is turned on in production; the sole-trader refusal enforced (ADR 0020 decision 15);
 no adopted number left without a lawful path (each legacy number has a `legacy_deadline` or a recorded
 re-papering).
 
@@ -3203,13 +3202,12 @@ Gathered here so they can be answered in one pass. Items 1, 2 and 10 to 12 block
 8. The sequencing of section letters: the edge-case section is `P`, which the register's preamble reserves
    in spirit to avoid confusion with priorities `P0`–`P2` (as `U` for the vault collides with the selling
    points `U1`–`U10`); the coordinator may prefer another letter.
-9. **The standing budget** ([§5.7](#57-the-standing-purchase-budget)): sign-off on the amended rule "a person
-   approves every purchase, one by one or through a standing budget a person sets" (recommended), and the
-   default budget Pylota sets for its operators (suggested: GB and US, 2 numbers per identity, 10 a month,
+9. **The standing budget** ([§5.7](#57-the-standing-purchase-budget)): the amended rule is **approved**
+   (2026-10-26). Still open: the default budget Pylota sets for its operators (suggested: GB and US, 2 numbers per identity, 10 a month,
    £3 setup and £3 a month per number).
-10. **Sole traders** ([§1.1](#11-sole-traders-an-owner-decision)): option (a), (b) or (c), after counsel's answer
-    to question 10 of [§32](#32-questions-for-counsel); blocks M41's acceptance. Before choosing, count the
-    tenants it affects (for Pylota, its operators that are sole traders).
+10. **Sole traders** ([§1.1](#11-sole-traders-refused-owner-decision-2026-10-26)): **decided**, refused (option (c), 2026-10-26).
+    Still useful before M41: count the adopted numbers it affects, so their owners hear of the 2027-01-24 exit
+    date early.
 11. Whether a US number may be sold to a tenant registered outside the US for receiving and inbound calls only
     while GB brands are unproved (designed: yes, with `acknowledge_not_available`).
 12. The default lifetime limits for throwaway numbers (designed: 1 hour to 365 days) and whether expiring

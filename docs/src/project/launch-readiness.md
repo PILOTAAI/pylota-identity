@@ -94,7 +94,7 @@ switch ([§10](#10-rollback-and-kill-switches)).
 | PH-7 | 10DLC set up as an ISV; `live::phone::a2p_paths` on staging | M39, owner | CC24 | US in any stage | open |
 | PH-8 | A GB-registered brand taken through 10DLC vetting on staging | owner | Vetting result dated | US for UK tenants | open |
 | PH-9 | E911 for tenants with no US location answered by Telnyx | owner, Telnyx | Written answer | US calls | open |
-| PH-10 | Sole traders: decision on GB numbers and on adopted numbers of sole-trader operators | owner, counsel | ADR 0020 amendment | P1 (adoption), P3 | open |
+| PH-10 | Sole traders: decision on GB numbers and on adopted numbers of sole-trader operators | owner, counsel | ADR 0020 decision 15: refused, exit no earlier than 2027-01-24 | P1 (adoption), P3 | done (2026-10-26) |
 | PH-11 | End-to-end GB and US numbers on production | owner | CC23, CC24 | P1 (GB), US | open |
 | PH-12 | Spend limits, balance alert and kill switches rehearsed | owner | CC25, CC27 | P1 | open |
 | PH-13 | Port-out guard live on every number | M41 | CC26; the PIN backfill step of M41 reports zero numbers without a PIN | P1 | open |
@@ -167,7 +167,7 @@ design's questions for counsel.
 | CNS-7 | Phone 7: sub-allocation under UK rules for numbers in the tenant's name in TREFT's account | counsel | P1 | open |
 | CNS-8 | Phone 8: marketing SMS consent evidence and STOP handling | counsel | Marketing SMS | open |
 | CNS-9 | Phone 9: port-out refusal grounds and PIN requirements | counsel | P1 | open |
-| CNS-10 | Phone 10: excluding sole traders, and the migration of sole-trader operators | counsel | P1 (adoption), P3 | open |
+| CNS-10 | Phone 10: is the refusal of sole traders, with the dated exit for adopted numbers, consistent with the rules that bind tenants | counsel | none (the refusal stands meanwhile) | open |
 | CNS-11 | Phone 11: US 10DLC registration by a UK ISV and of UK businesses | counsel | US texting for UK tenants | open |
 | CNS-12 | Vault: every question of the vault design's questions for counsel (using credentials at third-party services on a person's behalf, refused services, records of use) | counsel | V1 | open |
 | TAX-1 | VAT on the SaaS plans: UK registration date set in Stripe Tax | accountant | B | open |
