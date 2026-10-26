@@ -1411,7 +1411,10 @@ is never shown again), `DELETE …/{connector_id}`, `POST …/{connector_id}/rot
   `402 spend_cap_reached`. A dry run answers `200 { "would_send", "segments", "price_pence" }`.
 - `POST …/sms/{sms_id}/resolve` (`phone:send`) with `outcome` `sent` or `not_sent` for an `uncertain` SMS.
 - `GET /v1/identities/{identity_id}/sms`, `GET …/sms/{sms_id}`, `GET …/sms/{sms_id}/media/{n}`,
-  `GET …/sms-conversations` (`phone:read`); codes in text appear as `[code]`.
+  `GET …/sms-conversations` (`phone:read`); codes in text appear as `[code]`. The SMS list filters by
+  `conversation_id`, `number_id`, `counterparty`, `direction`, `status` (held SMS only with `quarantine:review`),
+  `after` and `before`; the call list (`GET …/calls`) by `number_id`, `counterparty`, `direction`, `status`, `after`
+  and `before`.
 - `GET /v1/identities/{identity_id}/sms/wait` (`phone:read`) with `number_id`, `from`, `account_id`, `kind`,
   `timeout` (1–60), `since`: `200 { "sms", "verification", "timed_out" }`.
 - `POST …/sms/{sms_id}/release` (`quarantine:review`); `DELETE …/sms/{sms_id}` (`erasure:manage`).
@@ -1431,8 +1434,10 @@ is never shown again), `DELETE …/{connector_id}`, `POST …/{connector_id}/rot
 
 ### Port-outs — `phone:read`, `phone:approve`
 
-`GET …/phone-numbers/{number_id}/port-outs`; `POST …/port-outs/{port_out_id}/authorize` and `…/reject` (a reason
-code from the provider's list; `1001` needs text) are decisions reserved for people; `409 port_out_closed`.
+`GET …/phone-numbers/{number_id}/port-outs`; `POST …/port-outs/{port_out_id}/authorize` (`{ "note"?,
+"on_behalf_of"? }`) and `…/reject` (a reason code from the provider's list, `1001` needing text, and
+`on_behalf_of`) are decisions reserved for people; a platform or partner key deciding under `phone.key_approval`
+names the person in `on_behalf_of`; `409 port_out_closed`.
 
 ### Money — `phone:read`
 

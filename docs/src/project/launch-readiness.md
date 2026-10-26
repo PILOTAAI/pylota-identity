@@ -169,9 +169,10 @@ design's questions for counsel.
 | CNS-9 | Phone 9: port-out refusal grounds and PIN requirements | counsel | P1 | open |
 | CNS-10 | Phone 10: is the refusal of sole traders, with the dated exit for adopted numbers, consistent with the rules that bind tenants | counsel | none (the refusal stands meanwhile) | open |
 | CNS-11 | Phone 11: US 10DLC registration by a UK ISV and of UK businesses | counsel | US texting for UK tenants | open |
+| CNS-11B | Phone 12: whether a purchase made under a standing budget a person set in advance satisfies the reseller terms and the tenant's records as the tenant's decision | counsel | P1 (budget-covered purchases stay off until answered; purchases approved one by one are unaffected) | open |
 | CNS-12 | Vault: every question of the vault design's questions for counsel (using credentials at third-party services on a person's behalf, refused services, records of use) | counsel | V1 | open |
 | TAX-1 | VAT on the SaaS plans: UK registration date set in Stripe Tax | accountant | B | open |
-| TAX-2 | Phone 12: VAT place of supply for telecommunications resold to UK and EU businesses; whether Stripe Tax covers it | accountant, counsel | P1 | open |
+| TAX-2 | Phone 13: VAT place of supply for telecommunications resold to UK and EU businesses; whether Stripe Tax covers it | accountant, counsel | P1 | open |
 | TAX-3 | US numbers sold to US businesses: whether state telecommunications taxes or 911 fees apply to TREFT | accountant | US in P3 | open |
 
 ## 6. Licence and contributions

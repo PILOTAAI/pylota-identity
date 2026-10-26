@@ -3109,7 +3109,7 @@ onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-bord
 P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125, P128.
 
 **Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of §12.3 are enabled;
-`live::phone::redaction_levels` recorded in §8; `live::phone::a2p_paths`, `live::phone::sole_prop_otp`,
+`live::phone::redaction_levels` recorded in §8; `live::phone::a2p_paths`,
 `live::phone::cross_border_sms` and `live::phone::us_onboarding_end_to_end` pass on staging (the last gates step 5
 of [§2.5](#25-us-enablement), and its measured waits replace the catalogue's `typical_wait_days`);
 `live::phone::uk_brand_registration` is run and its result recorded, whatever it is.

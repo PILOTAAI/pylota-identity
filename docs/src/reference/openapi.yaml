@@ -11859,6 +11859,31 @@ paths:
       x-rate-limit-buckets: [api]
       x-idempotency: none
       parameters:
+        - name: conversation_id
+          in: query
+          description: Only SMS in this conversation.
+          schema: {type: string}
+        - name: number_id
+          in: query
+          description: Only SMS sent from or received by this number of the identity.
+          schema: {$ref: '#/components/schemas/PhoneNumberId'}
+        - name: counterparty
+          in: query
+          description: Only SMS exchanged with this E.164 number, short code or alphanumeric sender.
+          schema: {type: string, minLength: 1, maxLength: 32}
+        - name: direction
+          in: query
+          description: Only SMS with this direction.
+          schema: {type: string, enum: [inbound, outbound]}
+        - name: status
+          in: query
+          description: >-
+            Only SMS with this status. Without it, held SMS (`quarantined`, `hidden`, `throttled`) are left out;
+            those statuses return SMS only to a key that holds `quarantine:review`, and SMS withheld for the vault
+            (`hidden`, `vault_code`) never show their text.
+          schema: {type: string}
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Before'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -12180,6 +12205,24 @@ paths:
       x-rate-limit-buckets: [api]
       x-idempotency: none
       parameters:
+        - name: number_id
+          in: query
+          description: Only calls to or from this number of the identity.
+          schema: {$ref: '#/components/schemas/PhoneNumberId'}
+        - name: counterparty
+          in: query
+          description: Only calls with this E.164 number.
+          schema: {type: string, minLength: 1, maxLength: 32}
+        - name: direction
+          in: query
+          description: Only calls with this direction.
+          schema: {type: string, enum: [inbound, outbound]}
+        - name: status
+          in: query
+          description: Only calls with this status.
+          schema: {type: string}
+        - $ref: '#/components/parameters/After'
+        - $ref: '#/components/parameters/Before'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
@@ -12357,13 +12400,19 @@ paths:
       tags: [Phone numbers]
       summary: "Authorize a port-out"
       description: >-
-        A decision reserved for people; never automatic.
+        A decision reserved for people; never automatic. A platform or partner key deciding under
+        `phone.key_approval` names the person in `on_behalf_of`.
       x-required-permission: ['phone:approve']
       x-key-levels: [platform, partner, tenant]
       x-rate-limit-buckets: [api]
       x-idempotency: required
       parameters:
         - $ref: '#/components/parameters/IdempotencyKeyRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PhonePortOutAuthorization'}
       responses:
         '200':
           description: "The port-out."
@@ -31185,6 +31234,23 @@ components:
       properties:
         reason_code: {type: string}
         reason: {type: string, maxLength: 500}
+        on_behalf_of:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[\x21-\x3F\x41-\x7E]+$'
+          description: The person in the caller's own application who decided; required from a platform or partner key under `phone.key_approval`.
+    PhonePortOutAuthorization:
+      type: object
+      additionalProperties: false
+      properties:
+        note: {type: string, maxLength: 500}
+        on_behalf_of:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[\x21-\x3F\x41-\x7E]+$'
+          description: The person in the caller's own application who decided; required from a platform or partner key under `phone.key_approval`.
     SmsSendRequest:
       type: object
       required: [to, text]
@@ -31674,14 +31740,22 @@ components:
         next_cursor: {type: [string, 'null']}
     VaultUseCreateRequest:
       type: object
-      required: [item_id, operation, consumer_id, run_id, origin, trigger, purpose]
-      if:
-        required: [operation]
-        properties: {operation: {const: session_capture}}
-      then:
-        properties: {phases: {maxItems: 0}}
-      else:
-        properties: {phases: {minItems: 1}}
+      required: [item_id, operation, run_id, origin, trigger, purpose]
+      allOf:
+        - if:
+            required: [operation]
+            properties: {operation: {const: session_capture}}
+          then:
+            properties: {phases: {maxItems: 0}}
+          else:
+            properties: {phases: {minItems: 1}}
+        - if:
+            required: [operation]
+            properties: {operation: {const: sign}}
+          then:
+            not: {required: [consumer_id]}
+          else:
+            required: [consumer_id]
       properties:
         item_id: {$ref: '#/components/schemas/VaultItemId'}
         operation: {$ref: '#/components/schemas/VaultOperation'}
