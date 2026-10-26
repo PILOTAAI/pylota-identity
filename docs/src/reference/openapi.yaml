@@ -16203,6 +16203,1463 @@ webhooks:
         '410': {$ref: '#/components/responses/WebhookGone'}
         default: {$ref: '#/components/responses/WebhookFailed'}
 
+  sms.received:
+    post:
+      operationId: onSmsReceived
+      tags:
+      - Events
+      summary: sms.received
+      description: An inbound SMS is stored and visible.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsReceivedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.quarantined:
+    post:
+      operationId: onSmsQuarantined
+      tags:
+      - Events
+      summary: sms.quarantined
+      description: An inbound SMS is stored but held. `sms.text` is absent.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsQuarantinedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.released:
+    post:
+      operationId: onSmsReleased
+      tags:
+      - Events
+      summary: sms.released
+      description: A held SMS was released.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsReleasedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.screened:
+    post:
+      operationId: onSmsScreened
+      tags:
+      - Events
+      summary: sms.screened
+      description: A screening verdict on an SMS.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsScreenedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.verification_received:
+    post:
+      operationId: onSmsVerificationReceived
+      tags:
+      - Events
+      summary: sms.verification_received
+      description: A verification code was found in a visible SMS. The value is only available through `GET …/sms/wait`.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsVerificationReceivedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.sent:
+    post:
+      operationId: onSmsSent
+      tags:
+      - Events
+      summary: sms.sent
+      description: The provider accepted the SMS.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsSentEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.delivered:
+    post:
+      operationId: onSmsDelivered
+      tags:
+      - Events
+      summary: sms.delivered
+      description: The handset or carrier confirmed delivery.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsDeliveredEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.failed:
+    post:
+      operationId: onSmsFailed
+      tags:
+      - Events
+      summary: sms.failed
+      description: The SMS was refused or not delivered.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsFailedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.delivery_unconfirmed:
+    post:
+      operationId: onSmsDeliveryUnconfirmed
+      tags:
+      - Events
+      summary: sms.delivery_unconfirmed
+      description: The carrier gave no final answer.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsDeliveryUnconfirmedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.uncertain:
+    post:
+      operationId: onSmsUncertain
+      tags:
+      - Events
+      summary: sms.uncertain
+      description: The outcome is unknown; it is never resent automatically.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsUncertainEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  sms.reconciled:
+    post:
+      operationId: onSmsReconciled
+      tags:
+      - Events
+      summary: sms.reconciled
+      description: An uncertain SMS was matched to a provider record.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsReconciledEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  call.started:
+    post:
+      operationId: onCallStarted
+      tags:
+      - Events
+      summary: call.started
+      description: A call on one of the identity's numbers began.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallStartedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  call.ended:
+    post:
+      operationId: onCallEnded
+      tags:
+      - Events
+      summary: call.ended
+      description: A call ended, or a call record filled it in later.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CallEndedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.requested:
+    post:
+      operationId: onPhoneRequestRequested
+      tags:
+      - Events
+      summary: phone_request.requested
+      description: A phone request was created, or returned to `pending_approval` because its price rose.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestRequestedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.approved:
+    post:
+      operationId: onPhoneRequestApproved
+      tags:
+      - Events
+      summary: phone_request.approved
+      description: A person, an allowed key or the tenant's standing budget approved a phone request.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestApprovedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.rejected:
+    post:
+      operationId: onPhoneRequestRejected
+      tags:
+      - Events
+      summary: phone_request.rejected
+      description: A phone request was rejected, or expired after 7 days.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestRejectedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.canceled:
+    post:
+      operationId: onPhoneRequestCanceled
+      tags:
+      - Events
+      summary: phone_request.canceled
+      description: A phone request was canceled by the requester, or by erasure.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestCanceledEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.completed:
+    post:
+      operationId: onPhoneRequestCompleted
+      tags:
+      - Events
+      summary: phone_request.completed
+      description: The provider work of a phone request ended successfully.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestCompletedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.failed:
+    post:
+      operationId: onPhoneRequestFailed
+      tags:
+      - Events
+      summary: phone_request.failed
+      description: The provider work of a phone request ended without success.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestFailedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_request.uncertain:
+    post:
+      operationId: onPhoneRequestUncertain
+      tags:
+      - Events
+      summary: phone_request.uncertain
+      description: A billable provider call's outcome is unknown; the service is reconciling.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequestUncertainEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_number.status_changed:
+    post:
+      operationId: onPhoneNumberStatusChanged
+      tags:
+      - Events
+      summary: phone_number.status_changed
+      description: A number changed status.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneNumberStatusChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_number.capability_changed:
+    post:
+      operationId: onPhoneNumberCapabilityChanged
+      tags:
+      - Events
+      summary: phone_number.capability_changed
+      description: One of a number's capability facets changed state.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneNumberCapabilityChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_number.expiring:
+    post:
+      operationId: onPhoneNumberExpiring
+      tags:
+      - Events
+      summary: phone_number.expiring
+      description: A number bought with `expires_at` will be released within 24 hours.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneNumberExpiringEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_number.action_needed:
+    post:
+      operationId: onPhoneNumberActionNeeded
+      tags:
+      - Events
+      summary: phone_number.action_needed
+      description: The provider needs information before a deadline.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneNumberActionNeededEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_number.port_out_requested:
+    post:
+      operationId: onPhoneNumberPortOutRequested
+      tags:
+      - Events
+      summary: phone_number.port_out_requested
+      description: Another carrier asked for the number.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneNumberPortOutRequestedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_number.port_out_decided:
+    post:
+      operationId: onPhoneNumberPortOutDecided
+      tags:
+      - Events
+      summary: phone_number.port_out_decided
+      description: A person authorised or rejected a port-out, or the provider authorised it.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneNumberPortOutDecidedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_registration.status_changed:
+    post:
+      operationId: onPhoneRegistrationStatusChanged
+      tags:
+      - Events
+      summary: phone_registration.status_changed
+      description: A US 10DLC brand, campaign or number assignment, or a toll-free verification, changed status.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRegistrationStatusChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_compliance.status_changed:
+    post:
+      operationId: onPhoneComplianceStatusChanged
+      tags:
+      - Events
+      summary: phone_compliance.status_changed
+      description: The compliance profile's status for a country, number type and action changed.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneComplianceStatusChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_consent.changed:
+    post:
+      operationId: onPhoneConsentChanged
+      tags:
+      - Events
+      summary: phone_consent.changed
+      description: A counterparty opted out or in.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneConsentChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_spend.warning:
+    post:
+      operationId: onPhoneSpendWarning
+      tags:
+      - Events
+      summary: phone_spend.warning
+      description: Phone spend reached 80% or 100% of a monthly cap.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneSpendWarningEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_setup.status_changed:
+    post:
+      operationId: onPhoneSetupStatusChanged
+      tags:
+      - Events
+      summary: phone_setup.status_changed
+      description: The tenant's onboarding status for a country changed.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneSetupStatusChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  phone_budget.changed:
+    post:
+      operationId: onPhoneBudgetChanged
+      tags:
+      - Events
+      summary: phone_budget.changed
+      description: The tenant's standing purchase budget was set, loosened, tightened or turned off.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneBudgetChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.item.created:
+    post:
+      operationId: onVaultItemCreated
+      tags:
+      - Events
+      summary: vault.item.created
+      description: A vault item was created or imported.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemCreatedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.item.updated:
+    post:
+      operationId: onVaultItemUpdated
+      tags:
+      - Events
+      summary: vault.item.updated
+      description: A vault item's metadata, origins, approval level or state changed.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemUpdatedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.item.rotated:
+    post:
+      operationId: onVaultItemRotated
+      tags:
+      - Events
+      summary: vault.item.rotated
+      description: A new version of a vault item became current.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemRotatedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.item.deleted:
+    post:
+      operationId: onVaultItemDeleted
+      tags:
+      - Events
+      summary: vault.item.deleted
+      description: A vault item was crypto-shredded.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemDeletedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.item.revealed:
+    post:
+      operationId: onVaultItemRevealed
+      tags:
+      - Events
+      summary: vault.item.revealed
+      description: A person revealed a value in the console, or was shown a new managed value once.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemRevealedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.item.health_changed:
+    post:
+      operationId: onVaultItemHealthChanged
+      tags:
+      - Events
+      summary: vault.item.health_changed
+      description: A vault item's health changed.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemHealthChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.grant.requested:
+    post:
+      operationId: onVaultGrantRequested
+      tags:
+      - Events
+      summary: vault.grant.requested
+      description: An agent asked for a vault grant.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultGrantRequestedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.grant.approved:
+    post:
+      operationId: onVaultGrantApproved
+      tags:
+      - Events
+      summary: vault.grant.approved
+      description: A vault grant was approved, or created approved.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultGrantApprovedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.grant.denied:
+    post:
+      operationId: onVaultGrantDenied
+      tags:
+      - Events
+      summary: vault.grant.denied
+      description: A vault grant was denied.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultGrantDeniedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.grant.revoked:
+    post:
+      operationId: onVaultGrantRevoked
+      tags:
+      - Events
+      summary: vault.grant.revoked
+      description: A vault grant was revoked, or given up by its agent.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultGrantRevokedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.grant.expired:
+    post:
+      operationId: onVaultGrantExpired
+      tags:
+      - Events
+      summary: vault.grant.expired
+      description: A vault grant's pending week or active period ended.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultGrantExpiredEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.requested:
+    post:
+      operationId: onVaultUseRequested
+      tags:
+      - Events
+      summary: vault.use.requested
+      description: The orchestrator created a vault use (also for refusals at creation).
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseRequestedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.approval_requested:
+    post:
+      operationId: onVaultUseApprovalRequested
+      tags:
+      - Events
+      summary: vault.use.approval_requested
+      description: A person must decide on a vault use.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseApprovalRequestedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.approved:
+    post:
+      operationId: onVaultUseApproved
+      tags:
+      - Events
+      summary: vault.use.approved
+      description: A vault use was approved; mint a ticket now.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseApprovedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.denied:
+    post:
+      operationId: onVaultUseDenied
+      tags:
+      - Events
+      summary: vault.use.denied
+      description: A vault use was denied.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseDeniedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.expired:
+    post:
+      operationId: onVaultUseExpired
+      tags:
+      - Events
+      summary: vault.use.expired
+      description: A vault use's approval deadline or first-redemption window passed.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseExpiredEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.canceled:
+    post:
+      operationId: onVaultUseCanceled
+      tags:
+      - Events
+      summary: vault.use.canceled
+      description: The orchestrator canceled a vault use.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseCanceledEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.use.closed:
+    post:
+      operationId: onVaultUseClosed
+      tags:
+      - Events
+      summary: vault.use.closed
+      description: A vault use closed, normally or early.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultUseClosedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.ticket.issued:
+    post:
+      operationId: onVaultTicketIssued
+      tags:
+      - Events
+      summary: vault.ticket.issued
+      description: A vault ticket was minted.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultTicketIssuedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.ticket.redeemed:
+    post:
+      operationId: onVaultTicketRedeemed
+      tags:
+      - Events
+      summary: vault.ticket.redeemed
+      description: A consumer redeemed a phase.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultTicketRedeemedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.ticket.refused:
+    post:
+      operationId: onVaultTicketRefused
+      tags:
+      - Events
+      summary: vault.ticket.refused
+      description: A redemption was refused.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultTicketRefusedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.ticket.reported:
+    post:
+      operationId: onVaultTicketReported
+      tags:
+      - Events
+      summary: vault.ticket.reported
+      description: A consumer reported an outcome.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultTicketReportedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.consumer.changed:
+    post:
+      operationId: onVaultConsumerChanged
+      tags:
+      - Events
+      summary: vault.consumer.changed
+      description: A vault consumer was registered, activated, suspended, resumed, re-keyed or revoked.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultConsumerChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+  vault.key.changed:
+    post:
+      operationId: onVaultKeyChanged
+      tags:
+      - Events
+      summary: vault.key.changed
+      description: The tenant's vault key rotated, custody changed, or `revoke-all` ran.
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/WebhookIdHeader'
+      - $ref: '#/components/parameters/WebhookTimestampHeader'
+      - $ref: '#/components/parameters/WebhookSignatureHeader'
+      - $ref: '#/components/parameters/WebhookUserAgentHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultKeyChangedEvent'
+      responses:
+        2XX:
+          $ref: '#/components/responses/WebhookAccepted'
+        '410':
+          $ref: '#/components/responses/WebhookGone'
+        default:
+          $ref: '#/components/responses/WebhookFailed'
+
 components:
 
   securitySchemes:
@@ -17857,6 +19314,19 @@ components:
         | `members:read` | List console members and pending invitations (tenant, partner and platform keys; every console role holds it) |
         | `members:manage` | Invite, revoke, change roles and remove console members (tenant, partner and platform keys). Includes `members:read` |
         | `partners:manage` | Create, list, read, update and delete partners (platform keys only) |
+        | `phone:read` | The catalogue, setup status, budget, numbers, requests, SMS, calls, usage, registrations, consent, charges. An identity key only for its own identity |
+        | `phone:request` | Buy within the budget; search; create and cancel own purchase, port-in and release requests; onboarding drafts; shorten `expires_at`. An identity key only for its own identity |
+        | `phone:send` | Send SMS; resolve uncertain SMS; record an opt-out. An identity key only for its own identity |
+        | `phone:call` | Place calls or create `outbound_call` requests. An identity key only for its own identity |
+        | `phone:approve` | Approve and reject phone requests; decide port-outs (decisions reserved for people) |
+        | `phone:manage` | Number roles and moves; connectors; routes and emergency requests; opt-ins; tighten the budget; extend `expires_at`; tenant reconcile |
+        | `phone:compliance` | The compliance profile and documents; compliance, 10DLC and toll-free requests; the sole-proprietor code |
+        | `vault:read` | Vault item metadata (never values), grants, uses, the tenant's vault status (tenant level and above). An identity key only for its own identity |
+        | `vault:write` | Create, update, archive, restore and rotate vault items; values are write-only; import a session. An identity key only for its own identity's items |
+        | `vault:request` | Ask for vault grants; give up its own identity's grants; P1 `sign` uses |
+        | `vault:use` | Create, cancel and mint tickets for vault uses: the integrator's orchestrator |
+        | `vault:approve` | Approve and deny vault grants and uses, and loosen an item's approval level; a decision reserved for people. Includes `vault:read` |
+        | `vault:admin` | Delete items, manage consumers, rotate the tenant's vault key, change custody, `revoke-all`. Includes `vault:read` |
         | `platform:ops` | Platform operations: signing-key rotation, the dead-letter queue, maintenance jobs, waitlist invitations, the list of agent sign-ups (platform keys only) |
 
         The upload routes take either `messages:send` or `drafts:write` (`x-required-permission-any`): a key
@@ -17872,7 +19342,7 @@ components:
         |---|---|
         | `platform:ops`, `partners:manage` | platform |
         | `tenants:manage` | platform, partner |
-        | `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve`, `drafts:approve` | platform, partner, tenant |
+        | `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve`, `drafts:approve`, `phone:approve`, `phone:manage`, `phone:compliance`, `vault:use`, `vault:approve`, `vault:admin` | platform, partner, tenant |
         | `tenants:erase` | platform, partner, and tenant keys minted by the workspace owner or its keys (otherwise `details.reason = "permission_owner_only"`) |
         | `identities:sign` | tenant, identity (platform and partner keys may grant it without holding it) |
         | Every other permission | platform, partner, tenant, identity |
@@ -17909,6 +19379,19 @@ components:
         - 'policy:write'
         - 'accounts:request'
         - 'accounts:approve'
+        - 'phone:read'
+        - 'phone:request'
+        - 'phone:send'
+        - 'phone:call'
+        - 'phone:approve'
+        - 'phone:manage'
+        - 'phone:compliance'
+        - 'vault:read'
+        - 'vault:write'
+        - 'vault:request'
+        - 'vault:use'
+        - 'vault:approve'
+        - 'vault:admin'
         - 'platform:ops'
     KeyLevel:
       type: string
@@ -18131,29 +19614,35 @@ components:
         The full effective policy of a tenant: the built-in defaults shown here, then `PM_DEFAULT_POLICY`,
         then the tenant's own values, deep-merged. Who may write each field (docs › Configuration › Who may
         change a field): platform keys write every field. For a partner key, `web_bot_auth.allowed`,
-        `domains.allow_create_zone`, `domains.cloudflare_zones` and `inbound.trusted_arc_sealers` are
-        platform-only; `quarantine.key_release` and `drafts.key_approval` are allowed on its own tenants; the
+        `domains.allow_create_zone`, `domains.cloudflare_zones`, `inbound.trusted_arc_sealers` and
+        `vault.allowed` are platform-only; `quarantine.key_release`, `drafts.key_approval`, `phone.allowed`,
+        `phone.key_approval` and `vault.key_approval` are allowed on its own tenants; the
         lower-only fields
         (`identity_daily_send_cap`, `tenant_daily_send_cap`, `max_recipients`, `auto_reply.allowed`,
         `auto_reply.max_automatic_exchanges`, `inbound.per_sender_per_hour`,
         `inbound.unauthenticated_per_hour`, `inbound.per_tenant_per_hour`, `inbound.extract_image_text`,
         `retention.raw_days`, `retention.events_days`, `triage.enabled`, `triage.daily_model_cap`,
         `search.agentic_enabled`,
-        `search.agentic_daily_cap`, `search.agentic_max_steps`, `search.agentic_max_seconds` and the `abuse`
-        thresholds) may be set at most to min(deployment default, platform ceiling), a switch to `true`
+        `search.agentic_daily_cap`, `search.agentic_max_steps`, `search.agentic_max_seconds`, the `abuse`
+        thresholds, `phone.countries`, the phone number limits, `phone.spend.*`, the `phone.sms` caps and
+        destinations, the `phone.calls` destinations and limits, `vault.max_items`,
+        `vault.session_max_ttl_days` and `vault.approval_deadline_seconds`) may be set at most to min(deployment default, platform ceiling), a switch to `true`
         only when both allow it (for `accounts.require_approval`, `false` is the looser value); every other
         field is free. A tenant key with `policy:write` (`updateTenantPolicy`) may set free fields, lower a
         lower-only field to at most its workspace ceiling (the strictest of the deployment default, the
         platform ceiling and the partner ceiling), and only tighten the guard fields `send_allowlist_only`,
         `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp`,
-        `drafts.require_approval`, `screening.mode`, `screening.on_unavailable` and
-        `screening.deadline_seconds` unless API keys may take decisions reserved for people on the tenant;
-        platform-only fields, `quarantine.key_release` and `drafts.key_approval` are not writable for it. A refused field gets `403 scope_denied` with
+        `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`,
+        `screening.deadline_seconds`, `phone.auto_approve` (setting it or loosening any field), `phone.calls.outbound`,
+        `phone.recording`, `phone.disclosure.calls`, `phone.disclosure.first_sms`, `phone.verification.redact`,
+        `vault.min_approval` and `vault.codes_into_fills_only` unless API keys may take decisions reserved for people on the tenant;
+        platform-only fields, `quarantine.key_release`, `drafts.key_approval`, `phone.allowed`,
+        `phone.key_approval` and `vault.key_approval` are not writable for it. A refused field gets `403 scope_denied` with
         `details.field` (or `403 permission_denied` with `details.reason = "person_required"` for a guard
         field) and nothing is stored. Identity keys cannot write the policy. While a tenant is a provisional
         agent sign-up, its effective policy also takes a fixed overlay that only tightens (docs › Agent
         self-sign-up § 4.2); the overlay is not stored.
-      required: [identity_daily_send_cap, tenant_daily_send_cap, max_recipients, send_allowlist_only, large_attachments, link_ttl_hours, ai_disclosure, auto_reply, quarantine, inbound, retention, triage, search, webhook_text_bytes, abuse, domains, events, domain_fallback, web_bot_auth, accounts, drafts, screening]
+      required: [identity_daily_send_cap, tenant_daily_send_cap, max_recipients, send_allowlist_only, large_attachments, link_ttl_hours, ai_disclosure, auto_reply, quarantine, inbound, retention, triage, search, webhook_text_bytes, abuse, domains, events, domain_fallback, web_bot_auth, accounts, drafts, screening, phone, vault]
       properties:
         identity_daily_send_cap:
           type: integer
@@ -18603,6 +20092,332 @@ components:
             mode: monitor
             on_unavailable: quarantine
             deadline_seconds: 120
+        phone:
+          type: object
+          description: Phone numbers (docs › Phone numbers § 19). `allowed` and `key_approval` are platform or own-partner
+            fields; `countries`, the number limits, `spend.*`, the SMS caps and destinations and the call limits are lower-only;
+            `auto_approve`, `calls.outbound`, `recording`, `disclosure.calls`, `disclosure.first_sms` and `verification.redact`
+            are guard fields.
+          required:
+          - allowed
+          - key_approval
+          - countries
+          - max_numbers_per_identity
+          - max_numbers_per_tenant
+          - auto_approve
+          - spend
+          - sms
+          - inbound
+          - calls
+          - recording
+          - disclosure
+          - verification
+          properties:
+            allowed:
+              type: boolean
+              default: false
+              description: Phone numbers may be used. On Pylota Identity Cloud only a platform key or the tenant's partner
+                key turns it on.
+            key_approval:
+              type: boolean
+              default: false
+              description: A platform key or the tenant's partner key may approve phone requests, decide port-outs and set
+                or loosen the standing budget, with `on_behalf_of`.
+            countries:
+              type:
+              - array
+              - 'null'
+              items:
+                type: string
+                pattern: ^[A-Z]{2}$
+              default: null
+              description: Countries the tenant may buy in; `null` is every catalogue country.
+            max_numbers_per_identity:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 5
+            max_numbers_per_tenant:
+              type: integer
+              minimum: 1
+              maximum: 200
+              default: 20
+            auto_approve:
+              type: object
+              description: 'The standing purchase budget (docs › Phone numbers › The standing purchase budget). A guard
+                object: setting it or loosening any field is a decision reserved for people; tightening needs `phone:manage`.
+                `version`, `set_by` and `set_at` are written by the service and ignored on write.'
+              required:
+              - enabled
+              properties:
+                enabled:
+                  type: boolean
+                  default: false
+                countries:
+                  type: array
+                  items:
+                    type: string
+                    pattern: ^[A-Z]{2}$
+                number_types:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PhoneNumberType'
+                max_numbers_per_identity:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                max_new_numbers_per_month:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                max_setup_pence_per_number:
+                  type: integer
+                  minimum: 0
+                max_monthly_pence_per_number:
+                  type: integer
+                  minimum: 0
+                expiring_only:
+                  type: boolean
+                  default: false
+                version:
+                  type: integer
+                  readOnly: true
+                set_by:
+                  type: object
+                  readOnly: true
+                set_at:
+                  type:
+                  - string
+                  - 'null'
+                  format: date-time
+                  readOnly: true
+              default:
+                enabled: false
+            spend:
+              type: object
+              properties:
+                tenant_monthly_cap_pence:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                  default: null
+                identity_monthly_cap_pence:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                  default: null
+                registration_cap_pence:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                  default: null
+                  description: A monthly cap for one-off registration fees (US 10DLC, toll-free verification), which count
+                    here instead of the monthly caps.
+            sms:
+              type: object
+              properties:
+                identity_daily_cap:
+                  type: integer
+                  minimum: 0
+                  default: 200
+                tenant_daily_cap:
+                  type: integer
+                  minimum: 0
+                  default: 2000
+                tenant_monthly_cap:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                  default: null
+                allowed_destination_countries:
+                  type:
+                  - array
+                  - 'null'
+                  items:
+                    type: string
+                    pattern: ^[A-Z]{2}$
+                  default: null
+                brand_name:
+                  type:
+                  - string
+                  - 'null'
+                  maxLength: 100
+                  default: null
+            inbound:
+              type: object
+              properties:
+                per_sender_per_hour:
+                  type: integer
+                  minimum: 1
+                  default: 30
+                per_identity_per_hour:
+                  type: integer
+                  minimum: 1
+                  default: 600
+            calls:
+              type: object
+              properties:
+                outbound:
+                  type: string
+                  enum:
+                  - 'off'
+                  - approval
+                  - allowed
+                  default: approval
+                  description: 'Guard field: tightening is a value further left in `off` < `approval` < `allowed`.'
+                allowed_destination_countries:
+                  type:
+                  - array
+                  - 'null'
+                  items:
+                    type: string
+                    pattern: ^[A-Z]{2}$
+                  default: null
+                concurrent_limit:
+                  type: integer
+                  minimum: 1
+                  default: 2
+                max_minutes:
+                  type: integer
+                  minimum: 1
+                  default: 15
+            recording:
+              type: string
+              enum:
+              - 'off'
+              - with_announcement
+              default: 'off'
+              description: A guard field; `off` is the stricter value.
+            disclosure:
+              type: object
+              properties:
+                calls:
+                  type: string
+                  enum:
+                  - required
+                  - 'off'
+                  default: required
+                first_sms:
+                  type: string
+                  enum:
+                  - required
+                  - 'off'
+                  default: required
+                call_text:
+                  type:
+                  - string
+                  - 'null'
+                  minLength: 1
+                  maxLength: 300
+                  default: null
+                sms_text:
+                  type:
+                  - string
+                  - 'null'
+                  minLength: 1
+                  maxLength: 300
+                  default: null
+            verification:
+              type: object
+              properties:
+                redact:
+                  type: boolean
+                  default: true
+                  description: Codes shown as `[code]` in reads and events. A guard field.
+          default:
+            allowed: false
+            key_approval: false
+            countries: null
+            max_numbers_per_identity: 5
+            max_numbers_per_tenant: 20
+            auto_approve:
+              enabled: false
+            spend:
+              tenant_monthly_cap_pence: null
+              identity_monthly_cap_pence: null
+              registration_cap_pence: null
+            sms:
+              identity_daily_cap: 200
+              tenant_daily_cap: 2000
+              tenant_monthly_cap: null
+              allowed_destination_countries: null
+              brand_name: null
+            inbound:
+              per_sender_per_hour: 30
+              per_identity_per_hour: 600
+            calls:
+              outbound: approval
+              allowed_destination_countries: null
+              concurrent_limit: 2
+              max_minutes: 15
+            recording: 'off'
+            disclosure:
+              calls: required
+              first_sms: required
+              call_text: null
+              sms_text: null
+            verification:
+              redact: true
+        vault:
+          type: object
+          description: The vault (docs › Agent credential vault). `allowed` is platform-only; `key_approval` is a platform
+            or own-partner field; `min_approval` and `codes_into_fills_only` are guard fields; `max_items`, `session_max_ttl_days`
+            and `approval_deadline_seconds` are lower-only.
+          required:
+          - allowed
+          - key_approval
+          - min_approval
+          - codes_into_fills_only
+          - max_items
+          - session_max_ttl_days
+          - approval_deadline_seconds
+          properties:
+            allowed:
+              type: boolean
+              default: false
+              description: Lets the tenant use the vault. Platform-only; turning it off closes every open use.
+            key_approval:
+              type: boolean
+              default: false
+              description: A platform key or the partner key of the tenant's own partner, holding `vault:approve`, may approve
+                this tenant's grants and uses, naming the person with `on_behalf_of`. Never a tenant or identity key.
+            min_approval:
+              $ref: '#/components/schemas/VaultApprovalLevel'
+              default: grant
+              description: 'The floor of every item''s approval level. Guard field: tightening is a level at or above the
+                current one in `grant` < `per_run` < `per_use`.'
+            codes_into_fills_only:
+              type: boolean
+              default: false
+              description: Withholds every verification message (mail and SMS) from agents and delivers codes only into
+                vault phases. Guard field; `true` is the stricter value.
+            max_items:
+              type: integer
+              minimum: 1
+              maximum: 10000
+              default: 1000
+            session_max_ttl_days:
+              type: integer
+              minimum: 1
+              maximum: 30
+              default: 30
+            approval_deadline_seconds:
+              type: integer
+              minimum: 60
+              maximum: 900
+              default: 600
+          default:
+            allowed: false
+            key_approval: false
+            min_approval: grant
+            codes_into_fills_only: false
+            max_items: 1000
+            session_max_ttl_days: 30
+            approval_deadline_seconds: 600
 
     TenantPolicyPatch:
       type: object
@@ -18822,6 +20637,296 @@ components:
             deadline_seconds:
               type: [integer, 'null']
               minimum: 30
+              maximum: 900
+        phone:
+          type:
+          - object
+          - 'null'
+          properties:
+            allowed:
+              type:
+              - boolean
+              - 'null'
+              description: Phone numbers may be used. On Pylota Identity Cloud only a platform key or the tenant's partner
+                key turns it on.
+            key_approval:
+              type:
+              - boolean
+              - 'null'
+              description: A platform key or the tenant's partner key may approve phone requests, decide port-outs and set
+                or loosen the standing budget, with `on_behalf_of`.
+            countries:
+              type:
+              - array
+              - 'null'
+              items:
+                type: string
+                pattern: ^[A-Z]{2}$
+              description: Countries the tenant may buy in; `null` is every catalogue country.
+            max_numbers_per_identity:
+              type:
+              - integer
+              - 'null'
+              minimum: 1
+              maximum: 20
+            max_numbers_per_tenant:
+              type:
+              - integer
+              - 'null'
+              minimum: 1
+              maximum: 200
+            auto_approve:
+              type:
+              - object
+              - 'null'
+              description: 'The standing purchase budget (docs › Phone numbers › The standing purchase budget). A guard
+                object: setting it or loosening any field is a decision reserved for people; tightening needs `phone:manage`.
+                `version`, `set_by` and `set_at` are written by the service and ignored on write.'
+              properties:
+                enabled:
+                  type:
+                  - boolean
+                  - 'null'
+                countries:
+                  type:
+                  - array
+                  - 'null'
+                  items:
+                    type: string
+                    pattern: ^[A-Z]{2}$
+                number_types:
+                  type:
+                  - array
+                  - 'null'
+                  items:
+                    $ref: '#/components/schemas/PhoneNumberType'
+                max_numbers_per_identity:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 1
+                  maximum: 20
+                max_new_numbers_per_month:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 1
+                  maximum: 200
+                max_setup_pence_per_number:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                max_monthly_pence_per_number:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                expiring_only:
+                  type:
+                  - boolean
+                  - 'null'
+            spend:
+              type:
+              - object
+              - 'null'
+              properties:
+                tenant_monthly_cap_pence:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                identity_monthly_cap_pence:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                registration_cap_pence:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                  description: A monthly cap for one-off registration fees (US 10DLC, toll-free verification), which count
+                    here instead of the monthly caps.
+            sms:
+              type:
+              - object
+              - 'null'
+              properties:
+                identity_daily_cap:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                tenant_daily_cap:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                tenant_monthly_cap:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 0
+                allowed_destination_countries:
+                  type:
+                  - array
+                  - 'null'
+                  items:
+                    type: string
+                    pattern: ^[A-Z]{2}$
+                brand_name:
+                  type:
+                  - string
+                  - 'null'
+                  maxLength: 100
+            inbound:
+              type:
+              - object
+              - 'null'
+              properties:
+                per_sender_per_hour:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 1
+                per_identity_per_hour:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 1
+            calls:
+              type:
+              - object
+              - 'null'
+              properties:
+                outbound:
+                  type:
+                  - string
+                  - 'null'
+                  enum:
+                  - 'off'
+                  - approval
+                  - allowed
+                  - null
+                  description: 'Guard field: tightening is a value further left in `off` < `approval` < `allowed`.'
+                allowed_destination_countries:
+                  type:
+                  - array
+                  - 'null'
+                  items:
+                    type: string
+                    pattern: ^[A-Z]{2}$
+                concurrent_limit:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 1
+                max_minutes:
+                  type:
+                  - integer
+                  - 'null'
+                  minimum: 1
+            recording:
+              type:
+              - string
+              - 'null'
+              enum:
+              - 'off'
+              - with_announcement
+              - null
+              description: A guard field; `off` is the stricter value.
+            disclosure:
+              type:
+              - object
+              - 'null'
+              properties:
+                calls:
+                  type:
+                  - string
+                  - 'null'
+                  enum:
+                  - required
+                  - 'off'
+                  - null
+                first_sms:
+                  type:
+                  - string
+                  - 'null'
+                  enum:
+                  - required
+                  - 'off'
+                  - null
+                call_text:
+                  type:
+                  - string
+                  - 'null'
+                  minLength: 1
+                  maxLength: 300
+                sms_text:
+                  type:
+                  - string
+                  - 'null'
+                  minLength: 1
+                  maxLength: 300
+            verification:
+              type:
+              - object
+              - 'null'
+              properties:
+                redact:
+                  type:
+                  - boolean
+                  - 'null'
+                  description: Codes shown as `[code]` in reads and events. A guard field.
+        vault:
+          type:
+          - object
+          - 'null'
+          properties:
+            allowed:
+              type:
+              - boolean
+              - 'null'
+              description: Platform keys only.
+            key_approval:
+              type:
+              - boolean
+              - 'null'
+              description: A platform key or the partner key of the tenant's own partner, holding `vault:approve`, may approve
+                this tenant's grants and uses, naming the person with `on_behalf_of`. Never a tenant or identity key.
+            min_approval:
+              type:
+              - string
+              - 'null'
+              enum:
+              - grant
+              - per_run
+              - per_use
+              - null
+            codes_into_fills_only:
+              type:
+              - boolean
+              - 'null'
+              description: Withholds every verification message (mail and SMS) from agents and delivers codes only into
+                vault phases. Guard field; `true` is the stricter value.
+            max_items:
+              type:
+              - integer
+              - 'null'
+              minimum: 1
+              maximum: 10000
+            session_max_ttl_days:
+              type:
+              - integer
+              - 'null'
+              minimum: 1
+              maximum: 30
+            approval_deadline_seconds:
+              type:
+              - integer
+              - 'null'
+              minimum: 60
               maximum: 900
     TenantPolicyView:
       type: object
@@ -19054,7 +21159,7 @@ components:
       description: >-
         An entry of the service sign-up ledger: a third-party account an identity's agent asked to create
         (FR-IDN-10). `purpose` and `account_identifier` were written by an agent: show them as untrusted text.
-      required: [id, tenant_id, identity_id, service_domain, sender_domains, account_identifier, address, purpose, status, rejected_reason, note, requested_by_key_id, decided_by_key_id, decided_by_user_id, decided_at, closed_by_key_id, closed_by_user_id, closed_at, expires_at, created_at, updated_at]
+      required: [id, tenant_id, identity_id, service_domain, sender_domains, login_domains, phone_number_id, sms_senders, account_identifier, address, purpose, status, rejected_reason, note, requested_by_key_id, decided_by_key_id, decided_by_user_id, decided_at, closed_by_key_id, closed_by_user_id, closed_at, expires_at, created_at, updated_at]
       properties:
         id: {$ref: '#/components/schemas/ServiceAccountId'}
         tenant_id: {$ref: '#/components/schemas/TenantId'}
@@ -19127,6 +21232,31 @@ components:
         updated_at:
           type: string
           format: date-time
+        login_domains:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+          description: Up to 5 organisational domains, besides `service_domain`, where the account signs in. Approving them
+            lets a vault fill happen there, so the approve page lists them apart.
+        phone_number_id:
+          description: The identity's number a service texts codes to. An entry naming no number matches SMS only when the
+            identity has one live SMS number.
+          oneOf:
+          - $ref: '#/components/schemas/PhoneNumberId'
+          - type: 'null'
+        sms_senders:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: 'Senders the service''s codes come from: E.164 numbers, short codes or alphanumeric sender IDs.'
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
     ServiceAccountCreateRequest:
       type: object
       required: [service_domain, account_identifier, purpose]
@@ -19160,6 +21290,77 @@ components:
         address:
           description: An active or retiring address of the identity; defaults to its primary address.
           $ref: '#/components/schemas/EmailAddress'
+        login_domains:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+          description: Up to 5 organisational domains, besides `service_domain`, where the account signs in. Approving them
+            lets a vault fill happen there, so the approve page lists them apart.
+        phone_number_id:
+          description: The identity's number a service texts codes to. An entry naming no number matches SMS only when the
+            identity has one live SMS number.
+          oneOf:
+          - $ref: '#/components/schemas/PhoneNumberId'
+          - type: 'null'
+        sms_senders:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: 'Senders the service''s codes come from: E.164 numbers, short codes or alphanumeric sender IDs.'
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+        vault_login:
+          type: object
+          additionalProperties: false
+          description: 'Optional: when the entry is approved, the same batch creates an identity-scoped vault login with
+            a generated password and an active `fill` grant to the requesting identity for 90 days (docs › Agent credential
+            vault § 3.5). Not stored on the entry.'
+          required:
+          - origins
+          properties:
+            origins:
+              type: array
+              minItems: 1
+              maxItems: 10
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/VaultOrigin'
+            password:
+              type: object
+              additionalProperties: false
+              required:
+              - generate
+              properties:
+                generate:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    length:
+                      type: integer
+                      minimum: 16
+                      maximum: 128
+                      default: 24
+                    classes:
+                      type: array
+                      uniqueItems: true
+                      items:
+                        type: string
+                        enum:
+                        - lower
+                        - upper
+                        - digit
+                        - symbol
+            email_otp:
+              type: boolean
+              default: false
+            approval:
+              $ref: '#/components/schemas/VaultApprovalLevel'
     ServiceAccountNoteRequest:
       type: object
       additionalProperties: false
@@ -25150,6 +27351,62 @@ components:
         - account.approved
         - account.rejected
         - account.closed
+        - sms.received
+        - sms.quarantined
+        - sms.released
+        - sms.screened
+        - sms.verification_received
+        - sms.sent
+        - sms.delivered
+        - sms.failed
+        - sms.delivery_unconfirmed
+        - sms.uncertain
+        - sms.reconciled
+        - call.started
+        - call.ended
+        - phone_request.requested
+        - phone_request.approved
+        - phone_request.rejected
+        - phone_request.canceled
+        - phone_request.completed
+        - phone_request.failed
+        - phone_request.uncertain
+        - phone_number.status_changed
+        - phone_number.capability_changed
+        - phone_number.expiring
+        - phone_number.action_needed
+        - phone_number.port_out_requested
+        - phone_number.port_out_decided
+        - phone_registration.status_changed
+        - phone_compliance.status_changed
+        - phone_consent.changed
+        - phone_spend.warning
+        - phone_setup.status_changed
+        - phone_budget.changed
+        - vault.item.created
+        - vault.item.updated
+        - vault.item.rotated
+        - vault.item.deleted
+        - vault.item.revealed
+        - vault.item.health_changed
+        - vault.grant.requested
+        - vault.grant.approved
+        - vault.grant.denied
+        - vault.grant.revoked
+        - vault.grant.expired
+        - vault.use.requested
+        - vault.use.approval_requested
+        - vault.use.approved
+        - vault.use.denied
+        - vault.use.expired
+        - vault.use.canceled
+        - vault.use.closed
+        - vault.ticket.issued
+        - vault.ticket.redeemed
+        - vault.ticket.refused
+        - vault.ticket.reported
+        - vault.consumer.changed
+        - vault.key.changed
 
     Event:
       description: Any webhook event. `type` selects the payload schema.
@@ -25218,6 +27475,62 @@ components:
         - $ref: '#/components/schemas/AccountApprovedEvent'
         - $ref: '#/components/schemas/AccountRejectedEvent'
         - $ref: '#/components/schemas/AccountClosedEvent'
+        - $ref: '#/components/schemas/SmsReceivedEvent'
+        - $ref: '#/components/schemas/SmsQuarantinedEvent'
+        - $ref: '#/components/schemas/SmsReleasedEvent'
+        - $ref: '#/components/schemas/SmsScreenedEvent'
+        - $ref: '#/components/schemas/SmsVerificationReceivedEvent'
+        - $ref: '#/components/schemas/SmsSentEvent'
+        - $ref: '#/components/schemas/SmsDeliveredEvent'
+        - $ref: '#/components/schemas/SmsFailedEvent'
+        - $ref: '#/components/schemas/SmsDeliveryUnconfirmedEvent'
+        - $ref: '#/components/schemas/SmsUncertainEvent'
+        - $ref: '#/components/schemas/SmsReconciledEvent'
+        - $ref: '#/components/schemas/CallStartedEvent'
+        - $ref: '#/components/schemas/CallEndedEvent'
+        - $ref: '#/components/schemas/PhoneRequestRequestedEvent'
+        - $ref: '#/components/schemas/PhoneRequestApprovedEvent'
+        - $ref: '#/components/schemas/PhoneRequestRejectedEvent'
+        - $ref: '#/components/schemas/PhoneRequestCanceledEvent'
+        - $ref: '#/components/schemas/PhoneRequestCompletedEvent'
+        - $ref: '#/components/schemas/PhoneRequestFailedEvent'
+        - $ref: '#/components/schemas/PhoneRequestUncertainEvent'
+        - $ref: '#/components/schemas/PhoneNumberStatusChangedEvent'
+        - $ref: '#/components/schemas/PhoneNumberCapabilityChangedEvent'
+        - $ref: '#/components/schemas/PhoneNumberExpiringEvent'
+        - $ref: '#/components/schemas/PhoneNumberActionNeededEvent'
+        - $ref: '#/components/schemas/PhoneNumberPortOutRequestedEvent'
+        - $ref: '#/components/schemas/PhoneNumberPortOutDecidedEvent'
+        - $ref: '#/components/schemas/PhoneRegistrationStatusChangedEvent'
+        - $ref: '#/components/schemas/PhoneComplianceStatusChangedEvent'
+        - $ref: '#/components/schemas/PhoneConsentChangedEvent'
+        - $ref: '#/components/schemas/PhoneSpendWarningEvent'
+        - $ref: '#/components/schemas/PhoneSetupStatusChangedEvent'
+        - $ref: '#/components/schemas/PhoneBudgetChangedEvent'
+        - $ref: '#/components/schemas/VaultItemCreatedEvent'
+        - $ref: '#/components/schemas/VaultItemUpdatedEvent'
+        - $ref: '#/components/schemas/VaultItemRotatedEvent'
+        - $ref: '#/components/schemas/VaultItemDeletedEvent'
+        - $ref: '#/components/schemas/VaultItemRevealedEvent'
+        - $ref: '#/components/schemas/VaultItemHealthChangedEvent'
+        - $ref: '#/components/schemas/VaultGrantRequestedEvent'
+        - $ref: '#/components/schemas/VaultGrantApprovedEvent'
+        - $ref: '#/components/schemas/VaultGrantDeniedEvent'
+        - $ref: '#/components/schemas/VaultGrantRevokedEvent'
+        - $ref: '#/components/schemas/VaultGrantExpiredEvent'
+        - $ref: '#/components/schemas/VaultUseRequestedEvent'
+        - $ref: '#/components/schemas/VaultUseApprovalRequestedEvent'
+        - $ref: '#/components/schemas/VaultUseApprovedEvent'
+        - $ref: '#/components/schemas/VaultUseDeniedEvent'
+        - $ref: '#/components/schemas/VaultUseExpiredEvent'
+        - $ref: '#/components/schemas/VaultUseCanceledEvent'
+        - $ref: '#/components/schemas/VaultUseClosedEvent'
+        - $ref: '#/components/schemas/VaultTicketIssuedEvent'
+        - $ref: '#/components/schemas/VaultTicketRedeemedEvent'
+        - $ref: '#/components/schemas/VaultTicketRefusedEvent'
+        - $ref: '#/components/schemas/VaultTicketReportedEvent'
+        - $ref: '#/components/schemas/VaultConsumerChangedEvent'
+        - $ref: '#/components/schemas/VaultKeyChangedEvent'
       discriminator:
         propertyName: type
         mapping:
@@ -25285,6 +27598,62 @@ components:
           account.approved: '#/components/schemas/AccountApprovedEvent'
           account.rejected: '#/components/schemas/AccountRejectedEvent'
           account.closed: '#/components/schemas/AccountClosedEvent'
+          sms.received: '#/components/schemas/SmsReceivedEvent'
+          sms.quarantined: '#/components/schemas/SmsQuarantinedEvent'
+          sms.released: '#/components/schemas/SmsReleasedEvent'
+          sms.screened: '#/components/schemas/SmsScreenedEvent'
+          sms.verification_received: '#/components/schemas/SmsVerificationReceivedEvent'
+          sms.sent: '#/components/schemas/SmsSentEvent'
+          sms.delivered: '#/components/schemas/SmsDeliveredEvent'
+          sms.failed: '#/components/schemas/SmsFailedEvent'
+          sms.delivery_unconfirmed: '#/components/schemas/SmsDeliveryUnconfirmedEvent'
+          sms.uncertain: '#/components/schemas/SmsUncertainEvent'
+          sms.reconciled: '#/components/schemas/SmsReconciledEvent'
+          call.started: '#/components/schemas/CallStartedEvent'
+          call.ended: '#/components/schemas/CallEndedEvent'
+          phone_request.requested: '#/components/schemas/PhoneRequestRequestedEvent'
+          phone_request.approved: '#/components/schemas/PhoneRequestApprovedEvent'
+          phone_request.rejected: '#/components/schemas/PhoneRequestRejectedEvent'
+          phone_request.canceled: '#/components/schemas/PhoneRequestCanceledEvent'
+          phone_request.completed: '#/components/schemas/PhoneRequestCompletedEvent'
+          phone_request.failed: '#/components/schemas/PhoneRequestFailedEvent'
+          phone_request.uncertain: '#/components/schemas/PhoneRequestUncertainEvent'
+          phone_number.status_changed: '#/components/schemas/PhoneNumberStatusChangedEvent'
+          phone_number.capability_changed: '#/components/schemas/PhoneNumberCapabilityChangedEvent'
+          phone_number.expiring: '#/components/schemas/PhoneNumberExpiringEvent'
+          phone_number.action_needed: '#/components/schemas/PhoneNumberActionNeededEvent'
+          phone_number.port_out_requested: '#/components/schemas/PhoneNumberPortOutRequestedEvent'
+          phone_number.port_out_decided: '#/components/schemas/PhoneNumberPortOutDecidedEvent'
+          phone_registration.status_changed: '#/components/schemas/PhoneRegistrationStatusChangedEvent'
+          phone_compliance.status_changed: '#/components/schemas/PhoneComplianceStatusChangedEvent'
+          phone_consent.changed: '#/components/schemas/PhoneConsentChangedEvent'
+          phone_spend.warning: '#/components/schemas/PhoneSpendWarningEvent'
+          phone_setup.status_changed: '#/components/schemas/PhoneSetupStatusChangedEvent'
+          phone_budget.changed: '#/components/schemas/PhoneBudgetChangedEvent'
+          vault.item.created: '#/components/schemas/VaultItemCreatedEvent'
+          vault.item.updated: '#/components/schemas/VaultItemUpdatedEvent'
+          vault.item.rotated: '#/components/schemas/VaultItemRotatedEvent'
+          vault.item.deleted: '#/components/schemas/VaultItemDeletedEvent'
+          vault.item.revealed: '#/components/schemas/VaultItemRevealedEvent'
+          vault.item.health_changed: '#/components/schemas/VaultItemHealthChangedEvent'
+          vault.grant.requested: '#/components/schemas/VaultGrantRequestedEvent'
+          vault.grant.approved: '#/components/schemas/VaultGrantApprovedEvent'
+          vault.grant.denied: '#/components/schemas/VaultGrantDeniedEvent'
+          vault.grant.revoked: '#/components/schemas/VaultGrantRevokedEvent'
+          vault.grant.expired: '#/components/schemas/VaultGrantExpiredEvent'
+          vault.use.requested: '#/components/schemas/VaultUseRequestedEvent'
+          vault.use.approval_requested: '#/components/schemas/VaultUseApprovalRequestedEvent'
+          vault.use.approved: '#/components/schemas/VaultUseApprovedEvent'
+          vault.use.denied: '#/components/schemas/VaultUseDeniedEvent'
+          vault.use.expired: '#/components/schemas/VaultUseExpiredEvent'
+          vault.use.canceled: '#/components/schemas/VaultUseCanceledEvent'
+          vault.use.closed: '#/components/schemas/VaultUseClosedEvent'
+          vault.ticket.issued: '#/components/schemas/VaultTicketIssuedEvent'
+          vault.ticket.redeemed: '#/components/schemas/VaultTicketRedeemedEvent'
+          vault.ticket.refused: '#/components/schemas/VaultTicketRefusedEvent'
+          vault.ticket.reported: '#/components/schemas/VaultTicketReportedEvent'
+          vault.consumer.changed: '#/components/schemas/VaultConsumerChangedEvent'
+          vault.key.changed: '#/components/schemas/VaultKeyChangedEvent'
 
     MessageReceivedEvent:
       description: '`message.received`: An inbound message is stored and visible.'
@@ -25990,6 +28359,1461 @@ components:
               const: account.closed
             data: {$ref: '#/components/schemas/AccountEventData'}
 
+    SmsReceivedEvent:
+      description: '`sms.received`: An inbound SMS is stored and visible.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.received
+          data:
+            $ref: '#/components/schemas/SmsReceivedData'
+    SmsQuarantinedEvent:
+      description: '`sms.quarantined`: An inbound SMS is stored but held. `sms.text` is absent.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.quarantined
+          data:
+            $ref: '#/components/schemas/SmsQuarantinedData'
+    SmsReleasedEvent:
+      description: '`sms.released`: A held SMS was released.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.released
+          data:
+            $ref: '#/components/schemas/SmsReleasedData'
+    SmsScreenedEvent:
+      description: '`sms.screened`: A screening verdict on an SMS.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.screened
+          data:
+            $ref: '#/components/schemas/SmsScreenedData'
+    SmsVerificationReceivedEvent:
+      description: '`sms.verification_received`: A verification code was found in a visible SMS. The value is only available
+        through `GET …/sms/wait`.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.verification_received
+          data:
+            $ref: '#/components/schemas/SmsVerificationReceivedData'
+    SmsSentEvent:
+      description: '`sms.sent`: The provider accepted the SMS.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.sent
+          data:
+            $ref: '#/components/schemas/SmsSentData'
+    SmsDeliveredEvent:
+      description: '`sms.delivered`: The handset or carrier confirmed delivery.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.delivered
+          data:
+            $ref: '#/components/schemas/SmsDeliveredData'
+    SmsFailedEvent:
+      description: '`sms.failed`: The SMS was refused or not delivered.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.failed
+          data:
+            $ref: '#/components/schemas/SmsFailedData'
+    SmsDeliveryUnconfirmedEvent:
+      description: '`sms.delivery_unconfirmed`: The carrier gave no final answer.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.delivery_unconfirmed
+          data:
+            $ref: '#/components/schemas/SmsDeliveryUnconfirmedData'
+    SmsUncertainEvent:
+      description: '`sms.uncertain`: The outcome is unknown; it is never resent automatically.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.uncertain
+          data:
+            $ref: '#/components/schemas/SmsUncertainData'
+    SmsReconciledEvent:
+      description: '`sms.reconciled`: An uncertain SMS was matched to a provider record.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: sms.reconciled
+          data:
+            $ref: '#/components/schemas/SmsReconciledData'
+    CallStartedEvent:
+      description: '`call.started`: A call on one of the identity''s numbers began.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: call.started
+          data:
+            $ref: '#/components/schemas/CallEventData'
+    CallEndedEvent:
+      description: '`call.ended`: A call ended, or a call record filled it in later.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: call.ended
+          data:
+            $ref: '#/components/schemas/CallEventData'
+    PhoneRequestRequestedEvent:
+      description: '`phone_request.requested`: A phone request was created, or returned to `pending_approval` because
+        its price rose.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.requested
+          data:
+            $ref: '#/components/schemas/PhoneRequestRequestedData'
+    PhoneRequestApprovedEvent:
+      description: '`phone_request.approved`: A person, an allowed key or the tenant''s standing budget approved a phone
+        request.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.approved
+          data:
+            $ref: '#/components/schemas/PhoneRequestApprovedData'
+    PhoneRequestRejectedEvent:
+      description: '`phone_request.rejected`: A phone request was rejected, or expired after 7 days.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.rejected
+          data:
+            $ref: '#/components/schemas/PhoneRequestRejectedData'
+    PhoneRequestCanceledEvent:
+      description: '`phone_request.canceled`: A phone request was canceled by the requester, or by erasure.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.canceled
+          data:
+            $ref: '#/components/schemas/PhoneRequestCanceledData'
+    PhoneRequestCompletedEvent:
+      description: '`phone_request.completed`: The provider work of a phone request ended successfully.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.completed
+          data:
+            $ref: '#/components/schemas/PhoneRequestCompletedData'
+    PhoneRequestFailedEvent:
+      description: '`phone_request.failed`: The provider work of a phone request ended without success.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.failed
+          data:
+            $ref: '#/components/schemas/PhoneRequestFailedData'
+    PhoneRequestUncertainEvent:
+      description: '`phone_request.uncertain`: A billable provider call''s outcome is unknown; the service is reconciling.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_request.uncertain
+          data:
+            $ref: '#/components/schemas/PhoneRequestUncertainData'
+    PhoneNumberStatusChangedEvent:
+      description: '`phone_number.status_changed`: A number changed status.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_number.status_changed
+          data:
+            $ref: '#/components/schemas/PhoneNumberStatusChangedData'
+    PhoneNumberCapabilityChangedEvent:
+      description: '`phone_number.capability_changed`: One of a number''s capability facets changed state.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_number.capability_changed
+          data:
+            $ref: '#/components/schemas/PhoneNumberCapabilityChangedData'
+    PhoneNumberExpiringEvent:
+      description: '`phone_number.expiring`: A number bought with `expires_at` will be released within 24 hours.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_number.expiring
+          data:
+            $ref: '#/components/schemas/PhoneNumberExpiringData'
+    PhoneNumberActionNeededEvent:
+      description: '`phone_number.action_needed`: The provider needs information before a deadline.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_number.action_needed
+          data:
+            $ref: '#/components/schemas/PhoneNumberActionNeededData'
+    PhoneNumberPortOutRequestedEvent:
+      description: '`phone_number.port_out_requested`: Another carrier asked for the number.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_number.port_out_requested
+          data:
+            $ref: '#/components/schemas/PhoneNumberPortOutRequestedData'
+    PhoneNumberPortOutDecidedEvent:
+      description: '`phone_number.port_out_decided`: A person authorised or rejected a port-out, or the provider authorised
+        it.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_number.port_out_decided
+          data:
+            $ref: '#/components/schemas/PhoneNumberPortOutDecidedData'
+    PhoneRegistrationStatusChangedEvent:
+      description: '`phone_registration.status_changed`: A US 10DLC brand, campaign or number assignment, or a toll-free
+        verification, changed status.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_registration.status_changed
+          data:
+            $ref: '#/components/schemas/PhoneRegistrationStatusChangedData'
+    PhoneComplianceStatusChangedEvent:
+      description: '`phone_compliance.status_changed`: The compliance profile''s status for a country, number type and
+        action changed.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_compliance.status_changed
+          data:
+            $ref: '#/components/schemas/PhoneComplianceStatusChangedData'
+    PhoneConsentChangedEvent:
+      description: '`phone_consent.changed`: A counterparty opted out or in.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_consent.changed
+          data:
+            $ref: '#/components/schemas/PhoneConsentChangedData'
+    PhoneSpendWarningEvent:
+      description: '`phone_spend.warning`: Phone spend reached 80% or 100% of a monthly cap.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_spend.warning
+          data:
+            $ref: '#/components/schemas/PhoneSpendWarningData'
+    PhoneSetupStatusChangedEvent:
+      description: '`phone_setup.status_changed`: The tenant''s onboarding status for a country changed.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_setup.status_changed
+          data:
+            $ref: '#/components/schemas/PhoneSetupStatusChangedData'
+    PhoneBudgetChangedEvent:
+      description: '`phone_budget.changed`: The tenant''s standing purchase budget was set, loosened, tightened or turned
+        off.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: phone_budget.changed
+          data:
+            $ref: '#/components/schemas/PhoneBudgetChangedData'
+    VaultItemCreatedEvent:
+      description: '`vault.item.created`: A vault item was created or imported.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.item.created
+          data:
+            $ref: '#/components/schemas/VaultItemEventData'
+    VaultItemUpdatedEvent:
+      description: '`vault.item.updated`: A vault item''s metadata, origins, approval level or state changed.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.item.updated
+          data:
+            $ref: '#/components/schemas/VaultItemEventData'
+    VaultItemRotatedEvent:
+      description: '`vault.item.rotated`: A new version of a vault item became current.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.item.rotated
+          data:
+            $ref: '#/components/schemas/VaultItemEventData'
+    VaultItemDeletedEvent:
+      description: '`vault.item.deleted`: A vault item was crypto-shredded.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.item.deleted
+          data:
+            $ref: '#/components/schemas/VaultItemDeletedData'
+    VaultItemRevealedEvent:
+      description: '`vault.item.revealed`: A person revealed a value in the console, or was shown a new managed value
+        once.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.item.revealed
+          data:
+            $ref: '#/components/schemas/VaultItemRevealedData'
+    VaultItemHealthChangedEvent:
+      description: '`vault.item.health_changed`: A vault item''s health changed.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.item.health_changed
+          data:
+            $ref: '#/components/schemas/VaultItemHealthChangedData'
+    VaultGrantRequestedEvent:
+      description: '`vault.grant.requested`: An agent asked for a vault grant.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.grant.requested
+          data:
+            $ref: '#/components/schemas/VaultGrantEventData'
+    VaultGrantApprovedEvent:
+      description: '`vault.grant.approved`: A vault grant was approved, or created approved.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.grant.approved
+          data:
+            $ref: '#/components/schemas/VaultGrantEventData'
+    VaultGrantDeniedEvent:
+      description: '`vault.grant.denied`: A vault grant was denied.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.grant.denied
+          data:
+            $ref: '#/components/schemas/VaultGrantEventData'
+    VaultGrantRevokedEvent:
+      description: '`vault.grant.revoked`: A vault grant was revoked, or given up by its agent.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.grant.revoked
+          data:
+            $ref: '#/components/schemas/VaultGrantEventData'
+    VaultGrantExpiredEvent:
+      description: '`vault.grant.expired`: A vault grant''s pending week or active period ended.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.grant.expired
+          data:
+            $ref: '#/components/schemas/VaultGrantEventData'
+    VaultUseRequestedEvent:
+      description: '`vault.use.requested`: The orchestrator created a vault use (also for refusals at creation).'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.requested
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultUseApprovalRequestedEvent:
+      description: '`vault.use.approval_requested`: A person must decide on a vault use.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.approval_requested
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultUseApprovedEvent:
+      description: '`vault.use.approved`: A vault use was approved; mint a ticket now.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.approved
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultUseDeniedEvent:
+      description: '`vault.use.denied`: A vault use was denied.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.denied
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultUseExpiredEvent:
+      description: '`vault.use.expired`: A vault use''s approval deadline or first-redemption window passed.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.expired
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultUseCanceledEvent:
+      description: '`vault.use.canceled`: The orchestrator canceled a vault use.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.canceled
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultUseClosedEvent:
+      description: '`vault.use.closed`: A vault use closed, normally or early.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.use.closed
+          data:
+            $ref: '#/components/schemas/VaultUseEventData'
+    VaultTicketIssuedEvent:
+      description: '`vault.ticket.issued`: A vault ticket was minted.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.ticket.issued
+          data:
+            $ref: '#/components/schemas/VaultTicketIssuedData'
+    VaultTicketRedeemedEvent:
+      description: '`vault.ticket.redeemed`: A consumer redeemed a phase.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.ticket.redeemed
+          data:
+            $ref: '#/components/schemas/VaultTicketRedeemedData'
+    VaultTicketRefusedEvent:
+      description: '`vault.ticket.refused`: A redemption was refused.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.ticket.refused
+          data:
+            $ref: '#/components/schemas/VaultTicketRefusedData'
+    VaultTicketReportedEvent:
+      description: '`vault.ticket.reported`: A consumer reported an outcome.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.ticket.reported
+          data:
+            $ref: '#/components/schemas/VaultTicketReportedData'
+    VaultConsumerChangedEvent:
+      description: '`vault.consumer.changed`: A vault consumer was registered, activated, suspended, resumed, re-keyed
+        or revoked.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.consumer.changed
+          data:
+            $ref: '#/components/schemas/VaultConsumerChangedData'
+    VaultKeyChangedEvent:
+      description: '`vault.key.changed`: The tenant''s vault key rotated, custody changed, or `revoke-all` ran.'
+      allOf:
+      - $ref: '#/components/schemas/EventBase'
+      - type: object
+        required:
+        - type
+        - data
+        properties:
+          type:
+            const: vault.key.changed
+          data:
+            $ref: '#/components/schemas/VaultKeyChangedData'
+
+    SmsEventSummary:
+      type: object
+      description: The SMS summary in phone mailbox events. Verification codes appear as `[code]`.
+      required:
+      - id
+      - conversation_id
+      - number_id
+      - direction
+      - status
+      - from
+      - to
+      - segments
+      properties:
+        id:
+          type: string
+        conversation_id:
+          type: string
+        number_id: &id007
+          type: string
+          description: The number ID (`pnm_`).
+        direction:
+          type: string
+          enum:
+          - inbound
+          - outbound
+        status:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        text:
+          type: string
+          description: Untrusted content; absent on `sms.quarantined`.
+        segments: &id001
+          type: integer
+        client_reference: &id006
+          type:
+          - string
+          - 'null'
+        received_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        sent_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        flags:
+          type: array
+          items:
+            type: string
+    VaultEventAudit:
+      type: object
+      description: The head of the tenant's hash-chained vault audit after the change.
+      required:
+      - seq
+      - row_hash
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        row_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    SmsReceivedData:
+      type: object
+      required:
+      - sms
+      - conversation_id
+      - trust
+      - media
+      properties:
+        sms: &id002
+          $ref: '#/components/schemas/SmsEventSummary'
+        conversation_id: &id003
+          type: string
+        trust: &id004
+          type: object
+          properties:
+            sender_unverified:
+              type: boolean
+              const: true
+            screening:
+              type:
+              - object
+              - 'null'
+        media: &id005
+          type: array
+          items:
+            type: object
+            properties:
+              n: *id001
+              content_type:
+                type: string
+              size: *id001
+    SmsQuarantinedData:
+      type: object
+      required:
+      - sms
+      - conversation_id
+      - trust
+      - media
+      - quarantine_reason
+      properties:
+        sms: *id002
+        conversation_id: *id003
+        trust: *id004
+        media: *id005
+        quarantine_reason:
+          type: string
+          enum:
+          - account_unapproved
+          - otp_unsolicited
+          - steering_suspected
+          - screening_unavailable
+          - risky_attachment
+    SmsReleasedData:
+      type: object
+      required:
+      - sms_id
+      properties:
+        sms_id:
+          type: string
+        released_by_key_id: *id006
+        released_by_user_id: *id006
+    SmsScreenedData:
+      type: object
+      required:
+      - sms_id
+      - status
+      properties:
+        sms_id:
+          type: string
+        status:
+          type: string
+        quarantine_reason: *id006
+        screening:
+          type:
+          - object
+          - 'null'
+    SmsVerificationReceivedData:
+      type: object
+      required:
+      - sms_id
+      - number_id
+      - kind
+      properties:
+        sms_id:
+          type: string
+        number_id: *id007
+        sender_hint:
+          type: string
+        kind:
+          type: string
+          enum:
+          - code
+        account_id: *id006
+    SmsSentData:
+      type: object
+      required:
+      - sms_id
+      - segments
+      properties:
+        sms_id:
+          type: string
+        segments: *id001
+        sender_used:
+          type: string
+        sender_substituted:
+          type: boolean
+    SmsDeliveredData:
+      type: object
+      required:
+      - sms_id
+      properties:
+        sms_id:
+          type: string
+    SmsFailedData:
+      type: object
+      required:
+      - sms_id
+      - reason
+      properties:
+        sms_id:
+          type: string
+        reason:
+          type: string
+    SmsDeliveryUnconfirmedData:
+      type: object
+      required:
+      - sms_id
+      properties:
+        sms_id:
+          type: string
+    SmsUncertainData:
+      type: object
+      required:
+      - sms_id
+      - reason
+      properties:
+        sms_id:
+          type: string
+        reason:
+          type: string
+        fix:
+          type: string
+    SmsReconciledData:
+      type: object
+      required:
+      - sms_id
+      - status
+      properties:
+        sms_id:
+          type: string
+        status:
+          type: string
+    CallEventData:
+      type: object
+      required:
+      - call
+      properties:
+        call:
+          $ref: '#/components/schemas/Call'
+    PhoneRequestRequestedData:
+      type: object
+      required:
+      - phone_request
+      - reason
+      properties:
+        phone_request: &id008
+          $ref: '#/components/schemas/PhoneRequest'
+        reason:
+          type: string
+          enum:
+          - created
+          - quote_changed
+    PhoneRequestApprovedData:
+      type: object
+      required:
+      - phone_request
+      - approved_by
+      properties:
+        phone_request: *id008
+        approved_by:
+          type: string
+          enum:
+          - person
+          - key
+          - standing_budget
+          - purchase
+        approved_by_key_id: *id006
+        approved_by_user_id: *id006
+        on_behalf_of: *id006
+        budget_version:
+          type:
+          - integer
+          - 'null'
+    PhoneRequestRejectedData:
+      type: object
+      required:
+      - phone_request
+      - reason
+      properties:
+        phone_request: *id008
+        reason:
+          type: string
+          enum:
+          - operator
+          - expired
+    PhoneRequestCanceledData:
+      type: object
+      required:
+      - phone_request
+      - reason
+      properties:
+        phone_request: *id008
+        reason:
+          type: string
+    PhoneRequestCompletedData:
+      type: object
+      required:
+      - phone_request
+      - result
+      properties:
+        phone_request: *id008
+        result:
+          type: object
+    PhoneRequestFailedData:
+      type: object
+      required:
+      - phone_request
+      - reason
+      properties:
+        phone_request: *id008
+        reason:
+          type: string
+    PhoneRequestUncertainData:
+      type: object
+      required:
+      - phone_request
+      properties:
+        phone_request: *id008
+    PhoneNumberStatusChangedData:
+      type: object
+      required:
+      - number_id
+      - identity_id
+      - from
+      - to
+      properties:
+        number_id: *id007
+        identity_id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        setup_state:
+          type: string
+        provisioning:
+          type: object
+          properties:
+            status:
+              type: string
+            code: *id006
+            retryable:
+              type: boolean
+        reason: *id006
+    PhoneNumberCapabilityChangedData:
+      type: object
+      required:
+      - number_id
+      - identity_id
+      - capability
+      - from
+      - to
+      properties:
+        number_id: *id007
+        identity_id:
+          type: string
+        capability:
+          type: string
+          enum:
+          - outbound_sms
+          - inbound_sms
+          - inbound_calls
+          - outbound_calls
+        from:
+          type: string
+          enum:
+          - enabled
+          - activating
+          - registration_required
+        to:
+          type: string
+          enum:
+          - enabled
+          - activating
+          - registration_required
+        reason: *id006
+        next_step:
+          type:
+          - object
+          - 'null'
+    PhoneNumberExpiringData:
+      type: object
+      required:
+      - number_id
+      - identity_id
+      - release_at
+      properties:
+        number_id: *id007
+        identity_id:
+          type: string
+        release_at: &id009
+          type: string
+          format: date-time
+    PhoneNumberActionNeededData:
+      type: object
+      required:
+      - number_id
+      - action_needed
+      properties:
+        number_id: *id007
+        action_needed:
+          type: object
+          properties:
+            kind:
+              type: string
+            message:
+              type: string
+              description: Untrusted text from the provider.
+            deadline_at:
+              type:
+              - string
+              - 'null'
+              format: date-time
+    PhoneNumberPortOutRequestedData:
+      type: object
+      required:
+      - number_id
+      - port_out_id
+      - respond_by
+      properties:
+        number_id: *id007
+        port_out_id:
+          type: string
+        respond_by: *id009
+    PhoneNumberPortOutDecidedData:
+      type: object
+      required:
+      - number_id
+      - port_out_id
+      - decision
+      properties:
+        number_id: *id007
+        port_out_id:
+          type: string
+        decision:
+          type: string
+          enum:
+          - authorized
+          - rejected
+          - provider_authorized
+        decided_by_key_id: *id006
+        decided_by_user_id: *id006
+    PhoneRegistrationStatusChangedData:
+      type: object
+      required:
+      - registration_id
+      - kind
+      - from
+      - to
+      properties:
+        registration_id:
+          type: string
+        kind:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        failure_reason: *id006
+    PhoneComplianceStatusChangedData:
+      type: object
+      required:
+      - country
+      - number_type
+      - action
+      - from
+      - to
+      properties:
+        country:
+          type: string
+        number_type:
+          $ref: '#/components/schemas/PhoneNumberType'
+        action:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+    PhoneConsentChangedData:
+      type: object
+      required:
+      - number_hint
+      - state
+      - purpose
+      - source
+      properties:
+        number_hint:
+          type: string
+          description: Masked.
+        state:
+          type: string
+        purpose:
+          type: string
+        source:
+          type: string
+    PhoneSpendWarningData:
+      type: object
+      required:
+      - scope
+      - percent
+      - used_pence
+      - cap_pence
+      - resets_at
+      properties:
+        scope:
+          type: string
+          enum:
+          - tenant
+          - identity
+          - registration
+        identity_id: *id006
+        percent: *id001
+        used_pence: *id001
+        cap_pence: *id001
+        resets_at: *id009
+    PhoneSetupStatusChangedData:
+      type: object
+      required:
+      - country
+      - from
+      - to
+      properties:
+        country:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        next_step:
+          type:
+          - object
+          - 'null'
+    PhoneBudgetChangedData:
+      type: object
+      required:
+      - version
+      - enabled
+      - change
+      - decided_by
+      properties:
+        version: *id001
+        enabled:
+          type: boolean
+        change:
+          type: string
+          enum:
+          - set
+          - loosened
+          - tightened
+          - disabled
+        decided_by:
+          type: string
+          enum:
+          - person
+          - key
+    VaultItemEventData:
+      type: object
+      required:
+      - item
+      - audit
+      properties:
+        item:
+          $ref: '#/components/schemas/VaultItem'
+        audit: &id010
+          $ref: '#/components/schemas/VaultEventAudit'
+    VaultItemDeletedData:
+      type: object
+      required:
+      - item_id
+      - receipt
+      - audit
+      properties:
+        item_id:
+          type: string
+        receipt:
+          $ref: '#/components/schemas/VaultShredReceipt'
+        audit: *id010
+    VaultItemRevealedData:
+      type: object
+      required:
+      - item_id
+      - actor_user_id
+      - rotated
+      - audit
+      properties:
+        item_id:
+          type: string
+        actor_user_id:
+          type: string
+        rotated:
+          type: boolean
+        audit: *id010
+    VaultItemHealthChangedData:
+      type: object
+      required:
+      - item_id
+      - health
+      - health_reason
+      - audit
+      properties:
+        item_id:
+          type: string
+        health:
+          $ref: '#/components/schemas/VaultHealth'
+        health_reason: *id006
+        audit: *id010
+    VaultGrantEventData:
+      type: object
+      required:
+      - grant
+      - audit
+      properties:
+        grant:
+          $ref: '#/components/schemas/VaultGrant'
+        audit: *id010
+    VaultUseEventData:
+      type: object
+      required:
+      - use
+      - audit
+      properties:
+        use:
+          $ref: '#/components/schemas/VaultUse'
+        audit: *id010
+    VaultTicketIssuedData:
+      type: object
+      required:
+      - use_id
+      - item_id
+      - consumer_id
+      - audit
+      properties:
+        use_id: &id011
+          type: string
+        item_id: &id012
+          type: string
+        consumer_id: &id013
+          type: string
+        audit: *id010
+    VaultTicketRedeemedData:
+      type: object
+      required:
+      - use_id
+      - item_id
+      - consumer_id
+      - phase
+      - audit
+      properties:
+        use_id: *id011
+        item_id: *id012
+        consumer_id: *id013
+        phase:
+          $ref: '#/components/schemas/VaultPhase'
+        audit: *id010
+    VaultTicketRefusedData:
+      type: object
+      required:
+      - use_id
+      - item_id
+      - consumer_id
+      - phase
+      - reason
+      - audit
+      properties:
+        use_id: *id011
+        item_id: *id012
+        consumer_id: *id013
+        phase:
+          $ref: '#/components/schemas/VaultPhase'
+        reason:
+          type: string
+        audit: *id010
+    VaultTicketReportedData:
+      type: object
+      required:
+      - use_id
+      - item_id
+      - consumer_id
+      - outcome
+      - audit
+      properties:
+        use_id: *id011
+        item_id: *id012
+        consumer_id: *id013
+        phase:
+          oneOf:
+          - $ref: '#/components/schemas/VaultPhase'
+          - type: 'null'
+        outcome:
+          type: string
+        audit: *id010
+    VaultConsumerChangedData:
+      type: object
+      required:
+      - consumer_id
+      - change
+      - audit
+      properties:
+        consumer_id:
+          type: string
+        change:
+          type: string
+          enum:
+          - registered
+          - activated
+          - suspended
+          - resumed
+          - keys_rotated
+          - revoked
+        audit: *id010
+    VaultKeyChangedData:
+      type: object
+      required:
+      - change
+      - custody
+      - audit
+      properties:
+        change:
+          type: string
+          enum:
+          - rotated
+          - custody_changed
+          - revoke_all
+        custody:
+          type: string
+          enum:
+          - operator
+          - partner
+        audit: *id010
+
     # ── Event envelope and payloads ──────────────────────────────────────────────────────────────
 
     EventBase:
@@ -26025,10 +29849,10 @@ components:
           minimum: 1
           description: >-
             Increases strictly per owner: per identity for mailbox events (`message.*`, `identity.*`,
-            `verification.received`, `calendar.received`, `draft.*`, `suppression.created`, `quota.warning`), per
+            `verification.received`, `calendar.received`, `draft.*`, `suppression.created`, `quota.warning`, `sms.*`, `call.*`), per
             domain for `domain.*` events, and per job for `erasure.*` and `export.*` events. `null` for platform
             events (`webhook.disabled`, `webhook.test`, `member.*`, `billing.*`, `tenant.policy_updated`,
-            `signup.verified` and `account.*`). `message.screened` precedes, by one `sequence`, the
+            `signup.verified`, `account.*`, `phone_request.*`, `phone_number.*`, `phone_registration.*`, `phone_compliance.*`, `phone_consent.*`, `phone_spend.*`, `phone_setup.*`, `phone_budget.*` and `vault.*`). `message.screened` precedes, by one `sequence`, the
             `message.received` or `message.quarantined` it causes, and `message.released` precedes its
             `message.received`.
         data:
@@ -26910,9 +30734,9 @@ components:
       required: [data]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/PhoneSetup'}}
-    PhoneSetupDraftRequest:
+    PhoneSetupDraftFields:
+      description: The fields of a phone onboarding draft, shared by the request and the stored draft.
       type: object
-      additionalProperties: false
       properties:
         business_description: {type: string, minLength: 1, maxLength: 1000}
         use_case: {type: string, minLength: 1, maxLength: 1000}
@@ -26922,9 +30746,14 @@ components:
         privacy_policy_url: {type: string, format: uri, maxLength: 1000}
         terms_url: {type: string, format: uri, maxLength: 1000}
         opt_in_image_url: {type: string, format: uri, maxLength: 1000}
+    PhoneSetupDraftRequest:
+      description: A draft's fields; no other property is accepted.
+      allOf:
+        - {$ref: '#/components/schemas/PhoneSetupDraftFields'}
+      unevaluatedProperties: false
     PhoneSetupDraft:
       allOf:
-        - {$ref: '#/components/schemas/PhoneSetupDraftRequest'}
+        - {$ref: '#/components/schemas/PhoneSetupDraftFields'}
         - type: object
           required: [id, country, updated_at]
           properties:
@@ -27663,13 +31492,14 @@ components:
         next_cursor: {type: [string, 'null']}
     VaultShredReceipt:
       type: object
-      required: [item_id, deleted, versions_shredded, r2_objects_deleted, uses_closed, grants_deleted, restorable_until, custody]
+      required: [item_id, deleted, versions_shredded, r2_objects_deleted, uses_closed, uses_deleted, grants_deleted, restorable_until, custody]
       properties:
         item_id: {$ref: '#/components/schemas/VaultItemId'}
         deleted: {type: boolean, const: true}
         versions_shredded: {type: integer}
         r2_objects_deleted: {type: integer}
         uses_closed: {type: integer}
+        uses_deleted: {type: integer, description: 'Uses deleted with the item, closed ones and the ones this deletion closed.'}
         grants_deleted: {type: integer}
         restorable_until: {type: [string, 'null'], format: date-time}
         custody: {type: string, enum: [operator, partner]}
@@ -27726,10 +31556,23 @@ components:
     VaultUseCreateRequest:
       type: object
       required: [item_id, operation, consumer_id, run_id, origin, trigger, purpose]
+      if:
+        required: [operation]
+        properties: {operation: {const: session_capture}}
+      then:
+        properties: {phases: {maxItems: 0}}
+      else:
+        properties: {phases: {minItems: 1}}
       properties:
         item_id: {$ref: '#/components/schemas/VaultItemId'}
         operation: {$ref: '#/components/schemas/VaultOperation'}
-        phases: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/VaultPhase'}}
+        phases:
+          type: array
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/VaultPhase'}
+          description: >-
+            At least one phase of the operation, without repeats; for `session_capture`, which has no phase, an
+            empty array (any other value is `400 invalid_request`).
         consumer_id: {$ref: '#/components/schemas/VaultConsumerId'}
         run_id: {type: string, minLength: 1, maxLength: 128, pattern: '^[\x21-\x3F\x41-\x7E]+$'}
         origin: {$ref: '#/components/schemas/VaultOrigin'}
@@ -27737,7 +31580,14 @@ components:
         purpose: {type: string, minLength: 1, maxLength: 200}
         capture_into: {type: [string, 'null']}
         run_window_seconds: {type: [integer, 'null'], minimum: 300, maximum: 7200}
-        version: {type: string, enum: [current, previous], default: current}
+        version:
+          type: string
+          enum: [current, previous]
+          default: current
+          description: >-
+            `previous` only for `fill` and `inject`, while the item's previous version is inside its overlap;
+            otherwise `403 vault_refused` with `details.reason = "previous_version_unavailable"`. Fixed at
+            creation and part of the digest.
         sign_request:
           type: object
           description: P1, for `operation = sign` only.
@@ -27751,7 +31601,7 @@ components:
     VaultUse:
       type: object
       description: A use never carries its ticket, its hash or a sealed key.
-      required: [id, tenant_id, identity_id, item_id, grant_id, operation, phases, phases_redeemed, consumer_id, run_id, origin, trigger, purpose, status, approval_reason, approved_by, digest, deadline_at, redeem_by, closes_at, close_reason, outcome, created_by_key_id, decided_by_key_id, decided_by_user_id, on_behalf_of, created_at, updated_at]
+      required: [id, tenant_id, identity_id, item_id, grant_id, operation, phases, phases_redeemed, consumer_id, run_id, origin, trigger, purpose, version, status, approval_reason, approved_by, digest, deadline_at, redeem_by, closes_at, closed_at, close_reason, outcome, created_by_key_id, decided_by_key_id, decided_by_user_id, on_behalf_of, created_at, updated_at]
       properties:
         id: {$ref: '#/components/schemas/VaultUseId'}
         tenant_id: {$ref: '#/components/schemas/TenantId'}
@@ -27766,6 +31616,7 @@ components:
         origin: {$ref: '#/components/schemas/VaultOrigin'}
         trigger: {$ref: '#/components/schemas/VaultTrigger'}
         purpose: {type: string}
+        version: {type: string, enum: [current, previous], description: 'The version the use names; fixed at creation.'}
         status: {type: string, enum: [pending_approval, approved, in_use, closed, denied, expired, canceled]}
         approval_reason: {type: [string, 'null'], enum: [per_use, per_run, operation, tenant_floor, null]}
         approved_by: {type: [string, 'null'], enum: [person, key, run, grant, null]}
@@ -27773,6 +31624,7 @@ components:
         deadline_at: {type: [string, 'null'], format: date-time}
         redeem_by: {type: [string, 'null'], format: date-time}
         closes_at: {type: [string, 'null'], format: date-time}
+        closed_at: {type: [string, 'null'], format: date-time}
         close_reason: {type: [string, 'null']}
         outcome: {type: [string, 'null']}
         created_by_key_id: {type: string}
