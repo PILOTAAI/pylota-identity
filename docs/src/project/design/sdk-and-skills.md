@@ -1,7 +1,8 @@
 # SDKs, skills and agent tooling
 
 Binding for implementation. This page specifies everything a developer or a coding agent installs on
-their own side to use Pylota Identity safely: the TypeScript SDK `@pylotahq/identity`, the agent skills and
+their own side to use Pylota Identity safely: the SDKs (TypeScript and JavaScript `@pylotahq/identity`,
+Python `pylota-identity` and Go `github.com/PILOTAAI/pylota-identity-go`, beside the Rust crate), the agent skills and
 plugins for Claude Code, Codex and Cursor, the client-facing MCP improvements (verified annotations,
 client hints, a per-key tool allow-list, a stdio bridge and exact setup for each client), the CLI
 additions `--schema`, `--query` and `idvy skills generate`, and the outline of the framework guides.
@@ -12,13 +13,13 @@ away. These tools exist so that integrators and agents do not write that client 
 
 | | |
 |---|---|
-| Requirements | FR-SDK-2 – FR-SDK-15 (this page); FR-SDK-1, FR-API-1, FR-API-2, FR-MCP-1, FR-CLI-1, FR-OUT-1, FR-OUT-2, FR-WH-2, FR-IDN-10 |
-| Edge cases | [Y20](../edge-cases.md)–[Y71](../edge-cases.md) |
-| Code | In this repository: `sdks/fixtures/` (HTTP exchange fixtures, JSON data read by both SDKs) and `sdks/typescript-tests.json` (the SDK's test inventory for `cargo xtask trace`); `integrations/pylota-identity-plugin/` (the skills and the plugin manifests); `integrations/skills-rules.toml`; `crates/worker/src/mcp/{tools.rs, schemas.rs}` (effect classes, annotations, `_meta` hints, the key allow-list); `crates/worker/src/auth.rs` and `handlers/keys.rs` (`mcp_tools`); `crates/cli/src/{schema.rs, query.rs, commands/skills.rs, commands/mcp.rs, commands/mcp_stdio.rs}`; `xtask/src/{gen_skills.rs, skills_check.rs}`. In the SDK repository `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)): the npm package `@pylotahq/identity`, `src/{client.ts, transport.ts, retry.ts, idempotency.ts, errors.ts, outcomes.ts, pagination.ts, wait.ts, webhooks.ts, events.ts, drafts.ts, uploads.ts, enums.ts}`, `src/generated/{openapi.d.ts, operations.ts, methods.ts}`, `scripts/{fetch-contract.mjs, generate.mjs}`, `test/`, and the framework guides' compiled examples |
+| Requirements | FR-SDK-2 – FR-SDK-15 and FR-SDK-25 – FR-SDK-33 (this page); FR-SDK-1, FR-API-1, FR-API-2, FR-MCP-1, FR-CLI-1, FR-OUT-1, FR-OUT-2, FR-WH-2, FR-IDN-10 |
+| Edge cases | [Y20](../edge-cases.md)–[Y92](../edge-cases.md) |
+| Code | In this repository: `sdks/fixtures/` (HTTP exchange fixtures, JSON data read by both SDKs) and `sdks/typescript-tests.json` (the SDK's test inventory for `cargo xtask trace`); `integrations/pylota-identity-plugin/` (the skills and the plugin manifests); `integrations/skills-rules.toml`; `crates/worker/src/mcp/{tools.rs, schemas.rs}` (effect classes, annotations, `_meta` hints, the key allow-list); `crates/worker/src/auth.rs` and `handlers/keys.rs` (`mcp_tools`); `crates/cli/src/{schema.rs, query.rs, commands/skills.rs, commands/mcp.rs, commands/mcp_stdio.rs}`; `xtask/src/{gen_skills.rs, skills_check.rs}`. In the SDK repository `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)): the npm package `@pylotahq/identity`, `src/{client.ts, transport.ts, retry.ts, idempotency.ts, errors.ts, outcomes.ts, pagination.ts, wait.ts, webhooks.ts, events.ts, drafts.ts, uploads.ts, enums.ts}`, `src/generated/{openapi.d.ts, operations.ts, methods.ts}`, `scripts/{fetch-contract.mjs, generate.mjs}`, `test/`, and the framework guides' compiled examples. In this repository also `sdks/fixtures/conformance/` (the shared conformance suite, [§3.2](#32-the-shared-conformance-suite)), `sdks/{python,go}-tests.json` and `crates/sdk/src/{phone.rs, vault.rs, vault_consumer/}`. In `PILOTAAI/pylota-identity-python` and `PILOTAAI/pylota-identity-go` ([ADR 0022](../adr/0022-sdk-languages.md)): the Python and Go SDKs of [§3.5](#35-python) and [§3.6](#36-go) |
 | Tables | D1 `api_keys.mcp_tools_json` (new column, [§8](#8-storage)); no mailbox change |
 | Contracts | `mcp_tools` on `POST /v1/keys`, the key object and `GET /v1/me`; `400 invalid_request` with `details.reason` `unknown_mcp_tool` or `mcp_tool_not_permitted`; the tool `_meta` key `anthropic/maxResultSizeChars`; `x-sdk` now covers both SDKs; CLI global flags `--schema` and `--query`; commands `idvy skills generate`, `idvy mcp stdio` and `idvy mcp config --client codex\|claude-desktop\|agent-sdk`; the npm package `@pylotahq/identity`, built in its own repository; the release assets `openapi.json` and `sdk-fixtures-{version}.tar.gz` it is built from; the plugin and marketplace manifests |
 | Limits | `mcp_tools`: at most 64 names; SDK defaults in [§2.6](#26-retries-timeouts-and-rate-limits); webhook timestamp tolerance 1–600 s, default 300 s ([Limits › SDKs and agent tooling](../../reference/limits.md)) |
-| Built in | [M36](../build-plan.md) |
+| Built in | [M36](../build-plan.md) (TypeScript, skills, MCP and CLI); M46 (conformance suite, phone and vault helpers, the vault consumer entry point in Rust and TypeScript), M47 (Python), M48 (Go) |
 
 External facts on this page were read on 2026-10-17 and are cited where they are used. Anything that
 could not be read is marked "not verified" or "verify at build time" with what settles it.
@@ -29,12 +30,12 @@ could not be read is marked "not verified" or "verify at build time" with what s
 |---|---|---|
 | TypeScript package name | `@pylotahq/identity` | The npm scope `pylotahq` exists (registry `GET /-/org/pylotahq/package` answered `200 {}` on 2026-10-17, so it holds no public package yet) and is the organisation Pylota's own notes name for Slotlock. The scopes `pylotamail` and `pylota-identity` do not exist (`404 Scope not found`); the unscoped names `pylota-identity` and `pylotamail` are unregistered (`npm view` 404), and so is `@pylotahq/identity` (`pylota-identity` names re-checked on 2026-10-24, after the rename of [ADR 0019](../adr/0019-pylota-identity.md)). A scoped name cannot be taken by anyone else, needs no new npm organisation, and does not collide with the `@pylota/*` workspace packages inside Pylota's monorepo. The scope `pylota` exists with no public packages and an owner this run could not establish, so it is not used. Ownership of `pylotahq` by TREFT LTD is an owner fact to confirm before M36; nothing is published by this design |
 | Where the SDK lives | Its own public repository, `PILOTAAI/pylota-identity-typescript`; this page stays its binding design | `AGENTS.md` allows no TypeScript or JavaScript source in this repository, and [ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md) keeps that rule. This repository publishes the contract and the shared fixtures as release assets ([§2.3](#23-generation)) |
-| Licence | FSL-1.1-ALv2, the same as this repository (`package.json` `license`, SPDX identifier `FSL-1.1-ALv2`) | One licence for the product and its client; each release becomes Apache-2.0 two years after it ships, as the product's do |
+| Licence | FSL-1.1-ALv2 for every SDK, the same as this repository (`package.json` `license`, `pyproject.toml` `project.license`, `LICENSE.md` in the Go module; SPDX identifier `FSL-1.1-ALv2`) | One licence for the product and its clients; each release becomes Apache-2.0 two years after it ships, as the product's do. pkg.go.dev does not render documentation for it, so the Go reference is in the product docs ([ADR 0022](../adr/0022-sdk-languages.md)) |
 | Generator | `openapi-typescript` 7.13.0 for types only, plus methods generated by the SDK repository's `scripts/generate.mjs` from the release's `openapi.json` | Types-only output adds no runtime code (openapi-ts.dev introduction, read 2026-10-17), it supports OpenAPI 3.1, and Pylota's integration spec already pins this exact version. `openapi-fetch` (0.17.0) and `@hey-api/openapi-ts` (0.99.0, still `0.x`) were rejected: both bring runtime behaviour (retries, keys, errors) that this page must control exactly |
 | Runtime dependencies | None | Every runtime in [§2.2](#22-runtimes) has `fetch`, Web Crypto and streams |
 | Runtimes | Node.js 22, 24 and 26; Cloudflare Workers; Deno; Bun | Node.js lines current on 2026-10-17 ([§2.2](#22-runtimes)) |
 | Retries | On by default, only for what the error envelope marks `retryable`, network errors and proxy `502/503/504`, always with the same key and the same bytes | A typical TypeScript integrator is an agent backend where transient failures are frequent and every retry is key-protected. The Rust SDK keeps retries off by default ([Rust workspace §11](rust-workspace.md#11-the-rust-sdk-fr-sdk-1)); the CLI turns them on |
-| Python SDK | P2 | [§3](#3-python) |
+| Python and Go SDKs | P1, each in its own repository, built to one shared conformance suite; JavaScript is the TypeScript package | [§3](#3-python-go-and-javascript), [ADR 0022](../adr/0022-sdk-languages.md) |
 | Skills location | A directory of this repository, `integrations/pylota-identity-plugin/`, released with the same tag and signature | The skills are checked against the `openapi.yaml`, MCP tool table and limits of the same commit ([§4.4](#44-staying-true-to-the-api)); a second repository would drift and need a second release process. Unlike the SDK, skills and manifests are Markdown and JSON data, not TypeScript or JavaScript source, so `AGENTS.md`'s Rust-only rule does not exclude them |
 | Per-key MCP allow-list | Key metadata `mcp_tools`, set when the key is minted | The MCP specification says the tool list "MUST NOT vary per-connection" but "MAY vary by the authorization presented on the request" ([Tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools), read 2026-10-17). A key field follows that rule; a per-connection `tools` parameter would not. Client-side narrowing exists in the bridge (`--tools`) and in the clients themselves |
 | `--query` language | JMESPath, crate `jmespath` 0.5.0 | The language AgentMail's CLI and the AWS CLI use, so agents already know it; no loops or recursion, unlike jq; the crate is the JMESPath project's own Rust implementation (MIT, published 2026-01-19, crates.io read 2026-10-17) |
@@ -573,28 +574,379 @@ repository's release pipeline ([Rust workspace § 10](rust-workspace.md#10-ci-pi
   attestations ([npm provenance](https://docs.npmjs.com/generating-provenance-statements), read
   2026-10-17).
 
-## 3. Python
+## 3. Python, Go and JavaScript
 
-**Decision: a Python SDK is P2 (v1.1 or later).** Reasons: Pylota, the first user, is TypeScript; the
-Rust SDK and the TypeScript SDK already cover the typed clients this page has to keep exactly safe; a
-third SDK would add a third runtime matrix, fixture consumer and release path for a solo owner
-([ADR 0015](../adr/0015-solo-operator.md)); and the safety value of an SDK lies in the rules of
-[§2.5](#25-idempotency)–[§2.8](#28-send-outcomes-and-uncertain), which Python users can follow without
-one. The PyPI name `pylota-identity` was unregistered on 2026-10-24, and `pylotamail` and `pylota` on 2026-10-17
-(`pypi.org/pypi/<name>/json` answered `404`); reserving one is an owner choice, not part of this design.
+[ADR 0022](../adr/0022-sdk-languages.md) adds a Python and a Go SDK and makes the TypeScript package the
+JavaScript SDK. External facts in this section were read on 2026-10-26 unless a line says otherwise; the
+ADR lists the sources.
 
-What v1.0 offers Python users:
+### 3.1 One specification, four SDKs
 
-- **The OpenAPI document** at `/openapi.json` (OpenAPI 3.1), from which any 3.1 client generator works.
-  The guide `guides/python.md` states the rules a hand-made client must keep: caller-chosen idempotency
-  keys reused on retry, retries only on `retryable`, `uncertain` never resent, `404` without the envelope
-  never read as "deleted".
-- **The MCP server**, through the Python agent frameworks' own MCP clients (OpenAI Agents SDK, LangChain,
-  Google ADK) with an `Authorization` header.
-- **The CLI**, with `--json`, `--schema` and `--query`, for scripts.
-- **Webhook verification** with the Standard Webhooks project's Python library (`standardwebhooks`
-  1.1.0 on PyPI, read 2026-10-17), which implements the same scheme; the guide shows the raw-body rule and
-  the 300-second tolerance.
+| | Rust | TypeScript and JavaScript | Python | Go |
+|---|---|---|---|---|
+| Package | crate `pylota-identity` (lib `pylota_identity`) | npm `@pylotahq/identity` | PyPI `pylota-identity`, import `pylota_identity` | module `github.com/PILOTAAI/pylota-identity-go`, package `identity` |
+| Source | `crates/sdk`, this repository ([Rust workspace § 11](rust-workspace.md#11-the-rust-sdk-fr-sdk-1)) | `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)) | `PILOTAAI/pylota-identity-python` | `PILOTAAI/pylota-identity-go` |
+| Runtimes | stable Rust of `rust-toolchain.toml`, native only | Node.js 22, 24, 26; Workers; Deno; Bun (§2.2) | CPython 3.11, 3.12, 3.13, 3.14, 3.15 | Go 1.26 and 1.27 |
+| Test prefix | `sdk::` | `ts::` | `py::` | `go::` |
+| Licence | FSL-1.1-ALv2 | FSL-1.1-ALv2 | FSL-1.1-ALv2 | FSL-1.1-ALv2 |
+
+**The rules of §2.5–§2.14 bind every SDK.** They are written for TypeScript because it was first; each
+language section below says only how a rule is expressed, never whether it applies. In particular, in every
+SDK:
+
+- an operation marked `x-idempotency: required` needs the caller's key, checked again at run time, and the
+  SDK never generates one (§2.5, rule 1). Phone purchases, phone requests, SMS sends, placed calls and vault
+  uses are marked `required` by their designs, so the rule reaches them through the contract with no
+  per-language code;
+- every attempt of one call sends the same key and the same body bytes (§2.5, rule 4);
+- the error envelope's `retryable` decides; a transport failure on a request that is not safe to repeat
+  ends in the language's `OutcomeUnknownError` with the key (§2.6, §2.7);
+- `uncertain` is a typed outcome that nothing resends, for a message and for an SMS (§2.8, [§3.3](#33-phone-and-vault-coverage));
+- webhooks are verified over the received bytes only, against every configured secret, within 300 seconds by
+  default (§2.10);
+- streams resume from their last cursor and stop on authentication failures and gaps (§2.11);
+- unknown fields, enum values, event types and error codes are tolerated (§2.13);
+- the key, a stream token and a vault ticket never appear in errors, logs or a string form of an object,
+  redirects are never followed, and the SDK refuses to run in a browser (§2.14).
+
+### 3.2 The shared conformance suite
+
+A rule proved four times by four hand-written test suites drifts. So the behaviour is proved once, as data,
+and every SDK runs the same data.
+
+`sdks/fixtures/conformance/` in this repository (JSON, not code) holds:
+
+| Directory | Case format | Rules it proves |
+|---|---|---|
+| `transport/` | A script: the call (operation, arguments, options), then for each attempt the request the SDK must send (method, path, the headers that matter, body bytes as base64) and the answer to give (a response, or a fault: `timeout`, `reset`, `tls`), then the result the SDK must return (value, or error class and fields) | §2.5–§2.7: keys, same bytes, `retryable`, `Retry-After` bounds, `409 request_in_progress`, `idempotency_conflict`, unsafe requests sent once, envelopes and their absence |
+| `outcomes/` | Status → classification pairs for messages and SMS, including unknown values | §2.8, [§3.3](#33-phone-and-vault-coverage) |
+| `pagination/`, `wait/` | Scripts over list and `wait` operations, with the server clock in `Date` | §2.9, Y38, Y48, Y83 |
+| `events/` | Scripts over the feed and stream: frames, close codes, `410 cursor_expired`, token mints | §2.11 |
+| `webhooks/` | The Standard Webhooks test vectors and this product's own: rotation, skew, re-serialised bodies | §2.10 |
+| `phone/` | Scripts for the one-call purchase (`201`, `202` pending or still ordering, `409 phone_number_taken` with alternatives, a lost response), approvals with stale digests, `sms/wait` | [§3.3](#33-phone-and-vault-coverage) |
+| `vault-consumer/origins.json` | Input URL → canonical origin or the refusal reason, from `core::vault::origin::canonicalise` | [Vault § 3.2](vault.md#32-exact-origins) |
+| `vault-consumer/signatures.json` | Request (method, authority, path, body), key, `created`, `expires`, nonce → `Content-Digest`, `Signature-Input`, signature base and `Signature` | [Vault § 8.4](vault.md#84-authenticating-a-consumer) |
+| `vault-consumer/packets.json` | Recipient key, `enc`, `ct`, `info`, `aad` → plaintext, or the failure for a wrong key, `aad` or tampered byte; the RFC 9180 test vectors for the suite DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM | [Vault § 8.6](vault.md#86-redemption-checks) step 10 |
+| `vault-consumer/redaction.json` | A value and response chunks → the redacted output and whether exposure was found, for the exact, URL-encoded, base64 and JSON-escaped forms across chunk boundaries | [Vault § 8.5](vault.md#85-the-consumer-contract) C11 and C17 |
+
+Every case names the rows and requirements it covers. The expected values are produced by the Rust side:
+`sdk::conformance::*` runs every script against `crates/sdk`, and the vault vectors are generated from
+`crates/core` (`cargo xtask gen-sdk-vectors`, failing CI when stale). The directory ships inside each release's
+`sdk-fixtures-{version}.tar.gz` ([§2.3](#23-generation)). Each SDK repository has one runner that plays every
+case against its client with a fake transport, and its release refuses to adopt a contract while any case
+fails (`ts::conformance::all`, `py::conformance::all`, `go::conformance::all`). Language-specific tests remain
+only for what the data cannot express: types, packaging, runtimes and cancellation.
+
+### 3.3 Phone and vault coverage
+
+Every SDK has one method per operation of the contract not marked `x-sdk: false`, so the phone and vault
+routes arrive by generation. On top of them, every SDK has these helpers:
+
+| Helper | Behaviour |
+|---|---|
+| Buy a number (`buyPhoneNumber`, `buy_phone_number`, `BuyPhoneNumber`) | The one-call purchase of [Phone numbers § 6.7](phone-numbers.md#67-one-call-purchase), `POST /v1/identities/{identity_id}/phone-numbers`, with the caller's key. It returns a closed result: `bought` with the number (`201`: `under_review`, `configuring` or `active`, with its capability facets); `pending` with the request (`202`: waiting for a person or for onboarding, with `blocked_by`, the quote with `follow_on`, and `next_step`, or still ordering after the inline budget, with the request to watch); or `taken` with the provider's alternatives (`409 phone_number_taken`, only for an exact `number`). A `202` is a result, not an error. It never buys an alternative on its own: each purchase spends money, so the caller chooses and calls again with a new key. A lost response is retried with the same key, which returns the first purchase |
+| Phone set-up status (`phoneSetup`, `phone_setup`, `PhoneSetup`) | `GET /v1/tenants/{tenant_id}/phone-setup` ([Phone numbers § 4.7](phone-numbers.md#47-phone-onboarding)): the tenant's onboarding per country, with what is missing, the next step and who must act, so an agent knows before it asks to buy |
+| Number capabilities | The capability facets of [Phone numbers § 6.4](phone-numbers.md#64-readiness-capabilities-and-pylotas-failure-codes) (`outbound_sms`, `inbound_sms`, `inbound_calls`, `outbound_calls`: `enabled`, `activating`, `registration_required`, `not_available`) decode as open enums, with `next_step` and `reason` |
+| `waitForSms`, `wait_for_sms`, `WaitForSMS` | `GET …/sms/wait` with one `since` fixed from the server clock before the first attempt, as `waitForMessage` (§2.9) |
+| SMS outcomes | `classify` maps an SMS status as §2.8 maps a message's: `uncertain` is never resent by software, an unknown status is neither terminal nor resendable |
+| Approvals | The approval methods for phone requests, vault grants and vault uses take `digest` (and `on_behalf_of` where the route has it) as required arguments. No helper fetches the current digest to fill it in, and a `409` for a stale digest is surfaced, never retried with a newer digest: a person approved what the digest names, nothing else |
+| Vault, for agents and orchestrators | Items, grant requests and uses through the generated methods. A minted ticket (`vtk_…`) is held like a key: shown as `vtk_{lookup}_…` in every string form, never logged, and returned to the caller exactly once |
+
+### 3.4 The vault consumer entry point
+
+A vault consumer ([Vault § 8](vault.md#8-consumers)) is the integrator's component that redeems tickets:
+a browser fleet supervisor, an egress proxy or an executor. Its helpers are a separate import in every SDK,
+never part of the default one, so an agent process that imports the SDK does not load the code that opens
+packets:
+
+| SDK | Import |
+|---|---|
+| Rust | feature `vault-consumer`, module `pylota_identity::vault_consumer` |
+| TypeScript and JavaScript | `@pylotahq/identity/vault-consumer` |
+| Python | `pylota_identity.vault_consumer` (extra `vault-consumer`, which brings `cryptography`) |
+| Go | `github.com/PILOTAAI/pylota-identity-go/vaultconsumer` |
+
+What it offers, each implemented to the vectors of [§3.2](#32-the-shared-conformance-suite):
+
+1. **`canonicalise_origin(url)`** (`canonicaliseOrigin` in TypeScript, `CanonicaliseOrigin` in Go). The function
+   of [Vault § 3.2](vault.md#32-exact-origins), named as the consumer contract names it (C4): `https` only, no
+   userinfo, IDNA A-label, lower case, trailing dot removed, port 443 dropped, other ports 1024–65535, IP
+   literals and internal names refused. The consumer contract requires a consumer to compare origins with it,
+   never with its own string handling.
+2. **`ConsumerKeys`.** Loads the Ed25519 signing key and the X25519 encryption key from files (mode `0600`
+   checked where the platform has modes) or from bytes the caller passes; never from a string argument of a
+   method that also takes a URL. Keys have no string form that reveals them.
+3. **Request signing.** Every consumer request is signed as [Vault § 8.4](vault.md#84-authenticating-a-consumer)
+   specifies: `Content-Digest` over the exact body bytes, `Signature-Input` `sig1` covering `@method`,
+   `@authority`, `@path` and `content-digest` (three components for `GET`), `created` from the server's clock
+   (learnt from `Date`, as §2.9), `expires` 30 seconds later, a fresh 32-byte nonce, `keyid` = the signing key's
+   RFC 7638 thumbprint, `alg="ed25519"`, `tag="pylota-identity-vault-consumer"`. A retry signs again with a new
+   nonce; the body bytes do not change.
+4. **`redeem(ticket, phase, context)`.** Sends the redemption and opens the packet with HPKE (base mode, the
+   suite of [Vault § 4.3](vault.md#43-data-keys-and-field-ciphertext), `info = "pylota-identity/vault-packet/v1"`,
+   `aad = "{use_id}|{phase}|{consumer_id}|{origin}"`), choosing the encryption key named by `enc_kid`. It checks
+   that the opened packet's `use_id`, `phase` and `origin` equal the request's. A phase is spent at the
+   service's commit, so a transport failure after the request was sent is never retried: the call ends in
+   `OutcomeUnknownError` and the orchestrator creates a new use, as Vault § 8.6 says. Only an envelope with
+   `retryable: true` (`503 unavailable`, before anything was decrypted) is retried, with the same ticket.
+5. **The packet.** Fields are bytes in a buffer the caller closes (`close()`, `Close()`, `Drop` in Rust), which
+   overwrites them; there is no string form, no JSON form and no field in an error. Rust uses `Zeroizing`;
+   TypeScript, Python (`bytearray`) and Go overwrite their buffers. Python and JavaScript cannot guarantee
+   that no copy survives in the runtime, and the guide says so; a consumer that needs that guarantee is written
+   in Rust or Go.
+6. **`report(ticket, outcome)` and `writeBack(ticket, …)`.** The routes of Vault § 8.7 and § 8.8, signed the
+   same way.
+7. **`requireTicketOrigin(requestUrl, ticketOrigin)`.** True only for an `https` request whose canonical origin
+   equals the ticket's on its canonical port; a consumer calls it before attaching a value, a cookie or a
+   substituted placeholder to any request.
+8. **`Redactor`.** Built from the values of one packet; scans a response, chunk by chunk, keeping a window of
+   the longest encoded form across chunk boundaries, replaces each exact, URL-encoded, base64 and JSON-escaped
+   form, and reports whether it found one, so the consumer can report `value_exposed`. It refuses a body with a
+   `Content-Encoding` other than `identity` (the consumer asked for `identity`, Vault § 8.5), because it cannot
+   scan compressed bytes.
+
+Consumer requests use the same transport rules as the rest of the SDK: `https` only, no redirect followed, the
+ticket never in a URL.
+
+These helpers are the parts of a consumer that must agree with the service byte for byte. They do not make a
+component a conforming consumer on their own: the contract's other rules (C1–C20) are the integrator's, and a
+consumer still passes the fixtures of [Vault § 24.3](vault.md#243-consumer-conformance-fixtures)
+(`idvy vault conformance --consumer DIR`) before activation. The reference consumer of that section is built on
+the Rust helpers.
+
+### 3.5 Python
+
+**Package and layout.**
+
+```text
+PILOTAAI/pylota-identity-python
+  pyproject.toml        name "pylota-identity", requires-python ">=3.11", license "FSL-1.1-ALv2",
+                        license-files ["LICENSE.md"], build backend hatchling 1.32.4,
+                        dependencies ["httpx>=0.28.1,<0.29"],
+                        optional-dependencies events ["websockets>=17.2,<18"],
+                                              vault-consumer ["cryptography>=50.0.2,<51"],
+                        [tool.pylota-identity] contract = "<release>"
+  uv.lock               every package pinned exactly with hashes; CI installs with `uv sync --locked`
+  release-keys.pub      the two minisign public keys (`current`, `next`)
+  openapi.json, fixtures/   the contract and fixtures of the pinned release (§2.3)
+  scripts/fetch_contract.py  downloads one release's assets and verifies SHA256SUMS.sig and every checksum
+  scripts/generate.py   runs datamodel-code-generator, then writes _generated/operations.py and the methods
+  src/pylota_identity/  __init__.py, py.typed, _client.py (Client), _async_client.py (AsyncClient),
+                        _transport.py, _retry.py, _idempotency.py, errors.py, outcomes.py, pagination.py,
+                        wait.py, webhooks.py, events.py, drafts.py, uploads.py, phone.py, vault.py,
+                        vault_consumer/ (§3.4), _generated/ (never edited by hand)
+  tests/                pytest suites (`py::`), the conformance runner
+  examples/             the guide's snippets as files, type-checked in CI
+```
+
+`fetch_contract.py` verifies the minisign signature itself, with `cryptography`'s Ed25519 and
+`hashlib.blake2b` (minisign's prehashed `ED` signatures), against `release-keys.pub` and the trusted comment
+`pylota-identity v{version}`; any mismatch writes nothing.
+
+**Dependencies.** At run time, only `httpx` 0.28.1 (BSD-3-Clause), and through the extras `websockets` 17.2
+(BSD-3-Clause; requires Python 3.11 or later) and `cryptography` 50.0.2 (Apache-2.0 OR BSD-3-Clause; HPKE since
+47.0.0). Metadata states each as a floor at the tested version and a ceiling below the next minor, and the
+SDK's CI runs its suite at every floor (`uv pip install --resolution lowest-direct`) and at the lock
+(`py::compat::dependency_floors`). Development tools, pinned exactly in `uv.lock` (each the newest release at
+least two weeks old on 2026-10-26): `uv` 0.13.0, `hatchling` 1.32.4, `datamodel-code-generator` 0.83.0,
+`pytest` 9.1.1, `respx` 0.23.1, `mypy` 2.4.0, `pyright` 1.1.414, `ruff` 0.17.0, `pip-audit` 2.10.1.
+
+**Generation.** `scripts/generate.py` runs datamodel-code-generator over `openapi.json` with
+`--output-model-type typing.TypedDict`, so models are `TypedDict`s: dictionaries at run time, with no
+validation library, which keeps unknown fields (§2.13). Every enum reachable from a response is
+`Literal[...] | str`; request bodies use the closed `Literal`. It then writes `_generated/operations.py`
+(the same table as TypeScript's `operations.ts`) and one method per row on both clients. CI fails when
+running it for the pinned tag changes a file (`py::generate::output_current`).
+
+**Client surface.**
+
+```python
+from pylota_identity import Client, IdempotencyKey
+
+client = Client(base_url="https://api.pylotamail.com", api_key=read_key_from_your_secret_store())
+sent = client.send_message(
+    "idn_01J9Z3K8V4QW7X2M5N6P8R0T1Y",
+    to=["renter@example.org"],
+    subject="Your booking BK-2291",
+    text="Your car is ready at 9:00.",
+    idempotency_key=IdempotencyKey("bk-2291-confirm"),
+)
+# A retry, by the SDK or by you, with the same key returns this message with sent["deduplicated"] True.
+```
+
+- `Client` (blocking) and `AsyncClient` (`async with AsyncClient(...) as client:`) have the same methods,
+  generated from one table; the async client never blocks the event loop.
+- A method takes the path parameters positionally, the request body's top-level properties as keyword-only
+  arguments (or the whole body as `body=`), query parameters as `query=`, then `idempotency_key=` and
+  `options=` (`timeout`, `retry`, `on_response`). Returned values are the decoded JSON as their `TypedDict`.
+- `IdempotencyKey(value)` checks `^[\x20-\x7E]{1,255}$` and raises `ConfigError`; a plain `str` is checked again
+  at call time. `idempotency_key_from(*parts)` derives keys as §2.5 rule 5.
+- Errors: `ApiError` (with `status`, `code`, `message`, `fix`, `details`, `request_id`, `retryable`, `meta`),
+  `OutcomeUnknownError`, `UpstreamError`, `UpstreamNotFoundError`, `UnsupportedByServerError`, `DecodeError`,
+  `ConfigError`, all under `PylotaIdentityError`. `is_api_error(err, "billing_limit")` narrows.
+- **Cancellation.** `asyncio.CancelledError` and `KeyboardInterrupt` are never caught, retried or wrapped; a
+  cancelled call raises them and the caller retries later with the same key ([Y72](../edge-cases.md)).
+- **Bodies.** Uploads accept `bytes`, a binary file object or an iterator of `bytes`. For `bytes` and a
+  seekable file the SDK computes `size` and `sha256` with `hashlib` in one pass and seeks back; for an iterator
+  the caller passes both (§2.12). Raw MIME and exports return an `httpx.Response` whose body is not read.
+- **Secrets.** The key lives in a private slot; `repr()`, `str()`, `pickle` and `copy` never reveal it (pickling
+  a client raises `TypeError`); `httpx` is built with `follow_redirects=False`; the SDK logs nothing of its own
+  above `DEBUG` and never a header. It refuses to run under Pyodide or any `sys.platform == "emscripten"` build
+  with `ConfigError` `browser_not_supported` ([Y92](../edge-cases.md)).
+- **Webhooks.** `pylota_identity.webhooks.verify_webhook(secrets=…, headers=…, body=…)` takes `bytes` or the
+  received `str` only; a `dict` (what `request.json()` returns) is a `TypeError` ([Y89](../edge-cases.md)).
+  `handle_webhook(...)` returns the status and headers of the §2.10 table for any framework, and the guide
+  shows it in FastAPI, Flask and Django. The deduper's store protocol has §2.11's three methods, sync and
+  async.
+- **Events.** `client.events.iterate(...)` (sync and async) and `AsyncClient.events.stream(...)` (with the
+  `events` extra). A blocking `Client.events.stream(...)` uses `websockets.sync.client`.
+
+**Tests and CI.** `py::` tests in `tests/` with `respx` for the fake transport, the conformance runner, and
+`py::it::` tests against this repository's workerd harness started with `cargo xtask itest --serve`, as the
+TypeScript SDK does (§2.15). The matrix is CPython 3.11–3.15 on Linux, with 3.14 also on macOS and Windows.
+`mypy --strict` and `pyright` check the package and a consumer fixture (`py::compat::typed_consumer`);
+`pip-audit` runs on the lock.
+
+**Release.** The SDK repository's `release.yml`, on a `v*` tag, runs the full CI, refuses a tag that differs
+from the package version or a contract that is not the named release's asset, builds the sdist and wheel with
+`uv build`, attests them and lists them in an unsigned `SHA256SUMS` on a draft GitHub Release. The owner signs it
+with `cargo xtask release sign <tag> --repo PILOTAAI/pylota-identity-python` (trusted comment
+`pylota-identity-python v{version}`). `release-publish.yml` (environment `release`, started by
+`workflow_dispatch`, `id-token: write`) verifies that signature and the checksums, then uploads exactly those
+two files with `pypa/gh-action-pypi-publish` at commit `dc37677b2e1c63e2034f94d8a5b11f265b73ba33` (v1.14.2) by
+PyPI trusted publishing, which also uploads Sigstore attestations by default. The project's PyPI settings allow
+no API token. The trusted publisher's exact configuration rules (`docs.pypi.org`, not reachable on 2026-10-26)
+are re-read when M47 starts.
+
+### 3.6 Go
+
+**Module and layout.**
+
+```text
+PILOTAAI/pylota-identity-go          module github.com/PILOTAAI/pylota-identity-go, go 1.26
+  go.mod, go.sum        one requirement: github.com/coder/websocket v1.8.15
+  LICENSE.md            FSL-1.1-ALv2
+  release-keys.pub
+  client.go, transport.go, retry.go, idempotency.go, errors.go, outcomes.go, pagination.go, wait.go,
+  events.go, drafts.go, uploads.go, phone.go, vault.go   package identity
+  zz_generated_types.go, zz_generated_operations.go, zz_generated_methods.go   (never edited by hand)
+  webhooks/             package webhooks: Verify, Handler (http.Handler)
+  vaultconsumer/        package vaultconsumer (§3.4): crypto/hpke, crypto/ed25519, crypto/sha256
+  internal/tools/       a separate module (its own go.mod): oapi-codegen v2.8.0, aead.dev/minisign v0.3.0,
+                        golang.org/x/mod v0.42.0, honnef.co/go/tools v0.8.1, golang.org/x/vuln v1.9.0
+  internal/cmd/generate, internal/cmd/fetchcontract, internal/cmd/modhash
+  conformance_test.go, *_test.go, examples/
+```
+
+Tools live in their own module so that nothing they need enters the requirement graph of an application that
+imports the SDK. `go 1.26` is the first release with `crypto/hpke`; the module supports the two Go releases the
+Go project supports, today 1.26 and 1.27.
+
+**Generation.** `go generate ./...` runs `internal/cmd/fetchcontract` (verifies the release as Python does,
+with `aead.dev/minisign`), then oapi-codegen with `generate: models: true` only (it reads OpenAPI 3.0 and 3.1;
+its 3.1 support is described as initial in its README at v2.8.0), then `internal/cmd/generate`, which writes
+the operations table and one method per row. The generated files must import only the standard library
+(`go::generate::stdlib_only`); if a contract makes oapi-codegen emit an import of its runtime package, the
+fallback is that `internal/cmd/generate` emits the models itself. CI fails when `go generate` for the pinned tag
+changes a file (`go::generate::output_current`).
+
+**Client surface.**
+
+```go
+client, err := identity.NewClient("https://api.pylotamail.com", key)
+if err != nil {
+	return err // *identity.ConfigError: no key, a malformed key, a base URL that is not https
+}
+sent, err := client.SendMessage(ctx, "idn_01J9Z3K8V4QW7X2M5N6P8R0T1Y", identity.SendRequest{
+	To:      []string{"renter@example.org"},
+	Subject: "Your booking BK-2291",
+	Text:    "Your car is ready at 9:00.",
+}, identity.IdempotencyKey("bk-2291-confirm"))
+```
+
+- `NewClient(baseURL, apiKey string, opts ...Option) (*Client, error)`. Options: `WithHTTPClient` (the SDK copies
+  the caller's client and sets `CheckRedirect` to return `http.ErrUseLastResponse` on the copy, never mutating
+  the caller's), `WithUserAgentSuffix`, `WithRetry`, `WithRequireExplicitIdempotencyKeys`.
+- A method takes `ctx`, the path parameters as `string`, the body struct, then, for an operation marked
+  `required`, an `IdempotencyKey` argument, then `...CallOption` (`WithIdempotencyKey` for `optional`
+  operations, `WithTimeout`, `WithResponseMeta`). `IdempotencyKey` is a `string` type checked at call time;
+  `identity.NewIdempotencyKey(s)` checks early and returns an error.
+- **Enums** are named string types with constants; any other value decodes and is kept, and `IsKnown()` says
+  whether this version knows it. Responses are decoded with `encoding/json`, never with
+  `DisallowUnknownFields`; `WithRawResponse(&raw)` returns the exact bytes for a caller that needs unknown
+  fields ([Y74](../edge-cases.md)).
+- **Errors** are `*APIError`, `*OutcomeUnknownError`, `*UpstreamError` (with `NotFound()`),
+  `*UnsupportedByServerError`, `*DecodeError` and `*ConfigError`, matched with `errors.As`.
+  `identity.IsAPIError(err, "billing_limit")` narrows.
+- **Cancellation.** A cancelled or expired `ctx` ends the call with an error that wraps `ctx.Err()` and, when
+  the request carried a key, an `*OutcomeUnknownError` with that key; the SDK never retries after `ctx` is done
+  ([Y73](../edge-cases.md)).
+- **Bodies.** Uploads take an `io.Reader`; for an `io.ReadSeeker` the SDK computes `size` and `sha256` and seeks
+  back; otherwise the caller passes both. Binary responses return an `io.ReadCloser` the caller closes.
+- **Secrets.** `*Client` implements `fmt.Formatter`, `String`, `GoString` and `slog.LogValuer` with the key
+  masked; no error's `Error()` contains it. Built for `GOOS=js`, `NewClient` returns `*ConfigError`
+  `browser_not_supported` ([Y92](../edge-cases.md)).
+- **Webhooks.** `webhooks.Verify(secrets []string, header http.Header, body []byte)` and
+  `webhooks.Handler(...) http.Handler`, which reads the body once with a 1 MiB limit before verifying.
+- **Events.** `client.Events.Iterate(ctx, …)` and `client.Events.Stream(ctx, …)` return iterators
+  (`iter.Seq2[Event, error]`); the stream uses `github.com/coder/websocket`.
+
+**Tests and CI.** `go::` tests (`go test ./...` with the race detector) on Go 1.26.10 and 1.27.3, the
+conformance runner, `go::it::` tests against `cargo xtask itest --serve`, `staticcheck` and `govulncheck`.
+`go::module::path_case` checks the module line and every import in examples and docs use `PILOTAAI` exactly: a
+module path is case-sensitive, and `github.com/pilotaai/…` is a different module the proxy refuses
+([Y88](../edge-cases.md)).
+
+**Release.** A Go module is published by its tag: once a tag is pushed, the module proxy and checksum database
+serve and pin that content. So the tag comes last:
+
+1. `release.yml` (`workflow_dispatch` with a commit SHA and a version) runs the full CI on that commit, refuses
+   a contract that is not the named release's asset, builds the module zip with `internal/cmd/modhash`
+   (`golang.org/x/mod/zip.CreateFromVCS`) and computes its `h1:` hash (`golang.org/x/mod/sumdb/dirhash`), and
+   lists the zip and a file `go-module.h1` in an unsigned `SHA256SUMS` on a draft release, with attestations.
+2. The owner signs it with `cargo xtask release sign <tag> --repo PILOTAAI/pylota-identity-go` (trusted comment
+   `pylota-identity-go v{version}`).
+3. `release-publish.yml` (environment `release`, `contents: write`) verifies the signature, creates the
+   annotated tag at that commit, pushes it, then fetches the version through `proxy.golang.org` and requires
+   its `h1:` and `sum.golang.org`'s line to equal the signed hash ([Y86](../edge-cases.md)). A mismatch pages the
+   owner and the version is retracted by the next release's `retract` directive.
+
+No pre-release tag is pushed. pkg.go.dev will not show documentation for an FSL-1.1-ALv2 module
+([ADR 0022](../adr/0022-sdk-languages.md)), so the release also renders the package documentation into the
+product docs' [SDKs](../../reference/sdks.md#go) page through the SDK repository's pull request to this one.
+
+### 3.7 JavaScript
+
+`@pylotahq/identity` is the JavaScript SDK. Its build output is ES modules with declarations, and every
+refusal that the types express is repeated at run time, so plain JavaScript gets the same behaviour
+(`ts::idempotency::y21_send_key_required` already runs from plain JavaScript). The package is ESM only:
+CommonJS code loads it with `await import('@pylotahq/identity')`; whether `require()` of the package works on
+each supported Node.js line is checked in CI (`ts::compat::commonjs_consumers`) rather than promised here. The
+JavaScript guide is the TypeScript guide's examples without type annotations, extracted and run by
+`ts::doctest::javascript_examples`.
+
+### 3.8 The Rust SDK
+
+`crates/sdk` gains, with M46, the helpers of [§3.3](#33-phone-and-vault-coverage) and, behind the feature
+`vault-consumer`, the entry point of [§3.4](#34-the-vault-consumer-entry-point), built on
+`core::vault::origin::canonicalise`, `core::httpsig::signature_base` and the `hpke` crate the Worker already uses
+([Vault § 4.3](vault.md#43-data-keys-and-field-ciphertext)), compiled for the native target. It is the reference
+the conformance vectors are generated from, and `sdk::conformance::*` runs every case.
+
+### 3.9 Versions, support and verification
+
+| | Registry | Published by | Trusted comment | A consumer verifies with |
+|---|---|---|---|---|
+| Rust | crates.io | the product release ([Rust workspace § 10](rust-workspace.md#10-ci-pipeline)) | `pylota-identity v{version}` | `SHA256SUMS.sig` of the product release |
+| TypeScript, JavaScript | npm | npm trusted publishing (§2.16) | `pylota-identity-typescript v{version}` | `npm audit signatures` |
+| Python | PyPI | PyPI trusted publishing with attestations | `pylota-identity-python v{version}` | the release's `SHA256SUMS.sig`; PyPI's attestations; `pip install --require-hashes` |
+| Go | the Go module proxy | the tag, pushed after signing | `pylota-identity-go v{version}` | `go mod verify` and the checksum database; the release's `SHA256SUMS.sig` over `go-module.h1` |
+
+Every SDK's major version is the API's path version, so any 1.x SDK works with any 1.y deployment for the
+operations both know (§2.13). Each SDK release names its contract (`package.json` `pylotaIdentity.contract`,
+`pyproject.toml` `[tool.pylota-identity] contract` and the constant `pylota_identity.CONTRACT`, Go `identity.Contract`). Security fixes go to the newest
+minor version of each SDK. A language runtime leaves the support matrix at its end of life, in the SDK's next
+minor release.
 
 ## 4. Agent skills and plugins
 
@@ -1088,7 +1440,10 @@ each guide pins the newest release at least two weeks old when it is written.
 | `frameworks/claude-agent-sdk.md` | `@anthropic-ai/claude-agent-sdk` 0.3.302 | The §5.5 snippet; `allowedTools` by name; reading the `init` message for `failed` or `needs-auth`; output limits and the `_meta` hint; running the agent on a test tenant first |
 | `frameworks/langchain.md` | `@langchain/mcp-adapters` 2.0.1, `@langchain/core` 1.2.18 | `MultiServerMCPClient({ mcp: { transport: 'http', url, headers } })`, `getTools()`; `beforeToolCall` to add a per-call trace header, never to change arguments; Python `langchain-mcp-adapters` named ([LangChain MCP](https://docs.langchain.com/oss/javascript/langchain/mcp-v1), read 2026-10-17) |
 | `typescript-sdk.md` | `@pylotahq/identity` | Install, where the source lives (`PILOTAAI/pylota-identity-typescript`) and which contract a version was built from, client, sends with keys, outcomes, pagination, `waitForMessage`, webhooks (`createWebhookHandler` on Workers, Node.js, Deno, Bun), events with resume and dedupe, errors and their fixes |
-| `python.md` | – | §3: generating a client from `/openapi.json`, the rules a client must keep, webhook verification with `standardwebhooks`, MCP from Python frameworks |
+| `python-sdk.md` | `pylota-identity` | §3.5: install (with the `events` and `vault-consumer` extras), sync and async clients, sends with keys, outcomes, `wait_for_message` and `wait_for_sms`, webhooks in FastAPI, Flask and Django, events, the one-call phone purchase, errors; MCP from Python frameworks |
+| `go-sdk.md` | `github.com/PILOTAAI/pylota-identity-go` | §3.6: install, `NewClient`, sends with keys, `context` cancellation, outcomes, waits, `webhooks.Handler`, events as iterators, the one-call phone purchase, errors |
+| `javascript-sdk.md` | `@pylotahq/identity` | §3.7: the TypeScript guide's examples in plain JavaScript, ESM and CommonJS loading |
+| `vault-consumers.md` | all four SDKs | §3.4: writing a vault consumer: keys, `canonicalise_origin`, redeem, the packet, `requireTicketOrigin`, `Redactor`, report and write-back, with the consumer contract's rules beside each step |
 | `agent-skills.md` | – | §4: what each skill teaches, installing in Claude Code, Codex, Cursor and plain directories, updating, and that skills never contain keys |
 
 Each guide ends with the same three warnings: a public or customer-facing agent must never hold a key
@@ -1297,8 +1652,9 @@ says otherwise; FR-SDK-11 extends the P0 annotations of M15.
   `noUncheckedIndexedAccess`
   ([SDKs, skills and agent tooling §2](sdk-and-skills.md#2-the-typescript-sdk)).
 - **FR-SDK-3** The SDKs **must never** generate an idempotency key for an operation marked
-  `x-idempotency: required` (today send, reply, reply-all, forward, calendar reply and draft send), and
-  **must** send the same key and the same body bytes on every retry of one call. The TypeScript SDK
+  `x-idempotency: required` (the mail sends, calendar reply and draft send, and the phone and vault
+  operations their designs mark, such as a phone purchase, an SMS send and a vault use), and
+  **must** send the same key and the same body bytes on every retry of one call. Every SDK
   **must** retry only failures that the error envelope marks `retryable`, and network failures and proxy
   `502`, `503` and `504` only for a `GET` or a request that carries an idempotency key; **must** honour
   `Retry-After` up to a bound and throw beyond it; and **must** end a call whose outcome it could not learn
@@ -1315,7 +1671,7 @@ says otherwise; FR-SDK-11 extends the P0 annotations of M15.
   and `410 cursor_expired` from the feed or stream raises a gap error instead of continuing from another
   position.
 - **FR-SDK-7** The SDKs **must** tolerate unknown fields, enum values, event types and error codes from a
-  newer deployment. The TypeScript SDK **must** report an operation that a deployment lacks as unsupported
+  newer deployment. Every SDK **must** report an operation that a deployment lacks as unsupported
   by that deployment, never as a missing resource.
 - **FR-SDK-8** The SDK **must never** expose the API key in errors, logs or serialised objects, **must**
   refuse to run in a browser or against a base URL that is not `https` (localhost excepted), and **must**
@@ -1348,8 +1704,51 @@ says otherwise; FR-SDK-11 extends the P0 annotations of M15.
   `idvy skills generate` **must** write the skills of its own version and **must not** overwrite a
   locally modified file unless forced.
 - **FR-SDK-15** The docs **must** include guides for the Vercel AI SDK, the OpenAI Agents SDK, the Claude
-  Agent SDK and LangChain, a TypeScript SDK guide, a Python guide and an agent skills guide, whose code
-  examples type-check in CI against pinned versions.
+  Agent SDK and LangChain, TypeScript, JavaScript, Python and Go SDK guides, a vault consumer guide and an
+  agent skills guide, whose code examples type-check (or compile) in CI against pinned versions.
+
+FR-SDK-16 – FR-SDK-24 are not used; the numbers were left free when the three designs of 2026-10-25 were
+allocated. The following are P1 ([ADR 0022](../adr/0022-sdk-languages.md)).
+
+- **FR-SDK-25** The project **must** ship a Python SDK, the PyPI package `pylota-identity` (import
+  `pylota_identity`), built in its own repository `PILOTAAI/pylota-identity-python`, with blocking and
+  `asyncio` clients that have exactly one method per `openapi.yaml` operation not marked `x-sdk: false`. It
+  **must** support every CPython line from its release to its end of life, starting with 3.11, and **must**
+  depend at run time only on `httpx`, with `websockets` and `cryptography` behind the extras `events` and
+  `vault-consumer` ([SDKs, skills and agent tooling § 3.5](sdk-and-skills.md#35-python)).
+- **FR-SDK-26** The project **must** ship a Go SDK, the module `github.com/PILOTAAI/pylota-identity-go`,
+  built in its own repository of that name, with exactly one method per such operation. It **must** support
+  the Go releases the Go project supports, starting with 1.26, and **must** depend only on the standard
+  library and `github.com/coder/websocket`; tools **must** live in a separate module
+  ([§ 3.6](sdk-and-skills.md#36-go)).
+- **FR-SDK-27** `@pylotahq/identity` **must** be usable from plain JavaScript with the same run-time
+  refusals as from TypeScript; there **must not** be a second JavaScript package
+  ([§ 3.7](sdk-and-skills.md#37-javascript)).
+- **FR-SDK-28** Every SDK **must** implement FR-SDK-3 – FR-SDK-8 with the behaviour the shared conformance
+  suite of each release defines, and **must not** adopt a contract whose conformance cases it does not all
+  pass. The suite **must** be generated from the Rust SDK and `crates/core`, and published in the release's
+  signed fixtures asset ([§ 3.2](sdk-and-skills.md#32-the-shared-conformance-suite)).
+- **FR-SDK-29** Every SDK **must** offer the one-call phone purchase, phone set-up status, `wait` for SMS and
+  SMS outcome classification, returning a pending approval and a taken number as typed results, never
+  retrying a purchase with another number and never resending an `uncertain` SMS. Its approval methods for
+  phone requests, vault grants and vault uses **must** take the digest from the caller and **must never** fetch
+  one to fill in or retry an approval ([§ 3.3](sdk-and-skills.md#33-phone-and-vault-coverage)).
+- **FR-SDK-30** Every SDK **must** offer the vault consumer helpers (origin canonicaliser, request signer,
+  redeem with HPKE packet opening, report, write-back, the ticket-origin check and the redactor) in an entry
+  point separate from its default import, producing exactly the outputs of the conformance vectors; it
+  **must never** retry a redemption after the request may have reached the service, **must** give packet
+  fields and keys no string, JSON or error form, and **must** let the caller overwrite packet plaintext
+  ([§ 3.4](sdk-and-skills.md#34-the-vault-consumer-entry-point)).
+- **FR-SDK-31** A vault ticket **must** be treated as a key in every SDK: never in a URL, a log, an error or a
+  string form beyond its lookup prefix.
+- **FR-SDK-32** Each Python and Go SDK release **must** name the Pylota Identity release whose contract it
+  was generated from, **must** have its artefacts listed in an owner-signed `SHA256SUMS`, and **must** be
+  published only by its repository's release workflow: Python by PyPI trusted publishing with attestations,
+  Go by pushing the tag after signing and checking the proxy's `h1:` hash against the signed one. A
+  pre-release **must not** be published ([§ 3.5](sdk-and-skills.md#35-python), [§ 3.6](sdk-and-skills.md#36-go)).
+- **FR-SDK-33** Every code example of an SDK, on the landing page and in the docs, **must** be checked in the
+  CI of the SDK it uses at the contract's tag, and each SDK's package metadata **must** state the licence
+  `FSL-1.1-ALv2`.
 
 ## Edge cases
 
@@ -1357,7 +1756,7 @@ Section Y, rows Y20 onward (Y1–Y19 belong to [Deliverability metrics](metrics.
 
 | # | Case | Required behaviour | Owner | Test |
 |---|---|---|---|---|
-| Y20 | An SDK send times out on the client after the server accepted it | The SDK retries with the same key and the same body bytes; the server returns the original `202` with `deduplicated: true`; one email | S | `ts::retry::y20_timeout_retries_same_key_and_bytes`, `ts::it::send::y20_lost_response_one_email` |
+| Y20 | An SDK send times out on the client after the server accepted it | The SDK retries with the same key and the same body bytes; the server returns the original `202` with `deduplicated: true`; one email | S | `ts::retry::y20_timeout_retries_same_key_and_bytes`, `ts::it::send::y20_lost_response_one_email`, `py::it::send::lost_response_one_email`, `go::it::send::lost_response_one_email` |
 | Y21 | An operation marked `x-idempotency: required` (send, reply, reply-all, forward, calendar reply, draft send) without a caller key, or with an empty, non-printable or 256-character key, including from plain JavaScript and with retries off | `ConfigError` before any request; the SDK never generates a key for these operations, including one a later contract marks `required`. Persisting the key before the first attempt is the integrator's | S+I | `ts::idempotency::y21_send_key_required` |
 | Y22 | Retries end on transport failures for a call that may have reached the server | `OutcomeUnknownError` with `idempotencyKey`, `operationId`, `attempts` and `mayHaveSucceeded: true`; its `fix` says to retry with the same key within 30 days; never presented as a failure that allows a new key | S+I | `ts::errors::y22_outcome_unknown_carries_key` |
 | Y23 | `409 request_in_progress`, including two processes sending with one key at once | Waits `Retry-After` or 1 s, at most 5 times, with the same key, then throws the `ApiError` (`retryable: true`); the second process receives the first's result as a replay; one email | S | `ts::retry::y23_request_in_progress_budget` |
@@ -1409,11 +1808,34 @@ Section Y, rows Y20 onward (Y1–Y19 belong to [Deliverability metrics](metrics.
 | Y69 | A `pmk_test_` key with the SDK or the bridge | Same behaviour as a live key; `mode` is `test`; simulator outcomes drive the uncertain and bounce tests | S | `ts::it::testmode::y69_test_key` |
 | Y70 | `403 tenant_suspended`, `403 partner_suspended` or `409 identity_paused` | Not retried; surfaced with `details`; a stream stops on the two `403` codes and keeps running for a paused identity, whose mail still arrives | S+I | `ts::retry::y70_suspension_not_retried` |
 | Y71 | A client built with `requireExplicitIdempotencyKeys: true` calls an optional-key `POST` without a key | `ConfigError` before any request; with a key, the key is sent unchanged | S | `ts::idempotency::y71_explicit_mode` |
+| Y72 | A Python call is cancelled (`asyncio.CancelledError`, `KeyboardInterrupt`) during a keyed send, before or after the request left | The exception propagates unwrapped; no retry and no new key; the caller's later retry with the same key returns the first result if the server stored one | S+I | `py::cancel::y72_cancellation_propagates` |
+| Y73 | A Go call's `ctx` is cancelled or its deadline passes during a keyed send | The call ends at once with an error wrapping `ctx.Err()` and, for a keyed request that may have been sent, `*OutcomeUnknownError` with the key; no retry after `ctx` is done | S+I | `go::cancel::y73_context_done` |
+| Y74 | A Go SDK older than the deployment decodes new fields and enum values | Decoding never fails; unknown enum values are kept and `IsKnown()` is false; `WithRawResponse` returns the exact bytes | S | `go::compat::y74_unknown_values_tolerated` |
+| Y75 | A Python SDK older than the deployment decodes new fields and enum values | Unknown keys stay in the returned dictionary; an unknown enum value is a plain `str`; nothing raises | S | `py::compat::y75_unknown_values_tolerated` |
+| Y76 | An SDK repository adopts a contract whose conformance cases it does not all pass, or the vectors are stale | The SDK's release refuses; in this repository `cargo xtask gen-sdk-vectors` changing a file fails CI | S | `sdk::conformance::all`, `xtask::sdk_vectors_current`, `ts::conformance::all`, `py::conformance::all`, `go::conformance::all` |
+| Y77 | A consumer canonicalises `HTTPS://TFL.GOV.UK.:443/`, an `xn--` label, a Unicode host, `http://`, userinfo, an IP literal in any notation, port 80 or `localhost` | Every SDK returns the same canonical origin or the same refusal reason as `core::vault::origin::canonicalise` | S | `sdk::conformance::vault_consumer_origins`, `ts::conformance::all`, `py::conformance::all`, `go::conformance::all` |
+| Y78 | A consumer signs a request with a clock 5 minutes off, retries it, or sends a body re-serialised after signing | `created` comes from the server clock learnt from `Date`; a retry signs again with a new nonce and the same bytes; `Content-Digest` is over the bytes sent; the service accepts each | S | `sdk::conformance::vault_consumer_signatures`, `ts::it::vault::y78_consumer_signature_accepted` |
+| Y79 | A packet is opened with the wrong encryption key, for another use, phase or origin (`aad`), or with one byte changed | Opening fails with no partial plaintext; the opened packet's `use_id`, `phase` and `origin` must equal the request's; closing a packet overwrites its fields | S | `sdk::conformance::vault_consumer_packets`, `py::vault_consumer::y79_packet_close_overwrites`, `go::vaultconsumer::y79_packet_close_overwrites` |
+| Y80 | An agent process imports the SDK's default entry point | The vault consumer helpers and the packet code are not loaded; they need their own import (and, in Python, the `vault-consumer` extra; in Rust, the feature) | S | `py::package::y80_consumer_not_in_default_import`, `ts::package::y80_consumer_entry_point_separate`, `go::package::y80_consumer_package_separate` |
+| Y81 | A redemption's response is lost after the request was sent | No retry: the call ends in `OutcomeUnknownError` and the orchestrator creates a new use; a `503 unavailable` envelope with `retryable: true` is retried with the same ticket | S+I | `sdk::conformance::vault_consumer_redeem`, `py::conformance::all` |
+| Y82 | The one-call phone purchase is retried after a timeout, meets a taken number, or needs a person | The retry carries the same key and returns the first purchase; one number; `pending` and `taken` are typed results with the request or the alternatives; no purchase of an alternative without the caller | S+I | `sdk::conformance::phone_buy`, `ts::it::phone::y82_buy_retry_one_number` |
+| Y83 | `wait_for_sms` is retried after a network error, or the client clock runs ahead | One `since`, fixed from the server clock before the first attempt, on every attempt; an SMS that arrived during the retry is returned | S | `sdk::conformance::phone_sms_wait` |
+| Y84 | An SMS becomes `uncertain`, or has a status the SDK does not know | `classify` returns `uncertain` or `unknown_status`; no SDK code path sends it again | S+I | `sdk::conformance::phone_sms_outcomes` |
+| Y85 | An approval of a phone request, vault grant or vault use is sent with a stale digest | `409` surfaced with `details.current_digest`; the SDK never re-reads the object and approves the newer digest; an approval without a digest is refused before any request | S | `sdk::conformance::approvals_need_digest` |
+| Y86 | The PyPI token store or the Go repository's tags are compromised, or the proxy serves different module content | PyPI accepts uploads only from trusted publishing in environment `release`, of files in the signed `SHA256SUMS`; the Go tag is pushed after signing and the proxy's `h1:` must equal the signed one, else the owner is paged and the version is retracted | S | `py::release::y86_pypi_files_in_signed_sums`, `go::release::y86_module_hash_matches_signed` |
+| Y87 | A Python application resolves `httpx`, `websockets` or `cryptography` to the oldest version the metadata allows | The suite passes at every floor; the metadata excludes the next minor | S | `py::compat::dependency_floors` |
+| Y88 | The Go module is imported as `github.com/pilotaai/pylota-identity-go`, or a doc or example spells it so | The proxy refuses the other case; every example, doc and the site use `PILOTAAI` exactly | S | `go::module::path_case` |
+| Y89 | A Python or Go webhook handler is given a parsed body (`dict`, a decoded struct) | Python raises `TypeError`; Go's `Verify` takes only `[]byte`; the vectors show a re-serialised body fails | S | `py::webhooks::y89_raw_body_only`, `sdk::conformance::webhooks` |
+| Y90 | The Python or Go event stream meets every close code, `410 cursor_expired` and a revoked key | The rules of Y34–Y37 hold in each language | S | `py::conformance::all`, `go::conformance::all` |
+| Y91 | A key, stream token or vault ticket could leak through `repr`, `str`, `pickle`, logging, `fmt` verbs, `slog` or an error | It never appears: shown as prefix and lookup only; pickling a Python client raises `TypeError` | S | `py::secrets::y91_key_never_serialised`, `go::secrets::y91_key_never_formatted` |
+| Y92 | The Python SDK runs under Pyodide (`sys.platform == "emscripten"`), or the Go SDK is built for `GOOS=js` | Construction is refused with `ConfigError` `browser_not_supported` | S | `py::secrets::y92_browser_refused`, `go::secrets::y92_browser_refused` |
 
 ## Tests
 
 `ts::` tests run in the SDK repository, `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)),
-and are defined here. `ts::<module>::<name>` tests are Vitest tests in its `test/` directory with a fake
+and are defined here; `py::` and `go::` tests run the same way in `PILOTAAI/pylota-identity-python` and
+`PILOTAAI/pylota-identity-go` ([ADR 0022](../adr/0022-sdk-languages.md)), with their inventories copied to
+`sdks/python-tests.json` and `sdks/go-tests.json`. `ts::<module>::<name>` tests are Vitest tests in its `test/` directory with a fake
 `fetch`, a fake WebSocket and the shared fixtures; `ts::it::<area>::<name>` tests run with Vitest against
 this repository's workerd harness, started at the contract's tag with `cargo xtask itest --serve`;
 `ts::runtime::` tests run the packed tarball on each runtime. Each Vitest title is the full test name and
@@ -1502,6 +1924,53 @@ pull request copies to `sdks/typescript-tests.json` here, where `cargo xtask tra
 | `ts::doctest::framework_guides` | In the SDK repository, the TypeScript blocks of this repository's framework guides, at the contract's tag, type-check against the pinned framework versions in `examples/` | FR-SDK-15 |
 | `eval::skills_safe_send` (report-only, nightly) | Records the pass rate of an agent with the skills on scripted faults: key reuse, no resend after `uncertain`, no instruction-following | FR-SDK-10 |
 | `ts::live::round_trip` (M20) | On staging, run by the SDK repository with a staging test key: the TypeScript SDK sends with a key, receives the webhook through `createWebhookHandler`, verifies it, and reads the event from the stream | FR-SDK-2, FR-SDK-5, FR-SDK-6 |
+| `sdk::conformance::all` | Every case of `sdks/fixtures/conformance/` passes against `crates/sdk` with a fake transport | Y76, FR-SDK-28 |
+| `xtask::sdk_vectors_current` | `cargo xtask gen-sdk-vectors` changes no file: the vault consumer vectors equal `crates/core`'s outputs | Y76, FR-SDK-28 |
+| `sdk::conformance::vault_consumer_origins` | Every origin case of the suite gives `core::vault::origin::canonicalise`'s answer through the Rust SDK's `canonicalise_origin` | Y77, FR-SDK-30 |
+| `sdk::conformance::vault_consumer_signatures` | The signer reproduces every signature-base and signature vector; a retry signs with a new nonce over the same bytes | Y78, FR-SDK-30 |
+| `sdk::conformance::vault_consumer_packets` | Every packet vector opens, every tampered one fails with no plaintext, and the RFC 9180 vectors of the suite pass | Y79, FR-SDK-30 |
+| `sdk::conformance::vault_consumer_redeem` | A lost redemption response is not retried; a `retryable` envelope is retried with the same ticket; no request follows a redirect | Y81, FR-SDK-30 |
+| `sdk::conformance::phone_buy` | The purchase scripts: same key on retry, one purchase, typed `bought`, `pending` and `taken` results, no automatic alternative | Y82, FR-SDK-29 |
+| `sdk::conformance::phone_sms_wait` | One `since` from the server clock across retries of `wait_for_sms` | Y83, FR-SDK-29 |
+| `sdk::conformance::phone_sms_outcomes` | SMS statuses classify as §3.3; `uncertain` and unknown statuses are never resendable | Y84, FR-SDK-29 |
+| `sdk::conformance::approvals_need_digest` | Approval methods refuse a missing digest before any request and surface a stale-digest `409` without a read or a second approval | Y85, FR-SDK-29 |
+| `sdk::conformance::webhooks` | The webhook vectors, including re-serialised bodies that must fail | Y89, FR-SDK-5 |
+| `ts::conformance::all`, `py::conformance::all`, `go::conformance::all` | In each SDK repository, every case of the release's conformance suite passes, and the release refuses a contract otherwise | Y76, Y77, Y81, Y90, FR-SDK-28 |
+| `ts::package::y80_consumer_entry_point_separate` | The default entry point's module graph does not contain `vault-consumer` | Y80, FR-SDK-30 |
+| `ts::it::vault::y78_consumer_signature_accepted` | Against workerd: a consumer signed by the SDK redeems, reports and writes back; one signed with a skewed local clock still succeeds | Y78, FR-SDK-30 |
+| `ts::it::phone::y82_buy_retry_one_number` | Against workerd with the fake provider: a dropped first response and a retry with the same key give one number | Y82, FR-SDK-29 |
+| `ts::compat::commonjs_consumers` | On each Node.js line, `await import()` from CommonJS works, and whether `require()` does is recorded | FR-SDK-27 |
+| `ts::doctest::javascript_examples` | The JavaScript guide's blocks run against the packed tarball | FR-SDK-27, FR-SDK-33 |
+| `py::generate::output_current` | `scripts/generate.py` for the pinned tag changes no file; `fetch_contract.py` refuses an asset whose checksum or signature does not verify | FR-SDK-25 |
+| `py::coverage::every_operation` | Both clients have exactly the contract's operations not marked `x-sdk: false` | FR-SDK-25 |
+| `py::compat::typed_consumer` | A consumer fixture passes `mypy --strict` and `pyright` | FR-SDK-25 |
+| `py::compat::dependency_floors` | The suite passes with every dependency at its floor and at the lock | Y87, FR-SDK-25 |
+| `py::compat::y75_unknown_values_tolerated` | Unknown keys and enum values survive decoding | Y75, FR-SDK-7 |
+| `py::cancel::y72_cancellation_propagates` | `CancelledError` and `KeyboardInterrupt` raised during each attempt phase propagate unwrapped, with no further request | Y72 |
+| `py::package::y80_consumer_not_in_default_import` | `import pylota_identity` loads neither `vault_consumer` nor `cryptography` | Y80, FR-SDK-30 |
+| `py::vault_consumer::y79_packet_close_overwrites` | After `close()` every field buffer of a packet is zero; a packet has no `repr` of its values | Y79, FR-SDK-30 |
+| `py::webhooks::y89_raw_body_only` | A `dict` body raises `TypeError`; bytes and received text pass | Y89, FR-SDK-5 |
+| `py::secrets::y91_key_never_serialised` | A canary key and ticket are absent from `repr`, `str`, logging output and every error; pickling a client raises | Y91, FR-SDK-8, FR-SDK-31 |
+| `py::secrets::y92_browser_refused` | With `sys.platform` set to `emscripten`, construction raises `browser_not_supported` | Y92, FR-SDK-8 |
+| `py::release::y86_pypi_files_in_signed_sums` | The publish job uploads only files whose checksums are in the owner-signed `SHA256SUMS` and refuses otherwise | Y86, FR-SDK-32 |
+| `py::doctest::site_examples` | The landing page's Python block and the Python guide's blocks run against the built wheel | FR-SDK-33 |
+| `py::it::send::lost_response_one_email` | Against workerd with a dropped first response, through both clients: one stored message, the second answer has `deduplicated: true` | Y20, FR-SDK-25 |
+| `py::live::round_trip` (M20) | On staging: sends with a key, verifies the webhook, reads the event from the stream | FR-SDK-25 |
+| `go::generate::output_current` | `go generate ./...` for the pinned tag changes no file | FR-SDK-26 |
+| `go::generate::stdlib_only` | The generated files import only the standard library | FR-SDK-26 |
+| `go::coverage::every_operation` | The client has exactly the contract's operations not marked `x-sdk: false` | FR-SDK-26 |
+| `go::module::path_case` | `go.mod`, examples, the guide and the site name `github.com/PILOTAAI/pylota-identity-go` exactly | Y88, FR-SDK-26 |
+| `go::compat::y74_unknown_values_tolerated` | Unknown fields and enum values decode; `IsKnown()` is false for them; `WithRawResponse` returns the bytes | Y74, FR-SDK-7 |
+| `go::cancel::y73_context_done` | Cancelling `ctx` in each attempt phase ends the call with no further request, wrapping `ctx.Err()` and carrying the key when one was sent | Y73 |
+| `go::package::y80_consumer_package_separate` | The `identity` package does not import `vaultconsumer` or `crypto/hpke` | Y80, FR-SDK-30 |
+| `go::vaultconsumer::y79_packet_close_overwrites` | After `Close()` every field buffer is zero; `%v` and `%+v` of a packet show no value | Y79, FR-SDK-30 |
+| `go::secrets::y91_key_never_formatted` | A canary key and ticket are absent from every `fmt` verb, `slog` output and error | Y91, FR-SDK-8, FR-SDK-31 |
+| `go::secrets::y92_browser_refused` | Built for `GOOS=js`, `NewClient` returns `browser_not_supported` | Y92, FR-SDK-8 |
+| `go::release::y86_module_hash_matches_signed` | Against a recorded release: the publish job pushes the tag only after the signature verifies, and fails when the proxy's `h1:` differs from the signed one | Y86, FR-SDK-32 |
+| `go::doctest::site_examples` | The landing page's Go block and the Go guide's blocks compile against the module | FR-SDK-33 |
+| `go::it::send::lost_response_one_email` | The same against workerd through the Go client | Y20, FR-SDK-26 |
+| `go::live::round_trip` (M20) | On staging: sends with a key, verifies the webhook, reads the event from the stream | FR-SDK-26 |
+| `xtask::release_sign_sdk_repo` (extended) | `release sign --repo` accepts the TypeScript, Python and Go SDK repositories, each with its own trusted comment, and refuses any other | FR-SDK-32 |
 
 ## Milestone
 
@@ -1576,6 +2045,65 @@ versions for the SDK repository's CI.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
 - M20 gains `ts::live::round_trip`.
 
+**M46 · SDK conformance suite, phone and vault helpers (after M36, M38, M39 and M43)**
+
+**Goal.** One language-neutral proof of the client rules, generated from the Rust side, and the phone and vault
+helpers in the Rust and TypeScript SDKs, so the Python and Go SDKs are built against data rather than prose.
+
+**Files:** in this repository, `sdks/fixtures/conformance/**`, `crates/sdk/src/{phone.rs, vault.rs,
+vault_consumer/{mod.rs, origin.rs, keys.rs, sign.rs, packet.rs, redact.rs}}`, `crates/sdk/tests/conformance.rs`,
+`xtask/src/gen_sdk_vectors.rs`, `sdks/python-tests.json` and `sdks/go-tests.json` (empty inventories), the guide
+`vault-consumers.md`. In `PILOTAAI/pylota-identity-typescript`: the conformance runner, the phone and vault
+helpers and the `vault-consumer` entry point.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `crates/core/src/vault/origin.rs` (M42), `crates/core/src/httpsig.rs` (M25) | Public for `crates/sdk`, unchanged in behaviour |
+| `crates/sdk/Cargo.toml` (M16) | Feature `vault-consumer` with `hpke` (the version the Worker pins), `zeroize` |
+| `xtask/src/trace.rs` (M0) | Prefixes `py` and `go`, read from `sdks/python-tests.json` and `sdks/go-tests.json` as `ts::` names are; a missing name is `pending (SDK)` |
+| `xtask` `release` (M19) | Assets `py-tests-required.json` and `go-tests-required.json`; `release sign --repo` accepts `PILOTAAI/pylota-identity-python` and `PILOTAAI/pylota-identity-go` with their trusted comments |
+| `.github/workflows/ci.yml` (M19) | `cargo xtask gen-sdk-vectors --check` in the `test` job |
+
+**Implements:** FR-SDK-28 – FR-SDK-31 and rows Y76–Y85, Y89 (the Rust and TypeScript parts).
+
+**Acceptance:** `sdk::conformance::*`, `xtask::sdk_vectors_current`, the extended `xtask::release_sign_sdk_repo`;
+in the TypeScript repository `ts::conformance::all`, `ts::package::y80_consumer_entry_point_separate`,
+`ts::it::vault::y78_consumer_signature_accepted` and `ts::it::phone::y82_buy_retry_one_number`; the reference
+consumer of [Vault § 24.3](vault.md#243-consumer-conformance-fixtures) built on the Rust helpers.
+
+**M47 · Python SDK (after M46)**
+
+**Files:** the repository `PILOTAAI/pylota-identity-python` ([§3.5](#35-python)); here, `sdks/python-tests.json`
+(the inventory a release produces) and the guide `python-sdk.md`.
+
+**Implements:** FR-SDK-25, FR-SDK-32 and FR-SDK-33 for Python, and rows Y72, Y75, Y80, Y86, Y87, Y89, Y91,
+Y92 (Python parts).
+
+**Human prerequisites.** Create `PILOTAAI/pylota-identity-python` (FSL-1.1-ALv2); register the PyPI project
+`pylota-identity` with a trusted publisher (repository `PILOTAAI/pylota-identity-python`, workflow
+`release-publish.yml`, environment `release`), which reserves the name; disallow API tokens on the project;
+give the repository a staging test key.
+
+**Acceptance:** the `py::` rows above pass in the SDK repository's CI on CPython 3.11–3.15 and are listed in
+`sdks/python-tests.json`; `py::conformance::all`; the first release publishes the sdist and wheel listed in its
+owner-signed `SHA256SUMS`, with PyPI attestations; `py::doctest::site_examples`; M20 gains
+`py::live::round_trip`.
+
+**M48 · Go SDK (after M46)**
+
+**Files:** the repository `PILOTAAI/pylota-identity-go` ([§3.6](#36-go)); here, `sdks/go-tests.json`, the guide
+`go-sdk.md` and the Go section of the [SDKs](../../reference/sdks.md) reference.
+
+**Implements:** FR-SDK-26, FR-SDK-32 and FR-SDK-33 for Go, and rows Y73, Y74, Y80, Y86, Y88, Y90, Y91, Y92
+(Go parts).
+
+**Human prerequisites.** Create `PILOTAAI/pylota-identity-go` (FSL-1.1-ALv2) with an environment `release`
+whose token may push tags; give it a staging test key; keep the organisation name `PILOTAAI`.
+
+**Acceptance:** the `go::` rows above pass on Go 1.26.10 and 1.27.3 and are listed in `sdks/go-tests.json`;
+`go::conformance::all`; the first release's tag is pushed only after the owner's signature, and the proxy's
+`h1:` equals the signed one; `go::doctest::site_examples`; M20 gains `go::live::round_trip`.
+
 ## Compared with AgentMail (read 2026-10-17)
 
 AgentMail facts are from the inventory files of 2026-10-17 and, where marked, from the npm and PyPI
@@ -1583,7 +2111,7 @@ registries read the same day.
 
 | AgentMail | Pylota Identity | Verdict |
 |---|---|---|
-| Python and TypeScript SDKs (npm `agentmail` 0.5.46, PyPI `agentmail` 2.0.18, registries read 2026-10-17) | Rust SDK (v1.0) and TypeScript SDK `@pylotahq/identity`; Python is P2, served by the OpenAPI document, MCP and the CLI | Deliberately different: one TypeScript user today, and a third SDK triples the safety-critical surface for one owner (§3) |
+| Python and TypeScript SDKs (npm `agentmail` 0.5.46, PyPI `agentmail` 2.0.18, registries read 2026-10-17) | Rust, TypeScript and JavaScript, Python and Go SDKs, each proven against one shared conformance suite generated from the Rust side (§3, [ADR 0022](../adr/0022-sdk-languages.md)) | Exceed: one more language, and the client rules proven as data in all four |
 | SDKs auto-retry `429`; the sample backs off 3 times | Retries only what the envelope marks `retryable`, network failures and proxy `5xx`; same key and bytes; typed `OutcomeUnknownError` with the key; long waits thrown, not slept | Exceed |
 | Optional `Idempotency-Key` on sends, kept 24 hours; `client_id` on creates | Key required on sends and kept 30 days; the SDK never generates one for a send; keys derivable from the task | Exceed |
 | Webhook verification left to the integrator (Svix-compatible helper in the LangChain package) | Built-in Standard Webhooks verification over raw bytes with rotation overlap and a handler that never answers `410` | Exceed |
