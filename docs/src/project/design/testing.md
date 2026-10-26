@@ -11,7 +11,7 @@ pipeline; this page adds what they must contain.
 |---|---|
 | Requirements | PRD release criteria 1–7, NFR-QUAL-1, NFR-QUAL-2, NFR-QUAL-3, NFR-SEC-1, NFR-SEC-2, NFR-OPS-1 |
 | Edge cases | Every row marked `S` or `S+I` in the [edge-case register](../edge-cases.md) |
-| Code | `crates/core/src/**` (`#[cfg(test)]` modules), `crates/conformance/`, `crates/worker/tests/it/`, `crates/worker/tests/browser/`, `crates/worker/tests/live/`, `fuzz/`, `xtask/`; the TypeScript SDK's tests live in its own repository ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)) |
+| Code | `crates/core/src/**` (`#[cfg(test)]` modules), `crates/conformance/`, `crates/worker/tests/it/`, `crates/worker/tests/browser/`, `crates/worker/tests/live/`, `fuzz/`, `xtask/`; the TypeScript, Python and Go SDKs' tests live in their own repositories ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md), [ADR 0022](../adr/0022-sdk-languages.md)); the shared SDK conformance suite is `sdks/fixtures/conformance/` and its Rust runner `crates/sdk/tests/conformance.rs` |
 
 ## 1. Principles
 
@@ -51,6 +51,9 @@ pipeline; this page adds what they must contain.
 | Attack suite | `it::security::` | `crates/worker/tests/it/security/` | `cargo xtask itest` | Section 7 |
 | Browser | `browser::` | `crates/worker/tests/browser/`: Playwright specs in TypeScript, with `@playwright/test` and `@axe-core/playwright` at exact versions in its `package.json` and lockfile (pinned at build time) | `cargo xtask itest`, after the `it::` tests and against the same running Worker; `cargo xtask itest --suite browser` alone | Console pages with JavaScript disabled and the axe accessibility scan (FR-CON-1; build plan M21, M24, M26). Section 6.8 |
 | TypeScript SDK | `ts::`, `ts::it::` | The SDK repository `PILOTAAI/pylota-identity-typescript`, `test/`: Vitest tests with a fake `fetch`, a fake WebSocket and the shared fixtures that this repository's releases ship from `sdks/fixtures/` | In the SDK repository's CI: `ts::` on Node.js 22, 24 and 26, then `ts::runtime::` on the packed tarball; `ts::it::` against this repository's harness, started at the contract's tag with `cargo xtask itest --serve`. Their names reach `trace` through `sdks/typescript-tests.json` | The TypeScript SDK and its packaging (FR-SDK-2–9; [SDKs, skills and agent tooling](sdk-and-skills.md#tests)) |
+| SDK conformance | `sdk::conformance::` | `crates/sdk/tests/conformance.rs` over `sdks/fixtures/conformance/` | `cargo test --workspace`; `cargo xtask gen-sdk-vectors --check` | The client rules as data, shared by all four SDKs ([SDKs, skills and agent tooling § 3.2](sdk-and-skills.md#32-the-shared-conformance-suite)) |
+| Python SDK | `py::`, `py::it::` | The SDK repository `PILOTAAI/pylota-identity-python`, `tests/`: pytest with `respx`, the shared fixtures and the conformance runner | In the SDK repository's CI on CPython 3.11–3.15; `py::it::` against this repository's harness started with `cargo xtask itest --serve`. Names reach `trace` through `sdks/python-tests.json` | The Python SDK and its packaging (FR-SDK-25, FR-SDK-28 – FR-SDK-33) |
+| Go SDK | `go::`, `go::it::` | The SDK repository `PILOTAAI/pylota-identity-go`: `go test` with the race detector, the shared fixtures and the conformance runner | In the SDK repository's CI on Go 1.26 and 1.27; `go::it::` against the same harness. Names reach `trace` through `sdks/go-tests.json` | The Go SDK and its release (FR-SDK-26, FR-SDK-28 – FR-SDK-33) |
 | Evaluation | – | `crates/conformance/golden/`, `crates/conformance/screening/`, `xtask` | `cargo xtask eval-search`, `eval-agentic`, `eval-triage`, `eval-screening` | Section 9 |
 | Live | `live::` | `crates/worker/tests/live/` | `cargo xtask live` | Section 10 |
 
@@ -639,6 +642,8 @@ The live tests of the AgentMail-parity milestones (M20 step 16) are defined on t
 `live::signup::x40_refuse_one_click_headers`, `live::metrics::bounce_moves_rates` and
 `ts::live::round_trip`. The last runs in the TypeScript SDK's own repository, against the same staging
 deployment, with a staging test key ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)).
+`py::live::round_trip` and `go::live::round_trip` run the same way in the Python and Go SDK repositories
+([ADR 0022](../adr/0022-sdk-languages.md)).
 
 **Manual tests.** Rows marked **Manual** need a person in a browser (a Google consent screen, a Stripe
 Checkout page, Gmail's unsubscribe button). They are `#[ignore]`d in the nightly run. Before a release, a
@@ -683,6 +688,10 @@ credentials are rotated every quarter.
 | `browser::<area>::<name>` | Playwright test against workerd (section 6.8) | `browser::console::no_js` |
 | `ts::<module>::<name>` | Vitest test of the TypeScript SDK with fakes and shared fixtures, in the SDK repository | `ts::retry::y20_timeout_retries_same_key_and_bytes` |
 | `ts::it::<area>::<name>` | Vitest test of the TypeScript SDK against this repository's workerd harness, in the SDK repository | `ts::it::send::y20_lost_response_one_email` |
+| `py::<module>::<name>` | pytest test of the Python SDK with fakes and shared fixtures, in the SDK repository | `py::cancel::y72_cancellation_propagates` |
+| `py::it::<area>::<name>` | pytest test of the Python SDK against this repository's workerd harness, in the SDK repository | `py::it::send::lost_response_one_email` |
+| `go::<package>::<name>` | `go test` test of the Go SDK with fakes and shared fixtures, in the SDK repository | `go::cancel::y73_context_done` |
+| `go::it::<area>::<name>` | `go test` test of the Go SDK against this repository's workerd harness, in the SDK repository | `go::it::send::lost_response_one_email` |
 | `eval::<suite>` | An evaluation run (section 9): its `Covers:` line names the quality requirement | `eval::search` |
 
 - The row ID (`a6`, `j7`) starts the last segment, so `cargo test a6_` finds every test for a row. A test
@@ -715,6 +724,13 @@ its rows), listed in the signed `SHA256SUMS`, and the SDK repository's release r
 contract whose required names it does not all define: a missing TypeScript test blocks the SDK release,
 never the product release.
 
+The Python and Go SDKs follow the same rule with their own inventories and assets: `trace` reads `py::` names
+from `sdks/python-tests.json` and `go::` names from `sdks/go-tests.json`, prints a name an inventory lacks as
+`pending (SDK)`, and every product release attaches `py-tests-required.json` and `go-tests-required.json`
+beside `ts-tests-required.json`. `sdk::conformance::` names are ordinary Rust tests of `crates/sdk` and are
+checked like any other. The prefixes `py` and `go` join section 11.1's list, and `xtask/src/trace.rs`'s
+`PREFIXES`, with M46.
+
 **Landed milestones.** A file `MILESTONES` at the repository root lists the milestones that have landed,
 one ID per line; each milestone's pull request adds its own line. Until `M20` is listed, `trace` checks
 only what has landed: the tests named in the acceptance of each listed milestone (directly, through a
@@ -735,8 +751,9 @@ then `M17 Completion` with M20); its ID alone stands for all of its blocks. Test
 source tree: the crate's prefix (`conf` for `conformance`; `it`, `live` and `browser` for the test
 directories of `crates/worker/tests/`), then the file's module path and inline modules without modules
 named `tests`, then the function; an `xtask::` name is the function alone. A test without a `Covers:`
-line does not fail (M0's per-crate placeholder tests have none). `sdks/typescript-tests.json` is a list
-of `{ "name", "covers" }` objects, or an object whose `tests` field is that list. `eval::` names are
+line does not fail (M0's per-crate placeholder tests have none). `sdks/typescript-tests.json`,
+`sdks/python-tests.json` and `sdks/go-tests.json` are each a list of `{ "name", "covers" }` objects, or an
+object whose `tests` field is that list. `eval::` names are
 `pending (evaluation)` until the evaluations land (M18).
 
 **Requirements in the full check.** The PRD sets priorities per area ([PRD § 5](../prd.md#5-scope-and-priorities)),

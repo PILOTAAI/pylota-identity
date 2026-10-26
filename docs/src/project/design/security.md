@@ -30,6 +30,8 @@ the thread token in [Threading](threading.md)), this page states the security pr
 | Sending reputation | Platform domain and tenant domains | Shared by every tenant on the platform domain |
 | Authentication verdicts | `messages.auth_json`, `verdict` | Agents act on "verified" mail |
 | Audit trail | D1 `audit_log` | Accountability for keys, releases and erasure |
+| Vault values: passwords, TOTP seeds, recovery codes, API secrets, session cookies | Never returned to an agent, a model or an API key; decrypted only inside the Worker for one request; reach only a registered consumer, sealed to its key, for one phase of one ticket ([Vault](vault.md)) | `it::vault::items_write_only`, `it::vault::redemption_binding`, `xtask::vault_types_have_no_debug` |
+| The tenant vault keys and partner unlock keys | Private halves sealed under the master key (operator custody) or also under the partner's unlock key (partner custody); unlock keys never stored | `it::vault::custody`, `core::crypto::hpke::rfc9180_vectors` |
 
 Each invariant below is enforced in code and covered by a named test (section 13).
 
@@ -70,6 +72,8 @@ Each invariant below is enforced in code and covered by a named test (section 13
       the CLI machine, the release pipeline)
  TB8: third-party services and sites that receive agent assertions and signed HTTP requests, and anyone
       who fetches the public JWKS and key directory (GET /.well-known/* on the API host)
+ TB9: integrator consumers (browser fleet, egress proxy, executor) ── signed HTTPS ──▶ /v1/vault/consumer/*;
+      values leave the Worker only here, HPKE-sealed to the consumer's X25519 key
 ```
 
 | Boundary | Untrusted side | Trusted side |
@@ -82,6 +86,7 @@ Each invariant below is enforced in code and covered by a named test (section 13
 | TB6 Operators of the deployment | — (trusted, but limited and audited) | — |
 | TB7 People → console | The browser and everything it sends until a session is verified; form fields always; the token of an unsubscribe link | The console router, its route table and the same services as the API |
 | TB8 Agent proofs → third parties | Verifiers and sites that receive assertions and signed requests; anyone reading the JWKS or the key directory | The signing handlers and the sealed keys, which never leave the Worker |
+| TB9 Vault consumers → the vault | A consumer until its signature verifies; the ticket and context it presents | The redemption checks of [Vault § 8.6](vault.md#86-redemption-checks) |
 
 ## 3. STRIDE threat model
 
@@ -156,6 +161,16 @@ reused; the others are defined in section 13.
 A key's `mcp_tools` can shorten the tools an MCP-only agent sees below what its permissions allow; it is
 defence in depth, not a boundary, because REST follows the permissions
 ([SDKs, skills and agent tooling §5.3](sdk-and-skills.md#53-per-key-tool-allow-list)).
+
+**Phone.** An agent can buy a number only inside a standing budget a person set, never through a flag it
+passes itself (`phone_buy_number` has no confirmation argument); it can never approve, port, release outside a
+scheduled expiry, submit KYC, change a voice route, set a budget or see a PIN. SMS text and caller speech are
+untrusted input, screened like mail; codes for vault logins never reach a model. A drafted registration text is
+untrusted, shown escaped to the person who submits it.
+
+**Vault.** An agent sees item handles, never values: no route, tool, event or log returns one, and identity
+keys cannot hold `vault:use`, `vault:approve` or `vault:admin`, so an agent can request a grant but never approve
+it, start a use or reveal anything ([Vault § 17](vault.md#17-who-can-start-a-fill)).
 
 ### 3.4 TB4: Worker → webhook endpoints
 
@@ -239,6 +254,18 @@ security properties.
 | E | A misbehaving agent keeps proving who it is after it was stopped | The kill switch (FR-IDN-9): pausing an identity, or suspending its tenant (which pauses every identity), stops signing at once (suspended tenant → `403 tenant_suspended`; paused identity → `409 identity_paused`) and withdraws its JWKS (`404`), so a verifier that refetches stops accepting it within the 5-minute cache ([O1](../edge-cases.md)). Erasure deletes the keys and writes each kid to `key_tombstones`, so a deleted kid is never published again ([O7](../edge-cases.md)) | `it::identity_keys::paused_withdraws_jwks`, `it::assertions::erasure_tombstones_kid` |
 | E | Signed HTTP requests from a tenant that never chose them | `PM_WEB_BOT_AUTH` is `off` by default and stays off until spike S13 passes (`422 web_bot_auth_disabled`, [O9](../edge-cases.md)); a tenant must be opted in with `policy.web_bot_auth.allowed`, which only a platform key can set (`403 policy_denied`, [O13](../edge-cases.md)) | `it::http_signatures::disabled_and_policy` |
 | D | Signing calls used to exhaust the Worker | `RL_SIGN`: 600 signing calls per 60 s per identity, assertions and HTTP signatures together (section 10) | `it::auth::rate_limited` |
+
+### 3.9 TB9: vault consumers → the vault
+
+| STRIDE | Threat | Mitigation | Test |
+|---|---|---|---|
+| S | Someone impersonates a consumer to redeem tickets | RFC 9421 Ed25519 signatures with a 30-second clock window, 60-second expiry and stored nonces; keys generated where used (a JWK with `d` refused); activation by a person or the platform | `it::vault::consumer_signatures` |
+| S | A model or page obtains a ticket and redeems it | Tickets go only to the orchestrator; each is bound to one consumer, so another caller cannot redeem it; 60 seconds to first redemption; one redemption per phase | `it::vault::use_lifecycle`, `it::vault::consumer_reach` |
+| T | A consumer fills on the wrong page, frame or form | The context of § 8.6 step 6 checked at redemption; C4, C5 and C11 in the consumer contract; conformance fixtures | `it::vault::redemption_binding`, `conf::vault::*` |
+| R | A consumer or orchestrator denies a use | Hash-chained audit rows in the batch of each change, with the chain head in every event | `it::vault::audit_chain_and_age_only` |
+| I | A value leaks through a response, a log, a screenshot, a placeholder in a writable field, a redirect or a cleartext request | No route returns a value; value types have no `Debug`; C10–C14, C17 and C21 (redaction robust to compression and chunking, placeholders pinned to the recorded field, TLS only, no redirects, closure within 30 s) | `xtask::vault_types_have_no_debug`, `conf::vault::echo_gzip`, `conf::vault::proxy_second_form`, `conf::vault::proxy_redirect_307` |
+| D | A consumer floods redemption or status | Per-network failed-authentication bucket; `RL_VAULT`, `RL_VAULT_STATUS`; 100 pending uses per tenant | `it::vault::consumer_signatures` |
+| E | An agent approves its own grant or starts a use | Identity keys cannot hold `vault:use`, `vault:approve` or `vault:admin`; the requesting key never approves; approval is a decision reserved for people | `it::vault::identity_key_levels`, `it::vault::grant_decisions` |
 
 ## 4. Authentication
 
@@ -350,10 +377,10 @@ partner's keys, [Partner keys](#partner-keys)), `tenant` (one tenant) and `ident
    |---|---|---|---|---|
    | `platform:ops`, `partners:manage` (platform-only) | yes | no | no | no |
    | `tenants:manage` | yes | yes, for its own tenants | no | no |
-   | `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve`, `drafts:approve` (tenant-only: never on identity keys) | yes | yes | yes | no |
+   | `members:read`, `members:manage`, `suppressions:manage`, `audit:read`, `usage:read`, `policy:write`, `accounts:approve`, `drafts:approve`, `phone:approve`, `phone:manage`, `phone:compliance`, `vault:use`, `vault:approve`, `vault:admin` (tenant-only: never on identity keys) | yes | yes | yes | no |
    | `tenants:erase` (tenant-scope erasure: deleting the workspace) | yes | yes, for its own tenants | only a key whose `created_by_role` is `owner` | no |
    | `identities:sign` | no (it may grant it, step 3) | no (it may grant it, step 3) | yes | yes, for its own identity |
-   | Every other permission (`events:read`, `metrics:read`, `drafts:read` and `drafts:write` among them) | yes | yes | yes | yes |
+   | Every other permission (`events:read`, `metrics:read`, `drafts:read` and `drafts:write`, `phone:read`, `phone:request`, `phone:send`, `phone:call`, `vault:read`, `vault:write` and `vault:request` among them) | yes | yes | yes | yes |
 
    A tenant key listing `tenants:erase` is refused unless the new key's `created_by_role` will be
    `owner`, that is, unless the workspace owner's console session mints it or the caller is a key whose
@@ -583,8 +610,12 @@ both serve public keys only, [Agent signing keys §3](agent-keys.md#3-publicatio
 notification endpoints `POST /hooks/ses` (SES delivery events) and `POST /hooks/ses/inbound` (SES
 inbound notifications), both authenticated by the SNS signature (section 3.5), signed links
 `GET /v1/links/{token}` and upload links `PUT /v1/links/{token}` (authenticated by their MAC, section 7.3),
-and `POST /v1/agent-signup` (`Scope::Public`; its controls are `RL_SIGNIN`, the admission budgets and the
-human-email rules, [Agent self-sign-up §14](agent-signup.md#14-security-and-visibility)). The console (`/console/*`) and the
+`POST /v1/agent-signup` (`Scope::Public`; its controls are `RL_SIGNIN`, the admission budgets and the
+human-email rules, [Agent self-sign-up §14](agent-signup.md#14-security-and-visibility)), the Telnyx
+webhook `POST /hooks/telnyx` (Ed25519 signature over `telnyx-timestamp|raw body`, a 5-minute window, in every
+environment; 256 KB; its own rate-limit bucket by client network,
+[Phone numbers § 9.2](phone-numbers.md#92-verification)), and `/v1/vault/consumer/*` (no API key, but every
+request is authenticated by the consumer's RFC 9421 signature, [Vault § 8.4](vault.md#84-authenticating-a-consumer)). The console (`/console/*`) and the
 Stripe webhook (`/billing/stripe/webhook`) are separate route tables with session and signature checks
 of their own. In the console table, the routes that need no session are the sign-in, sign-up, waitlist,
 OAuth start and callback, and invitation-accept routes, the agent sign-up verify page
@@ -702,6 +733,13 @@ unit test fails for any other route with `KeyOrStreamToken`.
 
 Builds with the `itest-hooks` cargo feature expose the table at `GET /__test/routes`, so the attack
 suite can prove it covers every route ([Testing](testing.md#7-cross-tenant-attack-suite)).
+
+Every phone route of [Phone numbers § 28](phone-numbers.md#28-mcp-and-cli) with its permission and key levels;
+the decisions reserved for people (`Decision::ApprovePhoneRequest`, `Decision::DecidePortOut`,
+`Decision::SetPhoneBudget`) are checked by `key_may_decide` after the permission. Identity keys can never hold
+`phone:approve`, `phone:manage` or `phone:compliance`.
+
+The five vault consumer routes (`/v1/vault/consumer/*`) are registered with `Auth::ConsumerSignature`, an empty permission list and `Scope::VaultConsumer`: they take no API key, and an `Authorization` header on them is `401 consumer_unauthenticated`. A consumer signature on any other route is ignored.
 
 ### 5.2 Order of checks
 
@@ -892,6 +930,17 @@ another ([Threading](threading.md)).
 | Webhook delivery headers (`webhook_endpoints.headers_sealed`) | Static tokens a receiver's gateway checks before the signature | The integrator, through the API or console | Requests that pass the receiver's gateway; the Standard Webhooks signature is still required |
 | API keys `pmk_…` | Authenticating one caller | The Worker (section 4.1) | Access within the key's scope |
 | `CLOUDFLARE_API_TOKEN` | CLI only: the commands in [CLI › Commands that use your Cloudflare token](../../reference/cli.md#commands-that-use-your-cloudflare-token), with the permissions in [Deploy › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token) | The operator | Never uploaded to the Worker; never stored in the CLI config file |
+| `PM_TELNYX_API_KEY` | Every Telnyx call | The operator in the Telnyx portal; uploaded by `idvy setup phone` | Buys numbers and sends on the operator's prepaid account until rotated in the portal and here |
+| Per-tenant SIP credentials (`phone_tenants.sip_sealed`) | The tenant's credential connection, given to Vapi for the `vapi` route | The Worker, `platform::Rng`, sealed under `PM_MASTER_KEY` | Calls on one tenant's connection, bounded by its outbound voice profile |
+| Vapi API keys (`phone_voice_connectors.api_key_sealed`) and server secrets (`phone_voice_routes.server_secret_sealed`) | The tenant's Vapi organisation | The tenant (key); the Worker (secret) | The tenant's Vapi account |
+| KYC data keys (`phone_compliance_documents.key_sealed`) | One per document | The Worker | Decrypts one document (needs R2 too) |
+| Sealed profile fields (`phone_compliance_profiles.tax_ids_sealed`, `representative_sealed`) and port-in details (`phone_requests.secrets_sealed`) | Submission to the provider only | The tenant | Tax IDs, the representative's contact and birth data, a losing carrier's account PIN |
+| Port-out PINs | Vault managed secrets ([Vault § 13.2](vault.md#132-managed-secrets)), never in D1 | The Worker | A port-out without the tenant noticing (the port-out guard still alerts and a person decides) |
+| Tenant vault keys (`vault_keys.private_sealed`) | Unwrapping one tenant's vault data keys | The Worker: 32 bytes from `platform::Rng` as an X25519 secret, sealed under `PM_MASTER_KEY` | With a D1 copy, every value of that tenant in operator custody |
+| Partner unlock keys (`pvu_…`) | Unwrapping a tenant key in partner custody | The Worker at enrolment, returned once, never stored | With the master key and a D1 copy, that tenant's values |
+| Vault data keys (`vault_item_versions.dek_sealed`) | Encrypting one item version's fields | The Worker, 32 bytes per version, HPKE-sealed to the tenant key | One version's values, with the tenant key |
+| Vault tickets (`vtk_…`) | One use's redemption | The Worker at minting, returned once to the orchestrator; only SHA-256 stored | One use's phases, by the consumer it is bound to, within its window |
+| Consumer keys (Ed25519, X25519) | A consumer's signatures and the packets sealed to it | The integrator, on the consumer's host (`idvy vault consumer-keys generate`) | Redeeming tickets bound to that consumer that the attacker also holds; reading packets captured in transit |
 
 Rules:
 
@@ -906,6 +955,9 @@ Rules:
   `probe_from`, never the password, and an identity key shows only its public JWK.
 - **Never logged.** Secrets, tokens, `Authorization` headers, signatures, signed-link tokens, minted
   agent assertions and unsubscribe tokens are never logged at any level (section 12).
+- **`PM_TELNYX_PUBLIC_KEY`** verifies Telnyx webhooks and is not secret.
+- **Vault values** are never returned by any API, logged or exported; a person reveals one
+  only in the console after re-authentication ([Vault § 13.1](vault.md#131-human-reveal-p1)).
 - **Read once per isolate**, through `platform::Secrets`, and held only in memory. The opened keyring is
   cached per isolate for 5 minutes ([Data model › Notes](data-model.md#notes)).
 
@@ -930,6 +982,8 @@ Rules:
 | SES keys | Create a second IAM access key, put both secrets, deactivate then delete the old key | No downtime |
 | `PM_STRIPE_SECRET_KEY` | In the Stripe dashboard, **Rotate key** with an expiration (both keys work for up to 7 days), `wrangler secret put PM_STRIPE_SECRET_KEY`, then let the old key expire ([API keys › Rotate an API key](https://docs.stripe.com/keys#rolling-keys), read 2026-10-09) | No downtime |
 | `PM_STRIPE_WEBHOOK_SECRET` | In the Stripe dashboard, **Roll secret** on the endpoint and keep the old secret for up to 24 hours, then `wrangler secret put PM_STRIPE_WEBHOOK_SECRET` inside that window. Stripe signs with every active secret, and the verifier accepts any matching `v1` ([Webhooks › Roll endpoint signing secrets](https://docs.stripe.com/webhooks#roll-endpoint-secrets), read 2026-10-09) | No downtime; no event is rejected |
+| `PM_TELNYX_API_KEY` | Create a second API key in the Telnyx portal, `idvy wrangler secret put PM_TELNYX_API_KEY`, then delete the old key in the portal | No downtime; the webhook public key is unchanged |
+| Tenant vault key | `POST /v1/tenants/{tenant_id}/vault/rotate-key` (`vault:admin`); the every-minute sweep re-wraps 200 versions a run ([Vault § 4.2](vault.md#42-the-tenant-vault-key)) | New versions seal to the new key at once; in partner custody a version is re-wrapped when it is next opened with the unlock key |
 
 **Master-key slots.** The master key has two secret slots and a selector, so a rotation never needs to
 move or read back a key value:
@@ -1035,6 +1089,12 @@ Residual risk: without `revoke_previous`, a leaked signing key keeps verifying f
 | Encodings | base64, Crockford base32 | `base64 =0.23.1`; base32 in `core` |
 | Constant-time comparison | — | `Mac::verify_slice`, or `subtle` (pin at build time) for non-MAC values |
 | Randomness | Web Crypto `crypto.getRandomValues` in the Worker, the OS CSPRNG natively | `platform::Rng` |
+| Vault data-key seal and consumer packets | HPKE base mode (RFC 9180): DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM | `hpke =0.14.1` (`default-features = false`, features `x25519`, `aes`, `alloc`), or the fallback of [ADR 0021](../adr/0021-agent-vault.md) decision 4 after spike S-VLT1 |
+| Vault field ciphertext and the ticket copy of a data key | AES-256-GCM, random 96-bit nonce, AAD binding tenant, item, version and purpose (or use) | `aes-gcm` (the workspace's 0.11 pin) |
+| Vault TOTP codes (RFC 6238) | HMAC-SHA1, -SHA256, -SHA512 per item | `hmac`, `sha1`, `sha2` |
+| Vault consumer request signatures | RFC 9421 with Ed25519, `verify_strict` | `ed25519-dalek =3.0.0` |
+| Vault signing (P1) | HMAC-SHA256; AWS SigV4 | `hmac`, `sha2` |
+| Vault audit chain | SHA-256 over canonical JSON | `sha2 =0.11.0` |
 
 No custom primitives. Truncated MACs are used only for thread tokens (40 bits, rate-limited), signed
 link tokens and search cursors (128 bits) and log pseudonyms (64 bits, correlation only).
@@ -1057,7 +1117,12 @@ Sealed columns: `webhook_endpoints.secret_enc` and `prev_secret_enc`, `webhook_e
 (aad `pm1|webhook_endpoints|headers_sealed|{endpoint_id}`, [Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)),
 `identity_keys.private_enc` (the
 32-byte Ed25519 seed), `signing_keys.ciphertext` (the `web_bot_auth` seed included), `domains.smtp_sealed` (aad `pm1|domains|smtp_sealed|{domain_id}`) and
-`domains.smtp_pending_sealed`, `users.totp_sealed`, `users.recovery_codes_sealed` and `oauth_states.pkce_sealed`. Each is an
+`domains.smtp_pending_sealed`, `users.totp_sealed`, `users.recovery_codes_sealed`, `oauth_states.pkce_sealed`; for phone numbers
+`phone_tenants.sip_sealed`, `phone_compliance_profiles.tax_ids_sealed`, `phone_compliance_profiles.representative_sealed`,
+`phone_compliance_documents.key_sealed`, `phone_requests.secrets_sealed`, `phone_voice_connectors.api_key_sealed` and
+`phone_voice_routes.server_secret_sealed` ([Phone numbers § 23](phone-numbers.md#23-security-t2)); and for the vault
+`vault_keys.private_sealed` and `vault_custody_slots.private_wrapped`, whose inner layer under a partner's unlock key
+the rotation carries unopened ([Vault § 4.2](vault.md#42-the-tenant-vault-key)). Each is an
 entry of the sealed-column registry `crates/core/src/sealed.rs` (table, column, row-ID expression), which
 the master-key rotation reads to re-seal and count them (section 6.2); code that adds a sealed column adds
 its entry.
@@ -1200,6 +1265,10 @@ crate holds no business rules). One guard serves every request to a host that is
 or AWS API host: webhook deliveries and test deliveries ([Webhooks](webhooks.md#http-client-and-ssrf-rules)),
 the scanner hook in [Inbound](inbound.md), and SMTP relay connections for `smtp_relay` domains
 (section 9.3).
+
+The vault makes no outbound request in v1 ([Vault § 1.4](vault.md#14-credentialed-fetch-is-deferred)); its
+consumer conformance fixtures check consumers against the embedded-IPv4 rules of section 9.1
+(`it::security::ssrf_embedded_ipv4`).
 
 ### 9.1 URL rules (at create, update and every attempt)
 
@@ -1353,7 +1422,7 @@ No request field ever makes the Worker fetch a URL; attachments come inline or f
 | `cargo deny check` | In CI on every pull request: advisories, licences (allow-list: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0; everything else needs an ADR), bans (no `openssl-sys`; `tokio` only as a direct dependency of `worker`, which depends on it with no features: `{ crate = "tokio", wrappers = ["worker"] }`; no duplicate versions of `sha2`, `hmac` or `aes-gcm`), sources (crates.io only, no git dependencies). Bans are checked on the Worker's wasm graph (`cargo deny --manifest-path crates/worker/Cargo.toml --target wasm32-unknown-unknown --exclude-dev check bans`), because the native crates use tokio legitimately (`reqwest` in `sdk` and `cli`, `rmcp` as a dev-dependency); licences, advisories and sources over the whole workspace (`cargo deny --workspace check licenses advisories sources`). The flags are checked against the pinned `cargo-deny` at build time. `deny.toml` sets `[graph] targets` to the targets actually built (`wasm32-unknown-unknown` for the Worker; `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` for the CLI), so dependencies of other targets are ignored: cargo-deny drops a dependency link that none of the listed targets satisfies (cargo-deny configuration, "The `[graph]` field", <https://embarkstudios.github.io/cargo-deny/checks/cfg.html>, read 2026-10-10). `webpki-root-certs` (the Mozilla root certificates as data; CDLA-Permissive-2.0 on crates.io for 1.0.7 to 1.0.9, read 2026-10-10) is allowed for that crate alone with `[[licenses.exceptions]] allow = ["CDLA-Permissive-2.0"] name = "webpki-root-certs"` (cargo-deny licences configuration, <https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html>, read 2026-10-10), never through the general allow-list; this sentence is the record the allow-list rule asks for. Which crate pulls it in on wasm32 is not verified here; `cargo deny` reports the path on the first run of M0. M0 result (2026-10-19): it is in no graph yet, because nothing depends on `reqwest` or `tokio-tungstenite`; `cargo deny` warns that the exception is unused until the milestone that adds them, which records the path `cargo xtask check-layering` also proves that tokio has no feature enabled in that graph ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)) |
 | `cargo audit` | RustSec advisories on every pull request and daily on `main`; a new advisory opens an issue |
 | SBOM | `cargo cyclonedx --format json` for the Worker (`--target wasm32-unknown-unknown`) and for the CLI, attached to every release |
-| Signed releases | `SHA256SUMS` lists the Worker bundle, the CLI binaries, `openapi.json` and the TypeScript SDK fixtures tarball, and has a detached minisign signature `SHA256SUMS.sig` with the trusted comment `pylota-identity v{version}` ([Rust workspace](rust-workspace.md#9-xtask)). The verification keys are compiled into `idvy`, which checks the signature, the trusted comment and the bundle checksum before deploying (FR-OPS-2; signature format and verification in [CLI and setup](cli.md)). Releases carry build provenance from `actions/attest@v4` (permissions `id-token: write`, `attestations: write`, `contents: read`), verifiable with `gh attestation verify <file> -R PILOTAAI/pylota-identity`. **The signing key never enters CI** or any online system: the minisign secret key lives on an encrypted removable drive, with a second drive at the break-glass record's location and the password in the owner's password manager ([Observability § 5.7](observability.md#57-break-glass-record)). `release.yml` builds and attests the files, uploads them with `SHA256SUMS` to a draft release, and stops. The owner runs `cargo xtask release sign v<x.y.z>` on their own machine with the drive attached: it downloads `SHA256SUMS` and every file it lists, checks each checksum and each file's attestation (`gh attestation verify`, whose provenance must name `release.yml` on that tag), and only then signs, uploads `SHA256SUMS.sig` and starts `release-publish.yml` on the tag. That workflow's `verify` job checks the signature against the public keys compiled into `idvy` before the draft becomes a pre-release, and its `publish` job promotes it only through `cargo xtask release-gate` (section 16) ([Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline)). A compromised CI can build and attest a bad release but cannot sign it, and the owner signs only files whose provenance is the tagged workflow. The two paths around the signature are closed too ([J35](../edge-cases.md)): `cloud-deploy.yml` verifies the `idvy` it runs against `SHA256SUMS.sig` with public keys written in the workflow, and its attestation against `release.yml` on that tag; and crates are published only by the owner, from a clean clone of the signed tag (`cargo xtask release crates`), so no workflow holds the crates.io token. Immutable releases stop a published asset or tag from being replaced. There is no second signer ([ADR 0015](../adr/0015-solo-operator.md)): the attestation check is the mechanical second look |
+| Signed releases | `SHA256SUMS` lists the Worker bundle, the CLI binaries, `openapi.json` and the TypeScript SDK fixtures tarball (which also carries the SDK conformance suite), and the `ts-`, `py-` and `go-tests-required.json` files, and has a detached minisign signature `SHA256SUMS.sig` with the trusted comment `pylota-identity v{version}` ([Rust workspace](rust-workspace.md#9-xtask)). The verification keys are compiled into `idvy`, which checks the signature, the trusted comment and the bundle checksum before deploying (FR-OPS-2; signature format and verification in [CLI and setup](cli.md)). Releases carry build provenance from `actions/attest@v4` (permissions `id-token: write`, `attestations: write`, `contents: read`), verifiable with `gh attestation verify <file> -R PILOTAAI/pylota-identity`. **The signing key never enters CI** or any online system: the minisign secret key lives on an encrypted removable drive, with a second drive at the break-glass record's location and the password in the owner's password manager ([Observability § 5.7](observability.md#57-break-glass-record)). `release.yml` builds and attests the files, uploads them with `SHA256SUMS` to a draft release, and stops. The owner runs `cargo xtask release sign v<x.y.z>` on their own machine with the drive attached: it downloads `SHA256SUMS` and every file it lists, checks each checksum and each file's attestation (`gh attestation verify`, whose provenance must name `release.yml` on that tag), and only then signs, uploads `SHA256SUMS.sig` and starts `release-publish.yml` on the tag. That workflow's `verify` job checks the signature against the public keys compiled into `idvy` before the draft becomes a pre-release, and its `publish` job promotes it only through `cargo xtask release-gate` (section 16) ([Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline)). A compromised CI can build and attest a bad release but cannot sign it, and the owner signs only files whose provenance is the tagged workflow. The two paths around the signature are closed too ([J35](../edge-cases.md)): `cloud-deploy.yml` verifies the `idvy` it runs against `SHA256SUMS.sig` with public keys written in the workflow, and its attestation against `release.yml` on that tag; and crates are published only by the owner, from a clean clone of the signed tag (`cargo xtask release crates`), so no workflow holds the crates.io token. Immutable releases stop a published asset or tag from being replaced. There is no second signer ([ADR 0015](../adr/0015-solo-operator.md)): the attestation check is the mechanical second look |
 | Site deploy (`.github/workflows/site.yml`) | The landing page and docs Worker `pylota-mail-site` is deployed with Wrangler installed from `site/package-lock.json` by `npm ci --ignore-scripts` (exact `wrangler` 4.139.0, every package with its `integrity` hash), never fetched by name at run time. Its token, the `production` environment's `CLOUDFLARE_API_TOKEN`, is an account-owned token scoped to the single Worker `pylota-mail-site` with the per-Worker **Editor** role, plus **Zone (pylotamail.com) › Workers Routes › Edit**, and nothing else: no account-wide Workers Scripts Edit (in Pylota's shared account that would reach every Worker) and no DNS Edit. Custom Domains that already exist need only Editor to redeploy; adding, changing or removing one needs Workers Routes Write on the zone (Cloudflare "Workers roles and permissions" and the changelog "Grant teammates and agents access to specific Workers", 2026-09-15, both read 2026-10-10). Editor cannot create a Worker, so the first deploy of a new site Worker is done once by hand with a wider token |
 | CodeQL | CodeQL for Rust (supported for editions 2021 and 2024, per codeql.github.com, read 2026-10-09) on pull requests and weekly; open high-severity alerts block a release |
 | Renovate | Cargo and GitHub Actions managers; exact pins kept; weekly grouped pull requests; `worker` and `worker-build` upgrades are never grouped and must pass spike S1's smoke checks plus the full integration suite; security updates raised immediately; nothing auto-merges |
@@ -1361,6 +1430,9 @@ No request field ever makes the Worker fetch a URL; attachments come inline or f
 | Secret scanning | GitHub secret scanning with push protection on the repository |
 | Bundle hygiene | `cargo xtask build-worker` refuses the `itest-hooks` feature and fails if the bundle contains the string `/__test/`; the size budget (NFR-SEC-2) is checked on every build. M0 result (2026-10-19, read from the `worker-build` 0.8.7 source): on first use `worker-build` downloads `wasm-bindgen` 0.2.129 and binaryen `version_132` from their GitHub releases and esbuild 0.28.2 from npm, and checks no hash. It uses `WASM_BINDGEN_BIN`, `WASM_OPT_BIN` and `ESBUILD_BIN` instead when they are set, so before `release.yml` (M19) builds a bundle, the three tools come from checksum-verified sources through those variables |
 | npm package | `@pylotahq/identity` has no runtime dependencies and no install scripts. It is built in its own repository, `PILOTAAI/pylota-identity-typescript`, only from an `openapi.json` and fixtures whose release signature verifies; it is packed in that repository's `release.yml`, attested, listed in a `SHA256SUMS` the owner signs offline, and published only by that repository's `release-publish.yml` through npm trusted publishing (OIDC, environment `release`), which attaches provenance; the package disallows token publishing. Pre-releases are never published ([SDKs, skills and agent tooling §2.16](sdk-and-skills.md#216-versioning-and-release)) |
+| PyPI package | `pylota-identity` depends at run time only on `httpx`, with `websockets` and `cryptography` behind extras, each bounded below the next minor; it has no build hooks beyond its build backend. It is built in its own repository, `PILOTAAI/pylota-identity-python`, only from a contract and fixtures whose release signature verifies; its sdist and wheel are attested, listed in a `SHA256SUMS` the owner signs offline, and uploaded only by that repository's `release-publish.yml` through PyPI trusted publishing (environment `release`), with Sigstore attestations; the project allows no API token. Pre-releases are never published ([SDKs, skills and agent tooling § 3.5](sdk-and-skills.md#35-python)) |
+| Go module | `github.com/PILOTAAI/pylota-identity-go` requires only `github.com/coder/websocket`; generators and linters live in a separate tools module. A version is published by its tag, so the tag is pushed only by `release-publish.yml`, after the owner's signature over the module zip's SHA-256 and `h1:` hash verifies; the workflow then requires the module proxy's and the checksum database's hash to equal the signed one, and a mismatch is retracted. No pre-release tag is pushed ([§ 3.6](sdk-and-skills.md#36-go)) |
+| Vault consumer code | The consumer helpers of every SDK (origin canonicalisation, request signing, packet opening, redaction) are a separate entry point, never loaded by the default import, generated against vectors produced by `crates/core` ([§ 3.4](sdk-and-skills.md#34-the-vault-consumer-entry-point)) |
 | Agent plugin | `integrations/pylota-identity-plugin/` holds only Markdown skills and one remote MCP server entry: no hooks, executables, scripts, monitors, commands or agents (`xtask::skills_format`), and no secret (`xtask::skills_no_secrets`). The marketplaces point at release tags |
 
 ## 12. Logging rules

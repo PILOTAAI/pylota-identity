@@ -336,6 +336,25 @@ another deployment's rule or resources (use a separate AWS account).
 idvy setup ses --region eu-west-2
 ```
 
+### `setup phone`
+
+Connects the deployment to its Telnyx account once. Reads the Telnyx API key from stdin, checks the account
+level (a Verified-only read answered with 10038 means not Verified) and records it through
+`POST /v1/platform/phone/probe`, reads the webhook public key you paste from the Telnyx portal, uploads
+`PM_TELNYX_API_KEY` and `PM_TELNYX_PUBLIC_KEY` as Worker secrets, creates the account's notification profile
+and a webhook channel to `https://{PM_API_HOST}/hooks/telnyx` for number orders, requirement groups, porting
+orders and port-outs, and prints what remains manual (data locality, the reseller annex, the account level).
+It writes nothing else to the account: tenant resources are created per tenant. `idvy doctor` re-checks every
+item and the signature of a Telnyx test webhook.
+
+```text
+idvy setup phone [--account-id <telnyx-org-id>] [--api-base us|eu] [--profile <name>]
+```
+
+```bash
+idvy setup phone --api-base eu < telnyx-key.txt
+```
+
 ### `deploy`
 
 Downloads the Worker release for the CLI's version from GitHub Releases, verifies its signature and
@@ -659,11 +678,17 @@ Sets a deployment-wide switch (`PUT /v1/platform/switches`, a platform key with 
 `read_only` refuses writes from every key but platform keys and holds outbound sends; `free_sending off`
 stops sends from workspaces on the Free plan or still in the send ramp; `emergency_prune` shortens the
 retention of event and delivery logs to 7 days; `agent_signup off` stops new agent sign-ups and their mail
-([Agent sign-up](#agent-sign-up)). The automatic containment rules set these switches too
+([Agent sign-up](#agent-sign-up)); `phone` is `on`, `paused_purchases` (orders, ports, registration fees,
+emergency registrations and voice-route changes refused; SMS, calls and inbound continue) or `paused` (outbound SMS
+and calls refused too); it never releases a number ([Phone numbers § 30](../project/design/phone-numbers.md#30-rollout-telemetry-and-rollback));
+`vault_redeem off` makes vault redemption, write-back and ticket minting refuse while reads and approvals
+continue ([Vault § 15](../project/design/vault.md#15-kill-switches-and-incident-response)). The automatic containment rules set these switches too
 ([Observability › Automatic containment](../project/design/observability.md#56-automatic-containment)).
 
 ```text
 idvy ops switch read_only|free_sending|emergency_prune|agent_signup on|off [--reason <text>]
+idvy ops switch phone on|paused_purchases|paused [--reason <text>]
+idvy ops switch vault_redeem on|off [--reason <text>]
 ```
 
 ### `ops freeze` and `ops unfreeze`
@@ -2632,6 +2657,246 @@ idvy agent-signups list --state provisional --since 2026-10-16
 idvy agent-signups list --since 2026-10-17T09:00:00Z --network 3f9a0c1d2e4b5a69
 ```
 
+## Phone numbers
+
+Behind `PM_PHONE`. An agent's key buys inside the tenant's standing budget or asks; people decide the rest
+([Phone numbers](../guides/phone.md)). Commands that can cost money take `--idempotency-key`; without it the CLI
+derives one from the command's arguments and reuses it on a retry, as `send` does.
+
+### `phone countries`
+
+```text
+idvy phone countries [--tenant <tenant>]
+```
+
+The catalogue rows with the tenant's standing (`eligible`, or the reason).
+
+### `phone setup status` and `phone setup draft`
+
+```text
+idvy phone setup status [--tenant <tenant>] [--country <cc>]
+idvy phone setup draft --country <cc> --file <draft.json> [--tenant <tenant>]
+idvy phone setup draft --country <cc> --delete [--tenant <tenant>]
+```
+
+`status` prints each country's status, steps, fees, waits and next step. `draft` writes the agent's draft of a
+registration's text (what the business does, 2–5 sample messages with the brand name, the opt-in flow, the
+website, privacy and terms URLs); a person submits it in the console.
+
+```bash
+idvy phone setup status --tenant brightwell --country US
+```
+
+### `phone budget get` and `phone budget set`
+
+```text
+idvy phone budget get [--tenant <tenant>]
+idvy phone budget set [--tenant <tenant>] [--enabled true|false] [--countries <cc,cc>] [--types <t,t>]
+                       [--per-identity <n>] [--per-month <n>] [--max-setup <pounds>] [--max-monthly <pounds>]
+                       [--expiring-only true|false] [--on-behalf-of <user>]
+```
+
+`set` reads the current budget, shows the change, and asks for confirmation when it loosens any field (pass
+`--yes` in scripts). Loosening needs a platform key or the tenant's partner key where `phone.key_approval` is
+`true`, with `--on-behalf-of`; otherwise `403 permission_denied` (`person_required`, exit 4) and a person saves
+it in the console. Tightening needs `phone:manage`.
+
+### `phone buy`
+
+```text
+idvy phone buy --country <cc> [--identity <identity>] [--type mobile|local|toll_free] [--area-code <nnn>]
+                [--number <e164> --quote-token <token>] [--expires-at <rfc3339>] [--primary-for sms,voice]
+                [--acknowledge-not-available] [--idempotency-key <key>]
+```
+
+Prints the number and its capability facets (exit 0) when the purchase was covered, or the request and who must
+act (exit 0, with `status` and `next_step`) when it waits. `409 phone_number_taken` prints the alternatives
+(exit 6).
+
+```bash
+idvy phone buy --country GB --identity bookings@brightwell
+idvy phone buy --country US --area-code 512 --expires-at 2026-11-02T00:00:00Z
+```
+
+### `phone search`
+
+```text
+idvy phone search --country <cc> --type <type> [--contains <digits>] [--starts-with <digits>]
+                   [--ends-with <digits>] [--locality <name>] [--region <name>] [--limit <1-20>] [--identity <identity>]
+```
+
+### `phone request` and `phone requests`
+
+```text
+idvy phone request number|port-in|release|route|emergency|a2p|toll-free|compliance [--identity <identity>] ...
+idvy phone requests list|get|approve|reject|cancel|resolve [<request_id>] [--tenant <tenant>] [--status <s>]
+                    [--digest <digest>] [--note <text>] [--on-behalf-of <user>] [--reason <text>]
+```
+
+`requests approve` without `--digest` reads the request, prints the quote (with `follow_on`) and asks for
+confirmation; non-interactive use must pass `--digest`. `requests resolve` is a platform-key command.
+
+### `phone numbers`
+
+```text
+idvy phone numbers list|get|update|move|lookup|adopt [<number>] [--identity <identity>] [--tenant <tenant>]
+                   [--primary-for sms,voice] [--expires-at <rfc3339>|none] [--to-identity <identity>]
+```
+
+`adopt` is a platform-key command.
+
+### `phone compliance`, `phone documents` and `phone export`
+
+```text
+idvy phone compliance get|update [--tenant <tenant>] [--legal-name ...] [--entity-type ...]
+                      [--registration-country <cc>] [--company-number ...] [--company-registry <cc[:region]:name>]
+                      [--use-case ...] [--representative-name ...] [--representative-role ...]
+idvy phone documents upload <file> --kind <kind> [--valid-until <date>] [--tenant <tenant>]
+idvy phone documents list|delete [<document_id>] [--tenant <tenant>]
+idvy phone export <profile_id> --reason <text>
+```
+
+`documents upload` computes the size and SHA-256 locally and `PUT`s the file. `export` is a platform-key command.
+
+### `phone registrations`
+
+```text
+idvy phone registrations [--tenant <tenant>]
+idvy phone registrations otp <registration_id> --pin <code>   # a person, for a US sole-proprietor brand
+idvy phone registrations otp-resend <registration_id>
+```
+
+### `phone connectors` and `phone route`
+
+```text
+idvy phone connectors create --kind vapi --region us|eu [--tenant <tenant>]   # reads the Vapi key from stdin
+idvy phone connectors list|rotate|delete [<connector_id>] [--tenant <tenant>]
+idvy phone route get <number>
+```
+
+### `phone sms`, `phone calls`, `phone consent`, `phone port-outs`
+
+```text
+idvy phone sms send --to <e164> --text <text> [--from <number>] [--kind transactional|marketing|verification]
+                    [--dry-run] [--idempotency-key <key>] [--identity <identity>]
+idvy phone sms list|get|wait|resolve|release [<sms_id>] [--identity <identity>] [--from <sender>] [--kind any|verification]
+idvy phone calls create --to <e164> --purpose <text> [--assistant <id>] [--idempotency-key <key>]
+idvy phone calls list|get [<call_id>]
+idvy phone consent get|set --number <e164> [--state opted_out|opted_in] [--purpose marketing] [--evidence <text>]
+idvy phone port-outs list|authorize|reject [<port_out_id>] [--reason-code <code>] [--reason <text>]
+```
+
+### `phone usage`, `phone charges`, `phone statement`, `phone reconcile`
+
+```text
+idvy phone usage [--identity <identity>] [--month YYYY-MM]
+idvy phone charges [--tenant <tenant>] [--month YYYY-MM]
+idvy phone statement --partner <partner_id> --month YYYY-MM
+idvy phone reconcile [--tenant <tenant> | --platform]
+```
+
+---
+
+## Vault
+
+Every command is a client of the [vault routes](api.md#vault). Values are read only from standard input or a
+file, never from an argument, so they never reach shell history; no command prints a value, and an unlock key
+or a ticket is printed once, to standard output only. There is no `reveal` command.
+
+### `vault status`
+
+```bash
+idvy vault status --tenant brightwell
+```
+
+Custody, the tenant key's `kid`, counts of items, grants and pending uses, and `retiring_versions`.
+
+### `vault items list`, `get`, `create`, `update`, `archive`, `restore`, `delete`
+
+```bash
+idvy vault items create --identity bookings.brightwell@pylotamail.com --kind login \
+  --title "TfL road user charging" --account sac_01JA… --origin https://tfl.gov.uk \
+  --username compliance.brightwell@pylotamail.com --password-stdin --approval per_run < tfl-password.txt
+idvy vault items create --identity … --kind api_key --title "Supplier API" --origin https://api.supplier.example \
+  --inject bearer --secret-stdin < key.txt
+idvy vault items create --identity … --kind session --title "Supplier portal" --origin https://portal.supplier.example \
+  --session-file storage-state.json --ttl-days 7
+idvy vault items delete vit_01JAD4…        # asks for the item's title to be typed back unless --yes
+```
+
+`--password-stdin`, `--secret-stdin`, `--totp-uri-file`, `--recovery-codes-file`, `--session-file` and
+`--generate [--length N]` supply values. `update` changes metadata only.
+
+### `vault items rotate`
+
+```bash
+idvy vault items rotate vit_01JAD4… --password-stdin --overlap-hours 24 < new-password.txt
+```
+
+### `vault grants list`, `request`, `approve`, `deny`, `revoke`
+
+```bash
+idvy vault grants request --identity … --item vit_01JAD4… --operation fill --purpose "Check PCN status each morning."
+idvy vault grants approve vgr_01JAD5… --expires-in 7d --on-behalf-of usr_8812
+```
+
+`approve` shows the grant's facts (item, sites, operations, identity, purpose as quoted text) and asks for
+confirmation unless `--yes`.
+
+### `vault uses list`, `get`, `approve`, `deny`, `cancel`
+
+```bash
+idvy vault uses approve vus_01JAD6… --digest c41a…      # prompts with the digest shown when --digest is omitted
+```
+
+### `vault consumers list`, `register`, `activate`, `suspend`, `resume`, `rotate-keys`, `revoke`
+
+```bash
+idvy vault consumers register --tenant brightwell --kind browser --name "Browser fleet" \
+  --hosting self_hosted --modes cdp --keys ./consumer-keys
+idvy vault consumers activate vcn_01JAC2… --note "Reviewed settings and conformance report 2026-11-02"
+```
+
+### `vault consumer-keys generate`
+
+```bash
+idvy vault consumer-keys generate --out ./consumer-keys
+```
+
+Local only: an Ed25519 signing key and an X25519 encryption key, written with mode `0600`; prints the two public
+JWKs.
+
+### `vault consumer-check`
+
+Signs `GET /v1/vault/consumer/self` with the keys in a directory and prints the answer, proving the keys and the
+clock before activation.
+
+### `vault conformance`
+
+```bash
+idvy vault conformance --consumer ./my-consumer.toml [--fixture proxy_second_form]
+```
+
+Runs the fixture server and the consumer under test against it, and prints a report. Exit 0 only when every
+fixture passes.
+
+### `vault custody enrol`, `release`
+
+```bash
+idvy vault custody enrol --tenant brightwell --slots 2      # partner key; prints two unlock keys once
+idvy vault custody release --tenant brightwell --unlock-stdin < unlock.txt
+```
+
+### `vault rotate-key`, `vault revoke-all`, `vault audit`
+
+```bash
+idvy vault rotate-key --tenant brightwell
+idvy vault revoke-all --tenant brightwell --shred-sessions     # asks for the tenant's slug to be typed back
+idvy vault audit --tenant brightwell --verify                  # exit 1 on a broken chain
+```
+
+---
+
 ---
 
 ## Commands at a glance
@@ -2662,6 +2927,16 @@ Privacy      erasure create|get|list|retry|reapply · export create|get
 Members      members list|invite|remove · invitations revoke
 Billing      plans list · billing get|set
 Usage        usage · usage daily · audit · metrics rates|events
+Phone        setup phone · phone countries · phone setup status|draft · phone budget get|set · phone buy · phone search
+             phone request · phone requests list|get|approve|reject|cancel|resolve · phone numbers list|get|update|move|lookup|adopt
+             phone compliance get|update · phone documents upload|list|delete · phone export · phone registrations
+             phone connectors create|list|rotate|delete · phone route get · phone sms send|list|get|wait|resolve|release
+             phone calls create|list|get · phone consent get|set · phone port-outs list|authorize|reject
+             phone usage · phone charges · phone statement · phone reconcile
+Vault        vault status · vault items list|get|create|update|archive|restore|delete|rotate
+             vault grants list|request|approve|deny|revoke · vault uses list|get|approve|deny|cancel
+             vault consumers list|register|activate|suspend|resume|rotate-keys|revoke · vault consumer-keys generate
+             vault consumer-check · vault conformance · vault custody enrol|release · vault rotate-key · vault revoke-all · vault audit
 ```
 
 Members, invitations, plans and billing can also be managed in the console. Notification preferences
