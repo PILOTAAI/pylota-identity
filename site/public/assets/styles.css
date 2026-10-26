@@ -407,6 +407,45 @@ html:not(.js) .theme-toggle {
   display: none;
 }
 
+/* ---------- Status: a capability that is not available yet ----------
+   One treatment everywhere (menus, headings, cards, code panels, pricing): a clock and the
+   word "Coming", in the amber the page already uses for "not yet" states. No dates. */
+
+.soon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber-ink);
+  font: 650 10.5px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.soon svg {
+  width: 11px;
+  height: 11px;
+}
+
+h3 .soon,
+.menu-title .soon,
+.envelope-fields .soon,
+.ways .soon,
+.code-file .soon {
+  margin-left: 6px;
+}
+
+/* on the code surfaces, which are dark in both themes */
+.code-head .soon {
+  background: rgba(240, 197, 138, 0.14);
+  color: var(--tk-num);
+}
+
 /* ---------- Header ---------- */
 
 .site-header {
@@ -671,6 +710,12 @@ html:not(.js) .has-menu:focus-within > .menu {
   letter-spacing: -0.01em;
 }
 
+.menu-title .soon {
+  min-height: 18px;
+  padding: 0 6px 0 5px;
+  font-size: 9.5px;
+}
+
 .menu-desc {
   color: var(--ink-2);
   font-size: 13px;
@@ -863,6 +908,11 @@ html:not(.js) .has-menu:focus-within > .menu {
 .sheet-list a:hover,
 .sheet-plain a:hover {
   background: var(--bg-1);
+}
+
+/* a capability with a status badge takes the full row */
+.sheet-list .sheet-wide {
+  grid-column: 1 / -1;
 }
 
 .sheet-list .i,
@@ -1817,9 +1867,11 @@ h2 {
 
 /* ---------- Capabilities ---------- */
 
+/* Three capabilities in one ruled grid (the Grok products row and Bird's API suite on Mobbin):
+   icon, name, status, one plain paragraph, a specimen of what the agent gets, a link down. */
 .caps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1827,7 +1879,10 @@ h2 {
 }
 
 .cap {
-  padding: 22px 24px 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 22px clamp(20px, 2.4vw, 40px) 4px;
   border-left: 1px solid var(--line-2);
 }
 
@@ -1836,19 +1891,33 @@ h2 {
   border-left: 0;
 }
 
+.cap:last-child {
+  padding-right: 0;
+}
+
 .cap-idx {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   margin-bottom: 28px;
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: 9px;
+  background: var(--paper);
   color: var(--blue-ink);
   font: 700 12px/1 var(--mono);
 }
 
+.cap-idx .i {
+  width: 16px;
+  height: 16px;
+}
+
 .cap h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 0;
   margin: 0 0 8px;
   font-size: 1.15rem;
   font-weight: 680;
@@ -1860,34 +1929,55 @@ h2 {
   color: var(--ink-2);
 }
 
-@media (max-width: 959px) {
-  .caps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .cap:nth-child(3) {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .cap:nth-child(n + 3) {
-    margin-top: 12px;
-    border-top: 1px solid var(--line-2);
-  }
+/* The description takes the slack, so the sample lines sit level across the three columns. */
+.cap > p:not([class]) {
+  flex-grow: 1;
 }
 
-@media (max-width: 559px) {
+.cap .cap-spec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 20px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
+  color: var(--ink);
+  font: 500 12.5px/1.4 var(--mono);
+}
+
+.cap-spec-v {
+  min-width: 0;
+  margin-right: 2px;
+  overflow-wrap: anywhere;
+}
+
+.cap-spec-mask {
+  color: var(--ink-2);
+  letter-spacing: 0.08em;
+}
+
+.cap .stage-links {
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+@media (max-width: 899px) {
   .caps {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .cap {
+  .cap,
+  .cap:first-child,
+  .cap:last-child {
     padding: 20px 0 4px;
     border-left: 0;
   }
 
   .cap + .cap {
-    margin-top: 8px;
+    margin-top: 20px;
     border-top: 1px solid var(--line-2);
   }
 
@@ -2088,6 +2178,16 @@ h2 {
   margin: 24px 0 0;
   color: var(--ink-3);
   font-size: 0.9rem;
+}
+
+.plans-soon {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 14px 0 0;
+  color: var(--ink-2);
+  font-size: 0.95rem;
 }
 
 @media (max-width: 1199px) {
@@ -2847,6 +2947,308 @@ h2 {
   font-size: 12.5px;
 }
 
+/* ---------- Phone numbers and vault (in design) ----------
+   Two-column sections laid out like the lifecycle stages: copy at 5, visual at 7, and
+   "-flip" puts the visual first on wide screens. */
+
+.chan-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 80px);
+  align-items: center;
+}
+
+.chan-grid-flip {
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+}
+
+.chan-grid-flip .chan-copy {
+  order: 2;
+}
+
+.chan-copy > p:not(.eyebrow) {
+  max-width: 48ch;
+  margin: 18px 0 0;
+  color: var(--ink-2);
+  font-size: 1.05rem;
+}
+
+/* the illustrative commands sit under the illustration, at its width */
+.chan-visual .code-os {
+  margin: 16px auto 0;
+}
+
+.numbers + .code-os {
+  max-width: 640px;
+}
+
+.grant + .code-os {
+  max-width: 540px;
+}
+
+.chan-visual {
+  min-width: 0;
+}
+
+.section-vault {
+  background: var(--bg-1);
+}
+
+@media (max-width: 899px) {
+  .chan-grid,
+  .chan-grid-flip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chan-grid-flip .chan-copy {
+    order: 0;
+  }
+}
+
+/* phone numbers card: a number list in the Quo and Telegram pattern (country, number, place),
+   with the state of each number as a pill a person can act on */
+.numbers {
+  max-width: 640px;
+  margin-inline: auto;
+  overflow: hidden;
+}
+
+.num-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 13px 20px 11px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 50%, var(--paper));
+}
+
+.num-title {
+  font-weight: 650;
+}
+
+.num-who {
+  min-width: 0;
+  color: var(--ink-2);
+  font: 12px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.num-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.num-list li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-areas: "cc main meta" ". note note";
+  gap: 0 14px;
+  align-items: center;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cc {
+  grid-area: cc;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 22px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  color: var(--ink-2);
+  font: 650 11px/1 var(--mono);
+}
+
+.num-main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.num {
+  display: block;
+  color: var(--ink);
+  font: 650 13.5px/1.4 var(--mono);
+  white-space: nowrap;
+}
+
+.num-place {
+  display: block;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+.num-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.num-note {
+  grid-area: note;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--amber-ink);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.num-note svg {
+  width: 13px;
+  height: 13px;
+}
+
+.num-msgs {
+  padding: 14px 20px 18px;
+  background: color-mix(in srgb, var(--bg) 30%, var(--paper));
+}
+
+.num-msgs ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.num-msgs li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 1px 10px;
+  align-items: center;
+}
+
+.num-msgs .th-dir {
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+
+.msg-from {
+  font-weight: 650;
+}
+
+.msg-body {
+  grid-column: 2;
+  color: var(--ink-2);
+}
+
+.msg-tag {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+.masked {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  letter-spacing: 0.1em;
+}
+
+@media (max-width: 559px) {
+  .num-list li {
+    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-areas: "cc main" ". meta" ". note";
+  }
+
+  .num-meta {
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+
+  .num-msgs li {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .msg-tag {
+    grid-column: 2;
+    grid-row: auto;
+    justify-self: start;
+    margin-top: 6px;
+  }
+}
+
+/* vault grant card: the key card's head and fields, then an audit trail in the PlanetScale
+   pattern (time, event code, what happened) */
+.grant {
+  max-width: 540px;
+  margin-inline: auto;
+  padding: 22px 24px 20px;
+}
+
+.grant .key-meta {
+  margin-top: 18px;
+}
+
+.key-hidden {
+  color: var(--green-ink);
+  font-weight: 650;
+}
+
+.key-hidden svg {
+  width: 14px;
+  height: 14px;
+}
+
+.audit {
+  margin-top: 18px;
+}
+
+.audit ol {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit li {
+  display: grid;
+  grid-template-columns: 40px auto minmax(0, 1fr);
+  gap: 2px 10px;
+  align-items: baseline;
+}
+
+.audit-t {
+  color: var(--ink-2);
+  font: 12px var(--mono);
+}
+
+.audit code {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.audit-d {
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+@media (max-width: 499px) {
+  .grant {
+    padding: 20px;
+  }
+
+  .audit li {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .audit code {
+    justify-self: start;
+  }
+
+  .audit-d {
+    grid-column: 2;
+  }
+}
+
 /* ---------- Developers ---------- */
 
 .dev-grid {
@@ -3015,10 +3417,10 @@ h2 {
   tab-size: 4;
 }
 
-/* keep the block the same height whichever tab is open (Rust is the longest sample) */
+/* keep the block the same height whichever tab is open (Go is the longest sample, 21 lines) */
 @media (min-width: 900px) {
   .tabs.is-ready pre {
-    min-height: calc(13px * 1.7 * 20 + 32px);
+    min-height: calc(13px * 1.7 * 21 + 32px);
   }
 }
 
@@ -3210,6 +3612,8 @@ h2 {
   --line-2: rgba(255, 255, 255, 0.18);
   --blue: #6B8AFF;
   --blue-ink: #8FA6FF;
+  --amber-soft: #2E2414;
+  --amber-ink: #E8B76B;
   background: var(--bg);
   color: var(--ink);
   border-top: 0;
@@ -3245,6 +3649,17 @@ h2 {
 
 .flow-node {
   padding: 18px 18px 20px;
+}
+
+/* the inputs: Email Routing, and Telnyx for phone numbers */
+.flow-ins {
+  display: grid;
+  gap: 8px;
+}
+
+.flow-k .soon {
+  margin-left: 6px;
+  letter-spacing: 0.08em;
 }
 
 .flow-core {

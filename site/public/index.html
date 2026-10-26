@@ -3,22 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pylota Identity · Email and identity for AI agents</title>
-  <meta name="description" content="Email and identity for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud.">
+  <title>Pylota Identity · Email, phone numbers and a vault for AI agents</title>
+  <meta name="description" content="Email, phone numbers and a credential vault for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud. Phone numbers and the vault are coming.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0A0A0B" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://pylotamail.com/">
   <meta property="og:url" content="https://pylotamail.com/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Pylota Identity">
-  <meta property="og:description" content="Email and identity for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud.">
+  <meta property="og:title" content="Pylota Identity · Email, phone numbers and a vault for AI agents">
+  <meta property="og:description" content="Email, phone numbers and a credential vault for AI agents. Source available, written in Rust, runs on your own Cloudflare account or on Pylota Identity Cloud. Phone numbers and the vault are coming.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="icon" href="favicon/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="favicon/favicon-16.png" sizes="16x16" type="image/png">
   <link rel="apple-touch-icon" href="favicon/favicon-180.png" sizes="180x180">
-  <link rel="stylesheet" href="assets/styles.css?v=20261009-8">
-  <script src="assets/app.js?v=20261009-8"></script>
+  <link rel="stylesheet" href="assets/styles.css?v=20261024-1">
+  <script src="assets/app.js?v=20261024-1"></script>
 </head>
 <body>
   <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
@@ -53,6 +53,9 @@
     <symbol id="i-crate" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.7l5.6 3.1v6.4L8 14.3l-5.6-3.1V4.8z"/><path d="M2.4 4.8L8 7.9l5.6-3.1M8 7.9v6.4"/></g></symbol>
     <symbol id="i-book" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2.2 3.2h3.9A1.9 1.9 0 0 1 8 5.1v8.6a1.6 1.6 0 0 0-1.6-1.6H2.2zM13.8 3.2H9.9A1.9 1.9 0 0 0 8 5.1v8.6a1.6 1.6 0 0 1 1.6-1.6h4.2z"/></g></symbol>
     <symbol id="i-server" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2.2" y="2.4" width="11.6" height="4.6" rx="1.2"/><rect x="2.2" y="9" width="11.6" height="4.6" rx="1.2"/><path d="M4.8 4.7h.01M4.8 11.3h.01"/></g></symbol>
+    <symbol id="i-phone" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.4" y="1.8" width="7.2" height="12.4" rx="1.6"/><path d="M7.2 11.8h1.6"/></g></symbol>
+    <symbol id="i-vault" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.2" width="11.6" height="10.2" rx="1.6"/><circle cx="7.4" cy="7.3" r="2.2"/><path d="M7.4 5.1v.9M11.2 5.9v2.8M4.6 12.4v1.4M11.4 12.4v1.4"/></g></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8s2.2-4.1 6-4.1S14 8 14 8s-2.2 4.1-6 4.1S2 8 2 8z"/><circle cx="8" cy="8" r="1.8"/><path d="M2.9 2.9l10.2 10.2"/></g></symbol>
   </svg>
 
   <a class="skip-link" href="#main">Skip to content</a>
@@ -61,7 +64,7 @@
     <div class="wrap header-inner">
       <a class="brand" href="/" aria-label="Pylota Identity home">
         <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path class="brand-mark-apex" d="M8 46 L26 14 L56 44" pathLength="100" fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="miter"/></svg>
-        <span class="brand-name">Pylota <span>Mail</span></span>
+        <span class="brand-name">Pylota <span>Identity</span></span>
       </a>
 
       <nav class="nav-primary" aria-label="Primary">
@@ -73,21 +76,21 @@
             <div class="menu menu-wide" id="menu-product">
               <div class="menu-grid">
               <div class="menu-col">
-                <p class="menu-label">The mailbox</p>
+                <p class="menu-label">Capabilities</p>
                 <ul>
-                  <li><a class="menu-link" href="#features"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-at"/></svg></span><span class="menu-text"><span class="menu-title">Identities</span><span class="menu-desc">Addresses and signed agent assertions</span></span></a></li>
-                  <li><a class="menu-link" href="#receive"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg></span><span class="menu-text"><span class="menu-title">Verified inbound</span><span class="menu-desc">SPF, DKIM and DMARC verdicts, quarantine</span></span></a></li>
-                  <li><a class="menu-link" href="#understand"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg></span><span class="menu-text"><span class="menu-title">Triage</span><span class="menu-desc">Category, needs reply, urgency, risk flags</span></span></a></li>
-                  <li><a class="menu-link" href="#act"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg></span><span class="menu-text"><span class="menu-title">Safe retries</span><span class="menu-desc">Idempotency keys; uncertain sends never resent</span></span></a></li>
+                  <li><a class="menu-link" href="#email"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-at"/></svg></span><span class="menu-text"><span class="menu-title">Email</span><span class="menu-desc">An address and a verified mailbox per agent</span></span></a></li>
+                  <li><a class="menu-link" href="#phone"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-phone"/></svg></span><span class="menu-text"><span class="menu-title">Phone numbers <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></span><span class="menu-desc">UK, Europe and USA, with SMS and voice</span></span></a></li>
+                  <li><a class="menu-link" href="#vault"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-vault"/></svg></span><span class="menu-text"><span class="menu-title">Vault <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></span><span class="menu-desc">Logins agents use without seeing them</span></span></a></li>
+                  <li><a class="menu-link" href="#security"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg></span><span class="menu-text"><span class="menu-title">Security</span><span class="menu-desc">Scoped keys, tenant isolation, signed events</span></span></a></li>
                 </ul>
               </div>
               <div class="menu-col">
-                <p class="menu-label">Built in</p>
+                <p class="menu-label">The mailbox</p>
                 <ul>
+                  <li><a class="menu-link" href="#receive"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg></span><span class="menu-text"><span class="menu-title">Verified inbound</span><span class="menu-desc">SPF, DKIM and DMARC verdicts, quarantine</span></span></a></li>
+                  <li><a class="menu-link" href="#understand"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg></span><span class="menu-text"><span class="menu-title">Triage</span><span class="menu-desc">Category, needs reply, urgency, risk flags</span></span></a></li>
+                  <li><a class="menu-link" href="#act"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg></span><span class="menu-text"><span class="menu-title">Safe retries</span><span class="menu-desc">Idempotency keys; uncertain sends never resent</span></span></a></li>
                   <li><a class="menu-link" href="#search"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg></span><span class="menu-text"><span class="menu-title">Search</span><span class="menu-desc">Keyword, semantic, hybrid and agentic</span></span></a></li>
-                  <li><a class="menu-link" href="#security"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg></span><span class="menu-text"><span class="menu-title">Security</span><span class="menu-desc">Scoped keys, tenant isolation, signed events</span></span></a></li>
-                  <li><a class="menu-link" href="/docs/guides/custom-domains.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-globe"/></svg></span><span class="menu-text"><span class="menu-title">Custom domains</span><span class="menu-desc">Any DNS host; change domains without breaking threads</span></span></a></li>
-                  <li><a class="menu-link" href="/docs/guides/privacy.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg></span><span class="menu-text"><span class="menu-title">Privacy</span><span class="menu-desc">Retention, EU jurisdiction, erasure receipts</span></span></a></li>
                 </ul>
               </div>
               </div>
@@ -117,7 +120,7 @@
                 <ul>
                   <li><a class="menu-link" href="/docs/reference/cli.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-terminal"/></svg></span><span class="menu-text"><span class="menu-title">CLI</span><span class="menu-desc">idvy: setup, send, search, ask</span></span></a></li>
                   <li><a class="menu-link" href="/docs/reference/events.html"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-webhook"/></svg></span><span class="menu-text"><span class="menu-title">Webhooks</span><span class="menu-desc">Signed events, retried for 72 hours</span></span></a></li>
-                  <li><a class="menu-link" href="#developers"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-crate"/></svg></span><span class="menu-text"><span class="menu-title">Rust SDK</span><span class="menu-desc">A typed client for Rust services</span></span></a></li>
+                  <li><a class="menu-link" href="#developers"><span class="menu-ico"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-crate"/></svg></span><span class="menu-text"><span class="menu-title">SDKs</span><span class="menu-desc">Rust, TypeScript, Python and Go</span></span></a></li>
                 </ul>
               </div>
               </div>
@@ -156,11 +159,13 @@
           <nav class="nav-mobile-panel" aria-label="Primary, small screens">
             <p class="sheet-label">Product</p>
             <ul class="sheet-list">
-              <li><a href="#features"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-at"/></svg>Identities</a></li>
+              <li><a href="#email"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-at"/></svg>Email</a></li>
+              <li><a href="#search"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg>Search</a></li>
+              <li class="sheet-wide"><a href="#phone"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-phone"/></svg>Phone numbers <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></a></li>
+              <li class="sheet-wide"><a href="#vault"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-vault"/></svg>Vault <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></a></li>
               <li><a href="#receive"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg>Verified inbound</a></li>
               <li><a href="#understand"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-sliders"/></svg>Triage</a></li>
               <li><a href="#act"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-retry"/></svg>Safe retries</a></li>
-              <li><a href="#search"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-search"/></svg>Search</a></li>
               <li><a href="#security"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-lock"/></svg>Security</a></li>
               <li><a href="/docs/guides/custom-domains.html"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-globe"/></svg>Custom domains</a></li>
               <li><a href="/docs/guides/privacy.html"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg>Privacy</a></li>
@@ -172,7 +177,7 @@
               <li><a href="/docs/reference/mcp.html"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-plug"/></svg>MCP server</a></li>
               <li><a href="/docs/reference/cli.html"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-terminal"/></svg>CLI</a></li>
               <li><a href="/docs/reference/events.html"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-webhook"/></svg>Webhooks</a></li>
-              <li><a href="#developers"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-crate"/></svg>Rust SDK</a></li>
+              <li><a href="#developers"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-crate"/></svg>SDKs</a></li>
             </ul>
             <ul class="sheet-plain">
               <li><a href="#pricing"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-receipt"/></svg>Pricing</a></li>
@@ -195,7 +200,7 @@
       <div class="wrap hero-top">
         <div class="hero-copy">
           <p class="kicker rise"><span class="kicker-tag">Fair Source</span> FSL-1.1-ALv2 · Rust on Cloudflare Workers</p>
-          <h1 id="hero-title" class="rise">Email and identity for AI&nbsp;agents.</h1>
+          <h1 id="hero-title" class="rise">Email, phone numbers and a vault for AI&nbsp;agents.</h1>
           <p class="lede rise">Written in Rust. Self-host it free on your own Cloudflare account, or use Pylota Identity Cloud.</p>
           <div class="cta-row rise">
             <a class="btn btn-primary" href="/docs/self-hosting.html">
@@ -216,13 +221,13 @@
 
         <div class="envelope rise">
           <div class="envelope-head">
-            <p class="envelope-label">Message headers</p>
+            <p class="envelope-label">Agent identity</p>
           </div>
           <dl class="envelope-fields">
+            <div><dt>Email:</dt><dd>bookings@acme.example.com</dd></div>
+            <div><dt>Phone:</dt><dd>+44 20 7946 0321 <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></dd></div>
+            <div><dt>Vault:</dt><dd>logins it uses but never sees <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></dd></div>
             <div><dt>Runs-On:</dt><dd>your Cloudflare account</dd></div>
-            <div><dt>Written-In:</dt><dd>Rust, compiled to WebAssembly</dd></div>
-            <div><dt>Speaks:</dt><dd>REST API, MCP, CLI, signed webhooks</dd></div>
-            <div><dt>Licence:</dt><dd>FSL-1.1-ALv2, Apache-2.0 after two years</dd></div>
           </dl>
           <p class="envelope-auth"><span>Authentication-Results:</span> <b>spf=pass</b> <b>dkim=pass</b> <b>dmarc=pass</b></p>
         </div>
@@ -360,28 +365,29 @@
       <div class="wrap">
         <div class="section-head">
           <p class="eyebrow">Capabilities</p>
-          <h2 id="features-title">A real mailbox for every agent, with the checks built in.</h2>
+          <h2 id="features-title">What an agent needs to act in its own name.</h2>
         </div>
         <ul class="caps">
-          <li class="cap">
-            <span class="cap-idx" aria-hidden="true">A</span>
-            <h3>An identity per agent</h3>
-            <p>Each agent gets its own identity and address. Move the address to another domain and its history moves with it.</p>
+          <li class="cap" id="email">
+            <span class="cap-idx" aria-hidden="true"><svg class="i" focusable="false"><use href="#i-at"/></svg></span>
+            <h3>Email</h3>
+            <p>Each agent gets its own address. Every inbound message is authenticated, triaged and searchable, and every send is safe to retry.</p>
+            <p class="cap-spec" aria-hidden="true"><span class="cap-spec-v">bookings@acme.example.com</span><span class="verified-check">dmarc=pass</span></p>
+            <p class="stage-links"><a href="#receive">Email in detail</a></p>
           </li>
           <li class="cap">
-            <span class="cap-idx" aria-hidden="true">B</span>
-            <h3>Idempotent sending</h3>
-            <p>Send, reply and forward all require an idempotency key, so a retried request returns the first result.</p>
+            <span class="cap-idx" aria-hidden="true"><svg class="i" focusable="false"><use href="#i-phone"/></svg></span>
+            <h3>Phone numbers <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></h3>
+            <p>Real numbers in the UK, Europe and the USA for SMS and voice, on Telnyx’s carrier network. A person approves every purchase.</p>
+            <p class="cap-spec" aria-hidden="true"><span class="cap-spec-v">+44 20 7946 0321</span><span class="chip">sms</span><span class="chip">voice</span></p>
+            <p class="stage-links"><a href="#phone">Phone numbers in detail</a></p>
           </li>
           <li class="cap">
-            <span class="cap-idx" aria-hidden="true">C</span>
-            <h3>Inbound you can trust</h3>
-            <p>Every inbound message is parsed, authenticated with DKIM, ARC and DMARC, and placed in its thread.</p>
-          </li>
-          <li class="cap">
-            <span class="cap-idx" aria-hidden="true">D</span>
-            <h3>Four ways in</h3>
-            <p>Signed webhooks tell your agent what happened. A REST API, an MCP server and a CLI let it act.</p>
+            <span class="cap-idx" aria-hidden="true"><svg class="i" focusable="false"><use href="#i-vault"/></svg></span>
+            <h3>Vault <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></h3>
+            <p>Logins an agent uses without seeing them, granted once for one site and one task. Every use is audited.</p>
+            <p class="cap-spec" aria-hidden="true"><span class="cap-spec-v">portal login <span class="cap-spec-mask">••••••••</span></span><span class="chip"><svg aria-hidden="true"><use href="#i-eye-off"/></svg>never shown</span></p>
+            <p class="stage-links"><a href="#vault">Vault in detail</a></p>
           </li>
         </ul>
       </div>
@@ -621,6 +627,135 @@
       </div>
     </section>
 
+    <!-- Phone numbers (in design) -->
+    <section class="section" id="phone" aria-labelledby="phone-eyebrow phone-title">
+      <div class="wrap chan-grid chan-grid-flip">
+        <div class="chan-copy">
+          <p class="eyebrow" id="phone-eyebrow">Phone numbers <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></p>
+          <h2 id="phone-title">A real number for every agent.</h2>
+          <p>Numbers in the UK, Europe and the USA, for SMS and voice, on Telnyx’s carrier network.</p>
+          <dl class="modes">
+            <div><dt>Codes</dt><dd>Verification codes arrive at the agent’s identity, or go straight into the vault without passing through the model.</dd></div>
+            <div><dt>Compliance</dt><dd>Business verification and US 10DLC registration show as states a person can act on.</dd></div>
+            <div><dt>Approval</dt><dd>A person approves every number purchase and every port.</dd></div>
+            <div><dt>Opt-out</dt><dd>STOP and other opt-outs are kept per business.</dd></div>
+          </dl>
+        </div>
+
+        <div class="chan-visual rise-on-scroll">
+          <div class="card numbers" role="img" aria-label="Illustration of the planned phone numbers view for the identity bookings@acme.example.com. A London number, +44 20 7946 0321, takes SMS and voice and is active. A Washington DC number, +1 202 555 0143, takes SMS and voice; its US 10DLC campaign needs a sample message before it can send. A new Dublin number is waiting for a person to approve the purchase. Below, an SMS from Acme Fleet Portal with a sign-in code went to the vault and was not shown to the agent, and a STOP reply from +44 7700 900418 opted that number out for Acme Car Hire.">
+            <div class="num-head">
+              <span class="num-title">Numbers</span>
+              <span class="num-who">bookings@acme.example.com</span>
+            </div>
+            <ul class="num-list">
+              <li>
+                <span class="cc">GB</span>
+                <span class="num-main"><span class="num">+44 20 7946 0321</span><span class="num-place">London</span></span>
+                <span class="num-meta"><span class="chip">sms</span><span class="chip">voice</span><span class="pill pill-green"><i></i>active</span></span>
+              </li>
+              <li>
+                <span class="cc">US</span>
+                <span class="num-main"><span class="num">+1 202 555 0143</span><span class="num-place">Washington, DC</span></span>
+                <span class="num-meta"><span class="chip">sms</span><span class="chip">voice</span><span class="pill pill-amber"><i></i>10DLC · action needed</span></span>
+                <span class="num-note"><svg aria-hidden="true"><use href="#i-warn"/></svg>Add a sample message to the campaign</span>
+              </li>
+              <li>
+                <span class="cc">IE</span>
+                <span class="num-main"><span class="num">+353 1 ••• ••••</span><span class="num-place">Dublin · new number</span></span>
+                <span class="num-meta"><span class="pill pill-amber"><i></i>awaiting approval</span><span class="fake-btn fake-btn-locked"><svg aria-hidden="true"><use href="#i-lock"/></svg>Approve</span></span>
+              </li>
+            </ul>
+            <div class="num-msgs">
+              <p class="ask-label">Messages</p>
+              <ul>
+                <li>
+                  <span class="th-dir th-in"><svg aria-hidden="true"><use href="#i-in"/></svg></span>
+                  <span class="msg-from">Acme Fleet Portal</span>
+                  <span class="msg-body">Your sign-in code is <span class="masked">••••••</span></span>
+                  <span class="msg-tag chip chip-blue"><svg aria-hidden="true"><use href="#i-lock"/></svg>to vault</span>
+                </li>
+                <li>
+                  <span class="th-dir th-in"><svg aria-hidden="true"><use href="#i-in"/></svg></span>
+                  <span class="msg-from">+44 7700 900418</span>
+                  <span class="msg-body">STOP</span>
+                  <span class="msg-tag chip">opted out · Acme Car Hire</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+            <div class="code code-os">
+              <div class="code-head"><span class="code-file">shell · illustrative</span><span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></div>
+<pre tabindex="0"><code><span class="t-c"># a London number that takes SMS and calls</span>
+idvy phone search --country GB --city London --sms --voice
+
+<span class="t-c"># request it for the bookings agent; a person approves the purchase</span>
+idvy phone request number +442079460321 \
+    --identity bookings@acme.example.com
+{ <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span> }</code></pre>
+            </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vault (in design) -->
+    <section class="section section-vault" id="vault" aria-labelledby="vault-eyebrow vault-title">
+      <div class="wrap chan-grid">
+        <div class="chan-copy">
+          <p class="eyebrow" id="vault-eyebrow">Vault <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></p>
+          <h2 id="vault-title">Credentials an agent can use without seeing them.</h2>
+          <dl class="modes">
+            <div><dt>Fill</dt><dd>In an agentic browser the vault types the secret into the page. The model never receives it.</dd></div>
+            <div><dt>Grants</dt><dd>One use, bound to one site and one task.</dd></div>
+            <div><dt>Approval</dt><dd>A person approves each use of a sensitive item.</dd></div>
+            <div><dt>Codes</dt><dd>One-time codes come from the agent’s own mailbox or number.</dd></div>
+            <div><dt>Audit</dt><dd>Every use is recorded. Revoking an item destroys its encryption key, so no copy can be read again.</dd></div>
+            <div><dt>Refused</dt><dd>Card and banking details are not stored, and CAPTCHAs are not solved.</dd></div>
+          </dl>
+        </div>
+
+        <div class="chan-visual rise-on-scroll">
+          <div class="card grant" role="img" aria-label="Illustration of a planned vault grant. The bookings agent asked for one use of the Acme Fleet Portal login, on the site portal.acme-fleet.example, for the task Download the October invoices. The secret is never shown to the model. The audit trail: the agent requested the grant at 09:41, sam@acme.example.com approved it at 09:42, the username and password were filled without being revealed at 09:42, a one-time code from +44 20 7946 0321 was filled without being revealed at 09:43, and the grant closed at 09:43 with its one use spent.">
+            <div class="key-head">
+              <span class="key-icon"><svg aria-hidden="true"><use href="#i-vault"/></svg></span>
+              <span class="key-title">Vault grant</span>
+              <span class="pill pill-green"><i></i>used · closed</span>
+            </div>
+            <dl class="key-meta">
+              <div><dt>Item</dt><dd>Acme Fleet Portal login</dd></div>
+              <div><dt>Agent</dt><dd>bookings@acme.example.com</dd></div>
+              <div><dt>Site</dt><dd><code>portal.acme-fleet.example</code></dd></div>
+              <div><dt>Task</dt><dd>Download the October invoices</dd></div>
+              <div><dt>Uses</dt><dd>1 of 1</dd></div>
+              <div><dt>Model sees</dt><dd class="key-hidden"><svg aria-hidden="true"><use href="#i-eye-off"/></svg>never</dd></div>
+            </dl>
+            <div class="audit">
+              <p class="ask-label">Audit</p>
+              <ol>
+                <li><span class="audit-t">09:41</span><code>grant.requested</code><span class="audit-d">bookings agent</span></li>
+                <li><span class="audit-t">09:42</span><code>grant.approved</code><span class="audit-d">sam@acme.example.com</span></li>
+                <li><span class="audit-t">09:42</span><code>secret.filled</code><span class="audit-d">username, password · not revealed</span></li>
+                <li><span class="audit-t">09:43</span><code>code.filled</code><span class="audit-d">from +44 20 7946 0321 · not revealed</span></li>
+                <li><span class="audit-t">09:43</span><code>grant.closed</code><span class="audit-d">one use spent</span></li>
+              </ol>
+            </div>
+          </div>
+            <div class="code code-os">
+              <div class="code-head"><span class="code-file">shell · illustrative</span><span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></div>
+<pre tabindex="0"><code><span class="t-c"># one use of the portal login, for one site and one task</span>
+idvy vault grant acme-portal \
+    --identity bookings@acme.example.com \
+    --site portal.acme-fleet.example \
+    --task <span class="t-s">"Download the October invoices"</span>
+{ <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span> }
+
+<span class="t-c"># once a person approves, the browser fills the form</span>
+{ <span class="t-k">"filled"</span>: [<span class="t-s">"username"</span>, <span class="t-s">"password"</span>], <span class="t-k">"revealed"</span>: <span class="t-n">false</span> }</code></pre>
+            </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Developers -->
     <section class="section" id="developers" aria-labelledby="dev-title">
       <div class="wrap dev-grid">
@@ -631,7 +766,7 @@
             <li><h3>MCP server</h3><p>Point any MCP client at <code>/mcp</code> with a scoped key.</p></li>
             <li><h3>CLI</h3><p><code>idvy</code> sets up the deployment, manages identities and runs searches.</p></li>
             <li><h3>REST API</h3><p>JSON over HTTPS. Every write that sends mail takes an <code>Idempotency-Key</code>.</p></li>
-            <li><h3>Rust SDK</h3><p>A typed client for services written in Rust.</p></li>
+            <li><h3>SDKs</h3><p>Typed clients for Rust, TypeScript and JavaScript, Python and Go.</p></li>
             <li><h3>Signed webhooks</h3><p>Events pushed to your endpoint, signed, and retried for up to 72&nbsp;hours.</p></li>
           </ul>
         </div>
@@ -683,7 +818,7 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
             </div>
 
             <div class="tab-panel" id="tab-rust" data-tab-panel>
-              <h3 class="tab-label" data-tab-label>Rust SDK</h3>
+              <h3 class="tab-label" data-tab-label>Rust</h3>
               <div class="code">
                 <div class="code-head"><span class="code-file">src/booking.rs</span><button class="copy" type="button" data-copy="code-rust"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> Rust example</span></button></div>
 <pre tabindex="0"><code id="code-rust"><span class="t-kw">use</span> pylota_identity::{Client, IdempotencyKey};
@@ -705,6 +840,78 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
     <span class="t-kw">let</span> sent = client.<span class="t-f">send_message</span>(<span class="t-s">"idn_01J9Z3K8V4"</span>, &amp;request, &amp;key).<span class="t-kw">await</span>?;
     println!(<span class="t-s">"{} deduplicated={}"</span>, sent.message.id, sent.deduplicated);
     Ok(())
+}</code></pre>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="tab-ts" data-tab-panel>
+              <h3 class="tab-label" data-tab-label>TypeScript</h3>
+              <div class="code">
+                <div class="code-head"><span class="code-file">src/booking.ts</span><button class="copy" type="button" data-copy="code-ts"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> TypeScript example</span></button></div>
+<pre tabindex="0"><code id="code-ts"><span class="t-kw">import</span> { PylotaIdentity, idempotencyKey } <span class="t-kw">from</span> <span class="t-s">'@pylotahq/identity'</span>;
+
+<span class="t-kw">export async function</span> <span class="t-f">confirmBooking</span>(apiKey: string) {
+  <span class="t-kw">const</span> client = <span class="t-kw">new</span> <span class="t-f">PylotaIdentity</span>({ baseUrl: <span class="t-s">'https://mail.example.com'</span>, apiKey });
+  <span class="t-c">// a retry with the same key returns this same message</span>
+  <span class="t-kw">const</span> sent = <span class="t-kw">await</span> client.<span class="t-f">sendMessage</span>({
+    path: { identity_id: <span class="t-s">'idn_01J9Z3K8V4'</span> },
+    body: {
+      to: [<span class="t-s">'renter@example.org'</span>],
+      subject: <span class="t-s">'Your booking BK-2291'</span>,
+      text: <span class="t-s">'Your car is ready at 9:00.'</span>,
+    },
+    idempotencyKey: <span class="t-f">idempotencyKey</span>(<span class="t-s">'bk-2291-confirm'</span>),
+  });
+  console.<span class="t-f">log</span>(sent.id, <span class="t-s">`deduplicated=${sent.deduplicated}`</span>);
+}</code></pre>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="tab-python" data-tab-panel>
+              <h3 class="tab-label" data-tab-label>Python</h3>
+              <div class="code">
+                <div class="code-head"><span class="code-file">booking.py</span><button class="copy" type="button" data-copy="code-python"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> Python example</span></button></div>
+<pre tabindex="0"><code id="code-python"><span class="t-kw">from</span> pylota_identity <span class="t-kw">import</span> Client, IdempotencyKey
+
+
+<span class="t-kw">def</span> <span class="t-f">confirm_booking</span>(api_key: str) -&gt; <span class="t-kw">None</span>:
+    client = <span class="t-f">Client</span>(base_url=<span class="t-s">"https://mail.example.com"</span>, api_key=api_key)
+    <span class="t-c"># a retry with the same key returns this same message</span>
+    sent = client.<span class="t-f">send_message</span>(
+        <span class="t-s">"idn_01J9Z3K8V4"</span>,
+        to=[<span class="t-s">"renter@example.org"</span>],
+        subject=<span class="t-s">"Your booking BK-2291"</span>,
+        text=<span class="t-s">"Your car is ready at 9:00."</span>,
+        idempotency_key=<span class="t-f">IdempotencyKey</span>(<span class="t-s">"bk-2291-confirm"</span>),
+    )
+    <span class="t-f">print</span>(sent.id, <span class="t-s">f"deduplicated={sent.deduplicated}"</span>)</code></pre>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="tab-go" data-tab-panel>
+              <h3 class="tab-label" data-tab-label>Go</h3>
+              <div class="code">
+                <div class="code-head"><span class="code-file">booking.go</span><button class="copy" type="button" data-copy="code-go"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> Go example</span></button></div>
+<pre tabindex="0"><code id="code-go"><span class="t-kw">import</span> (
+	<span class="t-s">"context"</span>
+	<span class="t-s">"fmt"</span>
+
+	identity <span class="t-s">"github.com/PILOTAAI/pylota-identity-go"</span>
+)
+
+<span class="t-kw">func</span> <span class="t-f">confirmBooking</span>(ctx context.Context, key string) error {
+	client := identity.<span class="t-f">NewClient</span>(<span class="t-s">"https://mail.example.com"</span>, key)
+	<span class="t-c">// a retry with the same key returns this same message</span>
+	sent, err := client.<span class="t-f">SendMessage</span>(ctx, <span class="t-s">"idn_01J9Z3K8V4"</span>, identity.SendRequest{
+		To:      []string{<span class="t-s">"renter@example.org"</span>},
+		Subject: <span class="t-s">"Your booking BK-2291"</span>,
+		Text:    <span class="t-s">"Your car is ready at 9:00."</span>,
+	}, identity.<span class="t-f">IdempotencyKey</span>(<span class="t-s">"bk-2291-confirm"</span>))
+	<span class="t-kw">if</span> err != <span class="t-kw">nil</span> {
+		<span class="t-kw">return</span> err
+	}
+	fmt.<span class="t-f">Println</span>(sent.ID, sent.Deduplicated)
+	<span class="t-kw">return</span> <span class="t-kw">nil</span>
 }</code></pre>
               </div>
             </div>
@@ -768,8 +975,11 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
           <h2 id="platform-title">Built on Cloudflare, in Rust.</h2>
           <p class="section-sub">One Rust Worker, compiled to WebAssembly, runs on Cloudflare primitives in your account.</p>
         </div>
-        <div class="flow" role="group" aria-label="Architecture: Email Routing passes mail to a Rust Worker compiled to WebAssembly, which uses Durable Objects with one per identity, D1, R2, Queues, Vectorize and Workers AI.">
-          <div class="flow-node"><span class="flow-k">in</span><span class="flow-name">Email Routing</span></div>
+        <div class="flow" role="group" aria-label="Architecture: Email Routing passes mail, and Telnyx will pass phone numbers' SMS and calls once phone numbers launch, to a Rust Worker compiled to WebAssembly, which uses Durable Objects with one per identity, D1, R2, Queues, Vectorize and Workers AI.">
+          <div class="flow-ins">
+            <div class="flow-node"><span class="flow-k">in</span><span class="flow-name">Email Routing</span></div>
+            <div class="flow-node"><span class="flow-k">in <span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span></span><span class="flow-name">Telnyx</span><span class="flow-sub">numbers, SMS, voice</span></div>
+          </div>
           <span class="flow-arrow" aria-hidden="true"></span>
           <div class="flow-node flow-core"><span class="flow-k">compute</span><span class="flow-name">Rust Worker</span><span class="flow-sub">WebAssembly</span></div>
           <span class="flow-arrow" aria-hidden="true"></span>
@@ -832,6 +1042,7 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
           </li>
         </ol>
         <p class="plans-note">Prices in pounds sterling, excluding VAT. A top-up is £1 a month for one more inbox, 1,000 more sends or 1,000 more triage analyses. Monthly allowances reset on your billing date on a paid plan, and on the 1st of each month on Free; inbox, domain and seat counts do not. Pylota Identity Cloud opens with the v1.0 release.</p>
+        <p class="plans-soon"><span class="soon"><svg aria-hidden="true" focusable="false"><use href="#i-clock"/></svg>Coming</span> Phone numbers and the vault are priced at launch.</p>
       </div>
     </section>
 
@@ -857,7 +1068,7 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
               <span class="repo-name"><span>PILOTAAI /</span> pylota-identity</span>
               <svg class="repo-gh" aria-hidden="true" focusable="false"><use href="#i-github"/></svg>
             </span>
-            <span class="repo-desc">Email and identity for AI agents.</span>
+            <span class="repo-desc">Email, phone numbers and a vault for AI agents.</span>
             <span class="repo-tags"><span class="chip">FSL-1.1-ALv2</span><span class="chip"><i class="lang-dot"></i>Rust</span><span class="chip">Cloudflare Workers</span></span>
           </a>
           <div class="code code-os">
@@ -894,6 +1105,10 @@ idvy deploy</code></pre>
           <details>
             <summary>Can operators bring their own domain?</summary>
             <p>Yes, wherever their DNS is hosted. A domain at any DNS host needs a few records (MX, DKIM, a bounce subdomain) and then sends and receives through Amazon SES, on the apex or a subdomain, so existing mail keeps working. Operators can also keep their own mailbox and forward to the agent, or send through their own mail provider: a daily check proves their mail still passes DMARC before the agent sends as them. Domains on Cloudflare work directly. Each option that uses Amazon SES or another mail provider ships in v1.0 only if its pre-build test passes; otherwise it follows in a later release. Identities keep their history when they move. The <a href="/docs/guides/custom-domains.html">custom domains guide</a> walks through each option.</p>
+          </details>
+          <details>
+            <summary>When can I use phone numbers and the vault?</summary>
+            <p>Not yet. Both are in design, so this page marks them Coming until you can use them. They will be priced at launch.</p>
           </details>
           <details>
             <summary>Where is data stored?</summary>
@@ -936,22 +1151,24 @@ idvy deploy</code></pre>
       <div class="footer-brand">
         <a class="brand" href="/" aria-label="Pylota Identity home">
           <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><path class="brand-mark-apex" d="M8 46 L26 14 L56 44" pathLength="100" fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="miter"/></svg>
-          <span class="brand-name">Pylota <span>Mail</span></span>
+          <span class="brand-name">Pylota <span>Identity</span></span>
         </a>
-        <p>Email and identity for AI agents.</p>
+        <p>Email, phone numbers and a vault for AI agents.</p>
       </div>
       <nav class="footer-col" aria-labelledby="f-product">
         <h2 id="f-product">Product</h2>
         <ul>
-          <li><a href="#features">Features</a></li>
-          <li><a href="#search">Search</a></li>
+          <li><a href="#email">Email</a></li>
+          <li><a href="#phone">Phone numbers</a></li>
+          <li><a href="#vault">Vault</a></li>
           <li><a href="#security">Security</a></li>
-          <li><a href="/docs/">Docs</a></li>
+          <li><a href="/docs/guides/privacy.html">Privacy</a></li>
         </ul>
       </nav>
       <nav class="footer-col" aria-labelledby="f-dev">
         <h2 id="f-dev">Developers</h2>
         <ul>
+          <li><a href="/docs/">Docs</a></li>
           <li><a href="/docs/quickstart.html">Quickstart</a></li>
           <li><a href="/docs/reference/api.html">REST API</a></li>
           <li><a href="/docs/reference/mcp.html">MCP server</a></li>
