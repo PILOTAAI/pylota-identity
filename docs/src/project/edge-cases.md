@@ -1,7 +1,7 @@
 # Edge-case register
 
-Every row is a required behaviour. The register has 1035 rows in 24 sections (A–L, N, O and W, then Q, R,
-T, V, X, Y and Z, then P and U). The 1027 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
+Every row is a required behaviour. The register has 1041 rows in 24 sections (A–L, N, O and W, then Q, R,
+T, V, X, Y and Z, then P and U). The 1033 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
 integrator-owned rows (C5, E6, E7, K1, K2, K4, X60 and P107) are tested in the integrator's own suites. Section
 W was section M; it was renamed so that its rows (W1–W49) can never be mistaken for build-plan milestones
 (M0–M49). Sections Q to Z were added with [ADR 0017](adr/0017-agentmail-parity.md) and follow section W.
@@ -9,10 +9,10 @@ They skip U, which would collide with the PRD's selling points U1–U10 (as M wo
 priorities and S with spikes), so calendar rows are section V and uploads rows are Q65–Q108 in section Q.
 Sections P (phone numbers, [ADR 0020](adr/0020-phone-numbers.md)) and U (the vault,
 [ADR 0021](adr/0021-agent-vault.md)) follow Z, because every other letter was taken or avoided. Section P holds
-phone-number rows: its IDs are always written with the section letter and a number from 1 to 127 (P1–P127), so
+phone-number rows: its IDs are always written with the section letter and a number from 1 to 128 (P1–P128), so
 they cannot be mistaken for the priorities P0, P1 and P2, which are never used as row IDs; in prose a row is
 always called 'row P1' and a priority 'priority P1'. Section U holds vault rows, always written with the section
-letter and a number from 1 to 85 (U1–U85), and the PRD's selling points are always called 'selling point U1' in
+letter and a number from 1 to 90 (U1–U90), and the PRD's selling points are always called 'selling point U1' in
 prose; a vault row is 'row U1'.
 The **Owner** column says where the behaviour is enforced:
 
@@ -1123,6 +1123,7 @@ on staging ([Phone numbers § 35](design/phone-numbers.md#35-tests)).
 | P125 | SMS from a US number to a GB handset; from a GB number to a US handset before the cross-border test | `403 policy_denied` (`destination_not_supported`); `403 policy_denied` (`destination_untested`) | S | `it::phone::cross_border_destinations`, `live::phone::cross_border_sms` |
 | P126 | A legacy-group number of a sole-trader tenant: before the decision, at its deadline, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
 | P127 | The provider account not at the Verified level | US rows `eligible: false` (`platform_prerequisite`) in the catalogue and the setup status; a US purchase blocked on `platform_prerequisite` | S | `it::phone::account_level_probe` |
+| P128 | A send while the ops switch `phone` is at `paused_purchases` (set by hand or by low provider balance); the same send at `paused` | Sent at `paused_purchases`; `503 unavailable` (`phone_paused`) at `paused`; a purchase at `paused_purchases` is refused | S | `it::phone::sms_under_paused_purchases` |
 
 ## U · Vault
 
@@ -1199,7 +1200,7 @@ fixtures in `crates/conformance/vault`, `conf::vault::*`, and in the integrator'
 | U64 | `vault.allowed` set false with uses `in_use` | Every open use closes (`kill_switch`); redemptions refuse at once, before the batch completes | S | `it::vault::kill_switches` |
 | U65 | `revoke-all` with `shred_sessions` and `archive_items` over 2,500 rows | Every grant revoked, use closed, session version deleted and item archived, in batches of 1,000; one `vault.revoke_all` row | S | `it::vault::kill_switches` |
 | U66 | Deleting an item; its R2 delete fails | Rows shredded in one batch with the receipt; the daily sweep deletes the object | S | `it::vault::erasure_scopes` |
-| U67 | Identity erasure with identity-scoped items and grants on tenant-scoped items | Its items shredded, its grants deleted and uses closed, audit rows kept with `run_id` cleared; receipt counts | S | `it::vault::erasure_scopes` |
+| U67 | Identity erasure with identity-scoped items and grants on tenant-scoped items | Its items shredded; its uses and then its grants deleted; audit rows unchanged and their `vault_audit_runs` rows deleted, so `idvy vault audit --verify` still passes; receipt counts | S | `it::vault::erasure_scopes`, `it::vault::erasure_keeps_chain` |
 | U68 | Tenant erasure in partner custody | Custody slots and tenant keys deleted first, then the rest; the probe finds no row and an empty `t/{tenant_id}/vault/` prefix | S | `it::vault::erasure_scopes` |
 | U69 | A sentence in `docs/` or `site/` claiming the vault is zero-knowledge or end-to-end encrypted without a negation in the sentence; "we cannot see your passwords" outside double quotes; the trust statement, which denies both | The build fails on the first two; the trust statement passes | S | `xtask::docs_forbidden_claims` |
 | U70 | `PM_VAULT` turned off while `vault_code` mail and SMS are hidden | They stay hidden and expire; nothing is released | S | `it::vault::email_codes_rule_4b` |
@@ -1218,3 +1219,8 @@ fixtures in `crates/conformance/vault`, `conf::vault::*`, and in the integrator'
 | U83 | A tenant generates 100,000 refusals in an hour | Rate limited at `RL_VAULT`; no audit row is deleted by count; only rows past 400 days ever go | S | `it::vault::audit_chain_and_age_only` |
 | U84 | A grant's or use's `purpose` holds a URL, Markdown link syntax and HTML | Shown as escaped text on every approval surface and in notification email; never a link, image or markup | S | `browser::vault::approval_no_links`, `it::vault::grant_decisions` |
 | U85 | Redemption context with `top_level_origin` `HTTPS://TFL.GOV.UK.:443` for a use at `https://tfl.gov.uk`; a consumer comparing its own way | Canonicalised to the same origin and accepted; consumers use `canonicalise_origin` from the SDK | S+I | `core::vault::origin::canonical_forms`, `conf::vault::canonical_origin` |
+| U86 | A consumer reports after `final: true`, after `window_elapsed` (within 10 minutes and after), and writes a session back after `final: true`; a use closed by revocation then writes back | Reports accepted until `ticket_valid_until`; the session write-back after `final` accepted until `closes_at`; the revoked use's write-back `410 vault_ticket_expired` (`grant_revoked`); `dek_ticket_sealed` cleared at closure in every case | S | `it::vault::reports_after_close` |
+| U87 | A `session_capture` use created with `phases: []`, minted, written back inside and after `run_window_seconds`; one created with a phase | `in_use` at minting with `closes_at` = mint + window; the write-back inside is accepted, the one after `410`; a phase is `400 invalid_request` | S | `it::vault::session_capture_window` |
+| U88 | `credentials` redeemed on a `password_change` form for a `rotate_fill` use and for a `fill` use | Accepted for `rotate_fill`; `403 vault_refused` (`form_kind_not_allowed`) for `fill` | S | `core::vault::redeem::form_kind_table` |
+| U89 | A `fill` use with `version: "previous"` inside the overlap, after it, and with no previous version | The previous DEK sealed at minting and redemption accepted inside the overlap; `403 vault_refused` (`previous_version_unavailable`) otherwise; a redemption after the overlap ends is `410` (`item_rotated`) | S | `it::vault::previous_version_use` |
+| U90 | Deleting an item with closed and open uses; identity erasure with uses of tenant-scoped items | One batch deletes uses before grants and the item, with no foreign-key failure; receipt counts `uses_deleted` | S | `it::vault::delete_with_uses` |

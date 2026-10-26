@@ -594,8 +594,9 @@ tenant that is being erased are handled by the global job's `held_erasures` step
 **Phone numbers.** `DELETE /v1/identities/{id}` is refused while the identity holds a live number
 (`409 identity_has_phone_numbers`), so numbers are released first; the mailbox wipe covers `sms_*` and `calls`.
 **Vault.** In step `scrub_control_plane`, before `service_accounts`: the identity's identity-scoped vault items
-are crypto-shredded (versions, grants, uses closed, R2 objects by key); its grants on tenant-scoped items are
-deleted and their uses closed; vault audit rows are kept with IDs only and `run_id` cleared
+are crypto-shredded (versions, uses, grants, R2 objects by key); its uses of tenant-scoped items and then its
+grants on them are deleted; vault audit rows are kept unchanged (IDs only) and their `vault_audit_runs` rows,
+which hold the run identifiers outside the hash chain, are deleted
 ([Vault § 16.3](vault.md#163-erasure-scopes)).
 
 ### 6.6 Tenant scope

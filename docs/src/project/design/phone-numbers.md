@@ -19,7 +19,7 @@ data, tenant isolation, provider credentials) ([ADR 0020](../adr/0020-phone-numb
 | | |
 |---|---|
 | Requirements | FR-PHN-1 to FR-PHN-54 (this page, [§33](#33-functional-requirements)); it extends FR-IDN-2, FR-IDN-4, FR-IDN-10, FR-IN-5, FR-IN-11, FR-SCR-1, FR-PRV-1 to FR-PRV-6, FR-BILL-1 to FR-BILL-6, FR-TEN-4, FR-CON-6 and FR-KEY-4 |
-| Edge cases | [P1](#34-edge-cases)–[P127](#34-edge-cases) (section `P · Phone numbers` of the [edge-case register](../edge-cases.md); P107 is integrator-owned) |
+| Edge cases | [P1](#34-edge-cases)–[P128](#34-edge-cases) (section `P · Phone numbers` of the [edge-case register](../edge-cases.md); P107 is integrator-owned) |
 | Code | `crates/core/src/phone/{mod.rs, e164.rs, catalogue.rs, requests.rs, budget.rs, onboarding.rs, capabilities.rs, numbers.rs, orders.rs, sms.rs, segments.rs, consent.rs, verify.rs, a2p.rs, voice.rs, porting.rs, money.rs, telnyx.rs}` (validation, state machines, the quote digest, the standing budget, onboarding status, capability facets, the policy pipeline, segment counting, status and error mapping from Telnyx; pure), `crates/core/data/phone-catalogue.json`, `crates/core/data/phone-rate-card.json`; `crates/worker/src/phone/{mod.rs, provider.rs, telnyx/{client.rs, webhook.rs, mapping.rs}, vapi.rs, fake.rs, execute.rs, buy.rs, onboarding.rs, orders.rs, numbers.rs, tenant_resources.rs, compliance.rs, documents.rs, sms_out.rs, sms_in.rs, a2p.rs, voice.rs, porting.rs, port_out.rs, reconcile.rs, money.rs, invoicing.rs}`; `handlers/phone/{catalogue.rs, numbers.rs, buy.rs, setup.rs, budget.rs, requests.rs, compliance.rs, sms.rs, wait.rs, calls.rs, consent.rs, routes.rs, connectors.rs, port_outs.rs, charges.rs, platform.rs}`; `handlers/hooks_telnyx.rs`; `consumers/phone.rs` (the `pm-phone` consumer); `mailbox/sms.rs`, `mailbox/calls.rs`; `crons/phone.rs`; `jobs/phone_reconcile.rs`; `console/pages/phone/*.rs`; `mcp/tools.rs` (twelve tools); `crates/cli/src/commands/phone.rs`; hooks in other milestones' files listed in [§36](#36-milestones) |
 | Tables | D1: `phone_tenants`, `phone_numbers`, `phone_number_releases`, `phone_requests`, `phone_onboarding_drafts`, `phone_compliance_profiles`, `phone_compliance_documents`, `phone_requirement_groups`, `phone_registrations`, `phone_voice_connectors`, `phone_voice_routes`, `phone_port_outs`, `phone_consent`, `phone_charges`, `phone_provider_events`, `phone_message_index` (new); `service_accounts.sms_senders_json` (new column). Mailbox: `sms_conversations`, `sms_messages`, `sms_media`, `sms_verifications` (with `vault_item_id`, `vault_consumed_at`, `vault_use_id` for the vault's code source), `calls` (new); `idempotency.sms_id` (new column). `TenantQuota`: counters `phone_spend:*`, `sms:*`, holds of feature `phone_spend`. R2: `phone-staging/…`, `t/{ten}/phone/docs/{cpd}`, `t/{ten}/i/{idn}/sms/{sms}/m/{n}` ([§24](#24-privacy), [Data model](data-model.md)) |
 | Contracts | The routes of [§28](#28-mcp-and-cli) and the [REST API](../../reference/api.md) (catalogue, setup, budget, one-call purchase, search, requests, numbers, routes, connectors, compliance, documents, SMS, `sms/wait`, calls, consent, port-outs, charges, platform reconcile and adopt); `POST /hooks/telnyx` (no key; Ed25519 signature); the permissions `phone:read`, `phone:request`, `phone:send`, `phone:call`, `phone:approve`, `phone:manage`, `phone:compliance`; the events of [§25](#25-events-and-audit); the policy fields of [§19](#19-policy), among them the standing budget `phone.auto_approve` and the registration cap; the errors of [§22](#22-failure-handling); the ID prefixes `pnm_ phr_ pdr_ cpp_ cpd_ sms_ smc_ cal_ pvc_ vrt_ pto_ pti_ a2p_ chg_ pev_` (`pvc_` for voice connectors, because the vault design uses `vcn_` for its consumers); the variables `PM_PHONE`, `PM_TELNYX_API_KEY`, `PM_TELNYX_PUBLIC_KEY`, `PM_TELNYX_API_BASE`, `PM_TELNYX_ACCOUNT_ID`, `PM_PHONE_CATALOGUE`, `PM_PHONE_RATE_CARD`, `PM_PHONE_KYC_RETENTION_DAYS`; the queue binding `Q_PHONE` (queues `pm-phone`, `pm-phone-dlq`); the ops switch `phone` |
@@ -1543,7 +1543,10 @@ is pure and takes the facts the handler loaded):
 1. **Idempotency.** Same key and body: the stored response. Same key, other body: `409
    idempotency_conflict`. In progress: `409 request_in_progress`.
 2. **Tenant and identity.** `403 tenant_suspended`, `409 identity_paused`, `409 identity_owner_required`.
-3. **Ops switch.** `phone` not `on`: `503 unavailable`, `details.reason = "phone_paused"`.
+3. **Ops switch.** `phone` at `paused`: `503 unavailable`, `details.reason = "phone_paused"`. At `on` and at
+   `paused_purchases` the send continues: `paused_purchases` stops only orders, ports and registration fees
+   ([§30](#30-rollout-telemetry-and-rollback)), and low provider balance sets it automatically, so texts keep working
+   while the operator tops up ([P128](#34-edge-cases)).
 4. **Test tenant.** A test tenant's SMS never reaches the provider: it is accepted and driven by the
    simulator (the last digit of `to` chooses `delivered`, `failed`, `delivery_unconfirmed` or `uncertain`),
    and the simulator's IDs are never written outside test tenants.
@@ -2841,7 +2844,7 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
 
 ## 34. Edge cases
 
-Section `P · Phone numbers` of the [edge-case register](../edge-cases.md) (rows P1–P127; P107 is
+Section `P · Phone numbers` of the [edge-case register](../edge-cases.md) (rows P1–P128; P107 is
 integrator-owned):
 
 | # | Case | Required behaviour | Owner | Test |
@@ -2973,6 +2976,7 @@ integrator-owned):
 | P125 | SMS from a US number to a GB handset; from a GB number to a US handset before the cross-border test | `403 policy_denied` (`destination_not_supported`); `403 policy_denied` (`destination_untested`) | S | `it::phone::cross_border_destinations`, `live::phone::cross_border_sms` |
 | P126 | A legacy-group number of a sole-trader tenant: before the decision, at its deadline, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
 | P127 | The provider account not at the Verified level | US rows `eligible: false` (`platform_prerequisite`) in the catalogue and the setup status; a US purchase blocked on `platform_prerequisite` | S | `it::phone::account_level_probe` |
+| P128 | A send while the ops switch `phone` is at `paused_purchases` (set by hand or by low provider balance); the same send at `paused` | Sent at `paused_purchases`; `503 unavailable` (`phone_paused`) at `paused`; a purchase at `paused_purchases` is refused | S | `it::phone::sms_under_paused_purchases` |
 
 ## 35. Tests
 
@@ -3088,7 +3092,7 @@ sms_in.rs, a2p.rs, codes.rs}`, `handlers/phone/{sms.rs, wait.rs, consent.rs}`, `
 **Implements:** FR-PHN-21 to FR-PHN-31, FR-PHN-45 (`outbound_sms` with registrations), FR-PHN-48, FR-PHN-49 (US
 onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), FR-PHN-54 (the
 sole-proprietor brand, where the decision allows it), and edge rows P42–P72, P77 (SMS charges in the job's input),
-P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125.
+P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125, P128.
 
 **Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of §12.3 are enabled;
 `live::phone::redaction_levels` recorded in §8; `live::phone::a2p_paths`, `live::phone::sole_prop_otp`,

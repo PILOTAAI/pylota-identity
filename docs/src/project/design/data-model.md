@@ -1549,7 +1549,7 @@ CREATE INDEX vault_grants_identity ON vault_grants(identity_id, status, created_
 CREATE INDEX vault_grants_item ON vault_grants(item_id, status);
 CREATE INDEX vault_grants_tenant ON vault_grants(tenant_id, status, created_at);
 
--- Uses (Vault § 6, § 7). ticket_hash and dek_ticket_sealed are cleared when the use ends.
+-- Uses (Vault § 6, § 7). dek_ticket_sealed is cleared when the use ends; ticket_hash at ticket_valid_until (§ 4.4).
 CREATE TABLE vault_uses (
   id                 TEXT PRIMARY KEY,                      -- vus_
   tenant_id          TEXT NOT NULL REFERENCES tenants(id),
@@ -1581,6 +1581,8 @@ CREATE TABLE vault_uses (
   redeem_by          INTEGER,
   first_redeemed_at  INTEGER,
   closes_at          INTEGER,
+  closed_at          INTEGER,
+  ticket_valid_until INTEGER,                               -- reports and allowed write-backs authenticate until then
   close_reason       TEXT,
   outcome            TEXT,
   write_back_done    INTEGER NOT NULL DEFAULT 0,
@@ -1661,13 +1663,21 @@ CREATE TABLE vault_audit (
   outcome           TEXT,
   reason            TEXT,
   site              TEXT,                                   -- registrable domain, never a URL
-  run_id            TEXT,
   details_json      TEXT NOT NULL DEFAULT '{}',             -- counts and enumerations only
   created_at        INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX vault_audit_seq ON vault_audit(tenant_id, seq);
 CREATE INDEX vault_audit_item ON vault_audit(tenant_id, item_id, seq);
 CREATE INDEX vault_audit_created ON vault_audit(created_at);
+
+-- The run of each audit row (Vault § 14.1), outside row_hash, so identity erasure can delete it
+-- without changing the chain.
+CREATE TABLE vault_audit_runs (
+  audit_id   TEXT PRIMARY KEY REFERENCES vault_audit(id) ON DELETE CASCADE,
+  tenant_id  TEXT NOT NULL,
+  run_id     TEXT NOT NULL
+);
+CREATE INDEX vault_audit_runs_run ON vault_audit_runs(tenant_id, run_id);
 
 -- Audit anchors (Vault § 16.1): the last row retention deleted, so the chain stays verifiable.
 CREATE TABLE vault_audit_anchors (

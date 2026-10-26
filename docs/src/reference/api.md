@@ -1506,7 +1506,8 @@ Returns `201` with the item.
 #### `DELETE /v1/vault/items/{item_id}` — `vault:admin`, never an identity key
 
 Crypto-shreds every version, deletes the item's grants and closes its uses. Returns `200` with the shred receipt
-(`versions_shredded`, `r2_objects_deleted`, `uses_closed`, `grants_deleted`, `restorable_until`, `custody`).
+(`versions_shredded`, `r2_objects_deleted`, `uses_closed`, `uses_deleted`, `grants_deleted`, `restorable_until`,
+`custody`). The item's uses are deleted with it; the audit keeps their IDs.
 
 #### Vault item object
 
@@ -1575,6 +1576,11 @@ The orchestrator asks to use an item now. `Idempotency-Key` required.
   "consumer_id": "vcn_01JAC2…", "run_id": "run_8f2c41", "origin": "https://tfl.gov.uk",
   "trigger": "login_form", "purpose": "Check PCN status for WM12ABC", "capture_into": null }
 ```
+
+`version` is optional: `"current"` (the default) or `"previous"`, for `fill` and `inject` while the item's
+previous version is inside its overlap (otherwise `403 vault_refused`, `previous_version_unavailable`). `phases`
+is non-empty, except for `session_capture`, which takes `phases: []`; its use starts when the ticket is minted and
+must write back within `run_window_seconds`.
 
 Returns `201` with `use` and, when no person must decide, `ticket` and `ticket_expires_at` (redeem within 60
 seconds). A replay returns `ticket: null` and `ticket_replayed: false`. `operation: "sign"` (P1) takes
@@ -1675,8 +1681,8 @@ seconds later), a `nonce`, `keyid`, `alg="ed25519"` and `tag="pylota-identity-va
 |---|---|
 | `GET /v1/vault/consumer/self` | The consumer's own record |
 | `POST /v1/vault/consumer/redeem` | `{ ticket, phase, wait_seconds, context }`: redeems one phase; answers the HPKE-sealed packet ([§ 8.6](../project/design/vault.md#86-redemption-checks)) |
-| `POST /v1/vault/consumer/report` | `{ ticket, phase?, outcome, final? }`: reports an outcome; answers with `closed` |
-| `POST /v1/vault/consumer/write-back` | `{ ticket, kind, … }`: a refreshed session, a rotated secret or a password confirmation; answers with `closed` |
+| `POST /v1/vault/consumer/report` | `{ ticket, phase?, outcome, final? }`: reports an outcome; answers with `closed`. Accepted until the use's `ticket_valid_until`, 10 minutes after it closed or its window ended |
+| `POST /v1/vault/consumer/write-back` | `{ ticket, kind, … }`: a refreshed session, a rotated secret or a password confirmation; answers with `closed`. Accepted before `closes_at`, after a `final` report too; a use closed for any other reason refuses it (`410 vault_ticket_expired`) |
 | `GET /v1/vault/consumer/uses/{use_id}` | The use's `status`, `closed` and `close_reason`, for a use bound to this consumer; at most 6 a minute per use |
 
 The header `X-Pylota-Identity-Vault-Unlock` is accepted only from the tenant's own partner key on

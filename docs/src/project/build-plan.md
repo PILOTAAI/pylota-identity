@@ -2085,7 +2085,7 @@ sms_in.rs, a2p.rs, codes.rs}`, `handlers/phone/{sms.rs, wait.rs, consent.rs}`, `
 **Implements:** FR-PHN-21 to FR-PHN-31, FR-PHN-45 (`outbound_sms` with registrations), FR-PHN-48, FR-PHN-49 (US
 onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), FR-PHN-54 (the
 sole-proprietor brand, where the decision allows it), and edge rows P42–P72, P77 (SMS charges in the job's input),
-P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125.
+P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125, P128.
 
 **Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of [Phone numbers § 12.3](design/phone-numbers.md#123-dispatch-provider-idempotency-and-uncertain) are enabled;
 `live::phone::redaction_levels` recorded in [Phone numbers § 8](design/phone-numbers.md#8-tenant-provider-resources); `live::phone::a2p_paths`, `live::phone::sole_prop_otp`,
@@ -2155,7 +2155,7 @@ audit, custody, rotate-key), `console/pages/vault.rs` (items and audit), `crates
 before both are recorded in [Design index › Spikes](design/index.md#spikes).
 
 **Implements:** FR-VLT-1–7, FR-VLT-21, FR-VLT-22, FR-VLT-24, FR-VLT-25 and edge rows U1–U21, U59–U63, U66–U69, U83,
-U85.
+U85, U90.
 
 **Acceptance:** the rows above with their tests; `xtask::vault_types_have_no_debug` and
 `xtask::docs_forbidden_claims` run in CI; `it::security::cross_tenant_matrix` covers the new routes.
@@ -2183,9 +2183,9 @@ consumer), CLI `grants`, `uses`, `consumers`, `consumer-keys`, `consumer-check`,
 | `notify/*` (M26) | Vault approvals in "Needs a person" and the daily email, with escaped purpose text |
 | `crons/mod.rs` (M5) | The every-minute vault cron (`jobs/vault_cron.rs`): use deadlines, nonce expiry |
 
-**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and edge rows U22–U40, U64, U65, U71–U82, U84.
+**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and edge rows U22–U40, U64, U65, U71–U82, U84, U86.
 
-**Acceptance:** the rows above; spike S-VLT3; every `conf::vault::*` fixture passes against the reference consumer
+**Acceptance:** the rows above; spike S-VLT3 against RFC 9421 Appendix B and the committed fixed vectors (the TypeScript, Python and Go helpers are checked against the same vectors in M46–M48, not here); every `conf::vault::*` fixture passes against the reference consumer
 in CDP and proxy modes; `sdk::coverage::every_operation` passes with the new operations.
 
 ---
@@ -2205,7 +2205,7 @@ M30 for the event-feed visibility of `vault.*` events; M31 because rule 4b sits 
 | `handlers/wait.rs` (M7) | `403 policy_denied` (`codes_into_fills_only`) |
 | `jobs/retention.rs` (M14) | Hidden `vault_code` mail and code rows after 24 hours |
 
-**Implements:** FR-VLT-14–17 and edge rows U41–U49, U51, U52, U70.
+**Implements:** FR-VLT-14–17 and edge rows U41–U49, U51, U52, U70, U87.
 
 **Acceptance:** the rows above; `live::vault::email_code_into_fill` on staging; `it::vault::sms_otp_phase` once M39
 has landed.
@@ -2219,7 +2219,7 @@ pages, `jobs/vault_cron.rs` (every minute: overlaps, re-wrap sweep; daily: sessi
 reminders), the session import route, CLI `revoke-all`, `idvy ops switch vault_redeem`, the runbook "Vault
 incident" in [Observability § 9](design/observability.md#9-runbooks).
 
-**Implements:** FR-VLT-18–20, FR-VLT-29 and edge rows U50, U53–U58.
+**Implements:** FR-VLT-18–20, FR-VLT-29 and edge rows U50, U53–U58, U88, U89.
 
 **Acceptance:** the rows above; `live::vault::browserbase_settings`; a staging rehearsal of
 [Vault § 22.3](design/vault.md#223-migrating-from-browser_sealed_sessions) with a test integrator (register and

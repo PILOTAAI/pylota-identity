@@ -15,7 +15,7 @@ Decided in [ADR 0021](../adr/0021-agent-vault.md); risk tier T2.
 | | |
 |---|---|
 | Requirements | FR-VLT-1 to FR-VLT-30 (this page, [§26](#26-functional-requirements)), FR-IDN-10 (the ledger gains `login_domains` and a vault link), FR-IN-5 and FR-IN-11 (quarantine rule 4b and `wait`), FR-TEN-4 (seven `vault.*` policy fields), FR-CON-6 (two new decisions reserved for people), FR-PRV-3 (erasure receipts), FR-KEY-1 (six permissions) |
-| Edge cases | [U1](../edge-cases.md)–[U85](../edge-cases.md) (section `U · Vault`, [§27](#27-edge-cases)) |
+| Edge cases | [U1](../edge-cases.md)–[U90](../edge-cases.md) (section `U · Vault`, [§27](#27-edge-cases)) |
 | Code | `crates/core/src/vault/{mod.rs, origin.rs, item.rs, policy.rs, digest.rs, ticket.rs, totp.rs, cookies.rs, audit.rs, refuse.rs, consumer.rs}` (origin canonicalisation and matching, item validation and refused kinds, the approval decision, the use digest, the ticket token, RFC 6238, session filtering, the audit row hash, the redemption checks; pure), `crates/core/src/crypto/{hpke.rs, pv1.rs}` (the HPKE suite and the `pv1` field envelope; pure, nonces and ephemeral keys passed in), `crates/api-types/src/vault.rs`, `crates/worker/src/vault/{mod.rs, keys.rs, items.rs, grants.rs, uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs, codes.rs, sessions.rs, versions.rs, sign.rs, reveal.rs, managed.rs, channels.rs, audit.rs, erase.rs}`, `jobs/vault_cron.rs`, `crates/conformance/vault/`, `handlers/vault.rs` (API-key routes), `handlers/vault_consumer.rs` (consumer routes), `auth/consumer.rs` (signed-request verification), `auth/people.rs` (two new `Decision` arms), `mailbox/ingest.rs` (quarantine rule 4b), `mailbox/codes.rs` (`VaultTakeCode`), `handlers/wait.rs` (the strict-mode refusal), `jobs/erasure.rs` and `jobs/retention.rs` (the vault steps), `console/pages/vault.rs`, `mcp/tools.rs` (six tools), `crates/cli/src/commands/vault.rs` |
 | Tables | D1 `vault_keys`, `vault_custody_slots`, `vault_items`, `vault_item_versions`, `vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`, `vault_audit`, `vault_audit_anchors`; new columns `service_accounts.login_domains_json`; mailbox `verifications.vault_item_id` and `verifications.vault_use_id`, the quarantine reason `vault_code`; R2 `t/{tenant_id}/vault/{item_id}/{version}` ([Data model](data-model.md)) |
 | Contracts | The `/v1/…/vault/…` routes and the consumer routes `/v1/vault/consumer/{self, redeem, report, write-back, uses/{use_id}}` ([REST API › Vault](../../reference/api.md#vault)); the permissions `vault:read`, `vault:write`, `vault:request`, `vault:use`, `vault:approve`, `vault:admin`; the consumer signature scheme `pylota-identity-vault-consumer`; the header `X-Pylota-Identity-Vault-Unlock`; 24 `vault.*` event types ([Webhook events › Vault](../../reference/events.md#vault)); 22 error codes ([Errors](../../reference/errors.md)); the policy fields `vault.allowed`, `vault.key_approval`, `vault.min_approval`, `vault.codes_into_fills_only`, `vault.max_items`, `vault.session_max_ttl_days`, `vault.approval_deadline_seconds`; the MCP tools `vault_list_items`, `vault_get_item`, `vault_request_grant`, `vault_list_grants`, `vault_get_use` and `vault_sign`, and a `vault_login` argument on `mail_request_account`; `idvy vault …` ([CLI](../../reference/cli.md#vault)) |
@@ -395,7 +395,11 @@ redemption the Worker opens the DEK with the ticket the consumer presents, so:
 
 - redemption needs neither the tenant key nor the unlock key;
 - a copy of D1 taken during a ticket's life still lacks the ticket secret;
-- `dek_ticket_sealed` and `ticket_hash` are cleared in the batch that closes the use.
+- `dek_ticket_sealed` is cleared in the batch that closes the use, so a closed use can never decrypt again;
+- `ticket_hash` is kept until `ticket_valid_until`, which the closing batch sets to `max(closes_at, closed_at) +
+  10 minutes`, so the ticket still authenticates the reports and the session write-back that §8.7 and §8.8 allow
+  after closure; the every-minute vault cron clears it then. It opens nothing: write-back seals to the tenant's
+  public key and a report decrypts nothing.
 
 ### 4.5 What the Worker holds, and for how long
 
@@ -572,7 +576,8 @@ required):
 
 | Field | Rule |
 |---|---|
-| `operation`, `phases` | [§7.2](#72-operations-and-phases); `phases` is a non-empty subset of the operation's, without repeats |
+| `operation`, `phases` | [§7.2](#72-operations-and-phases); `phases` is a non-empty subset of the operation's, without repeats, except for `session_capture`, which has no phase and takes `phases: []` (any other value is `400 invalid_request`) |
+| `version` | Optional: `"current"` (the default) or `"previous"`, for `fill` and `inject` only, while the item's previous version is inside its overlap ([§11.1](#111-versions)); fixed at creation and part of the digest |
 | `consumer_id` | An `active` consumer that reaches the tenant and whose kind allows the operation ([§8.1](#81-consumer-kinds)) |
 | `run_id` | 1–128 printable ASCII characters without `@`: the integrator's identifier of the run (for Pylota, the browser run). Opaque to the vault |
 | `origin` | One canonical origin of the item and of the grant |
@@ -613,7 +618,7 @@ Response `201`:
 ### 6.3 The digest
 
 `digest = hex(sha256(canonical_json({ v: 1, use_id, tenant_id, identity_id, item_id, operation, phases (sorted),
-origin, consumer_id, run_id, capture_into })))`, with the canonical JSON of
+origin, consumer_id, run_id, capture_into, version })))`, with the canonical JSON of
 [Outbound › Idempotency fingerprint](outbound.md#idempotency-fingerprint). A use never changes after creation,
 so the digest names exactly what the approver saw; an approval that passes a digest must match it.
 
@@ -674,8 +679,11 @@ item, the consumer, the identity and the tenant as at creation, then:
 1. draws a ticket `vtk_{lookup}_{secret}`: `lookup` is 12 characters of lower-case Crockford base32 (60 random
    bits) and `secret` 52 characters encoding 32 random bytes, the format of API keys
    ([Security §4.1](security.md#41-key-format));
-2. opens the tenant key (with the unlock key in partner custody), unwraps the current version's DEK and seals it
-   under the 32 secret bytes ([§4.4](#44-the-ticket-copy)); zeroises the tenant key and the DEK;
+2. opens the tenant key (with the unlock key in partner custody), unwraps the DEK of the version the use names
+   (`version`: `"current"` by default, or `"previous"` for a `fill` or `inject` use while the item's previous
+   version is inside its overlap, [§11.1](#111-versions); a previous version past its overlap, or absent, is
+   `403 vault_refused` with `details.reason = "previous_version_unavailable"`) and seals it under the 32 secret
+   bytes ([§4.4](#44-the-ticket-copy)); zeroises the tenant key and the DEK;
 3. for an `email_otp` phase, sends `MailboxRequest::RegisterWait` for each of the item's `sender_domains`, with
    `ttl_ms` = the use's window plus 10 minutes, so the code is not unsolicited under
    [Inbound › E5](inbound.md#verification-codes-and-unsolicited-otp-e5);
@@ -702,13 +710,18 @@ item, the consumer, the identity and the tenant as at creation, then:
 - The first redemption makes the use `in_use` and sets `closes_at` = first redemption + the window: 10 minutes
   for `fill` and `rotate_fill`; `run_window_seconds` (default 30 minutes, at most 2 hours) for `session_load`,
   `session_capture` and `inject`.
+- A `session_capture` use has no phase to redeem, so **minting** starts it: the mint batch sets `status =
+  'in_use'`, `first_redeemed_at = now` and `closes_at = now + run_window_seconds` (default 30 minutes), and
+  `redeem_by` does not apply. Its one write-back must arrive before `closes_at`; a use that gets none is closed
+  `window_elapsed` like any other.
 - After `closes_at`, no phase and no write-back is accepted, and the vault cron closes the use
   (`window_elapsed`). A report with `final: true` closes it earlier ([§8.7](#87-reports)).
 
 ### 7.4 What closes a use early
 
 In the batch of the cause, by one `UPDATE … WHERE` on the item, grant, consumer, identity or tenant, setting
-`status = 'closed'`, `close_reason`, and clearing `dek_ticket_sealed` and `ticket_hash`:
+`status = 'closed'`, `close_reason`, `closed_at`, `ticket_valid_until` ([§4.4](#44-the-ticket-copy)), and clearing
+`dek_ticket_sealed`:
 
 | Cause | `close_reason` |
 |---|---|
@@ -966,13 +979,14 @@ Steps, in order:
    | `top_level_origin`, canonicalised, equals the use's origin | `top_level_origin_mismatch` |
    | `frame_origin`, canonicalised, equals the use's origin | `frame_origin_mismatch` |
    | `trigger` equals the use's | `trigger_not_allowed` |
-   | `form_kind` fits the phase: `credentials` → `login` or `reauth`, or `signup` while the item's `first_used_at` is `null`; `new_password` → `password_change`; `totp`, `email_otp`, `sms_otp` → `otp`; `session` and `secret` → absent | `form_kind_not_allowed`, `signup_after_first_use` |
+   | `form_kind` fits the phase: `credentials` → `login` or `reauth`, or `signup` while the item's `first_used_at` is `null`, or `password_change` only when the use's operation is `rotate_fill` (a `fill` on a password-change page stays refused); `new_password` → `password_change`; `totp`, `email_otp`, `sms_otp` → `otp`; `session` and `secret` → absent | `form_kind_not_allowed`, `signup_after_first_use` |
    | `session_recording`, `session_logging` and `captcha_solving` are `off`, and `extensions` is `none` | `recording_on`, `logging_on`, `captcha_solving_on`, `extensions_present` |
    | `hosting` and `provider` equal the consumer's registration | `hosting_mismatch` |
    | `mode` is one of the consumer's declared modes, and `proxy` only for an `egress_proxy` | `mode_not_declared` |
 
-7. **Live state.** The item is `active` and its current version is still `ticket_version` (otherwise the use is
-   closed `item_rotated` and the answer is `410`); the grant is active; the ledger entry approved; the identity
+7. **Live state.** The item is `active`, and `ticket_version` is still the version the use named: for
+   `"current"`, the item's current version; for `"previous"`, the item's previous version with its overlap not
+   ended (otherwise the use is closed `item_rotated` and the answer is `410`); the grant is active; the ledger entry approved; the identity
    active; the tenant not suspended; the consumer active. A failure is the error of [§6.2](#62-creating-a-use)'s
    checks, and closes the use.
 8. **Phase work.** `totp`: [§9.1](#91-totp). `email_otp` and `sms_otp`: a long poll of up to `wait_seconds`
@@ -1034,7 +1048,10 @@ The packet's plaintext:
 | `password_changed`, `password_change_failed` | [§11.3](#113-rotate_fill-p1) |
 
 With `final: true` the use closes (`completed`), except that a session write-back is still accepted until
-`closes_at`.
+`closes_at`. That exception applies only to `close_reason` `completed` and `window_elapsed` (the latter only for
+the reports above): a use closed for any reason of [§7.4](#74-what-closes-a-use-early) accepts reports until
+`ticket_valid_until` and refuses every write-back (`410 vault_ticket_expired` with `details.reason` = the close
+reason). Reports and write-backs after closure are authenticated by `ticket_hash` alone; nothing is decrypted.
 
 ### 8.8 Write-back
 
@@ -1399,12 +1416,13 @@ that from happening here ([U83](#27-edge-cases)).
 | `actor_key_id`, `actor_user_id`, `actor_consumer_id`, `on_behalf_of` | Who acted: a key, a person, a consumer, or the system (all `NULL`) |
 | `operation`, `phase`, `outcome`, `reason` | Enumerations only |
 | `site` | The registrable domain of the origin concerned, never a URL |
-| `run_id` | The use's run identifier |
 | `details_json` | Counts and enumerations: `mode`, `context_sha256`, `cookies_dropped`, `direct`, `close_reason`, `custody` |
 | `created_at` | Platform clock |
 
-Never in a row: a value, a ticket, an unlock key, a packet, a username, a title, a purpose, a note, an address or
-a full URL. `core::vault::audit::Row` has typed fields only, as `worker::log` does
+Never in a row: a value, a ticket, an unlock key, a packet, a username, a title, a purpose, a note, an address, a
+full URL or a run identifier. The run a row belongs to is kept beside the chain, in `vault_audit_runs (audit_id,
+tenant_id, run_id)`, which `row_hash` does not cover: identity erasure deletes those rows and leaves every hashed
+row, and so every chain head already sent to a partner, unchanged. The audit API's `run_id` filter joins it. `core::vault::audit::Row` has typed fields only, as `worker::log` does
 ([Security §12](security.md#12-logging-rules)).
 
 Actions: `item.created`, `item.updated`, `item.rotated`, `item.archived`, `item.restored`, `item.deleted`,
@@ -1502,7 +1520,7 @@ incident"):
 | `previous` versions | Their overlap | The every-minute vault cron |
 | Session versions | Until `expires_at` | The daily vault sweep (row, then R2 object) |
 | Grants: `denied`, `revoked`, `expired` | 90 days after the decision | The global retention job's new `vault` step |
-| Uses: closed, `denied`, `expired`, `canceled` | 90 days after they ended; their ticket hash and sealed DEK are cleared when they end | The same step |
+| Uses: closed, `denied`, `expired`, `canceled` | 90 days after they ended; the sealed DEK is cleared when they end and the ticket hash at `ticket_valid_until` ([§4.4](#44-the-ticket-copy)) | The same step |
 | `vault_consumer_nonces` | Until 60 seconds after the signature's `expires` | The every-minute vault cron |
 | `vault_audit` | 400 days, by age only (never by count, [§14.1](#141-the-audit-row)) | The same step; before deleting the oldest rows of a tenant it stores the last deleted row's `seq` and `row_hash` in `vault_audit_anchors`, so the chain stays verifiable from the anchor |
 | Revoked consumers | 400 days after revocation, for the audit trail | The same step |
@@ -1512,13 +1530,14 @@ incident"):
 
 `DELETE /v1/vault/items/{item_id}` (`vault:admin`; never an identity key) is a crypto-shred with a receipt, in
 one batch guarded by the audit sequence: every version row (each DEK and field ciphertext) deleted, the item's
-grants deleted, its open uses closed (`item_deleted`) with their sealed DEKs cleared, the item row deleted, the
-audit row `item.deleted` and the event. After the commit, every R2 object under
+uses deleted (open ones first counted as closed `item_deleted`; `vault_uses` references the item and the grant,
+so the uses go before them), the item's grants deleted, the item row deleted, the audit row `item.deleted` and the
+event. The audit keeps the IDs. After the commit, every R2 object under
 `t/{tenant_id}/vault/{item_id}/` is deleted (retried by the daily sweep). Response `200`:
 
 ```json
 { "item_id": "vit_01JAD4…", "deleted": true, "versions_shredded": 2, "r2_objects_deleted": 1,
-  "uses_closed": 0, "grants_deleted": 1, "restorable_until": "2026-11-23T09:00:00Z",
+  "uses_closed": 0, "uses_deleted": 14, "grants_deleted": 1, "restorable_until": "2026-11-23T09:00:00Z",
   "custody": "operator" }
 ```
 
@@ -1536,7 +1555,7 @@ suspect a leak.
 
 | Scope | Vault rows | Where |
 |---|---|---|
-| Identity ([Privacy §6.5](privacy.md#65-identity-scope-fr-idn-4)) | Its identity-scoped items with their versions, grants and uses deleted as in [§16.2](#162-deleting-an-item); its grants on tenant-scoped items deleted and their uses closed; R2 objects of its items deleted by key; audit rows kept (IDs only), with their `run_id` cleared | Step `scrub_control_plane`, before `service_accounts` |
+| Identity ([Privacy §6.5](privacy.md#65-identity-scope-fr-idn-4)) | Its identity-scoped items with their versions, grants and uses deleted as in [§16.2](#162-deleting-an-item); its uses of tenant-scoped items deleted (open ones closed first), then its grants on them; R2 objects of its items deleted by key; audit rows kept unchanged (IDs only) and their `vault_audit_runs` rows deleted, so the chain still verifies | Step `scrub_control_plane`, before `service_accounts` |
 | Tenant ([Privacy §6.6](privacy.md#66-tenant-scope)) | First `vault_custody_slots` and `vault_keys` (every tenant key: the crypto-shred), then `vault_uses`, `vault_grants`, `vault_item_versions`, `vault_items`, tenant-level `vault_consumers`, and `vault_audit` and `vault_audit_anchors` except the `vault.revoke_all` row the erasure itself writes; `t/{tenant_id}/vault/` swept with the rest of the prefix | Step `stop_routing` closes open uses; step `delete_d1_rows` deletes the rows in that order; step `sweep_r2` |
 | Counterparty, message, thread | Not affected: vault items hold the agent's and the operator's own credentials, not a counterparty's. A hidden `vault_code` message is erased with its message like any other | — |
 | Person (console account) | Audit rows keep `actor_user_id` as an opaque ID, as audit rows do today | — |
@@ -1828,7 +1847,7 @@ Each default is the cautious one.
 |---|---|---|
 | **S-VLT1** | `hpke` 0.14.1 (`default-features = false`; `x25519`, `aes`, `alloc`) builds for `wasm32-unknown-unknown`, takes randomness from `platform::Rng` through `rand_core`, passes the RFC 9180 test vectors for DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-256-GCM in base mode, and seals and opens a 1 MiB plaintext in a Worker within 50 ms of CPU | [ADR 0021](../adr/0021-agent-vault.md) decision 4: the same suite implemented in `core::crypto::hpke` from the already-pinned `x25519-dalek`, `hkdf`, `sha2` and `aes-gcm`, against the same vectors; the wire format is RFC 9180's either way, so no stored value changes |
 | **S-VLT2** | The audit-sequence guard of [§14.2](#142-appending) holds under 50 concurrent writers to one tenant in `wrangler dev` and on staging D1: no gap, no duplicate `seq`, every change has its row | Serialise vault writes per tenant through the tenant's `TenantQuota` object |
-| **S-VLT3** | RFC 9421 verification with `ed25519-dalek` 3.0.0 `verify_strict` over the signature base of `core::httpsig`, against the RFC 9421 Appendix B Ed25519 example and against signatures made by the TypeScript, Python and Go consumer SDK helpers | None needed: the Web Bot Auth path already uses the same base builder |
+| **S-VLT3** | RFC 9421 verification with `ed25519-dalek` 3.0.0 `verify_strict` over the signature base of `core::httpsig`, against the RFC 9421 Appendix B Ed25519 example and a fixed set of cross-language signature vectors committed with the spike (the SDK helpers do not exist yet when M43 runs; M46–M48 check them against the same vectors) | None needed: the Web Bot Auth path already uses the same base builder |
 
 ### 24.2 Named tests
 
@@ -2012,10 +2031,10 @@ section U of the [edge-case register](../edge-cases.md).
 
 ## 27. Edge cases
 
-The rows are section **U · Vault** of the [edge-case register](../edge-cases.md), U1–U85. U1–U72 cover
+The rows are section **U · Vault** of the [edge-case register](../edge-cases.md), U1–U90. U1–U72 cover
 §1–§24; U73–U85 come from the review of Infisical's Agent Vault: placeholder misuse (U73–U77), grants and keys
 (U78, U79), redirects and outbound ranges (U80, U81), early closure (U82), audit flooding (U83), approval links
-(U84) and host canonicalisation (U85).
+(U84) and host canonicalisation (U85); U86–U90 come from the design review of this page: closure and late reports (U86), capture windows (U87), password-change fills (U88), previous versions (U89) and deletion with retained uses (U90).
 
 ## 28. Milestones
 
@@ -2033,7 +2052,7 @@ CLI `vault status|items|audit|custody|rotate-key`. D1 tables `vault_keys`, `vaul
 **Order.** The first pull request is spike S-VLT1 with `core::crypto::hpke::rfc9180_vectors`, then S-VLT2.
 
 **Implements:** FR-VLT-1–7, FR-VLT-21, FR-VLT-22, FR-VLT-24, FR-VLT-25 and rows U1–U21, U59–U63, U66–U69, U83,
-U85.
+U85, U90.
 
 **Acceptance:** the rows with their tests; `xtask::vault_types_have_no_debug` and
 `xtask::docs_forbidden_claims` in CI.
@@ -2046,7 +2065,7 @@ uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs}`, `handlers/vault_consu
 console approval and consumer pages, CLI `grants`, `uses`, `consumers`, `consumer-keys`, `consumer-check`,
 `conformance`. D1 tables `vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`.
 
-**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and rows U22–U40, U64, U65, U71–U82, U84.
+**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and rows U22–U40, U64, U65, U71–U82, U84, U86.
 
 **Acceptance:** the rows; spike S-VLT3; `it::security::cross_tenant_matrix` extended; the conformance fixtures
 pass against a reference consumer built in `crates/conformance` (Rust, CDP mode and proxy mode).
@@ -2058,7 +2077,7 @@ pass against a reference consumer built in `crates/conformance` (Rust, CDP mode 
 (`VaultTakeSmsCode`, with M39). Mailbox columns `verifications.vault_item_id`, `verifications.vault_use_id`,
 `verifications.vault_consumed_at`.
 
-**Implements:** FR-VLT-14–17 and rows U41–U49, U51, U52, U70.
+**Implements:** FR-VLT-14–17 and rows U41–U49, U51, U52, U70, U87.
 
 **Acceptance:** the rows; `live::vault::email_code_into_fill` on staging.
 
@@ -2069,7 +2088,7 @@ pass against a reference consumer built in `crates/conformance` (Rust, CDP mode 
 objects, rotation reminders), the import route, CLI `revoke-all`, `idvy ops switch vault_redeem`, the runbook
 "Vault incident".
 
-**Implements:** FR-VLT-18–20, FR-VLT-29 and rows U50, U53–U58.
+**Implements:** FR-VLT-18–20, FR-VLT-29 and rows U50, U53–U58, U88, U89.
 
 **Acceptance:** the rows; `live::vault::browserbase_settings`; a staging rehearsal of [§22.3](#223-migrating-from-browser_sealed_sessions)
 with a test integrator (register and activate consumers, import 20 sessions, load and write back, revoke-all);
