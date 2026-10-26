@@ -176,12 +176,14 @@ design's questions for counsel.
 
 ## 6. Licence and contributions
 
-The source is under FSL-1.1-ALv2 ([PRD §12](prd.md#12-licensing)). Each release obliges:
+The service is under FSL-1.1-ALv2 ([PRD §12](prd.md#12-licensing)); the SDKs, the crate
+`pylota-identity-api-types` and the agent skills are under Apache-2.0 ([ADR 0022](adr/0022-sdk-languages.md)
+decision 9). Each release obliges:
 
 | ID | Item | Owner | Evidence | Blocks | Status |
 |---|---|---|---|---|---|
-| LIC-1 | `LICENSE.md` in every published artefact: the Worker bundle, the CLI archives, each crate, the npm and PyPI packages and the Go module | M19, M46–M48 | `xtask::release_artefacts_carry_licence` | v1.0, S | open |
-| LIC-2 | `license = "FSL-1.1-ALv2"` (SPDX) in every crate's metadata; the SDKs' own licence as decided in ADR 0022 | M0, M46–M48 | `Cargo.toml` (done for the workspace crates); each SDK's manifest | v1.0, S | done for crates |
+| LIC-1 | The right licence file in every published artefact: `LICENSE.md` (FSL-1.1-ALv2) in the Worker bundle, the CLI archives and the FSL crates; `LICENSE` and `NOTICE` (Apache-2.0) in the SDK crates, the npm and PyPI packages, the Go module and the skills | M19, M46–M48 | `xtask::release_artefacts_carry_licence` | v1.0, S | open |
+| LIC-2 | `license = "FSL-1.1-ALv2"` (SPDX) in the service crates' metadata; `license = "Apache-2.0"` on `pylota-identity` (the Rust SDK) and `pylota-identity-api-types`, and in each SDK's manifest | M0, M16, M46–M48 | `Cargo.toml` (the two crates still inherit FSL from the workspace: switch them in M46); each SDK's manifest; `cargo deny check licenses` allowing both | v1.0, S | open |
 | LIC-3 | A third-party licence file for each binary and package, generated from its SBOM at release | M19 | `THIRD_PARTY_LICENSES` in each archive; `cargo deny check licenses` green | v1.0 | open |
 | LIC-4 | The release date of each version recorded, because each version becomes Apache-2.0 on its second anniversary | M19 | The GitHub Release date of each tag; the CHANGELOG states the date per version | v1.0 | open |
 | LIC-5 | Contributions signed off under the DCO, as CONTRIBUTING.md requires | M19 | A CI job that refuses a pull request commit without `Signed-off-by` | A | open |

@@ -84,9 +84,10 @@ the service expects. A consumer must still meet the consumer contract and pass t
 
 ## Licence
 
-Every SDK is licensed under FSL-1.1-ALv2, as Pylota Identity is: each release becomes Apache-2.0 two years after
-it ships. pkg.go.dev does not show documentation for this licence, so the Go package documentation is on this
-page.
+Every SDK, and every agent skill, is licensed under the Apache License 2.0, so it can be installed and shipped
+inside your own application without a licence review beyond the usual one. The Pylota Identity service itself is
+source available under FSL-1.1-ALv2. The Go package documentation is on this page as well as on pkg.go.dev, so
+the reference for every language is in one place.
 
 ## Go
 

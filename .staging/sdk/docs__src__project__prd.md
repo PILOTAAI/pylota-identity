@@ -57,7 +57,7 @@ All are P1, as section 1's row says.)
   ([§ 3.7](design/sdk-and-skills.md#37-javascript)).
 - **FR-SDK-28** Every SDK **must** implement FR-SDK-3 – FR-SDK-8 with the behaviour the shared conformance
   suite of each release defines, and **must not** adopt a contract whose conformance cases it does not all
-  pass. The suite **must** be generated from the Rust SDK and `crates/core`, and published in the release's
+  pass. The suite **must** be generated from `crates/core`, and published in the release's
   signed fixtures asset ([§ 3.2](design/sdk-and-skills.md#32-the-shared-conformance-suite)).
 - **FR-SDK-29** Every SDK **must** offer the one-call phone purchase, phone set-up status, `wait` for SMS and
   SMS outcome classification, returning a pending approval and a taken number as typed results, never
@@ -79,5 +79,13 @@ All are P1, as section 1's row says.)
   pre-release **must not** be published ([§ 3.5](design/sdk-and-skills.md#35-python), [§ 3.6](design/sdk-and-skills.md#36-go)).
 - **FR-SDK-33** Every code example of an SDK, on the landing page and in the docs, **must** be checked in the
   CI of the SDK it uses at the contract's tag, and each SDK's package metadata **must** state the licence
-  `FSL-1.1-ALv2`.
+  `Apache-2.0`, with `LICENSE` and `NOTICE` in every published artefact.
 
+
+---
+
+Under `## 12. Licensing`, after the bullet that begins "Contributions are licensed to TREFT LTD":
+
+- The client libraries are licensed differently from the service: the TypeScript, Python, Go and Rust SDKs, the
+  crate `pylota-identity-api-types` they depend on, and the agent skills are under the **Apache License 2.0**
+  ([ADR 0022](adr/0022-sdk-languages.md) decision 9). Everything else in this repository stays FSL-1.1-ALv2.

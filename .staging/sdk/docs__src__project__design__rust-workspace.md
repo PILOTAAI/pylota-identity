@@ -22,10 +22,12 @@ And in `cargo xtask release`'s row, after "`ts-tests-required.json`", add ", `py
   [SDKs, skills and agent tooling § 3.3](sdk-and-skills.md#33-phone-and-vault-coverage) (`buy_phone_number`,
   `phone_setup`, `wait_for_sms`, `sms_outcome`), and the approval methods take the digest as an argument.
   Behind the feature `vault-consumer` (dependencies `hpke`, at the version the Worker pins, and `zeroize`),
-  `pylota_identity::vault_consumer` is the entry point of § 3.4 of that page: `canonicalise_origin` re-exports
-  `core::vault::origin::canonicalise`, the signer uses `core::httpsig::signature_base` and `ed25519-dalek`,
-  packets are `Zeroizing` buffers, and `Redactor` scans chunked responses. It is the reference the shared
-  conformance vectors are generated from.
+  `pylota_identity::vault_consumer` is the entry point of § 3.4 of that page: its own `canonicalise_origin` and
+  RFC 9421 signer (with `ed25519-dalek`), never a dependency on `core` (the crate rules above; `sdk` is
+  Apache-2.0), proven equal to `core::vault::origin::canonicalise` and `core::httpsig::signature_base` by the
+  conformance vectors,
+  packets are `Zeroizing` buffers, and `Redactor` scans chunked responses. The shared conformance
+  vectors are generated from `core`, never from the SDK.
 - **Conformance.** `crates/sdk/tests/conformance.rs` plays every case of `sdks/fixtures/conformance/`
   against the client with a fake transport, with `RetryPolicy::standard()` unless a case names another
   policy (the SDK's retries are off by default), as `sdk::conformance::*`.

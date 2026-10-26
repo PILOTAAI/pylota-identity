@@ -97,11 +97,29 @@ Facts the decision rests on, each read on 2026-10-26:
    ranges with a tested floor and an exclusive ceiling at the next minor (`httpx>=0.28.1,<0.29`), because a
    library pinned exactly cannot be installed beside another library with a different pin; the repository's
    `uv.lock` pins every package exactly with hashes, and CI runs the suite at the floor and at the lock.
-9. **Licence.** FSL-1.1-ALv2 for the Python and Go SDKs, as for the TypeScript SDK (ADR 0018 decision 2) and
-   the product: SPDX expression `FSL-1.1-ALv2` in `pyproject.toml` `project.license`, `LICENSE.md` at the root
-   of each repository. Each release becomes Apache-2.0 two years after it ships. Because pkg.go.dev will not
-   render documentation for this licence, the Go reference is published with the product docs
-   ([SDKs](../../reference/sdks.md)) and `go doc` works locally.
+9. **Licence: Apache-2.0 for the clients, FSL-1.1-ALv2 for the service.** The TypeScript, Python, Go and Rust
+   SDKs, the crate `pylota-identity-api-types` the Rust SDK depends on, and the agent skills are licensed under
+   the Apache License 2.0 (SPDX `Apache-2.0`), with `LICENSE` and `NOTICE` in each repository and each
+   published artefact: `package.json` `license`, `pyproject.toml` `project.license`, the Go module's `LICENSE`,
+   and `license = "Apache-2.0"` on those two crates in place of the workspace's `FSL-1.1-ALv2`. Everything else
+   in this repository stays FSL-1.1-ALv2. This amends [ADR 0018](0018-typescript-sdk-in-its-own-repository.md)
+   decision 2 (owner decision, 2026-10-26). The reasons:
+   - FSL protects against a competing **service**; an SDK is a thin client of the public contract, generated
+     from `openapi.json`, and holds none of the service's value.
+   - Integrators ship the SDK inside their own applications. A licence that is not OSI-approved is refused by
+     many companies' licence scanners and needs a legal review per customer; Apache-2.0 does not.
+   - pkg.go.dev renders documentation only for licences on its list, which excludes non-OSI licences (evidence
+     above); under Apache-2.0 the Go module is documented where Go developers look.
+   - Apache-2.0 carries a patent grant, which matters for the vault-consumer code (origin canonicaliser,
+     request signing, HPKE packet opening).
+   - Apache-2.0 is what each FSL-1.1-ALv2 release becomes two years after it ships, so the clients start where
+     the service ends.
+   - It is the norm for comparable clients: Sentry, the licensor that wrote FSL, publishes `@sentry/node` under
+     MIT (11.9.0, npm registry, read 2026-10-26); AgentPhone's SDKs and MCP server and Infisical's Agent Vault
+     SDK are MIT (their published `package.json`/`PKG-INFO`, read 2026-10-26).
+
+   Contributions to the SDK repositories are accepted under Apache-2.0 with the same DCO sign-off as this
+   repository (`CONTRIBUTING.md`).
 10. **Versions and releases.** Each SDK's major version is the API's path version (`/v1` → 1.x.y) and each
     release names the product release whose contract it was generated from. Each SDK repository's release
     produces its artefacts and an unsigned `SHA256SUMS` with GitHub attestations; the owner signs it offline
@@ -124,9 +142,11 @@ Facts the decision rests on, each read on 2026-10-26:
 - Harder: four release processes for one owner. The shared conformance suite and the identical release
   steps (attest, sign offline, publish by OIDC or tag) keep each one mechanical; an SDK release never blocks a
   product release, because missing SDK tests are `pending (SDK)` here.
-- Go documentation is not on pkg.go.dev while the licence is FSL-1.1-ALv2; the product docs carry it instead.
+- The Go module is documented on pkg.go.dev as well as in the product docs.
+- Two licences in one repository: the two Apache-2.0 crates carry their own `LICENSE` and `NOTICE`, and
+  `cargo deny check licenses` allows `Apache-2.0` for them and `FSL-1.1-ALv2` for the rest.
 - Human prerequisites before M47 and M48: create `PILOTAAI/pylota-identity-python` and
-  `PILOTAAI/pylota-identity-go` (FSL-1.1-ALv2); register the PyPI project `pylota-identity` with a trusted
+  `PILOTAAI/pylota-identity-go` (Apache-2.0); register the PyPI project `pylota-identity` with a trusted
   publisher for `release-publish.yml` in environment `release`, which is the act that reserves the name; give
   both repositories a staging test key for their `live::round_trip` tests; confirm the GitHub organisation's
   name stays `PILOTAAI`, because a Go module path is case-sensitive and cannot be renamed without a new
@@ -134,13 +154,10 @@ Facts the decision rests on, each read on 2026-10-26:
 
 ## Alternatives considered
 
-- **Apache-2.0 (or MIT) for the SDKs only.** Client libraries under a permissive licence install anywhere,
-  appear on pkg.go.dev with full documentation and pass licence scanners that refuse non-OSI licences. Not
-  chosen, to keep one licence across the product and its clients as ADR 0018 decided; the SDKs contain the
-  canonicaliser, signer and packet code that a competing service would otherwise copy. **The owner may
-  reverse this** by choosing Apache-2.0 for the TypeScript, Python and Go SDKs at once; that change amends
-  ADR 0018 decision 2 and this decision 9 together, and the Rust crate's licence with them if the owner wants
-  one rule.
+- **FSL-1.1-ALv2 for the SDKs, one licence for everything** (the draft of this ADR, and ADR 0018 decision 2).
+  Not chosen: it protects nothing the SDKs hold, keeps the Go module off pkg.go.dev and makes every
+  integrator's legal review harder.
+- **MIT for the SDKs.** As permissive, but without a patent grant and not the licence the service converges to.
 - **Generated clients only, no hand-written layer** (openapi-python-client, oapi-codegen's client
   generator). Fast to start, but each generator owns retries, keys and errors in its own way, which is
   exactly what [§ 2.5–§ 2.8](../design/sdk-and-skills.md#25-idempotency) must control. The generators are used

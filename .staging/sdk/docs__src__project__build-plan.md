@@ -38,7 +38,7 @@ helpers and the `vault-consumer` entry point.
 
 | File (owner milestone) | Hook |
 |---|---|
-| `crates/core/src/vault/origin.rs` (M42), `crates/core/src/httpsig.rs` (M25) | Public for `crates/sdk`, unchanged in behaviour |
+| `crates/sdk/Cargo.toml`, `crates/api-types/Cargo.toml` (M16, M0) | `license = "Apache-2.0"` in place of the workspace licence, with `LICENSE` and `NOTICE` in each crate; `deny.toml` allows `Apache-2.0` for these two ([ADR 0022](adr/0022-sdk-languages.md) decision 9) |
 | `crates/sdk/Cargo.toml` (M16) | Feature `vault-consumer` with `hpke` (the version the Worker pins), `zeroize` |
 | `xtask/src/trace.rs` (M0) | Prefixes `py` and `go`, read from `sdks/python-tests.json` and `sdks/go-tests.json` as `ts::` names are; a missing name is `pending (SDK)` |
 | `xtask` `release` (M19) | Assets `py-tests-required.json` and `go-tests-required.json`; `release sign --repo` accepts `PILOTAAI/pylota-identity-python` and `PILOTAAI/pylota-identity-go` with their trusted comments |
@@ -59,7 +59,7 @@ consumer of [Vault § 24.3](design/vault.md#243-consumer-conformance-fixtures) b
 **Implements:** FR-SDK-25, FR-SDK-32 and FR-SDK-33 for Python, and rows Y72, Y75, Y80, Y86, Y87, Y89, Y91,
 Y92 (Python parts).
 
-**Human prerequisites.** Create `PILOTAAI/pylota-identity-python` (FSL-1.1-ALv2); register the PyPI project
+**Human prerequisites.** Create `PILOTAAI/pylota-identity-python` (Apache-2.0); register the PyPI project
 `pylota-identity` with a trusted publisher (repository `PILOTAAI/pylota-identity-python`, workflow
 `release-publish.yml`, environment `release`), which reserves the name; disallow API tokens on the project;
 give the repository a staging test key.
@@ -77,7 +77,7 @@ owner-signed `SHA256SUMS`, with PyPI attestations; `py::doctest::site_examples`;
 **Implements:** FR-SDK-26, FR-SDK-32 and FR-SDK-33 for Go, and rows Y73, Y74, Y80, Y86, Y88, Y90, Y91, Y92
 (Go parts).
 
-**Human prerequisites.** Create `PILOTAAI/pylota-identity-go` (FSL-1.1-ALv2) with an environment `release`
+**Human prerequisites.** Create `PILOTAAI/pylota-identity-go` (Apache-2.0) with an environment `release`
 whose token may push tags; give it a staging test key; keep the organisation name `PILOTAAI`.
 
 **Acceptance:** the `go::` rows above pass on Go 1.26.10 and 1.27.3 and are listed in `sdks/go-tests.json`;
