@@ -66,9 +66,16 @@ configured. The `ses_ingest` ledger in D1 passes each SES pointer to `pm-inbound
 |---|---|---|
 | `fetch` | HTTPS to the API host, and to the console host when `PM_CONSOLE_HOST` differs | On the API host: REST API `/v1/*`, MCP `/mcp`, `/openapi.json`, `/health`, `/.well-known/*` (the security contact, identity JWKS and the Web Bot Auth key directory), signed links `/v1/links/*`, the SNS endpoints `/hooks/ses` (SES delivery events) and `/hooks/ses/inbound` (SES inbound notifications), and the Stripe webhook `/billing/stripe/webhook`. Uploads arrive as a `PUT` to their signed link ([Uploads](design/uploads.md)); `GET /v1/events/stream` upgrades to a WebSocket that the Worker hands to the tenant's `TenantEvents` object ([Event feed](design/event-feed.md)); `POST /v1/agent-signup` takes no key and answers only while `PM_AGENT_SIGNUP` is on ([Agent self-sign-up](design/agent-signup.md)). On the console host: `/console/*` |
 | `email` | Email Routing, for domains with `inbound = routing` | Looks up the recipient, writes raw mail to R2, queues a pointer, and rejects unknown or retired addresses |
-| `queue` | Twelve Cloudflare queues: six work queues and their six dead-letter queues | Inbound processing, screening (`pm-screen`, [Screening](design/screening.md)), outbound transport, delivery events, webhook delivery (after appending each event to its tenant's event log), indexing, triage, dead-letter recording. The SES backstop is an SQS queue in AWS, polled by `scheduled`, not one of these |
+| `queue` | Fourteen Cloudflare queues: seven work queues and their seven dead-letter queues | Inbound processing, phone provider events and executions (`pm-phone`, [Phone numbers](design/phone-numbers.md)), screening (`pm-screen`, [Screening](design/screening.md)), outbound transport, delivery events, webhook delivery (after appending each event to its tenant's event log), indexing, triage, dead-letter recording. The SES backstop is an SQS queue in AWS, polled by `scheduled`, not one of these |
 | `scheduled` | Cron (every minute and every 15 minutes) | Every minute: address retirement, the platform-event outbox sweep, restarting queued jobs, the state-alert evaluator (with alert email and the automatic containment rules), the master-key re-seal sweep, draining the SES backstop queue, the scheduled-drafts watchdog ([Drafts](design/drafts.md)). Every 15 minutes: domain health scheduling, retention, usage roll-up, the SES account check, the capacity checks, the nightly backup job, agent sign-up expiry. While `PM_FREEZE = "on"` they do nothing ([Observability › Restore from PITR](design/observability.md#restore-from-pitr)) |
 | Durable Object `alarm` | Alarms set by each object | State machines: domain health, jobs, outbox dispatch, in each mailbox the transport-claim, dispatch-retry, lock and reconciliation work for its own sends, scheduled drafts, screening deadlines, upload expiry and per-identity message expiry, in each tenant's `Notifier` the notification windows and the daily 09:00 run, and in each tenant's `TenantEvents` the revalidation of open streams. `TenantEvents` also receives its WebSocket messages and closes through the three hibernation handlers |
+
+The phone feature adds `POST /hooks/telnyx` on the API host. It takes no key: each request carries Telnyx's
+Ed25519 signature over `telnyx-timestamp|raw body`, and the handler acknowledges within 2 seconds by writing the
+raw event to R2 `phone-staging/` and queueing a pointer on `pm-phone`; it reads nothing from D1
+([Phone numbers § 9](design/phone-numbers.md#9-provider-webhooks)).
+
+
 
 ### Inbound sources and outbound transports
 
@@ -88,6 +95,10 @@ is added ([Domains on any DNS host](design/domain-connections.md)):
 | `smtp` | The customer's relay over a Worker TCP socket (ports 465 or 587, TLS before AUTH), allowed only while a daily alignment probe passes | `smtp_relay` |
 
 Test tenants always use the simulator.
+
+Phone numbers have one provider transport: the `PhoneProvider` trait (`crates/worker/src/phone/provider.rs`),
+implemented for Telnyx at the fixed hosts `api.telnyx.com/v2` or `api.telnyx.eu/v2`, with Vapi (`api.vapi.ai`)
+for the `vapi` voice route. Test tenants use its in-memory fake.
 
 ### Console and billing
 
@@ -133,7 +144,7 @@ are never hashed into IDs, because `workers-rs` only applies a jurisdiction to u
 | Durable Object SQLite | `MAILBOX`, `DOMAINS`, `JOBS`, `QUOTA`, `SES_CONTROL`, `NOTIFY`, `EVENTS` | Everything per mailbox, in one transaction; each other object's own state | Strong consistency per mailbox, no cross-tenant write contention, 10 GB per object, one-call deletion |
 | R2 | `BLOBS` (and the optional `BACKUP`) | Raw `.eml`, attachments, extracted attachment text, draft attachments, uploads (never copied to `BACKUP`), exports | Large objects, free egress, erasure by prefix |
 | Vectorize | `VECTORS` (index `pm-mail-chunks`) | Chunk vectors and filter metadata only, never text | Semantic retrieval |
-| Queues | `Q_INBOUND`, `Q_OUTBOUND`, `Q_DELIVERY`, `Q_WEBHOOKS`, `Q_INDEX`, `Q_SCREEN` | Pointers only (≤ 128 KB) | At-least-once async work with dead-letter queues |
+| Queues | `Q_INBOUND`, `Q_OUTBOUND`, `Q_DELIVERY`, `Q_WEBHOOKS`, `Q_INDEX`, `Q_SCREEN`, `Q_PHONE` | Pointers only (≤ 128 KB) | At-least-once async work with dead-letter queues |
 
 R2 keys are tenant-prefixed so that erasure can list them:
 
@@ -148,6 +159,10 @@ t/{tenant_id}/i/{identity_id}/up/{upload_id}                           upload (�
 t/{tenant_id}/exports/{export_id}.zip
 inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml                            before routing resolves (≤ 15 days)
 inbound-staging/ses/{key}                                              SES object copied from S3 (≤ 15 days)
+t/{tenant_id}/i/{identity_id}/sms/{sms_id}/m/{n}                       inbound MMS media
+t/{tenant_id}/phone/docs/{document_id}                                 KYC document, encrypted (never copied to BACKUP)
+t/{tenant_id}/vault/{item_id}/{version}                                vault session ciphertext (never copied to BACKUP)
+phone-staging/{yyyy}/{mm}/{dd}/{ulid}.json                             provider event before it is processed
 ```
 
 R2 has no versioning, point-in-time recovery or replication (R2 S3 API compatibility page, last updated
@@ -155,6 +170,11 @@ R2 has no versioning, point-in-time recovery or replication (R2 S3 API compatibi
 bug that deletes them. For that, an optional nightly job copies new `t/` objects to a second bucket
 (`PM_BACKUP_BUCKET`, off by default, on for Pylota Identity Cloud); retention and erasure delete from both
 ([Privacy › R2 backup copy](design/privacy.md#54-optional-r2-backup-copy)).
+
+Vault items, versions, grants, uses, consumers and the hash-chained vault audit live in D1; session versions are
+ciphertext in R2 under `t/{tenant_id}/vault/`, never in the backup bucket. Every value is sealed under a per-version
+data key, itself sealed to a per-tenant X25519 key whose private half is sealed under the master key (and under a
+partner's unlock key in partner custody).
 
 The full schema is in [Data model](design/data-model.md).
 
@@ -341,6 +361,44 @@ See [Agent signing keys](design/agent-keys.md).
 
 See [Notifications](design/notifications.md).
 
+### 4.8 Phone numbers
+
+```text
+agent (identity key) ──POST …/phone-numbers {country}──▶ Worker
+   │  catalogue row · onboarding status · standing budget · spend hold (TenantQuota)
+   ├─ covered and onboarded ─▶ claim the request ─▶ spend intent (D1) ─▶ POST /number_orders (Telnyx) ─▶ 201 number
+   ├─ outside the budget ─────▶ 202 request pending_approval ─▶ person approves (console / partner key) ─▶ queue
+   └─ not onboarded ──────────▶ 202 request blocked_by ─▶ person finishes onboarding ─▶ unblocked ─▶ queue
+Telnyx ──POST /hooks/telnyx──▶ R2 phone-staging + pm-phone pointer ─▶ consumer resolves the tenant from provider facts
+   ├─ order and number events ─▶ phone_numbers state machine ─▶ configure (messaging profile, route, PIN in the vault)
+   ├─ message.received ────────▶ IdentityMailbox IngestSms (quarantine rules, codes, vault channel)
+   └─ receipts, 10DLC, port-outs ▶ SMS status, registrations, the port-out guard
+cron (every minute) ─▶ due requests and numbers, expiring numbers, port-out listing
+nightly reconciler ──▶ numbers, orders, porting, compliance, A2P, records, deliveries, opt-outs, balance
+```
+
+Every billable provider call is bracketed by Pylota Identity's own records (claim, spend intent,
+attempt-scoped `customer_reference`), because Telnyx's order routes take no idempotency key; an unknown outcome
+becomes `uncertain` and is reconciled before anything is retried. Tenants share one provider account and are
+separated by their own messaging profile, connection, voice profile, billing group, requirement groups and tags.
+
+See [Phone numbers](design/phone-numbers.md).
+
+### 4.9 The vault
+
+```text
+agent ──MCP/REST (identity key)──▶ vault_request_grant ──▶ person approves (console / partner app)
+orchestrator ──REST (vault:use)──▶ POST …/vault/uses ──▶ [person approves] ──▶ ticket (once)
+consumer ──signed POST /v1/vault/consumer/redeem──▶ Worker: checks binding and live state, opens the DEK
+         with the ticket, decrypts one phase, seals it to the consumer's X25519 key ──▶ packet
+consumer fills at the exact origin, reports, writes back; every step: D1 batch + audit row + event
+```
+
+The vault makes no outbound request with a secret ([Vault § 1.4](design/vault.md#14-credentialed-fetch-is-deferred)).
+One-time codes come from the identity's own mailbox (rule 4b) or number, never through the model.
+
+See [Agent credential vault](design/vault.md).
+
 ## 5. Consistency and delivery guarantees
 
 | Guarantee | How |
@@ -369,11 +427,18 @@ crates/worker       handlers, router, auth, console, Durable Object classes, sta
 crates/sdk          Rust client (reqwest), used by the CLI
 crates/cli          `idvy` (clap): setup, deploy, doctor, admin, mail
 crates/conformance  MIME corpus + RFC conformance runner (native and against workerd)
-sdks/fixtures       recorded HTTP exchanges shared by the Rust SDK and the TypeScript SDK `@pylotahq/identity`,
-                    which is built in its own repository from each release's openapi.json (ADR 0018)
+sdks/fixtures       recorded HTTP exchanges and the shared SDK conformance suite (conformance/), used by the
+                    Rust SDK here and by the TypeScript, Python and Go SDKs, each built in its own repository
+                    from each release's openapi.json (ADR 0018, ADR 0022)
 integrations/       agent skills and plugins, checked against the contract of the same commit
 xtask               build-worker, size budget, itest, fuzz, release bundling
 ```
+
+Phone numbers live in `crates/core/src/phone/` (pure: catalogue, requests, state machines, money, Telnyx
+mappings) and `crates/worker/src/phone/` (the provider trait, its Telnyx client and fake, executors, the
+reconciler), with `handlers/phone/`, `handlers/hooks_telnyx.rs` and `consumers/phone.rs`. The vault lives in
+`crates/core/src/vault/` and `crates/core/src/crypto/{hpke.rs, pv1.rs}` (pure), `crates/worker/src/vault/`,
+`handlers/vault.rs`, `handlers/vault_consumer.rs`, `auth/consumer.rs`, `crates/conformance/vault/`.
 
 See [Rust workspace and platform](design/rust-workspace.md).
 
@@ -403,6 +468,8 @@ See [Rust workspace and platform](design/rust-workspace.md).
 | Amazon SES, S3, SNS, SQS (optional) | Inbound and outbound for domains on any DNS host (`dns_records`, `send_only`, `smtp_relay` with `inbound: ses`), failover | Outbound errors are classified like Cloudflare's. Inbound: SNS retries the push; the SQS backstop keeps each notification for 14 days; S3 keeps the object until it is ingested. Paused SES sending moves SES domains to fallback |
 | Customer SMTP relays (optional) | Outbound for `smtp_relay` domains | Replies are classified per SMTP code; nothing is resent after the final `.`; a failing alignment probe moves the domain to fallback |
 | Google and GitHub (optional) | Console sign-in | Email link and code sign-in still work |
+| Telnyx | Phone numbers, SMS, voice, compliance, porting, US A2P | Behind `PM_PHONE`; one account in v1; contract tests against the live API before code depends on a behaviour |
+| Vapi | The `vapi` voice route and outbound calls | Per-tenant connectors with the tenant's own Vapi key, sealed |
 
 ## 9. What is deliberately not here
 

@@ -27,6 +27,7 @@ There are three layers:
 | `Q_WEBHOOKS` | Queue producer and consumer | `pm-webhooks` (DLQ `pm-webhooks-dlq`) | Batch 20, max retries 13 |
 | `Q_INDEX` | Queue producer and consumer | `pm-index` (DLQ `pm-index-dlq`) | Batch 10, max retries 10 |
 | `Q_SCREEN` | Queue producer and consumer | `pm-screen` (DLQ `pm-screen-dlq`) | Batch 10, `max_batch_timeout` 1 s, max retries 3. Screening jobs, kept apart from `pm-index` so a backlog there cannot push held mail past its deadline ([Screening hold §5](../project/design/screening.md#5-the-screen-job)) |
+| `Q_PHONE` | Queue producer and consumer | `pm-phone` (DLQ `pm-phone-dlq`) | Provider events, executions, reconciles, SMS dispatch and configuration. Created by `idvy setup` when `PM_PHONE` is `on`, or later ([Phone numbers](../project/design/phone-numbers.md)) |
 | `VECTORS` | Vectorize | `pm-mail-chunks` | 1024 dimensions, cosine, 8 metadata indexes |
 | `VECTORS_NEXT` | Vectorize | the new index of a re-embed | Only while an embedding-model change is re-embedding; `idvy deploy` adds and removes it ([Search design › Index lifecycle](../project/design/search.md#7-index-lifecycle)) |
 | `AI` | Workers AI | – | Embeddings, rerank, triage, planner, `toMarkdown` |
@@ -129,6 +130,16 @@ Cron triggers:
 | `PM_BILLING` | `off` | `off` (no plan checks and no usage alerts; only the daily caps in tenant policy apply) or `stripe` (plans, metering, Stripe checkout and portal) |
 | `PM_PLAN_CATALOG` | built-in Cloud catalog | JSON plan catalog (see [Billing design](../project/design/billing.md#plan-catalog)), including each plan's Stripe price ID, the top-up price IDs and maximum quantity, and the three Customer Portal configuration IDs; `cargo xtask stripe-setup` writes it ([Billing › Stripe account setup](../project/design/billing.md#stripe-account-setup)) |
 | `PM_BILLING_GRACE_DAYS` | `7` | Days a `past_due` workspace keeps its plan before Free limits apply |
+| `PM_PHONE` | `off` | `on` enables phone numbers: the routes, `POST /hooks/telnyx`, the `pm-phone` consumer and the phone cron steps. With `off` every phone route answers `404 route_not_found` and `/hooks/telnyx` answers `503`. Turning it off never releases a number ([Phone numbers § 30](../project/design/phone-numbers.md#30-rollout-telemetry-and-rollback)) |
+| `PM_TELNYX_API_BASE` | `https://api.telnyx.com/v2` | `https://api.telnyx.com/v2` or `https://api.telnyx.eu/v2`, checked at isolate start; no other host is accepted |
+| `PM_TELNYX_ACCOUNT_ID` | – (required with `PM_PHONE=on`) | The Telnyx organisation ID, stored as `provider_account_id` on every phone row and checked against `GET /v2/balance` at isolate start |
+| `PM_TELNYX_PUBLIC_KEY` | – (required with `PM_PHONE=on`) | The account's webhook public key (Ed25519, base64). Not secret. Without it `/hooks/telnyx` answers `503 unavailable` (`not_configured`) |
+| `PM_PHONE_CATALOGUE` | built-in | JSON catalogue of countries and number types, validated at deploy and at isolate start; how the operator turns a row on or off ([Phone numbers § 3](../project/design/phone-numbers.md#3-the-country-catalogue)) |
+| `PM_PHONE_RATE_CARD` | built-in | JSON rate card of GBP prices, versioned ([Phone numbers § 18.1](../project/design/phone-numbers.md#181-prices-currency-and-the-rate-card)) |
+| `PM_PHONE_KYC_RETENTION_DAYS` | `365` | Days KYC documents are kept after the tenant's last number, until counsel sets a period per country |
+| `PM_VAULT` | `off` | `on` enables the [vault](../guides/vault.md). With `off` every vault and consumer route answers `422 vault_disabled`; hidden `vault_code` mail stays hidden. Production keeps it `off` until the vault's last milestone is accepted |
+| `PM_VAULT_REFUSED_DOMAINS` | unset | Comma-separated registrable domains added to the built-in refused list (`account.gov.uk`): no vault item may use an origin there |
+| `PM_VAULT_CLEARANCE_COOKIES` | unset | Comma-separated cookie names added to the built-in clearance list (`cf_clearance`): dropped from every session state |
 
 ## Secrets
 
@@ -148,6 +159,10 @@ stdout, a file or a log; with it they are printed once to stdout.
 | `PM_STRIPE_SECRET_KEY` | only with `PM_BILLING=stripe` | Stripe API calls: create a Customer, create and retrieve Checkout Sessions, create Customer Portal sessions, read subscriptions with their latest invoice, retrieve a disputed charge, and cancel subscriptions (workspace deletion, duplicates, a lost dispute). A restricted key with exactly Checkout Sessions Write, Customer portal Write, Customers Write, Subscriptions Write, Invoices Read and Charges Read ([Billing › Stripe integration](../project/design/billing.md#stripe-integration)) |
 | `PM_STRIPE_WEBHOOK_SECRET` | only with `PM_BILLING=stripe` | Verifying the `Stripe-Signature` header on `/billing/stripe/webhook` |
 | `PM_OAUTH_GOOGLE_CLIENT_SECRET`, `PM_OAUTH_GITHUB_CLIENT_SECRET` | only with the matching client ID | The OAuth code exchange for Google and GitHub sign-in |
+| `PM_TELNYX_API_KEY` | only with `PM_PHONE=on` (uploaded by `idvy setup phone`, read from stdin; generated by the operator in the Telnyx portal) | Every provider call. A leak lets someone buy numbers and send on the operator's account until it is rotated in the portal and here |
+
+The vault adds no secret: its keys are generated by the Worker and sealed under `PM_MASTER_KEY`
+([Security § 6.1](../project/design/security.md#61-inventory)).
 
 Rotating `PM_KEY_PEPPER` (`idvy setup --rotate-pepper`) invalidates every API key, so it is a
 break-glass action. Rotating
@@ -256,6 +271,33 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
   "accounts": {
     "require_approval": false
   },
+  "vault": {
+    "allowed": false,
+    "key_approval": false,
+    "min_approval": "grant",
+    "codes_into_fills_only": false,
+    "max_items": 1000,
+    "session_max_ttl_days": 30,
+    "approval_deadline_seconds": 600
+  },
+  "phone": {
+    "allowed": false,
+    "key_approval": false,
+    "countries": null,
+    "max_numbers_per_identity": 5,
+    "max_numbers_per_tenant": 20,
+    "auto_approve": { "enabled": false },
+    "spend": { "tenant_monthly_cap_pence": null, "identity_monthly_cap_pence": null,
+               "registration_cap_pence": null },
+    "sms": { "identity_daily_cap": 200, "tenant_daily_cap": 2000, "tenant_monthly_cap": null,
+             "allowed_destination_countries": null, "brand_name": null },
+    "inbound": { "per_sender_per_hour": 30, "per_identity_per_hour": 600 },
+    "calls": { "outbound": "approval", "allowed_destination_countries": null, "concurrent_limit": 2,
+               "max_minutes": 15 },
+    "recording": "off",
+    "disclosure": { "calls": "required", "first_sms": "required", "call_text": null, "sms_text": null },
+    "verification": { "redact": true }
+  },
   "drafts": {
     "require_approval": "never",
     "key_approval": false
@@ -301,6 +343,30 @@ sending reputation or the AI budget of a Cloud deployment. This is the full docu
 | `screening.on_unavailable` | `quarantine` (default: no verdict by the deadline holds the message as `screening_unavailable`) or `deliver`. `deliver` applies only when the service failed (`model_unavailable`, `ai_rate_limited`, `deadline_exceeded`); a reached model cap and invalid classifier output are always held. Guard field |
 | `screening.deadline_seconds` | 30–900, default 120: the longest a held message waits for its verdict. Guard field: a tenant key may lower it only while `on_unavailable` is `quarantine` |
 | `events.labels_changed` | `true` emits `message.labels_changed` for label changes, delivered only to endpoints that name it. `false` by default |
+| `phone.allowed` | Phone numbers may be used. Lower-only; on Pylota Identity Cloud only a platform key or the tenant's partner key turns it on |
+| `phone.key_approval` | A platform key or the tenant's partner key may approve phone requests, decide port-outs and set or loosen the standing budget, with `on_behalf_of`. Only those keys set it |
+| `phone.countries` | Countries the tenant may buy in. Lower-only |
+| `phone.max_numbers_per_identity`, `phone.max_numbers_per_tenant` | Live numbers, counting pending purchases (at most 20 and 200). Lower-only |
+| `phone.auto_approve` | The standing purchase budget: `enabled`, `countries`, `number_types`, `max_numbers_per_identity`, `max_new_numbers_per_month`, `max_setup_pence_per_number`, `max_monthly_pence_per_number`, `expiring_only`; `version`, `set_by` and `set_at` are written by the service. A guard object: setting it or loosening any field is a decision reserved for people; tightening needs `phone:manage` ([Phone numbers § 5.7](../project/design/phone-numbers.md#57-the-standing-purchase-budget)) |
+| `phone.spend.tenant_monthly_cap_pence`, `phone.spend.identity_monthly_cap_pence` | Monthly phone spend caps. Lower-only |
+| `phone.spend.registration_cap_pence` | A monthly cap for one-off registration fees (the US 10DLC brand and campaign, toll-free verification), which count here instead of the monthly caps. Lower-only |
+| `phone.sms.*` | Segment caps per day and month; the destination countries (each also needs the sending number's row to have tested it); the brand name in auto-responses and disclosures |
+| `phone.inbound.*` | Inbound SMS throttles per sender and per identity |
+| `phone.calls.outbound` | `off`, `approval` (default) or `allowed`. A guard field |
+| `phone.calls.*` | Destination countries, concurrency and maximum call length. Lower-only |
+| `phone.recording` | `off` or `with_announcement`. A guard field |
+| `phone.disclosure.*` | AI disclosure on calls and the first SMS of a conversation (guard fields), and their texts |
+| `phone.verification.redact` | Codes shown as `[code]` in reads and events. A guard field |
+| `vault.allowed` | `true` lets the tenant use the vault. `false` by default. Platform-only: only a platform key sets it; turning it off closes every open use ([Vault § 15](../project/design/vault.md#15-kill-switches-and-incident-response)) |
+| `vault.key_approval` | `true` lets a platform key or the partner key of the tenant's own partner (never a tenant or identity key), holding `vault:approve`, approve this tenant's vault grants and uses, naming the person with `on_behalf_of`. `false` by default. Only a platform key or the tenant's own partner key can set it. Pylota sets it on its operators' tenants |
+| `vault.min_approval` | The floor of every item's approval level: `grant` (default), `per_run` or `per_use`. Guard field: tightening means a level at or above the current one |
+| `vault.codes_into_fills_only` | `true` withholds every verification message (mail and SMS) from agents and delivers codes only into vault phases; `wait` with `kind=verification` answers `403 policy_denied`. `false` by default. Guard field (`true` is stricter) |
+| `vault.max_items` | Vault items per tenant, 1–10,000, default 1,000. Lower-only |
+| `vault.session_max_ttl_days` | The longest session TTL, 1–30 days, default 30. Lower-only |
+| `vault.approval_deadline_seconds` | How long a use waits for a person, 60–900 seconds, default 600. Lower-only |
+
+On Pylota Identity Cloud, `PM_DEFAULT_POLICY` sets `phone.spend` to `{2000, 1000, 6000}`. `null` for a country
+list means every catalogue country.
 
 **Provisional agent sign-ups.** While a tenant is a provisional agent sign-up, `core::policy::effective`
 applies a fixed overlay after the stored policy, taking the stricter value of each field: both daily send
@@ -324,10 +390,10 @@ Identity keys cannot write the policy at all: they can hold neither `tenants:man
 
 | Class | Fields | A partner key | A workspace writer |
 |---|---|---|---|
-| Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones`, `inbound.trusted_arc_sealers` | `403 scope_denied` with `details.field` | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` |
-| Platform or own partner | `quarantine.key_release`, `drafts.key_approval` | May set it on the tenants of its own partner, at creation and later | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` ([J14](../project/edge-cases.md)) |
-| Lower-only | `identity_daily_send_cap`, `tenant_daily_send_cap`, `max_recipients`, `auto_reply.allowed`, `auto_reply.max_automatic_exchanges`, `inbound.per_sender_per_hour`, `inbound.unauthenticated_per_hour`, `inbound.per_tenant_per_hour`, `inbound.extract_image_text`, `retention.raw_days`, `retention.events_days`, `triage.enabled`, `triage.daily_model_cap`, `search.agentic_enabled`, `search.agentic_daily_cap`, `search.agentic_max_steps`, `search.agentic_max_seconds`, `abuse.complaint_rate_pause`, `abuse.bounce_rate_pause`, `abuse.tenant_complaint_rate_pause`, `abuse.tenant_bounce_rate_pause`, `accounts.require_approval` | May set a value at or below the field's ceiling; above it, `403 scope_denied` with `details.field` | May set a value at or below its workspace ceiling; above it, `403 scope_denied` with `details.field`, `details.reason = "above_ceiling"`, `details.ceiling` and `details.ceiling_source` ([J23](../project/edge-cases.md)) |
-| Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp`, `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`, `screening.deadline_seconds` | May set any valid value | A person may set any valid value. A tenant key may only tighten them (a value at least as strict as the current one), unless API keys may take decisions reserved for people on this tenant; otherwise `403 permission_denied` with `details.field` and `details.reason = "person_required"` ([J25](../project/edge-cases.md)) |
+| Platform-only | `web_bot_auth.allowed`, `domains.allow_create_zone`, `domains.cloudflare_zones`, `inbound.trusted_arc_sealers`, `vault.allowed` | `403 scope_denied` with `details.field` | `403 scope_denied` with `details.field` and `details.reason = "not_writable"`  |
+| Platform or own partner | `quarantine.key_release`, `drafts.key_approval`, `phone.allowed`, `phone.key_approval`, `vault.key_approval` | May set it on the tenants of its own partner, at creation and later | `403 scope_denied` with `details.field` and `details.reason = "not_writable"` ([J14](../project/edge-cases.md))  |
+| Lower-only | `identity_daily_send_cap`, `tenant_daily_send_cap`, `max_recipients`, `auto_reply.allowed`, `auto_reply.max_automatic_exchanges`, `inbound.per_sender_per_hour`, `inbound.unauthenticated_per_hour`, `inbound.per_tenant_per_hour`, `inbound.extract_image_text`, `retention.raw_days`, `retention.events_days`, `triage.enabled`, `triage.daily_model_cap`, `search.agentic_enabled`, `search.agentic_daily_cap`, `search.agentic_max_steps`, `search.agentic_max_seconds`, `abuse.complaint_rate_pause`, `abuse.bounce_rate_pause`, `abuse.tenant_complaint_rate_pause`, `abuse.tenant_bounce_rate_pause`, `accounts.require_approval`, `phone.countries`, `phone.max_numbers_per_identity`, `phone.max_numbers_per_tenant`, `phone.spend.*`, `phone.sms.identity_daily_cap`, `phone.sms.tenant_daily_cap`, `phone.sms.tenant_monthly_cap`, `phone.sms.allowed_destination_countries`, `phone.calls.allowed_destination_countries`, `phone.calls.concurrent_limit`, `phone.calls.max_minutes`, `vault.max_items`, `vault.session_max_ttl_days`, `vault.approval_deadline_seconds` | May set a value at or below the field's ceiling; above it, `403 scope_denied` with `details.field` | May set a value at or below its workspace ceiling; above it, `403 scope_denied` with `details.field`, `details.reason = "above_ceiling"`, `details.ceiling` and `details.ceiling_source` ([J23](../project/edge-cases.md))  |
+| Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp`, `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`, `screening.deadline_seconds`, `phone.auto_approve` (setting it or loosening any field is a decision reserved for people), `phone.calls.outbound`, `phone.recording`, `phone.disclosure.calls`, `phone.disclosure.first_sms`, `phone.verification.redact`, `vault.min_approval`, `vault.codes_into_fills_only` | May set any valid value | A person may set any valid value. A tenant key may only tighten them (a value at least as strict as the current one), unless API keys may take decisions reserved for people on this tenant; otherwise `403 permission_denied` with `details.field` and `details.reason = "person_required"` ([J25](../project/edge-cases.md))  |
 | Free | Every other field: `large_attachments`, `link_ttl_hours`, `ai_disclosure`, `inbound.extract_attachment_text`, `inbound.ses_bounce_retired`, `retention.message_days`, `triage.categories`, `triage.rules`, `search.refs_packs`, `search.custom_refs`, `webhook_text_bytes`, `domain_fallback`, `events.labels_changed` | May set any valid value | May set any valid value |
 
 - **Ceiling.** A lower-only field's ceiling for a partner key is the more restrictive of the deployment

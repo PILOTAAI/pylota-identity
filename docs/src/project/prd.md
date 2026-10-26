@@ -4,9 +4,9 @@
 |---|---|
 | Product | Pylota Identity |
 | Document owner | TREFT LTD (the owner, who is the sole developer and the Cloud operator) |
-| Status | Approved for build (v1.0); the additions of [ADR 0017](adr/0017-agentmail-parity.md) and [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md) stay Proposed until the owner accepts those records |
-| Last reviewed | 2026-10-17 |
-| Licence | FSL-1.1-ALv2 (Fair Source; each release becomes Apache-2.0 two years after it ships) |
+| Status | Approved for build (v1.0); the additions of [ADR 0017](adr/0017-agentmail-parity.md), [ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md), [ADR 0020](adr/0020-phone-numbers.md) (phone numbers), [ADR 0021](adr/0021-agent-vault.md) (the vault) and [ADR 0022](adr/0022-sdk-languages.md) (SDK languages) stay Proposed until the owner accepts those records |
+| Last reviewed | 2026-10-26 |
+| Licence | FSL-1.1-ALv2 (Fair Source; each release becomes Apache-2.0 two years after it ships); the SDKs, `pylota-identity-api-types` and the agent skills are Apache-2.0 ([§ 12](#12-licensing)) |
 | Related | [Architecture](architecture.md) · [Design](design/index.md) · [Build plan](build-plan.md) · [Edge cases](edge-cases.md) |
 
 Requirement IDs (`FR-*`, `NFR-*`) are stable. Tests, design documents and pull requests cite them.
@@ -110,12 +110,21 @@ Pylota's own experience showed the cost of these gaps:
 - Attachments fetched from URLs. Pylota Identity never fetches a URL to build an attachment (SSRF, content
   integrity, prompt injection; [Uploads § 1](design/uploads.md#1-what-uploads-are-and-are-not)). Upload
   the file instead.
+- Becoming a telephony carrier or holding number ranges from a regulator. Numbers are bought from a provider
+  (Telnyx) in each tenant's own legal name ([Phone numbers](design/phone-numbers.md)).
+- Phone numbers for individuals; for sole traders until the owner's decision ([Phone numbers § 1.1](design/phone-numbers.md#11-sole-traders-an-owner-decision)); and numbers bought by an agent without a person's approval, given one by one or through a standing budget the person set.
+- Call Control webhooks and media streaming through Pylota Identity (planned for v1.1); alphanumeric sender IDs;
+  outbound MMS; WhatsApp, RCS and iMessage.
+- Showing a vault value to an agent, a model or an API key, in any form. Agents use credentials through
+  registered consumers and never see them ([Vault](design/vault.md)).
+- Payment cards, bank details and passkeys in the vault; CAPTCHA solving; storing bot-challenge clearance.
+- A zero-knowledge or end-to-end encrypted vault. Pylota Identity Cloud holds the keys that decrypt the vault,
+  and says so ([Vault § 1.2](design/vault.md#12-the-trust-model)).
+- Credentialed fetch: the vault does not make outbound requests with a secret on an agent's behalf in v1.0.
 - OAuth 2.1 for the MCP endpoint (planned for v1.1; v1.0 uses API keys as bearer tokens; [ADR 0016](adr/0016-plan-items-changed-for-v1.md)).
 - MCP server-sent event notifications. MCP 2026-07-28's `subscriptions/listen` carries only list and
   resource changes, and an events primitive is not yet specified; `mail_events` and the WebSocket stream
   cover agents meanwhile ([Event feed § 15.1](design/event-feed.md#151-mcp-mail_events)).
-- A Python SDK (P2). v1.0 offers Python users the OpenAPI document, the MCP server and the CLI
-  ([SDKs, skills and agent tooling §3](design/sdk-and-skills.md#3-python)).
 - Framework toolkit packages. Guides use each framework's MCP client or the TypeScript SDK.
 - Running on platforms other than Cloudflare Workers.
 
@@ -186,11 +195,13 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 | Delivery | All six provider event types, per-recipient status; deliverability metrics: pause windows with thresholds and headroom, and event counts per hour and day by identity, tenant and domain (FR-MET) | Uncertain-send reconciliation | – |
 | Search | Keyword, semantic, hybrid, agentic; facets; tenant scope | Contacts, find-related | – |
 | Triage | Category, needs-reply, urgency, summary, risk flags; rules | Custom categories | – |
-| Integrations | REST, OpenAPI, MCP (API key), CLI, Rust SDK, webhooks; `wait` long-poll and verification extraction (quarantine rule 5, unsolicited OTP, depends on it: E4, E5); the event feed, durable event consumers and the WebSocket event stream (FR-EVT-1–11); the calendar object on REST, MCP, the CLI and the console (FR-CAL-14) | TypeScript SDK `@pylotahq/identity` (FR-SDK-2–9); agent skills and plugins (FR-SDK-10); MCP annotations from effect classes and client hints (FR-SDK-11); per-key MCP tool allow-list (FR-SDK-12); `idvy mcp stdio` (FR-SDK-13); CLI `--schema`, `--query` and `idvy skills generate` (FR-SDK-14); framework guides (FR-SDK-15); `calendar-reply` on REST, `mail_calendar_reply` and `idvy calendar-reply` (FR-CAL-10, FR-CAL-14); opt-in label events (FR-WH-6); webhook delivery headers (FR-WH-7); documentation links in errors (FR-API-3) | MCP OAuth 2.1; Python SDK; TypeScript agent-assertion verifier |
+| Integrations | REST, OpenAPI, MCP (API key), CLI, Rust SDK, webhooks; `wait` long-poll and verification extraction (quarantine rule 5, unsolicited OTP, depends on it: E4, E5); the event feed, durable event consumers and the WebSocket event stream (FR-EVT-1–11); the calendar object on REST, MCP, the CLI and the console (FR-CAL-14) | TypeScript SDK `@pylotahq/identity` (FR-SDK-2–9); Python SDK `pylota-identity` and Go SDK `github.com/PILOTAAI/pylota-identity-go`, each in its own repository, and `@pylotahq/identity` as the JavaScript SDK (FR-SDK-25–27); the shared SDK conformance suite (FR-SDK-28); phone and vault helpers and the vault consumer entry point in every SDK (FR-SDK-29–31); SDK release and example checks (FR-SDK-32–33); agent skills and plugins (FR-SDK-10); MCP annotations from effect classes and client hints (FR-SDK-11); per-key MCP tool allow-list (FR-SDK-12); `idvy mcp stdio` (FR-SDK-13); CLI `--schema`, `--query` and `idvy skills generate` (FR-SDK-14); framework guides (FR-SDK-15); `calendar-reply` on REST, `mail_calendar_reply` and `idvy calendar-reply` (FR-CAL-10, FR-CAL-14); opt-in label events (FR-WH-6); webhook delivery headers (FR-WH-7); documentation links in errors (FR-API-3) | MCP OAuth 2.1; TypeScript agent-assertion verifier |
 | Privacy | Retention, erasure with receipts, legal hold | Subject-access export; per-identity message expiry (FR-PRV-7) | – |
 | Operations | Setup, deploy, doctor, metrics, DLQ consumers, test mode | Restore drill tooling | A second Pylota Identity Cloud jurisdiction, an owner decision (GAP-25) |
 | Console | Sign-in, workspaces, members, roles, seats, inboxes, quarantine release, keys, domains, plan and usage; Cloud sign-up (waitlist and open); Google and GitHub sign-in; two-step verification (TOTP); the Overview; notifications; agent self-sign-up behind `PM_AGENT_SIGNUP` (Cloud, FR-ASU) | – | Passkeys; SSO (SAML/OIDC) |
 | Plans and billing | Plan catalog, metering with holds, `402 billing_limit`, usage API, Stripe checkout and portal, top-ups; usage alerts | – | Annual billing, invoicing; pay-per-call through x402 or MPP (GAP-26) |
+| Phone numbers (behind `PM_PHONE`, [ADR 0020](adr/0020-phone-numbers.md)) | Catalogue with GB mobile, GB geographic and US local rows; compliance profiles and encrypted write-only KYC documents; phone requests approved by people; ordering with spend intents, attempt-scoped references and reconciliation; numbers on identities with history; release; per-tenant provider resources; signed provider webhooks; inbound and outbound SMS with the consent ledger, caps and the US 10DLC gate; verification codes with the ledger gate and the vault channel; the `vapi` voice route and approved outbound calls with disclosure; emergency settings; the port-out guard; the nightly reconciler; GBP rate card, spend caps (with a registration cap), Stripe invoice items and partner statements; adoption for Pylota's migration with a dated exit; phone onboarding once per tenant and country, the standing purchase budget, the one-call purchase, capability facets and throwaway numbers (FR-PHN-1–23, 25–35, 37–54) | Ireland, Netherlands, US toll-free and the local rows for Germany, France, Spain and Italy; SMS screening by the classifier (FR-PHN-24); `sip` and `forward` routes; toll-free verification; port-in (FR-PHN-36) | Call Control and media streaming routes; alphanumeric sender IDs; outbound MMS; managed provider accounts per partner; a second provider (Twilio) |
+| Vault (behind `PM_VAULT`, [ADR 0021](adr/0021-agent-vault.md)) | `login`, `api_key` and `session` items bound to approved ledger entries and exact origins; write-only values sealed per version under a per-tenant key; grants and uses approved by people, bound to a digest; one-use tickets redeemed by registered consumers with signed requests and sealed packets; the consumer contract and conformance fixtures; TOTP and email codes into fills; sessions with filtering, write-back and expiry; hash-chained audit; kill switches; crypto-shred erasure; the six MCP tools and `idvy vault`; the import route for Pylota's sessions (FR-VLT-1–6, 8–13, 15, 17, 21–26, 28) | Partner custody (FR-VLT-7); SMS codes into fills with the phone milestones (FR-VLT-16); TOTP (FR-VLT-14); rotation by hand, `rotate_fill` and rotate-after-use (FR-VLT-18); signing (FR-VLT-19); console reveal (FR-VLT-20); MCP and CLI tooling (FR-VLT-27); the session import route (FR-VLT-29); outbound ranges by embedded IPv4 in the fixtures (FR-VLT-30) | Credentialed fetch through the vault; share links to people; breach checks of stored passwords; SSH keys and documents |
 
 ## 6. Functional requirements
 
@@ -209,7 +220,8 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   itself. The one exception: a platform or partner key **may** grant `identities:sign`, which it cannot
   hold, to a tenant or identity key it mints, and the grant is audit-logged. Deleting a workspace (a
   tenant-scope erasure) **must** need its own permission, `tenants:erase`, which a workspace admin and the
-  keys an admin mints never hold.
+  keys an admin mints never hold. Identity keys **must not** hold `vault:use`, `vault:approve` or `vault:admin`
+  ([Vault § 17.2](design/vault.md#172-what-each-kind-of-key-may-hold)).
 - **FR-KEY-2** Key secrets **must** be shown once, stored only as a keyed hash, support expiry, and
   support rotation with an overlap window. No stored record, an idempotency record included, **may** hold
   a secret: an idempotent replay of a response that carried one returns it without the secret
@@ -239,9 +251,10 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 - **FR-TEN-4** A workspace **must** be able to change its own tenant policy: a tenant key holding
   `policy:write`, and a console owner or admin, **may** set the free fields and lower the lower-only fields,
   never above the strictest of the deployment default, the platform operator's value and, for a partner's
-  tenant, the partner's value. Platform-only fields and `quarantine.key_release` **must** stay out of its
+  tenant, the partner's value. Platform-only fields (among them `vault.allowed`) and `quarantine.key_release` **must** stay out of its
   reach, identity keys **must not** hold `policy:write`, and a key **must not** loosen a guard field
-  (allow-list only, quarantine on authentication failure, the spam threshold, unsolicited-code quarantine)
+  (allow-list only, quarantine on authentication failure, the spam threshold, unsolicited-code quarantine,
+  `vault.min_approval`, `vault.codes_into_fills_only`)
   where only people may release quarantined mail (FR-CON-6). Every policy write **must** be audited and
   evented, and concurrent writes **must not** lose one another ([Workspace policy](design/workspace-policy.md)).
 
@@ -310,7 +323,10 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   approved entry matches the mail (the authenticated sender's organisational domain and the receiving
   address); other such mail **must** be held for review, never dropped. Entries **must** emit
   `account.requested`, `account.approved`, `account.rejected` and `account.closed`, expire when undecided,
-  and be deleted with the identity or tenant ([Service sign-up ledger](design/service-accounts.md)).
+  and be deleted with the identity or tenant ([Service sign-up ledger](design/service-accounts.md)). A ledger entry **may** list up to five `login_domains` where the account signs
+  in, shown apart on the approve page, and **may** carry a `vault_login` that the approval turns into a vault
+  login item and its first grant ([Vault § 3.3](design/vault.md#33-ledger-binding),
+  [§ 3.5](design/vault.md#35-a-login-born-from-a-ledger-approval)).
 
 ### 6.3 Domains
 
@@ -390,7 +406,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   - `known_sender`;
   - a quarantine decision.
 - **FR-IN-5** Messages that fail authentication, carry a risky attachment or exceed the spam threshold
-  **must** be quarantined. Quarantined mail is hidden from agents unless the key holds `quarantine:review`.
+  **must** be quarantined. Quarantined mail is hidden from agents unless the key holds `quarantine:review`. A verification message for a vault login item's channel **must** be stored `hidden` with
+  `quarantine_reason = 'vault_code'`, withheld from every agent surface and from API keys whatever their
+  permissions, and never released (FR-VLT-15).
 - **FR-IN-6** Automated mail **must** be classified and marked `automated`, so agents never auto-reply to
   it. This covers:
   - auto-replies (RFC 3834) and out-of-office replies;
@@ -408,7 +426,8 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   messages). Labels, read state and archiving **must** be settable per message and per thread, and
   `is:unread` **must** follow the read state.
 - **FR-IN-11** An agent **must** be able to wait for new mail (`wait`, a long poll with filters), and
-  verification codes and links in received mail **must** be extracted into a structured field.
+  verification codes and links in received mail **must** be extracted into a structured field. `wait` with `kind=verification` **must** answer `403 policy_denied` when the tenant's
+  `vault.codes_into_fills_only` is `true`.
 - **FR-IN-12** Unsolicited inbound mail **must** be capped per identity and per tenant by source, so that
   mail nobody asked for cannot exhaust storage, triage or model spend.
 - **FR-IN-13** The service **must** read and update up to 100 messages of one identity in one request
@@ -617,8 +636,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   `noUncheckedIndexedAccess`
   ([SDKs, skills and agent tooling §2](design/sdk-and-skills.md#2-the-typescript-sdk)).
 - **FR-SDK-3** The SDKs **must never** generate an idempotency key for an operation marked
-  `x-idempotency: required` (today send, reply, reply-all, forward, calendar reply and draft send), and
-  **must** send the same key and the same body bytes on every retry of one call. The TypeScript SDK
+  `x-idempotency: required` (the mail sends, calendar reply and draft send, and the phone and vault
+  operations their designs mark, such as a phone purchase, an SMS send and a vault use), and
+  **must** send the same key and the same body bytes on every retry of one call. Every SDK
   **must** retry only failures that the error envelope marks `retryable`, and network failures and proxy
   `502`, `503` and `504` only for a `GET` or a request that carries an idempotency key; **must** honour
   `Retry-After` up to a bound and throw beyond it; and **must** end a call whose outcome it could not learn
@@ -635,7 +655,7 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   and `410 cursor_expired` from the feed or stream raises a gap error instead of continuing from another
   position.
 - **FR-SDK-7** The SDKs **must** tolerate unknown fields, enum values, event types and error codes from a
-  newer deployment. The TypeScript SDK **must** report an operation that a deployment lacks as unsupported
+  newer deployment. Every SDK **must** report an operation that a deployment lacks as unsupported
   by that deployment, never as a missing resource.
 - **FR-SDK-8** The SDK **must never** expose the API key in errors, logs or serialised objects, **must**
   refuse to run in a browser or against a base URL that is not `https` (localhost excepted), and **must**
@@ -668,8 +688,47 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   `idvy skills generate` **must** write the skills of its own version and **must not** overwrite a
   locally modified file unless forced.
 - **FR-SDK-15** The docs **must** include guides for the Vercel AI SDK, the OpenAI Agents SDK, the Claude
-  Agent SDK and LangChain, a TypeScript SDK guide, a Python guide and an agent skills guide, whose code
-  examples type-check in CI against pinned versions.
+  Agent SDK and LangChain, TypeScript, JavaScript, Python and Go SDK guides, a vault consumer guide and an
+  agent skills guide, whose code examples type-check (or compile) in CI against pinned versions.
+- **FR-SDK-25** The project **must** ship a Python SDK, the PyPI package `pylota-identity` (import
+  `pylota_identity`), built in its own repository `PILOTAAI/pylota-identity-python`, with blocking and
+  `asyncio` clients that have exactly one method per `openapi.yaml` operation not marked `x-sdk: false`. It
+  **must** support every CPython line from its release to its end of life, starting with 3.11, and **must**
+  depend at run time only on `httpx`, with `websockets` and `cryptography` behind the extras `events` and
+  `vault-consumer` ([SDKs, skills and agent tooling § 3.5](design/sdk-and-skills.md#35-python)).
+- **FR-SDK-26** The project **must** ship a Go SDK, the module `github.com/PILOTAAI/pylota-identity-go`,
+  built in its own repository of that name, with exactly one method per such operation. It **must** support
+  the Go releases the Go project supports, starting with 1.26, and **must** depend only on the standard
+  library and `github.com/coder/websocket`; tools **must** live in a separate module
+  ([§ 3.6](design/sdk-and-skills.md#36-go)).
+- **FR-SDK-27** `@pylotahq/identity` **must** be usable from plain JavaScript with the same run-time
+  refusals as from TypeScript; there **must not** be a second JavaScript package
+  ([§ 3.7](design/sdk-and-skills.md#37-javascript)).
+- **FR-SDK-28** Every SDK **must** implement FR-SDK-3 – FR-SDK-8 with the behaviour the shared conformance
+  suite of each release defines, and **must not** adopt a contract whose conformance cases it does not all
+  pass. The suite **must** be generated from `crates/core`, and published in the release's
+  signed fixtures asset ([§ 3.2](design/sdk-and-skills.md#32-the-shared-conformance-suite)).
+- **FR-SDK-29** Every SDK **must** offer the one-call phone purchase, phone set-up status, `wait` for SMS and
+  SMS outcome classification, returning a pending approval and a taken number as typed results, never
+  retrying a purchase with another number and never resending an `uncertain` SMS. Its approval methods for
+  phone requests, vault grants and vault uses **must** take the digest from the caller and **must never** fetch
+  one to fill in or retry an approval ([§ 3.3](design/sdk-and-skills.md#33-phone-and-vault-coverage)).
+- **FR-SDK-30** Every SDK **must** offer the vault consumer helpers (origin canonicaliser, request signer,
+  redeem with HPKE packet opening, report, write-back, the ticket-origin check and the redactor) in an entry
+  point separate from its default import, producing exactly the outputs of the conformance vectors; it
+  **must never** retry a redemption after the request may have reached the service, **must** give packet
+  fields and keys no string, JSON or error form, and **must** let the caller overwrite packet plaintext
+  ([§ 3.4](design/sdk-and-skills.md#34-the-vault-consumer-entry-point)).
+- **FR-SDK-31** A vault ticket **must** be treated as a key in every SDK: never in a URL, a log, an error or a
+  string form beyond its lookup prefix.
+- **FR-SDK-32** Each Python and Go SDK release **must** name the Pylota Identity release whose contract it
+  was generated from, **must** have its artefacts listed in an owner-signed `SHA256SUMS`, and **must** be
+  published only by its repository's release workflow: Python by PyPI trusted publishing with attestations,
+  Go by pushing the tag after signing and checking the proxy's `h1:` hash against the signed one. A
+  pre-release **must not** be published ([§ 3.5](design/sdk-and-skills.md#35-python), [§ 3.6](design/sdk-and-skills.md#36-go)).
+- **FR-SDK-33** Every code example of an SDK, on the landing page and in the docs, **must** be checked in the
+  CI of the SDK it uses at the contract's tag, and each SDK's package metadata **must** state the licence
+  `Apache-2.0`, with `LICENSE` and `NOTICE` in every published artefact.
 - **FR-API-3** Every error envelope **must** carry `docs`, an absolute link to the code's anchor on the
   deployment's published errors page, and every error code **must** have that anchor
   ([Parity additions § 10](design/parity-additions.md#10-a-documentation-link-in-errors-fr-api-3)).
@@ -688,7 +747,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   Every purge **must** write an audit event.
 - **FR-PRV-3** Erasure **must** be supported per message, thread, counterparty, identity and tenant. It
   **must** return a receipt counting what was deleted in each store. Every scope **must** also delete the
-  drafts it covers and count them (`drafts_deleted`, FR-DRF-10).
+  drafts it covers and count them (`drafts_deleted`, FR-DRF-10). Identity and tenant scopes **must** also crypto-shred vault items and count
+  `vault_items_deleted`, `vault_versions_shredded`, `vault_keys_shredded`, `vault_uses_deleted` and
+  `vault_audit_deleted`.
 - **FR-PRV-4** A legal hold on a thread **must** stop retention and erasure from deleting it. Erasure
   receipts **must** list each held item.
 - **FR-PRV-5** Subject-access export **must** produce every message to or from a counterparty across a
@@ -713,6 +774,13 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   [Cloud commissioning](cloud-commissioning.md) page: its full configuration, scoped and short-lived
   credentials, the partner bootstrap, the checks, and three gated phases (partner-only, waitlist, open),
   so that Pylota's integration runs on Cloud before public sign-up opens.
+- **FR-OPS-6** Pylota Identity Cloud **must** go live product by product (mail, phone numbers, the vault,
+  the SDKs) only through the gates of [Cloud commissioning](cloud-commissioning.md#10-go-live-gates), each
+  opened when every row of [Launch readiness](launch-readiness.md) that blocks it is `done` or `n/a` with
+  evidence: build milestones, production checks, legal pages and processors, counsel and tax answers, licence
+  obligations, security sign-off and operations. `release-gate` **must** refuse `v1.0.0` while a row that
+  blocks `v1.0` is open. Acceptance: `xtask::launch_readiness_refuses_open_blockers`,
+  `cli::doctor::launch_readiness_gates`.
 
 ### 6.14 Console and workspaces
 
@@ -739,7 +807,9 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   only for a signed-in person (`PM_QUARANTINE_KEY_RELEASE=off`), except in a workspace whose policy has
   `quarantine.key_release: true`, which only a platform key or the workspace's partner key can set; there,
   those two keys can release too, never the workspace's own tenant or identity keys. Self-hosters can allow release by API keys with
-  `quarantine:review` everywhere (`on`, the default for self-hosting).
+  `quarantine:review` everywhere (`on`, the default for self-hosting). Approving a vault grant or use, and activating a vault consumer, **must** follow the same
+  rule (`Decision::ApproveVault`, `Decision::ActivateConsumer`); console reveal of a vault value **must** need
+  re-authentication within 10 minutes.
 - **FR-CON-7** A self-hosted deployment **must** create its first owner during `idvy setup`
   (`--owner-email`). The console **must** be optional (`PM_CONSOLE=off` removes its routes).
 - **FR-CON-8** Self-serve sign-up **must** follow `PM_SIGNUP`: `closed` (the default; no public sign-up),
@@ -1215,6 +1285,288 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
   link or refuse token, or a key; every new store **must** be covered by the tenant-scope erasure or hold
   only keyed hashes.
 
+### 6.23 Phone numbers
+
+Behind `PM_PHONE` ([ADR 0020](adr/0020-phone-numbers.md), [Phone numbers](design/phone-numbers.md)). The
+priority of each requirement is given in brackets; acceptance names the edge rows of section P of the
+[edge-case register](edge-cases.md).
+
+- **FR-PHN-1** (P0) Phone numbers **must** be off unless `PM_PHONE` is `on` and the tenant's `phone.allowed`
+  is `true`; the ops switch `phone` **must** support `on`, `paused_purchases` and `paused` as specified, and
+  no flag, switch or rollback **may** release a number. Acceptance: P4, P101.
+- **FR-PHN-2** (P0) The service **must** reach the telephony provider only through the `PhoneProvider`
+  trait, at fixed hosts, with one Telnyx account in v1 and `provider` and `provider_account_id` stored on
+  every row that names a provider resource; no route, tool, event or log **may** expose a provider credential.
+  Acceptance: P103.
+- **FR-PHN-3** (P0) What can be bought **must** come from a versioned catalogue of rows (country, number type,
+  status `available`, `requires_local_presence` or `not_offered`, capabilities, requirements, local presence,
+  sender rules, quiet hours, emergency settings, sources and verification date); GB mobile, GB local and US
+  local rows are P0, US toll-free, IE, NL and the DE, FR, ES and IT local rows P1. Acceptance: P1, P3.
+- **FR-PHN-4** (P0) Number search **must** require every capability of the row on each candidate, never
+  substitute another number type, drop candidates above the row's cost ceiling and numbers in the 90-day
+  cross-tenant quarantine, return a GBP quote and a signed quote token per candidate, and count against a
+  daily cap. Acceptance: P1, P2, P39.
+- **FR-PHN-5** (P0) Each tenant **must** have one compliance profile describing a business in whose legal
+  name its numbers are registered; individuals **must** be refused, and sole traders **must** be refused unless
+  the owner's recorded decision and the row allow them (FR-PHN-54); tax identifiers and
+  the representative's contact and birth data **must** be sealed and never returned. Acceptance: P5, P6.
+- **FR-PHN-6** (P0) KYC documents **must** be uploaded with declared size and SHA-256, sniffed and refused when
+  risky, encrypted per document under a sealed data key before they reach R2, and never readable through any
+  route; deleting one **must** crypto-shred it. Acceptance: P7, P8, P9.
+- **FR-PHN-7** (P0) Provider requirements **must** be read as data and mapped to profile fields and document
+  kinds; submitting a profile for a country, type and action **must** be a request a person approves, whose
+  run uploads and links documents within one run and validates addresses; provider group states **must** map
+  to profile statuses, with expiry notifications. Acceptance: P10–P14.
+- **FR-PHN-8** (P0) KYC records **must** be kept while needed and for `PM_PHONE_KYC_RETENTION_DAYS` after the
+  last number, then deleted; tenant erasure **must** delete them except documents in their retention period,
+  which the receipt lists; provider copies **must** be deleted after the last number; a platform export
+  **must** be single-use and audited. Acceptance: P98, P99.
+- **FR-PHN-9** (P0) Every purchase, port-in, release, compliance submission, US registration, toll-free
+  verification, emergency registration, voice-route change and (under policy) outbound call **must** be a phone
+  request (a purchase may be approved by the standing budget, FR-PHN-43, and a scheduled release by its
+  purchase, FR-PHN-50), created with a required `Idempotency-Key`, bounded per tenant, and rejected as expired after 7
+  days undecided. Acceptance: P15, P19, P22.
+- **FR-PHN-10** (P0) Approving a phone request or deciding a port-out **must** be a decision reserved for
+  people (`key_may_decide`, opt-in `phone.key_approval` for platform and own-partner keys only), never by the
+  requesting key, bound to the request's digest, and audited with `on_behalf_of`. Acceptance: P16, P17, P18.
+- **FR-PHN-11** (P0) Quotes **must** be in GBP from the rate card; a higher price at execution **must** return
+  the request to `pending_approval` with a new digest; provider costs in USD **must** be shown only to platform
+  and partner keys. Acceptance: P20, P76.
+- **FR-PHN-12** (P0) A request **must** run under one claim with a fencing token, re-check the ops switch,
+  configuration, policy, compliance, tenant resources and the spend hold before any billable call, and never
+  start for an erasing tenant or a deleting identity. Acceptance: P21, P33, P37.
+- **FR-PHN-13** (P0) Every order attempt **must** write a spend intent and an attempt-scoped
+  `customer_reference` first; a definitive refusal **must** clear the intent only after a complete listing
+  proves no order; an unknown outcome **must** become `uncertain` and **must not** be retried until an order is
+  adopted or absence is proved by two complete listings at least 5 and 10 minutes apart; at most 3 attempts;
+  after 24 hours only a platform resolve ends it. Acceptance: P23–P27.
+- **FR-PHN-14** (P0) Numbers **must** follow the state machine of [§ 6.2](design/phone-numbers.md#62-the-provisioning-state-machine), with carrier, SMS and voice facets each
+  read back from the provider, the capability facets of FR-PHN-45, `setup_state` and `provisioning { status, code, retryable }` using Pylota's
+  failure codes unchanged, and no provider IDs for tenant or identity keys. Acceptance: P34.
+- **FR-PHN-15** (P0) Requirements pending, deadlines and long reviews **must** notify people, remind before
+  deadlines, back off and alert after 7 days, and end a cancelled order as `failed` so the next request can
+  order again. Acceptance: P28, P29, P30.
+- **FR-PHN-16** (P0) Orders **must** be moved by provider events, the every-minute cron, read-repair that only
+  queues work with a written backoff, and the nightly reconciler, all idempotent under the claim.
+  Acceptance: P21, P96.
+- **FR-PHN-17** (P0) A number **must** be an address of one identity: a unique live E.164 in the directory,
+  history kept after release, port-out or move, routing and lookup on live numbers only, primary and alias
+  roles per capability, moves within a tenant, and per-identity and per-tenant limits. Acceptance: P23, P40,
+  P103.
+- **FR-PHN-18** (P0) Deleting an identity that holds a live number **must** be refused; a paused identity
+  **must** keep receiving and refuse sends; a suspended tenant **must** refuse sends and requests.
+  Acceptance: P35, P36, P37.
+- **FR-PHN-19** (P0) Release **must** be an approved request that discovers the number by stored IDs, then
+  reference, then exact number in a complete listing, waits on pending orders, proves the ownership stamp,
+  removes the voice route first and treats `404` as success; a released number **must not** be sold to
+  another tenant for 90 days. Acceptance: P38, P39.
+- **FR-PHN-20** (P0) Each tenant **must** have its own messaging profile, credential connection, outbound
+  voice profile and billing group at the provider, found by name and tag before any create, read back after
+  every change, and kept in step with policy. Acceptance: P41, P55.
+- **FR-PHN-21** (P0) `POST /hooks/telnyx` **must** verify the Ed25519 signature over the timestamp and raw body
+  with a 5-minute window in every environment, write the raw event to R2 and queue a pointer before answering
+  `2xx`, read nothing from D1, deduplicate on the event ID and apply events in `occurred_at` order per
+  resource. Acceptance: P42–P45, P47.
+- **FR-PHN-22** (P0) The owner of every provider event **must** come from a fact the provider controls and be
+  cross-checked with a second fact where one exists; a mismatch **must** have no effect and alert.
+  Acceptance: P46, P48.
+- **FR-PHN-23** (P0) Inbound SMS **must** be stored in the identity's mailbox with the trust flag
+  `sender_unverified`, decided by the SMS quarantine rules, never refused for a plan or spend reason, and handled
+  by the simulator in test tenants. Acceptance: P49, P52, P56.
+- **FR-PHN-24** (P1) Inbound SMS **must** be screened as mail is (the deterministic scan, and in `hold` mode the
+  classifier and deadline), with short and keyword messages exempt from the model. Acceptance: P51.
+- **FR-PHN-25** (P0) A consent ledger per tenant brand **must** record opt-outs and opt-ins by keyed hash, apply
+  STOP, START and HELP whatever the message's other status, never send Pylota Identity's own confirmation,
+  accept opt-ins only with `phone:manage` and evidence, survive counterparty erasure, and stay in step with the
+  provider's list. Acceptance: P50, P53, P55, P67, P105.
+- **FR-PHN-26** (P0) Verification codes in SMS **must** be extracted without the link rule, and where
+  `accounts.require_approval` is true reach an agent only through an approved service-ledger entry naming the
+  number, a registered wait and, when listed, the sender. Acceptance: P57, P58, P62.
+- **FR-PHN-27** (P0) Codes on a number named by an active vault login item's phone channel **must** be withheld
+  as `vault_code`, never shown to agents or API keys, and given only to the vault's `SmsCodeSource` once;
+  `vault.codes_into_fills_only` **must** withhold every code SMS; reads and events **must** redact codes; no log
+  **may** hold SMS text or codes. Acceptance: P59, P60, P61.
+- **FR-PHN-28** (P0) Outbound SMS **must** use one send route with a required `Idempotency-Key`, a sender bound to
+  the sending identity, and the ordered pipeline of [§ 12.2](design/phone-numbers.md#122-policy-pipeline), whose caps fail closed; a dry run **must** check
+  without holding or storing. Acceptance: P64, P65, P69, P70, P71, P106.
+- **FR-PHN-29** (P0) Dispatch **must** make one provider call per SMS under a transport claim, with the provider
+  idempotency key `pi-sms-{sms_id}`; repeats with the same key **may** be enabled only after the contract test
+  passes; an unknown outcome **must** end `uncertain`, never be resent automatically, and be reconciled by
+  matching or resolved by the integrator. Acceptance: P63.
+- **FR-PHN-30** (P0) Receipts **must** set SMS statuses, record the sender actually used and flag substitution,
+  hold a receipt that arrives before its target for 15 minutes, and settle the spend hold with the provider's
+  cost. Acceptance: P66, P72, P75.
+- **FR-PHN-31** (P0 for 10DLC, P1 for toll-free) US A2P **must** use one brand and campaign per tenant,
+  readiness only at `MNO_PROVISIONED`, brand approval at `VERIFIED` or `VETTED_VERIFIED`, `webhookURL` set,
+  creation only inside an approved and claimed request with a lookup before paying again, and a send gate for
+  every US sender; simulated IDs **must never** be stored for live tenants. Acceptance: P68, P81–P84.
+- **FR-PHN-32** (P0 for `vapi`, P1 for `sip` and `forward`) Each voice-capable number **must** have one route
+  (`vapi`, `sip` inbound, `forward` or `none`) set by an approved request and read back; the `vapi` route
+  **must** use Vapi's bring-your-own SIP trunk with the tenant's SIP credentials, never a Telnyx key, adopt by
+  exact number and verify by PATCH then GET. Acceptance: P85, P86, P89.
+- **FR-PHN-33** (P0) Outbound calls **must** go through a `vapi` route only in v1, refuse emergency, short and
+  premium destinations, follow `phone.calls.outbound`, speak the disclosure first, hold their maximum cost, and
+  become `uncertain` rather than be placed twice; calls the service did not place **must** be detected.
+  Acceptance: P87, P88, P90.
+- **FR-PHN-34** (P0) Recording **must** be off by default and on only with an announcement; transcripts the
+  service holds **must** be untrusted input; call records and usage **must** count what the caps count.
+  Acceptance: P90.
+- **FR-PHN-35** (P0) Each catalogue row **must** carry an emergency setting; US numbers **must** have a
+  registered emergency address (an approved request) before their routes place calls; agent routes **must
+  never** dial emergency numbers; tenants **must** be warned before purchase where emergency calls are not
+  supported. Acceptance: P88, P91.
+- **FR-PHN-36** (P1) Port-in **must** be an approved request with a free portability check, sealed losing-carrier
+  details, provider splits as separate records, exceptions as `action_needed`, and no cancellation within 48
+  hours of the FOC date. Acceptance: P92.
+- **FR-PHN-37** (P0) Every number **must** carry a random port-out PIN kept only in the vault; a port-out
+  **must** alert people at once, be decided only by a person, never be rejected automatically, escalate at 50%,
+  75% and 90% of its window, and rotate the PIN after a rejection or reveal. Acceptance: P93, P94, P95, P102.
+- **FR-PHN-38** (P0) The provider's state **must** be reconciled continuously and nightly across numbers,
+  orders, porting, compliance, A2P, message and call records, webhook deliveries, opt-outs and balance, and on
+  request per tenant and per deployment. Acceptance: P96, P97.
+- **FR-PHN-39** (P0) Money **must** follow [§ 18](design/phone-numbers.md#18-money): GBP prices from the rate card, one charge per unique source,
+  monthly spend caps per tenant and identity enforced with holds and refused with `402 spend_cap_reached` before
+  anything is stored, recurring charges never refused, provider-side daily limits as backstops, balance alerts
+  with an automatic pause, Stripe invoice items with idempotency keys, partner statements, and a paid plan or a
+  partner for self-serve tenants. Acceptance: P73–P80.
+- **FR-PHN-40** (P0) Erasure scopes **must** cover SMS, media, calls and phone data with the receipt fields of
+  [§ 24](design/phone-numbers.md#24-privacy); tenant erasure **must** run `phone_release`; logs **must** pseudonymise phone numbers; every sealed column
+  **must** be in the sealed-column registry. Acceptance: P53, P98, P61.
+- **FR-PHN-41** (P0) The MCP server **must** offer the twelve `phone_*` tools of [§ 28](design/phone-numbers.md#28-mcp-and-cli) and no tool that approves,
+  releases, ports, submits KYC, changes a route, sets a budget or shows a PIN; `phone_buy_number` **must not**
+  take a confirmation flag; the CLI **must** offer `idvy phone …` and
+  `idvy setup phone`. Acceptance: `it::mcp::phone_tools`, `cli::phone::commands`.
+- **FR-PHN-42** (P0) A platform key **must** be able to adopt a number already in the provider account into an
+  identity, stamping ownership and refusing a number already held; an adopted number registered under a
+  platform group **must** be re-papered under its tenant's profile by its `legacy_deadline`, and **must never**
+  be released by a deadline (FR-PHN-54). Acceptance: P100, P126.
+- **FR-PHN-43** (P0) A tenant **may** have a standing purchase budget (`phone.auto_approve`), off by default,
+  set or loosened only by a decision reserved for people and tightened by `phone:manage`; a `purchase_number`
+  it covers **must** be created approved with the budget's version recorded, count against a monthly slot
+  taken atomically with the spend hold, and remain subject to the spend caps, the ops switch and quote changes.
+  Acceptance: P108–P111.
+- **FR-PHN-44** (P0) `POST /v1/identities/{identity_id}/phone-numbers` **must** buy a number in one call with a
+  required country and a required `Idempotency-Key`, defaulting the type per country, answering `201` with the
+  number once the provider accepted the order inside the budget, or `202` with the request otherwise; a taken
+  number **must** be replaced by the next candidate up to 5 times for `any`, and answered `409
+  phone_number_taken` with up to 5 alternatives for an exact number. Acceptance: P112–P114.
+- **FR-PHN-45** (P0) Every number **must** report the capability facets `outbound_sms`, `inbound_sms`,
+  `inbound_calls` and `outbound_calls` as `enabled`, `activating`, `registration_required` or `not_available`
+  with a reason and a next step, computed by the same function the send and call gates use, and emit
+  `phone_number.capability_changed` on each change; `setup_state` **must** be `registration_pending` when only a
+  registration is missing. Acceptance: P115, P116.
+- **FR-PHN-46** (P0) A purchase quote **must** carry `follow_on[]` for every registration the number will still
+  need for this tenant, with its price, typical wait and who acts, covered by the digest. Acceptance: P117.
+- **FR-PHN-47** (P0) A purchase for a row the tenant has not finished onboarding **must** be created with
+  `blocked_by` and a next step rather than refused, **must not** be executed while blocked, and **must** run
+  once onboarding completes. Acceptance: P118.
+- **FR-PHN-48** (P0) One-off registration fees **must** count against `phone.spend.registration_cap_pence`
+  instead of the monthly caps; pass-through fees **must** be priced at cost until the owner sets a margin.
+  Acceptance: P119.
+- **FR-PHN-49** (P0) Phone onboarding **must** report one status per tenant and country with its steps, fees,
+  waits and next step through REST and the MCP tool `phone_setup_status`; agents **may** draft the registration
+  text, which **must** hold no tax identifier, personal data or document and **must** be submitted only by a
+  person. Acceptance: P120, P121.
+- **FR-PHN-50** (P0) A purchase **may** carry `expires_at`; its approval **must** cover the release at that time,
+  which **must** run with every release safety rule; extending or removing the expiry **must** need
+  `phone:manage`. Acceptance: P122.
+- **FR-PHN-51** (P0) The profile **must** name the company register (with its region where a country has
+  several), and document requirements **must** be mapped per registration country, never guessed.
+  Acceptance: P123.
+- **FR-PHN-52** (P0) A US number of a tenant registered outside the US **must** report `outbound_sms:
+  not_available` until GB brands are proved and allowed, and `outbound_calls: not_available` without a US
+  emergency address; SMS **must** be refused to destinations the sending row has not tested. Acceptance: P124,
+  P125.
+- **FR-PHN-53** (P0) The provider account's level **must** be probed and recorded, and a row that needs a level
+  the account lacks **must** report `platform_prerequisite`; US rows **must** stay off until the enablement
+  sequence of [§ 2.5](design/phone-numbers.md#25-us-enablement) is complete. Acceptance: P127.
+- **FR-PHN-54** (P0) The owner's decision on sole traders **must** be recorded before M41's acceptance; under any
+  option an adopted number **must** keep working with a dated exit (re-paper or port out) and be suspended for
+  outbound only, never released, at its deadline; a US sole-proprietor brand **must** take its one-time code
+  only from a person. Acceptance: P6, P126.
+
+### 6.24 Vault
+
+Behind `PM_VAULT` ([ADR 0021](adr/0021-agent-vault.md)). Priorities in brackets; acceptance names rows of
+section U of the [edge-case register](edge-cases.md).
+
+- **FR-VLT-1** (P0) The vault **must** be off unless `PM_VAULT` is `on` and the tenant's `vault.allowed` is
+  `true`; `vault.allowed` is set only by a platform key; turning the vault off **must not** release a withheld
+  code. Acceptance: U1, U2, U70.
+- **FR-VLT-2** (P0) No route, MCP tool, event, log, audit row, idempotency record or export **may** return or
+  contain a vault value, ticket, packet, unlock key or TOTP seed; value-holding types **must not** implement
+  `Debug` or `Serialize`. Acceptance: U3, U4, U5.
+- **FR-VLT-3** (P0) Items **must** be one of `login`, `api_key` or `session` (and the internal
+  `managed_secret`), bound to 1–10 exact `https` origins canonicalised as specified; wildcards, IP literals,
+  internal names and confusable hosts **must** be refused. Acceptance: U6, U7, U8, U85.
+- **FR-VLT-4** (P0) The vault **must** refuse payment cards, bank details, passkeys and WebAuthn keys, and
+  **must** drop bot-challenge clearance cookies. Acceptance: U9, U10, U11.
+- **FR-VLT-5** (P0) Every usable item **must** be bound to an approved service-ledger entry whose registrable
+  domain (or `login_domains`) covers each origin, re-checked at grant approval, use creation and redemption;
+  closing the entry **must** archive the item and close its uses. Acceptance: U12, U13, U14, U15.
+- **FR-VLT-6** (P0) Values **must** be sealed per item version under a fresh DEK, with AAD binding tenant, item,
+  version and purpose, the DEK sealed by HPKE to the tenant's X25519 key, and the tenant key sealed under the
+  master key (and, in partner custody, under the partner's unlock key). Acceptance: U16, U17, U18.
+- **FR-VLT-7** (P1) A tenant's own partner key **must** be able to move the tenant into partner custody and back,
+  with one or two unlock keys shown once; unwrapping routes **must** require the unlock key in that mode.
+  Acceptance: U19, U20, U21.
+- **FR-VLT-8** (P0) An agent **must** obtain use of an item only through a grant a person approves (or a
+  platform or partner key under `vault.key_approval` with `on_behalf_of`); the requesting key **must never**
+  approve; identity keys **must never** hold `vault:use`, `vault:approve` or `vault:admin`; a later change to an
+  item **must not** widen a live grant. Acceptance: U22, U23, U24, U78, U79.
+- **FR-VLT-9** (P0) Uses **must** be created only by `vault:use` keys from an enumerated trigger, with the
+  approval level computed as the strictest of item, tenant floor and operation floor, and approval bound to the
+  use's digest. Acceptance: U25, U26, U27, U28.
+- **FR-VLT-10** (P0) Tickets **must** be one-use per phase, bound to one consumer, the run, the origin and a
+  60-second first-redemption window, stored only as a hash, and closed early by every cause listed.
+  Acceptance: U29, U30, U31, U32.
+- **FR-VLT-11** (P0) Consumers **must** authenticate every request with an RFC 9421 Ed25519 signature with nonce
+  replay protection, be activated by a person or platform key, and receive values only HPKE-sealed to their
+  current encryption key. Acceptance: U33, U34, U35, U36.
+- **FR-VLT-12** (P0) Redemption **must** refuse and close the use on any mismatch of run, top-level origin,
+  frame origin, trigger, form kind, browser declarations, hosting or mode, and on any live-state change.
+  Acceptance: U37, U38, U39.
+- **FR-VLT-13** (P0) The consumer contract `vault-consumer/1` (C1–C21) **must** be published, versioned and
+  tested by conformance fixtures that a consumer passes before activation. Acceptance: U40, U73–U77, U80, U82.
+- **FR-VLT-14** (P1) TOTP codes **must** be computed inside the vault, one code per step per item, with the seed
+  never returned. Acceptance: U41, U42.
+- **FR-VLT-15** (P0) Verification email for a vault login item's channel **must** be withheld from every agent
+  surface and API key and delivered only into an open `email_otp` phase, once; a strict mode **must** extend
+  this to every verification mail. Acceptance: U43, U44, U45, U46.
+- **FR-VLT-16** (P1) SMS codes **must** follow FR-VLT-15 through the phone design's code source, only into an
+  `sms_otp` phase of a use created at most 10 minutes before. Acceptance: U47, U48.
+- **FR-VLT-17** (P0) Session items **must** be filtered to their origins, bounded, loaded by one run at a time,
+  rotated at write-back with the previous version deleted, and expired by TTL. Acceptance: U49, U50, U51, U52.
+- **FR-VLT-18** (P1) Items **must** keep at most `current`, `previous` and `pending` versions; rotation by hand,
+  `rotate_fill` and write-back of rotated API keys **must** close open uses. Acceptance: U53, U54, U55.
+- **FR-VLT-19** (P1) `api_key` items with a sign scheme **must** produce HMAC-SHA256 and AWS SigV4 signatures
+  through grants and approval, without returning the secret. Acceptance: U56.
+- **FR-VLT-20** (P1) A person **must** be able to reveal a value only in the console, re-authenticated, at most
+  10 times a day, never a TOTP seed or session cookies; no API, MCP or CLI route **may** reveal. Acceptance:
+  U57, U58.
+- **FR-VLT-21** (P0) The vault **must** keep internal managed secrets for other services (the port-out PIN),
+  writable only by their owner service, with rotate-and-show-once where reveal is unavailable. Acceptance: U59,
+  U60.
+- **FR-VLT-22** (P0) Every vault change **must** write a hash-chained audit row in the same batch, with typed
+  fields only, kept 400 days by age and never trimmed by count; every row except authentication failures
+  **must** emit an event carrying the chain head. Acceptance: U61, U62, U63, U83.
+- **FR-VLT-23** (P0) The kill switches and `revoke-all` **must** stop redemption at the next request.
+  Acceptance: U64, U65.
+- **FR-VLT-24** (P0) Item deletion **must** crypto-shred with a receipt, and identity and tenant erasure **must**
+  remove vault rows and objects with receipt fields and probes. Acceptance: U66, U67, U68.
+- **FR-VLT-25** (P0) Documentation, the site and SDK descriptions **must** use the honest trust statement and
+  **must not** claim zero knowledge or end-to-end encryption. Acceptance: U69.
+- **FR-VLT-26** (P0) Approval surfaces **must not** render any agent- or key-written text as a link or markup.
+  Acceptance: U84.
+- **FR-VLT-27** (P1) The MCP server **must** offer the six vault tools only by permission, none of which returns a
+  value or approves; the CLI **must** read values only from standard input or files. Acceptance: U71, U72.
+- **FR-VLT-28** (P0) A consumer holding a value across requests **must** learn of a use's early closure within 30
+  seconds through the use status route, and drop the value and its connections. Acceptance: U82.
+- **FR-VLT-29** (P1) Pylota Identity **must** offer the session import route that lets an integrator migrate an
+  existing sealed session store with idempotent, auditable imports. Acceptance: U50.
+- **FR-VLT-30** (P1) Every outbound fetch the platform makes, and every consumer fetch in the conformance
+  fixtures, **must** refuse NAT64, 6to4 and cloud-metadata destinations by the embedded IPv4. Acceptance: U81.
+
 ## 7. Non-functional requirements
 
 | ID | Requirement | Target |
@@ -1242,6 +1594,11 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 | NFR-BILL-1 | Metered actions allowed beyond a granted allowance | 0 (holds are atomic per workspace) |
 | NFR-BILL-2 | Metered actions failed because a billing provider was unreachable | 0 (metering is in-process; Stripe is only needed to change plans) |
 | NFR-CON-1 | Console pages, server render time | p95 ≤ 300 ms |
+| NFR-REL-5 | Inbound SMS accepted → webhook delivered | p95 ≤ 30 s, p99 ≤ 120 s |
+| NFR-REL-6 | Provider webhook acknowledged (`/hooks/telnyx`) | p99 ≤ 500 ms |
+| NFR-PERF-7 | Vault ticket redemption, consumer request to sealed packet | p95 ≤ 500 ms (excluding a one-time-code long poll) |
+| NFR-SEC-3 | Vault values in API responses, MCP results, events, webhook deliveries or logs | 0 |
+| NFR-OPS-4 | A product flag turned on with a row that blocks its gate still open | 0 ([Launch readiness](launch-readiness.md)) |
 
 ## 8. Success metrics
 
@@ -1264,6 +1621,8 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 7. The release gate passes: `release-gates/v{version}.md` ticks every item of the
    [pre-release checklist](design/security.md#16-pre-release-checklist) with a link to its evidence, and
    the release carries SBOMs, signed checksums and build provenance (`cargo xtask release-gate`).
+8. Every row of [Launch readiness](launch-readiness.md) whose **Blocks** names `v1.0` is `done` or `n/a`
+   with its evidence (FR-OPS-6).
 
 ## 10. Risks
 
@@ -1276,6 +1635,15 @@ v1.1 with a written ADR. `P2` is v1.1 or later.
 | An LLM fabricates in agentic search or triage | Deterministic citation check, schema validation, untrusted-content fencing, read-only tools |
 | Web Bot Auth is still an IETF draft, and Cloudflare's verifier can change | Spike S13 checks the format against Cloudflare's test endpoint. Signed HTTP requests are P1 and stay off (`PM_WEB_BOT_AUTH=off`) unless S13 passes; agent assertions rely only on published RFCs (7517, 7519, 7638, 8037) |
 | SES receiving, SMTP from a Worker and child zones are unproven from a Worker | Spikes S11, S12 and S10 gate `dns_records`, `smtp_relay` and `delegated_subdomain` (`smtp_relay` with `inbound: ses` needs S11 too). A method whose spike fails moves to v1.1 by ADR; `cloudflare_zone`, `nameservers` and `send_only` do not depend on them |
+| Telephony is regulated, and TREFT may count as a provider (Ofcom General Conditions, emergency calling, caller ID) | Numbers registered in each tenant's own name; agent routes never dial emergency numbers; tenants warned before purchase; each legal question listed for counsel and answered before the feature opens in production ([Phone numbers § 32](design/phone-numbers.md#32-questions-for-counsel)) |
+| One Telnyx account serves every tenant: a suspension stops all of them, and limits are shared | Per-tenant provider-side spend limits; the `phone` ops switch; balance alerts; `provider_account_id` on every row so a partner can move to its own managed account; a provider trait that admits a second provider |
+| Buying a number needs regulatory work an agent cannot do, so agents stall waiting on people | Onboarding once per tenant and country with one status and the person who must act; a standing budget a person sets; a one-call purchase; purchases that wait on onboarding instead of failing ([Phone numbers § 4.7](design/phone-numbers.md#47-phone-onboarding), [§ 5.7](design/phone-numbers.md#57-the-standing-purchase-budget), [§ 6.7](design/phone-numbers.md#67-one-call-purchase)) |
+| US texting for businesses registered outside the US, and for sole traders, is unproven | US numbers sold for receiving and calls only to such tenants until a staging registration and counsel's answer; the sole-trader decision recorded before M41 ([§ 13.1](design/phone-numbers.md#131-us-sole-proprietor-brands), [§ 13.2](design/phone-numbers.md#132-brands-registered-outside-the-us)) |
+| Provider costs are in US dollars and customers pay in pounds | A rate card with a currency buffer; an alert at 5% exchange-rate drift; 30 days' notice before existing numbers are re-priced |
+| Telnyx's documents contradict themselves on prices, statuses and rules | Every external behaviour has a contract test against the real API before code depends on it; the catalogue fails a release when a row is unverified for 180 days |
+| A vault value reaches a model through a consumer's mistake (a screenshot during a fill, an echoing response, a page that copies the value) | Values only through registered consumers bound by a contract with conformance fixtures; no model step during a fill; post-fill exposure search; response redaction; `value_exposed` blocks the item until rotation |
+| The operator or Cloudflare can decrypt vault values | Stated plainly in every document; partner custody for partners who hold their own unlock key; no zero-knowledge claim, enforced by a CI check |
+| `hpke` 0.14.1 may not build or meet the CPU budget on `wasm32-unknown-unknown` | Spike S-VLT1 first; the fallback implements the same RFC 9180 suite from pinned primitives, with the same wire format |
 
 ## 11. Open questions
 
@@ -1294,6 +1662,9 @@ None blocking v1.0. Decisions are recorded in [ADRs](adr/index.md).
 - The licensor is **TREFT LTD**, the company behind Pylota (`LICENSE.md`: "Copyright 2026 TREFT LTD").
 - Contributions are licensed to TREFT LTD under Apache-2.0 with a DCO sign-off (`CONTRIBUTING.md`), so it can
   publish them under FSL now and Apache-2.0 later.
+- The client libraries are licensed differently from the service: the TypeScript, Python, Go and Rust SDKs, the
+  crate `pylota-identity-api-types` they depend on, and the agent skills are under the **Apache License 2.0**
+  ([ADR 0022](adr/0022-sdk-languages.md) decision 9). Everything else in this repository stays FSL-1.1-ALv2.
 
 ## 13. Business model and pricing
 
@@ -1320,6 +1691,14 @@ $20 and $99 become £10 and £49.50, and its $2 top-up becomes £1.
   The per-identity rolling send limit stays on every plan as an abuse backstop.
 - Prices are in pounds sterling (GBP) and exclude VAT. Stripe Tax adds UK VAT, and VAT or sales tax in
   other countries, where it is due. Every customer is billed in GBP; there are no local-currency prices in v1.
+- **Phone numbers** are priced outside the plan allowances: a monthly and a one-time price per number, and
+  per-segment and per-minute usage, all in GBP from a published rate card built from the provider's USD list
+  prices with a margin and a currency buffer ([Phone numbers § 18](design/phone-numbers.md#18-money)). They
+  need a paid plan, or a partner that pays for its tenants, and are capped per workspace and per identity each
+  month. Regulatory pass-through fees (the US texting registration) are priced at cost and capped separately. Charges are added to the next Stripe invoice, or to the partner's monthly statement.
+- **The vault** is part of the paid plans, with no separate price and no metering in v1.0; a Free-plan workspace
+  cannot use it. Its limits (items per identity and per workspace, sessions, grants, uses) are in
+  [Limits › Vault](../reference/limits.md#vault).
 
 ### Cost controls
 

@@ -19,6 +19,8 @@
 - [Security](guides/security.md)
 - [Privacy, retention and erasure](guides/privacy.md)
 - [Plans and billing](guides/plans.md)
+- [Phone numbers](guides/phone.md)
+- [Vault](guides/vault.md)
 
 # Reference
 
@@ -29,6 +31,7 @@
 - [CLI](reference/cli.md)
 - [Configuration](reference/configuration.md)
 - [Limits](reference/limits.md)
+- [SDKs](reference/sdks.md)
 
 # Project
 
@@ -67,10 +70,13 @@
   - [Agent self-sign-up](project/design/agent-signup.md)
   - [SDKs, skills and agent tooling](project/design/sdk-and-skills.md)
   - [Parity additions](project/design/parity-additions.md)
+  - [Phone numbers](project/design/phone-numbers.md)
+  - [Agent credential vault](project/design/vault.md)
 - [AgentMail comparison and gap register](project/agentmail-gap-analysis.md)
 - [Edge-case register](project/edge-cases.md)
 - [Build plan](project/build-plan.md)
 - [Cloud commissioning](project/cloud-commissioning.md)
+- [Launch readiness](project/launch-readiness.md)
 - [Decision records](project/adr/index.md)
   - [0001 Rust on Workers](project/adr/0001-rust-on-workers.md)
   - [0002 Storage layout](project/adr/0002-storage.md)
@@ -91,3 +97,6 @@
   - [0017 What v1.0 adds, defers and refuses to match AgentMail](project/adr/0017-agentmail-parity.md)
   - [0018 The TypeScript SDK in its own repository](project/adr/0018-typescript-sdk-in-its-own-repository.md)
   - [0019 Pylota Mail becomes Pylota Identity](project/adr/0019-pylota-identity.md)
+  - [0020 Phone numbers for agents](project/adr/0020-phone-numbers.md)
+  - [0021 Agent credential vault](project/adr/0021-agent-vault.md)
+  - [0022 SDK languages: Python and Go join Rust and TypeScript](project/adr/0022-sdk-languages.md)

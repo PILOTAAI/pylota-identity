@@ -239,6 +239,69 @@ From [Agent self-sign-up](../project/design/agent-signup.md).
 | Sends while provisional | To the person only; 1 recipient per message; 10 messages per UTC day |
 | Inbound while provisional | 20 per sender per hour, 20 unauthenticated per hour, 100 per hour for the workspace; the excess is stored `throttled` |
 
+## Phone numbers
+
+From [Phone numbers](../project/design/phone-numbers.md). Telnyx's own limits that shape these (messaging webhooks
+acknowledged within 2 seconds; 0.1 messages a second per long code and 20 per toll-free number, queued above that;
+30 dials a second per region; documents of at most 20 MB, linked within 30 minutes; number reservations of 30
+minutes) were read from Telnyx's documentation on 2026-10-24 and can change.
+
+| Limit | Value |
+|---|---|
+| Numbers per identity, per tenant | 5 and 20 by default (policy); at most 20 and 200 |
+| Requests per tenant | 20 `pending_approval` (blocked ones included); 10 running (`executing`, `in_progress`, `action_needed`, `uncertain`) |
+| Blocked request lifetime | 7 days after it is unblocked, at most 30 days after creation |
+| Standing budget | `max_numbers_per_identity` 1–20; `max_new_numbers_per_month` 1–200 |
+| One-call purchase | Inline run up to 15 seconds; up to 5 candidates when a number is taken; `details.alternatives` up to 5 |
+| `expires_at` | 1 hour to 365 days after the purchase |
+| Onboarding drafts | One per tenant and country; 2–5 sample messages of 20–1,024 characters; other text fields 1–1,000 characters; deleted after 30 days untouched |
+| Sole-proprietor one-time code | 5 resends a day |
+| Pending request lifetime | 7 days, then `rejected` (`expired`) |
+| Quote token | 30 minutes |
+| Searches | 300 a day per tenant; `limit` 1–20 per search |
+| SMS text | 1–10 segments (GSM-7 153 characters a segment when split, UCS-2 67) |
+| SMS caps | 200 segments a day per identity, 2,000 per tenant (policy) |
+| Inbound SMS | 30 an hour per sender per identity, 600 an hour per identity (policy); text kept up to 10,000 characters |
+| MMS media | 10 items, 5 MB each |
+| `sms/wait` timeout | 1–60 seconds |
+| Verification values | Released for 24 hours after arrival; repeatable for 1 hour after first release; vault deposits at most 15 minutes |
+| KYC documents | PDF, PNG or JPEG; 1–20,971,520 bytes; 50 per tenant; upload URL one hour |
+| Profile addresses | 20 |
+| `sms_senders` per ledger entry | 10 |
+| Voice connectors per tenant | 5 |
+| Outbound call length | `phone.calls.max_minutes`, default 15, at most 120 |
+| Port-out response | `respond_by` 24 hours after the request |
+| Tenant reconcile | Once every 10 minutes |
+| Webhook body | 256 KB |
+
+Provider-side backstops: each tenant's messaging profile and outbound voice profile carry a daily spend limit in USD
+of 1.5 times the tenant's daily cap at its highest price; SMS above a number's sending rate wait in `queued` rather
+than fill the provider's queue.
+
+## Vault
+
+From [Vault § 19](../project/design/vault.md#19-billing-and-limits).
+
+| Limit | Value |
+|---|---|
+| Items | 100 per identity; `vault.max_items` per tenant, default 1,000, at most 10,000 |
+| Origins | 1–10 per item and per grant; `login_domains` at most 5 per ledger entry |
+| Values | Password 1–1,024 bytes; secret 1–16,384 bytes; recovery codes 1–20 of at most 64 characters; TOTP secret 16–128 base32 characters, `digits` 6 or 8, `period` 15–120 seconds |
+| Generated passwords | 16–128 characters, default 24 with all four classes |
+| Session state | 1,048,576 bytes after filtering, 500 cookies, 10 origins; TTL 1 hour to `vault.session_max_ttl_days` (default 30) |
+| Grants | 20 pending per identity; 50 not ended per item; pending 7 days; active 1 hour to 90 days, default 7 days; `max_uses` 1–100,000 |
+| Uses | 120 a minute per identity; 100 waiting for approval per tenant; approval deadline 60–900 seconds, default 600 |
+| Tickets | First redemption within 60 seconds of minting; a window of 10 minutes for `fill` and `rotate_fill`, 300–7,200 seconds (default 1,800) for `session_load`, `session_capture` and `inject` |
+| Code long poll | `wait_seconds` 0–60 |
+| Consumers | 10 platform-level, 10 per partner, 5 per tenant (not counting revoked) |
+| Consumer requests | Body 1,572,864 bytes; signature `created` within 30 seconds of the server clock, `expires` at most 60 seconds after `created`; use status 6 a minute per use |
+| Key rotation overlap for consumers | 0–86,400 seconds, default 3,600 |
+| Version overlap | 0–168 hours, default 24 |
+| Reveal | 10 a person a UTC day, after signing in again within 10 minutes |
+| Signing (P1) | `message_base64` 1–65,536 bytes; SigV4 `headers` at most 50, `timestamp` within 5 minutes |
+| `title` | 1–120 characters; `purpose` 1–500 (grants) or 1–200 (uses); `run_id` 1–128 |
+| Audit | Kept 400 days, by age only |
+
 ## Deliverability metrics
 
 From [Deliverability metrics](../project/design/metrics.md).
@@ -325,10 +388,11 @@ A plan or top-up increase counts from the moment its invoice is paid.
 | Limit | Value | Source |
 |---|---|---|
 | MCP tools per key (`mcp_tools`) | 64 names | Pylota Identity |
-| TypeScript SDK attempt timeout | 30 s (1–120 s); `waitForMessage`: its `timeout` + 15 s | Pylota Identity |
-| TypeScript SDK retries | 3 (0–10), backoff 0.5 s, 1 s, 2 s + up to 250 ms; `Retry-After` slept up to 60 s (1–300 s); `request_in_progress` 5 more attempts | Pylota Identity |
-| TypeScript SDK `collect` | 10,000 items by default | Pylota Identity |
-| TypeScript SDK deduplication lease | 60 s by default (15–3,600 s) | Pylota Identity |
+| SDK attempt timeout (TypeScript, Python, Go) | 30 s (1–120 s); waits: their `timeout` + 15 s | Pylota Identity |
+| SDK retries (TypeScript, Python, Go; the Rust SDK's retries are off unless `RetryPolicy::standard()`) | 3 (0–10), backoff 0.5 s, 1 s, 2 s + up to 250 ms; `Retry-After` slept up to 60 s (1–300 s); `request_in_progress` 5 more attempts | Pylota Identity |
+| SDK `collect` | 10,000 items by default | Pylota Identity |
+| SDK deduplication lease | 60 s by default (15–3,600 s) | Pylota Identity |
+| Vault consumer request signature | `expires` 30 s after `created`; `created` from the server clock | [Vault § 8.4](../project/design/vault.md#84-authenticating-a-consumer) |
 | Webhook timestamp tolerance (SDK and `idvy webhooks verify`) | 300 s by default, at most 600 s | Pylota Identity |
 | MCP result-size hint | `_meta["anthropic/maxResultSizeChars"]` = 100,000 on tools under the 96 KB cap | Claude Code persists larger text results above 50,000 characters ([MCP output limits](https://code.claude.com/docs/en/mcp), read 2026-10-17) |
 | MCP tool descriptions and server instructions | 4,096 characters | Claude Code cuts longer ones (same page) |

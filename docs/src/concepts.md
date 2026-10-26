@@ -129,6 +129,27 @@ Amazon SES, such mail is accepted by SES and then dropped without a bounce
 
 Reference: [REST API › Addresses](reference/api.md#addresses).
 
+## Phone numbers
+
+A **phone number** is another address of an identity: it receives and sends SMS and carries calls to a route
+the workspace chooses. It is registered in the workspace's own legal name, so before the first number in a
+country the workspace **sets up the country once** (its business details and, in the UK, documents the provider
+reviews; in the US, a texting registration). After that an agent gets a number with **one call**, inside a
+**standing budget** a person set; outside it, the purchase becomes a **phone request** a person approves. Each
+number says what it can do now in four **capability facets** (`outbound_sms`, `inbound_sms`, `inbound_calls`,
+`outbound_calls`), each `enabled`, `activating`, `registration_required` or `not_available`, with the next step
+and who must take it. Ports, releases, compliance submissions, registration fees, voice routes and port-outs are
+always decided by people. See the [phone guide](guides/phone.md).
+
+## Vault
+
+The **vault** keeps the credentials an agent needs at other services (logins with their TOTP seeds, API keys
+and browser sessions) beside the agent's identity. An agent never holds a value: it asks for a **grant**, which a
+person approves; your own server starts a **use** when its code sees a login form or an API call; and a
+**consumer** you registered (a browser fleet, an egress proxy or an executor) redeems a one-use **ticket** and
+receives the values encrypted to its own key. Every step is recorded in a hash-chained audit. The vault is
+server-custody, not zero-knowledge. See the [vault guide](guides/vault.md).
+
 ## Domains
 
 A **domain** is where addresses live and what mail is sent as. The platform domain must be on
