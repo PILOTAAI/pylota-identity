@@ -2013,14 +2013,13 @@ the moment: `crates/core/data/phone-rate-card.json`, overridable with `PM_PHONE_
 price_pence = ceil( usd × fx × (1 + fx_buffer) × (1 + margin) × 100 )
 fx         = 0.748   (1 USD in GBP, ECB reference rates of 2026-10-23)
 fx_buffer  = 0.10    (exchange-rate headroom)
-margin     = 0.40    (owner decision; placeholder)
+margin     = 0.40    (owner decision, 2026-10-26)
 ```
 
 Where Telnyx's pages give two prices for one item, the card uses the higher (UK SMS $0.050 or $0.055:
 $0.055). Regulatory pass-through fees (10DLC brand, vetting, campaign and resubmission fees) are priced at
-cost, `ceil(usd × fx × (1 + fx_buffer) × 100)`, without the margin, until the owner decides otherwise
-([§39](#39-open-questions-for-the-owner), question 1): brand and campaign up front $34.50 → £28.39; the
-campaign's $10 a month → £8.23. Illustrative rows with the placeholder margin (the owner sets the real margin, [§39](#39-open-questions-for-the-owner)):
+cost, `ceil(usd × fx × (1 + fx_buffer) × 100)`, without the margin (owner decision, 2026-10-26): brand and campaign up front $34.50 → £28.39; the
+campaign's $10 a month → £8.23. Rows with the owner's 40% margin and 10% currency buffer (decided 2026-10-26):
 
 | Item | Telnyx USD (2026-10-24) | GBP price |
 |---|---|---|
@@ -2831,7 +2830,7 @@ behind `PM_PHONE`. "Acceptance" names the edge rows whose tests prove the requir
   `blocked_by` and a next step rather than refused, **must not** be executed while blocked, and **must** run
   once onboarding completes. Acceptance: P118.
 - **FR-PHN-48** (P0) One-off registration fees **must** count against `phone.spend.registration_cap_pence`
-  instead of the monthly caps; pass-through fees **must** be priced at cost until the owner sets a margin.
+  instead of the monthly caps; pass-through fees **must** be priced at cost, with no margin (owner decision, 2026-10-26).
   Acceptance: P119.
 - **FR-PHN-49** (P0) Phone onboarding **must** report one status per tenant and country with its steps, fees,
   waits and next step through REST and the MCP tool `phone_setup_status`; agents **may** draft the registration
@@ -3180,13 +3179,12 @@ difference between this page and one of them is a defect: fix both in the same c
 
 ## 39. Open questions for the owner
 
-Gathered here so they can be answered in one pass. Items 1, 2 and 10 to 12 block M38 or M41 as marked.
+Gathered here so they can be answered in one pass. Items 1, 2, 9 and 10 are decided; 11 and 12 block M38 or M41 as marked.
 
-1. The margin and currency buffer of the rate card (placeholders 40% and 10%), whether monthly fees are
-   prorated (the design charges whole months, matching the provider), and whether regulatory pass-through fees
-   carry the margin (designed: at cost).
-2. The Cloud default spend caps (£20 a tenant, £10 an identity, £60 for registration fees a month) and whether
-   phone needs a paid plan for self-serve workspaces (designed: yes).
+1. **Decided (2026-10-26):** the rate card's 40% margin and 10% currency buffer, whole-month charging (no
+   proration), and regulatory pass-through fees at cost with no margin.
+2. **Decided (2026-10-26):** the Cloud default spend caps (£20 a tenant, £10 an identity, £60 for registration
+   fees a month), and phone only on a paid plan for self-serve workspaces.
 3. Whether Pylota Identity Cloud's Telnyx account is Pylota's existing TREFT account (numbers adopted, no
    porting) or a new one (numbers ported) ([§7.6](#76-adoption-for-pylotas-migration)). The owner's report that
    GB is set up on TREFT's account points to adoption.
@@ -3203,8 +3201,8 @@ Gathered here so they can be answered in one pass. Items 1, 2 and 10 to 12 block
    in spirit to avoid confusion with priorities `P0`–`P2` (as `U` for the vault collides with the selling
    points `U1`–`U10`); the coordinator may prefer another letter.
 9. **The standing budget** ([§5.7](#57-the-standing-purchase-budget)): the amended rule is **approved**
-   (2026-10-26). Still open: the default budget Pylota sets for its operators (suggested: GB and US, 2 numbers per identity, 10 a month,
-   £3 setup and £3 a month per number).
+   (2026-10-26), and so is the default budget Pylota sets for its operators: GB and US, 2 numbers per identity,
+   10 a month, £3 setup and £3 a month per number.
 10. **Sole traders** ([§1.1](#11-sole-traders-refused-owner-decision-2026-10-26)): **decided**, refused (option (c), 2026-10-26).
     Still useful before M41: count the adopted numbers it affects, so their owners hear of the 2027-01-24 exit
     date early.

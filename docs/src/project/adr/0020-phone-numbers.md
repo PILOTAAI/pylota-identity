@@ -71,7 +71,10 @@ The facts the decision rests on, each read on 2026-10-24:
    and each country row has an emergency setting.
 8. **Money.** Customer prices are GBP from a published rate card (provider USD × exchange rate × currency buffer
    × margin); monthly spend caps per tenant and per identity are enforced with holds in `TenantQuota`; charges
-   are invoiced as Stripe invoice items or partner statements.
+   are invoiced as Stripe invoice items or partner statements. The owner set the margin at 40% and the buffer at
+   10%, regulatory pass-through fees at cost with no margin, and the Cloud defaults (caps £20 a tenant, £10 an
+   identity and £60 for registration fees a month; Pylota's operator budget GB and US, 2 numbers per identity,
+   10 a month, £3 setup and £3 a month per number) on 2026-10-26.
 9. **Countries.** A data-driven catalogue; launch rows GB mobile (SMS and voice), GB geographic (voice), US local
    and toll-free, Ireland and the Netherlands; Germany, France, Spain and Italy only for tenants with local
    presence.

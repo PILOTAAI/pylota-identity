@@ -89,7 +89,7 @@ switch ([§10](#10-rollback-and-kill-switches)).
 | PH-2 | Reseller requirements annex accepted by TREFT | owner | Signed copy in the operations repository | P1 | open |
 | PH-3 | Data locality set and `PM_TELNYX_API_BASE` matching | owner | CC21; the portal setting dated | P1 | open |
 | PH-4 | Which Telnyx account Cloud uses (adoption or porting of Pylota's numbers) | owner | ADR 0020 amendment or note | P1 | open |
-| PH-5 | Rate card margin and buffer, Cloud spend caps, registration-fee cap | owner | The rate card and default policy in the release | P1 | open |
+| PH-5 | Rate card margin and buffer, Cloud spend caps, registration-fee cap | owner | Decided 2026-10-26: 40% margin, 10% buffer, pass-through fees at cost, caps £20 / £10 / £60, Pylota's default budget as suggested; the rate card and default policy in the release carry them | P1 | decided; release values open |
 | PH-6 | Telnyx account at the Verified level | owner, Telnyx | CC21 records the level | US in any stage | open |
 | PH-7 | 10DLC set up as an ISV; `live::phone::a2p_paths` on staging | M39, owner | CC24 | US in any stage | open |
 | PH-8 | A GB-registered brand taken through 10DLC vetting on staging | owner | Vetting result dated | US for UK tenants | open |
