@@ -17,7 +17,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.99.1" # equal to rust-toolchain.toml
 license = "FSL-1.1-ALv2"
-repository = "https://github.com/PILOTAAI/pylota-mail"
+repository = "https://github.com/PILOTAAI/pylota-identity"
 
 # Exact pins only (AGENTS.md); `cargo xtask check-layering` fails on any other form. The versions are
 # those of Rust workspace § 3; each was re-read on crates.io on 2026-10-19 (it exists, is not yanked,

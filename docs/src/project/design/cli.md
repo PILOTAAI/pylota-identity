@@ -1,6 +1,6 @@
 # CLI and setup
 
-Binding design for `pmail`, the command-line client: configuration, output and exit codes, `setup`,
+Binding design for `idvy`, the command-line client: configuration, output and exit codes, `setup`,
 `setup ses`, `deploy`, `upgrade`, `doctor`, `destroy`, secret and signing-key rotation, dead-letter
 handling and the client-side behaviour of the mail and admin commands. It implements FR-CLI-1, FR-OPS-1
 to FR-OPS-3, FR-CON-7 and FR-BILL-12, build plan milestone M16, the CLI half of M17 (`dlq`, and `secrets rotate-master` in M17 Foundation; `ops` and `erasure retry|reapply` in M17 Completion), the
@@ -23,10 +23,10 @@ decides how they behave.
 
 | | |
 |---|---|
-| Code | `crates/cli/` (package `pylota-mail-cli`, binary `pmail`) |
-| Depends on | `pylota-mail` (SDK, with its `stream` feature for `events tail`), `pylota-mail-api-types`, `pylota-mail-core` (address validation, key format, DNS record parsing), `clap =4.6.7`, `reqwest =0.13.5`, `serde =1.0.229`, `serde_json =1.0.151`, `sha2 =0.11.0`, `hmac =0.13.0`, `base64 =0.23.1`, `ulid =3.0.0`, `jmespath =0.5.0` (`--query`), `utoipa =6.0.0` (the schemas of the CLI's own output structs, `--schema`), `tokio-tungstenite =0.30.0` (through the SDK's `stream` feature); and, each pinned at build time: `tokio` (current-thread runtime that `reqwest` needs, CLI binary only), `toml`, `flate2`, `tar`, `minisign-verify`, `getrandom`, and the AWS credential loader used by `setup ses` ([§2.6](#26-aws-credentials)) |
-| Never depends on | `pylota-mail-worker`, `pylota-mail-platform`, `worker` ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)) |
-| Related designs | [Rust workspace §8](rust-workspace.md#8-generated-wranglertoml) (the generated `wrangler.toml`), [Identities, addresses and domains](identity-domains.md) (platform domain onboarding), [Observability §7.2](observability.md#72-pmail-doctor) (doctor checks) and [§8.3](observability.md#83-listing-and-redriving) (`dlq`), [Security §6](security.md#62-rotation-procedures) (secrets and signing keys), [Search §7](search.md#7-index-lifecycle) (index generations), [Domains on any DNS host](domain-connections.md) (connection methods, `setup ses`), [Cloud sign-up §6.1](cloud-signup.md#61-before-launch-the-waitlist) (`waitlist invite`) |
+| Code | `crates/cli/` (package `pylota-identity-cli`, binary `idvy`) |
+| Depends on | `pylota-identity` (SDK, with its `stream` feature for `events tail`), `pylota-identity-api-types`, `pylota-identity-core` (address validation, key format, DNS record parsing), `clap =4.6.7`, `reqwest =0.13.5`, `serde =1.0.229`, `serde_json =1.0.151`, `sha2 =0.11.0`, `hmac =0.13.0`, `base64 =0.23.1`, `ulid =3.0.0`, `jmespath =0.5.0` (`--query`), `utoipa =6.0.0` (the schemas of the CLI's own output structs, `--schema`), `tokio-tungstenite =0.30.0` (through the SDK's `stream` feature); and, each pinned at build time: `tokio` (current-thread runtime that `reqwest` needs, CLI binary only), `toml`, `flate2`, `tar`, `minisign-verify`, `getrandom`, and the AWS credential loader used by `setup ses` ([§2.6](#26-aws-credentials)) |
+| Never depends on | `pylota-identity-worker`, `pylota-identity-platform`, `worker` ([Rust workspace §2](rust-workspace.md#2-crate-responsibilities-and-allowed-dependencies)) |
+| Related designs | [Rust workspace §8](rust-workspace.md#8-generated-wranglertoml) (the generated `wrangler.toml`), [Identities, addresses and domains](identity-domains.md) (platform domain onboarding), [Observability §7.2](observability.md#72-idvy-doctor) (doctor checks) and [§8.3](observability.md#83-listing-and-redriving) (`dlq`), [Security §6](security.md#62-rotation-procedures) (secrets and signing keys), [Search §7](search.md#7-index-lifecycle) (index generations), [Domains on any DNS host](domain-connections.md) (connection methods, `setup ses`), [Cloud sign-up §6.1](cloud-signup.md#61-before-launch-the-waitlist) (`waitlist invite`) |
 | External facts verified on 2026-10-09 | Cloudflare API reference pages for zones (list), DNS records (list), D1 (create, query), R2 (create bucket with `cf-r2-jurisdiction`, lifecycle `PUT` replaces the rule set), Queues (create, list), event subscriptions (create, list), Vectorize (index create, metadata index create and list), Email Routing (settings, `POST …/email/routing/dns`, catch-all `PUT`), Email Sending (subdomain create, update, DNS), Workers secrets; Wrangler 4 command reference for `deploy`, `secret put`, `secret bulk`, `versions upload`, `versions deploy`, `delete` and `queues subscription create` (flags `--source email.sending --zone-id --domain`); Cloudflare docs on version overrides (`Cloudflare-Workers-Version-Overrides`), gradual deployments with Durable Objects, deployment management (a Durable Object class change cannot be uploaded with `versions upload`), D1 migrations and D1 jurisdictions, Durable Object delete migrations, Email Sending event subscriptions (scoped to a zone apex or a verified sending subdomain), Email Service domain records; GitHub REST "Get a release by tag name" (`X-GitHub-Api-Version: 2026-03-10`); crates.io metadata of `minisign-verify`. The AWS facts behind `setup ses` (receiving regions, `GetAccount`, SNS `SignatureVersion`, SES quotas and pricing) are cited, read 2026-10-09, in [Domains on any DNS host §4.2](domain-connections.md#42-deployment-set-up-for-ses); AWS operation and field names not cited there are marked "verify at build time" |
 
 ## 1. Crate layout
@@ -99,9 +99,9 @@ pub enum CliError {
 
 ### 2.1 The config file
 
-The file is `~/.config/pylota-mail/config.toml` ([Configuration › CLI configuration](../../reference/configuration.md#cli-configuration)).
-`$XDG_CONFIG_HOME/pylota-mail/config.toml` is used when `XDG_CONFIG_HOME` is set; on Windows the
-file is `%APPDATA%\pylota-mail\config.toml`.
+The file is `~/.config/pylota-identity/config.toml` ([Configuration › CLI configuration](../../reference/configuration.md#cli-configuration)).
+`$XDG_CONFIG_HOME/pylota-identity/config.toml` is used when `XDG_CONFIG_HOME` is set; on Windows the
+file is `%APPDATA%\pylota-identity\config.toml`.
 
 ```rust
 pub struct ConfigFile {
@@ -122,12 +122,12 @@ pub struct Profile {
 - Unknown keys are an error (`deny_unknown_fields`), so a typo never silently drops a setting.
 - At most one of `key`, `key_env` and `key_command` may be set in a profile (exit 3 otherwise).
 - **Permissions (Unix).** The file and its directory are created with modes `0600` and `0700`. Before
-  reading, `pmail` checks `st_mode & 0o077 == 0` and that the owner is the current user; otherwise it
+  reading, `idvy` checks `st_mode & 0o077 == 0` and that the owner is the current user; otherwise it
   refuses with exit 3 and the fix `chmod 600 <path>`. Writes go to a temporary file in the same
   directory (mode `0600`), then `rename`, so a crash never leaves a half-written file. On Windows the
   file is created in the user's profile directory, which only the user can read by default; no mode
   check is made.
-- The Cloudflare API token is never stored in this file. `pmail` refuses to write a key named like
+- The Cloudflare API token is never stored in this file. `idvy` refuses to write a key named like
   `CLOUDFLARE_*` into it. The account ID is not a secret: `setup` stores it in the profile as
   `account_id` ([§2.5](#25-cloudflare-credentials)).
 
@@ -137,26 +137,26 @@ Highest first, per setting:
 
 | Setting | 1. Flag | 2. Environment | 3. Profile |
 |---|---|---|---|
-| Profile name | `--profile` | `PYLOTA_MAIL_PROFILE` | `default_profile`, else a profile named `default` |
-| API URL | `--url` | `PYLOTA_MAIL_URL` | `url` |
-| API key | `--key` | `PYLOTA_MAIL_KEY` | `key`, `key_env` or `key_command` |
+| Profile name | `--profile` | `PYLOTA_IDENTITY_PROFILE` | `default_profile`, else a profile named `default` |
+| API URL | `--url` | `PYLOTA_IDENTITY_URL` | `url` |
+| API key | `--key` | `PYLOTA_IDENTITY_KEY` | `key`, `key_env` or `key_command` |
 | Default identity | `--identity` | – | `identity` |
 | Default tenant | `--tenant` | – | `tenant` |
 | Cloudflare account ID | `--account-id` | `CLOUDFLARE_ACCOUNT_ID` | `account_id`, else `PM_CF_ACCOUNT_ID` in the rendered `<dir>/wrangler.toml` |
 
-- A missing profile named by `--profile` or `PYLOTA_MAIL_PROFILE` is exit 3. A missing default
+- A missing profile named by `--profile` or `PYLOTA_IDENTITY_PROFILE` is exit 3. A missing default
   profile is not an error; the URL and key must then come from flags or the environment.
 - **Which profile setup and login write.** `setup` and `login` store a key, so they write the profile
-  named by `--profile`, default `default`; `PYLOTA_MAIL_PROFILE` and `default_profile` do not change it,
+  named by `--profile`, default `default`; `PYLOTA_IDENTITY_PROFILE` and `default_profile` do not change it,
   so neither command can overwrite another environment's key by accident.
   (`keys create --save-profile <name>` names its profile explicitly; `config set` changes the profile
   it resolves.)
-- The environment outranks the profile, so a `PYLOTA_MAIL_KEY` left in the environment keeps overriding
-  a key saved in a profile. `login` prints a one-line warning to stderr when `PYLOTA_MAIL_KEY` is set and
+- The environment outranks the profile, so a `PYLOTA_IDENTITY_KEY` left in the environment keeps overriding
+  a key saved in a profile. `login` prints a one-line warning to stderr when `PYLOTA_IDENTITY_KEY` is set and
   differs from the key it saved.
 - `--key` on the command line is visible to other users through the process list on most systems.
   The CLI accepts it (scripts need it) but prints a one-line warning to stderr in human mode,
-  suggesting `PYLOTA_MAIL_KEY` or a profile.
+  suggesting `PYLOTA_IDENTITY_KEY` or a profile.
 - The URL must be `https://` unless the host is `localhost`, `127.0.0.1` or `[::1]`. A trailing `/v1`
   or `/` is removed.
 - The key must match `^pmk_(live|test)_[0-9a-hjkmnp-tv-z]{12}_[0-9a-hjkmnp-tv-z]{52}$`
@@ -190,7 +190,7 @@ When a tenant-scoped command needs a tenant and none is given: a tenant or ident
 tenant; a platform key uses the profile's `tenant`, else the **default tenant** (the one tenant with
 an empty `address_suffix`, created by `setup`); a partner key uses the profile's `tenant`, else exits 2
 with "Pass --tenant", because no tenant is a partner's by default (the default tenant has no partner). This is why
-`pmail identities create --username bookings --display-name "Acme Car Hire"` works with the platform
+`idvy identities create --username bookings --display-name "Acme Car Hire"` works with the platform
 key that setup leaves in the profile. `GET /v1/me` is called at most once per invocation and cached for
 that invocation only.
 
@@ -217,7 +217,7 @@ this token, and of the Worker's own `PM_CF_API_TOKEN`, are in one table:
 [Deploy to Cloudflare › Create a Cloudflare API token](../../self-hosting.md#2-create-a-cloudflare-api-token).
 That table scopes Workers access per Worker: the first `setup` (which creates the Worker and its Custom
 Domains) runs with a first-run token holding Workers Admin at product scope, and every later command
-with a deploy token holding Workers Editor on `pylota-mail` only. When step 13 or 14 of setup fails with
+with a deploy token holding Workers Editor on `pylota-identity` only. When step 13 or 14 of setup fails with
 a Workers authorization error, the CLI's fix names the first-run token.
 
 The deployment directory is `./deploy` unless `--dir <path>` is given. It holds `wrangler.toml` and
@@ -340,17 +340,17 @@ JSON mode prints strings exactly as the API returned them (JSON escaping makes t
 | 16 | `deliverability` | `metrics rates` found a tripped window or a sending pause in effect, so a script can gate a bulk send on it ([Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli)) |
 | 130 | `interrupted` | SIGINT or Ctrl-C |
 
-Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI/pylota-mail/blob/main/AGENTS.md):
+Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI/pylota-identity/blob/main/AGENTS.md):
 "do not silently change a public contract"). New codes may be added; existing ones never change meaning.
 
 ## 4. HTTP behaviour against the API
 
-- All API calls go through the SDK (`pylota_mail::Client`). The CLI sets
-  `User-Agent: pmail/<version> (+https://github.com/PILOTAAI/pylota-mail)`.
+- All API calls go through the SDK (`pylota_identity::Client`). The CLI sets
+  `User-Agent: idvy/<version> (+https://github.com/PILOTAAI/pylota-identity)`.
 - Timeouts: connect 10 s; request 30 s; `wait` uses `timeout + 15` s; `ask` and streaming have no
   overall timeout but abort after 30 s without a byte (the server sends a keep-alive every 10 s).
 - **Idempotency keys.** Mail sends (`send`, `reply`, `reply-all`, `forward`, `calendar-reply`) take
-  `--idempotency-key`. When it is omitted, the CLI generates `pmail-<ulid>` and prints it to stderr in
+  `--idempotency-key`. When it is omitted, the CLI generates `idvy-<ulid>` and prints it to stderr in
   human mode (and includes it in a CLI-generated error document in JSON mode), so a person can rerun
   the command with the same key after a network error. `drafts send` without `--idempotency-key` derives
   `cli:{draft_id}:{revision}:{approval.state}` instead, so re-running the same command never sends twice
@@ -391,7 +391,7 @@ Exit codes are part of the CLI contract ([AGENTS.md](https://github.com/PILOTAAI
 ### 5.1 Wrangler
 
 Some steps need Cloudflare's `wrangler` CLI (Worker uploads, secrets, queue subscriptions, rollback and
-delete). `pmail` never fetches it by name (`npx`, `npm exec` or `npm install wrangler`): that would
+delete). `idvy` never fetches it by name (`npx`, `npm exec` or `npm install wrangler`): that would
 resolve Wrangler's dependency tree from the npm registry at run time and run its install scripts while
 the process holds a Cloudflare token ([J34](../edge-cases.md)). Instead:
 
@@ -400,7 +400,7 @@ the process holds a Cloudflare token ([J34](../edge-cases.md)). Instead:
    `cargo xtask release` copies both into the Worker bundle as `wrangler/package.json` and
    `wrangler/package-lock.json`, so `SHA256SUMS` and the owner's signature cover them
    ([Rust workspace §9](rust-workspace.md#9-xtask)).
-2. Before the first Wrangler call of a command, `pmail` downloads and verifies the bundle of its own
+2. Before the first Wrangler call of a command, `idvy` downloads and verifies the bundle of its own
    version (§8.1 to §8.3; `setup` and `destroy` do this too), then installs Wrangler from the bundle's
    lockfile into `<dir>/.wrangler/{version}/` with `npm ci --ignore-scripts --no-audit --no-fund`.
    `npm ci` refuses a lockfile that does not match `package.json` and checks every package against its
@@ -413,15 +413,15 @@ the process holds a Cloudflare token ([J34](../edge-cases.md)). Instead:
 4. `--from-source` uses the checkout's `deploy/wrangler/` lockfile in the same way; it is the operator's
    own source, so no signature applies (§8.8).
 
-The workflows that run `pmail` with a token (`cloud-deploy.yml`, and `release-publish.yml`'s `staging`
+The workflows that run `idvy` with a token (`cloud-deploy.yml`, and `release-publish.yml`'s `staging`
 job) therefore install nothing from npm by name either. Node.js 22 or later and its `npm` are the only
 Node.js requirements. An operator who needs Wrangler by hand (a secret the CLI does not wrap, a rollback)
-runs `pmail wrangler <args…>`, which installs it the same way and passes the arguments through, with
+runs `idvy wrangler <args…>`, which installs it the same way and passes the arguments through, with
 stdin, stdout and the exit code unchanged. Test: `cli::wrangler::installs_from_signed_lockfile`.
 
 ## 6. `setup`
 
-`pmail setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example --jurisdiction eu`
+`idvy setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example --jurisdiction eu`
 
 ### 6.1 Flags
 
@@ -444,7 +444,7 @@ stdin, stdout and the exit code unchanged. Test: `cli::wrangler::installs_from_s
 | `--source-dir` | `.` | The repository checkout that `--from-source` builds |
 | `--print-secrets` | off | Print generated secrets once, to stdout, at the end |
 | `--rotate-pepper` | off | Break-glass: replace `PM_KEY_PEPPER`, which invalidates every API key ([§6.5](#65-the-bootstrap-key)) |
-| `--profile` | `default` | Profile that receives the URL, the account ID and the bootstrap key. `default_profile` and `PYLOTA_MAIL_PROFILE` do not change it ([§2.2](#22-precedence)) |
+| `--profile` | `default` | Profile that receives the URL, the account ID and the bootstrap key. `default_profile` and `PYLOTA_IDENTITY_PROFILE` do not change it ([§2.2](#22-precedence)) |
 | `--dir` | `./deploy` | Deployment directory |
 | `--yes` | off | Accept confirmations (not `--replace-mx`'s, which must be given as a flag) |
 
@@ -454,7 +454,7 @@ writes `PM_SIGNUP = "closed"` (FR-CON-8), so people join a self-hosted deploymen
 by invitation.
 
 SES is not part of `setup`. A deployment that wants `dns_records`, `send_only` or the SES failover runs
-`pmail setup ses` afterwards ([§6.9](#69-setup-ses)).
+`idvy setup ses` afterwards ([§6.9](#69-setup-ses)).
 
 ### 6.2 Preflight
 
@@ -464,7 +464,7 @@ All checks run before anything is created; each failure is exit 2, 3 or 10 with 
 2. `--domain` is a valid host name (A-label after IDNA conversion, no port, no path) and differs from
    `--mail-domain`; so is `--console-host` when given. `--mail-domain` is a valid domain.
    `--jurisdiction` is `eu` or `default`. `--daily-send-quota` is a positive integer. `--backup-bucket`
-   is a valid R2 bucket name other than `pylota-mail-blobs`.
+   is a valid R2 bucket name other than `pylota-identity-blobs`.
 3. `node --version` reports 22 or later and `npm --version` answers; then the release bundle is
    downloaded and verified and Wrangler is installed from its lockfile, and `wrangler --version` prints
    `4.139.0` ([§5.1](#51-wrangler)).
@@ -493,26 +493,26 @@ Each step prints `created`, `exists`, `updated` or `skipped` with the resource a
 | # | Step | Cloudflare call(s), in order | Idempotency |
 |---|---|---|---|
 | 1 | Download and verify the release bundle | GitHub release lookup and downloads ([§8.1](#81-bundle-download), [§8.2](#82-signature-and-checksums)) | An extracted, verified `.bundle/<version>/` is reused |
-| 2 | D1 database `pylota-mail` | `GET /accounts/{a}/d1/database?name=pylota-mail` (filter parameter: verify at build time; otherwise list and match `name`); if absent `POST /accounts/{a}/d1/database` `{"name":"pylota-mail","jurisdiction":"eu"}` (no `jurisdiction` for `default`) | Found by name. If the existing database reports a different jurisdiction, stop: it cannot be moved ([Privacy](privacy.md#3-jurisdiction-and-residency)) |
-| 3 | R2 bucket `pylota-mail-blobs`, and the backup bucket with `--backup-bucket` | `GET /accounts/{a}/r2/buckets/pylota-mail-blobs` with header `cf-r2-jurisdiction: eu`; if `404`, `POST /accounts/{a}/r2/buckets` `{"name":"pylota-mail-blobs"}` with the same header (jurisdiction is a header, not a body field). The same two calls for `{PM_BACKUP_BUCKET}` when it is set, in the same jurisdiction | Found by name in the jurisdiction. A bucket of the same name in another jurisdiction is reported, not reused |
-| 4 | R2 lifecycle rules | `GET …/buckets/pylota-mail-blobs/lifecycle`, then `PUT …/lifecycle` with the existing rules plus `{"id":"pm-inbound-staging","enabled":true,"conditions":{"prefix":"inbound-staging/"},"deleteObjectsTransition":{"condition":{"type":"Age","maxAge":1296000}}}` (15 days, longer than the 14-day dead-letter retention, [J7](../edge-cases.md)) and `{"id":"pm-abort-multipart","enabled":true,"conditions":{"prefix":""},"abortMultipartUploadsTransition":{"condition":{"type":"Age","maxAge":86400}}}` (incomplete multipart uploads aborted after 1 day, [Privacy §9.1](privacy.md#91-job-steps)). Field names from the R2 lifecycle API reference (read 2026-10-10) | `PUT` replaces the whole rule set, so the CLI merges: other rules are kept, rules with these two ids are replaced. No `PUT` when they are already identical |
+| 2 | D1 database `pylota-identity` | `GET /accounts/{a}/d1/database?name=pylota-identity` (filter parameter: verify at build time; otherwise list and match `name`); if absent `POST /accounts/{a}/d1/database` `{"name":"pylota-identity","jurisdiction":"eu"}` (no `jurisdiction` for `default`) | Found by name. If the existing database reports a different jurisdiction, stop: it cannot be moved ([Privacy](privacy.md#3-jurisdiction-and-residency)) |
+| 3 | R2 bucket `pylota-identity-blobs`, and the backup bucket with `--backup-bucket` | `GET /accounts/{a}/r2/buckets/pylota-identity-blobs` with header `cf-r2-jurisdiction: eu`; if `404`, `POST /accounts/{a}/r2/buckets` `{"name":"pylota-identity-blobs"}` with the same header (jurisdiction is a header, not a body field). The same two calls for `{PM_BACKUP_BUCKET}` when it is set, in the same jurisdiction | Found by name in the jurisdiction. A bucket of the same name in another jurisdiction is reported, not reused |
+| 4 | R2 lifecycle rules | `GET …/buckets/pylota-identity-blobs/lifecycle`, then `PUT …/lifecycle` with the existing rules plus `{"id":"pm-inbound-staging","enabled":true,"conditions":{"prefix":"inbound-staging/"},"deleteObjectsTransition":{"condition":{"type":"Age","maxAge":1296000}}}` (15 days, longer than the 14-day dead-letter retention, [J7](../edge-cases.md)) and `{"id":"pm-abort-multipart","enabled":true,"conditions":{"prefix":""},"abortMultipartUploadsTransition":{"condition":{"type":"Age","maxAge":86400}}}` (incomplete multipart uploads aborted after 1 day, [Privacy §9.1](privacy.md#91-job-steps)). Field names from the R2 lifecycle API reference (read 2026-10-10) | `PUT` replaces the whole rule set, so the CLI merges: other rules are kept, rules with these two ids are replaced. No `PUT` when they are already identical |
 | 5 | Queues | `GET /accounts/{a}/queues` (all pages); for each missing name `POST /accounts/{a}/queues` `{"queue_name": …}`. Dead-letter queues first: `pm-inbound-dlq`, `pm-outbound-dlq`, `pm-delivery-events-dlq`, `pm-webhooks-dlq`, `pm-index-dlq`, `pm-screen-dlq`, then `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index`, `pm-screen` ([Screening hold § 5.1](screening.md#51-queue)) | Found by name |
-| 6 | Vectorize index `pm-mail-chunks` | `GET /accounts/{a}/vectorize/v2/indexes/pm-mail-chunks`; if absent `POST /accounts/{a}/vectorize/v2/indexes` `{"name":"pm-mail-chunks","description":"pylota-mail generation=1 embed_model=@cf/baai/bge-m3","config":{"dimensions":1024,"metric":"cosine"}}`. Then `GET …/metadata_index/list` and, for each missing, `POST …/metadata_index/create` `{"propertyName": …, "indexType": …}` for `identity_id` string, `thread_id` string, `sent_at` number, `sender_domain` string, `direction` string, `has_attachment` boolean, `verdict` string, `kind` string ([Data model](data-model.md)) | Found by name. An existing index with other dimensions or metric stops setup. Metadata indexes are created before any vector is written, because vectors written earlier are not filterable ([Search §7.3](search.md#73-re-embed-job-embedding-model-change)) |
+| 6 | Vectorize index `pm-mail-chunks` | `GET /accounts/{a}/vectorize/v2/indexes/pm-mail-chunks`; if absent `POST /accounts/{a}/vectorize/v2/indexes` `{"name":"pm-mail-chunks","description":"pylota-identity generation=1 embed_model=@cf/baai/bge-m3","config":{"dimensions":1024,"metric":"cosine"}}`. Then `GET …/metadata_index/list` and, for each missing, `POST …/metadata_index/create` `{"propertyName": …, "indexType": …}` for `identity_id` string, `thread_id` string, `sent_at` number, `sender_domain` string, `direction` string, `has_attachment` boolean, `verdict` string, `kind` string ([Data model](data-model.md)) | Found by name. An existing index with other dimensions or metric stops setup. Metadata indexes are created before any vector is written, because vectors written earlier are not filterable ([Search §7.3](search.md#73-re-embed-job-embedding-model-change)) |
 | 7 | Email Routing on the mail domain | `GET /zones/{z}/email/routing`; if not enabled, delete foreign MX records when `--replace-mx` was accepted, then `POST /zones/{z}/email/routing/dns` `{"name": "{mail_domain}"}` (adds and locks the MX and SPF records); then `PATCH /zones/{z}/email/routing` `{"support_subaddress": true}` if it is not already `true` | Read first; each call only when the setting differs |
-| 8 | Ownership record | `GET /zones/{z}/dns_records?type=TXT&name.exact=_pylota-mail.{mail_domain}`; if absent, `POST /zones/{z}/dns_records` `{"type":"TXT","name":"_pylota-mail.{mail_domain}","content":"pm-verify={token}","ttl":1}` ([Identities, addresses and domains](identity-domains.md), step 4) | An existing `pm-verify=` value is reused as the token |
+| 8 | Ownership record | `GET /zones/{z}/dns_records?type=TXT&name.exact=_pylota-identity.{mail_domain}`; if absent, `POST /zones/{z}/dns_records` `{"type":"TXT","name":"_pylota-identity.{mail_domain}","content":"pm-verify={token}","ttl":1}` ([Identities, addresses and domains](identity-domains.md), step 4) | An existing `pm-verify=` value is reused as the token |
 | 9 | Email Sending on the mail domain | `GET /zones/{z}/email/sending/subdomains`; if no entry has `name == mail_domain`, `POST /zones/{z}/email/sending/subdomains` `{"name": "{mail_domain}"}`; then `PATCH /zones/{z}/email/sending/subdomains/{tag}` `{"drop_suppressed_recipients": false, "preview_enabled": false}` when either differs ([Outbound › G4](outbound.md#provider-suppressions-and-resending-g4), [Privacy](privacy.md#3-jurisdiction-and-residency)) | Found by name. Whether an apex is onboarded through this endpoint, and whether both fields are accepted by `PATCH`, are verified by spike S9; the fallback is the dashboard step printed by `doctor` |
 | 10 | Rate-limit namespace IDs | No call when `deploy/wrangler.toml` already holds an ID for each of the seven bindings (`RL_API`, `RL_SEARCH`, `RL_AGENTIC`, `RL_SEND`, `RL_SIGNIN`, `RL_SIGN`, `RL_PARTNER`). Otherwise list the account's scripts (`GET /accounts/{a}/workers/scripts`) and read each script's bindings (`GET /accounts/{a}/workers/scripts/{name}/settings`; verify at build time), collect every `ratelimit` binding's `namespace_id`, and pick the smallest unused integers from 1001 for the bindings that have none | Kept across re-runs through the rendered file ([Rust workspace §8](rust-workspace.md#8-generated-wranglertoml)); a file from an older release that lacks `RL_SIGNIN`, `RL_SIGN` or `RL_PARTNER` gets one new ID for each missing binding |
 | 11 | Render `deploy/wrangler.toml` | none ([§7](#7-rendering-wranglertoml)) | Deterministic; a re-run with the same inputs writes the same bytes |
 | 12 | D1 migrations | `POST /accounts/{a}/d1/database/{id}/query` per migration ([§8.5](#85-d1-migrations)) | `schema_migrations` records each applied version |
-| 13 | First deploy | `wrangler deploy --config <dir>/wrangler.toml` ([§5.1](#51-wrangler)) from the bundle directory. Creates the Worker `pylota-mail`, its Durable Object classes, queue consumers, cron triggers and the Custom Domain (two when the console host differs) | Skipped when `/health` already reports this version and the rendered file is unchanged since the last deploy ([§8.9](#89-no-op-redeploys)) |
-| 14 | Secrets | `GET /accounts/{a}/workers/scripts/pylota-mail/secrets` (names only); for each missing required secret, generate 32 bytes from the OS CSPRNG, base64, and pipe it to `wrangler secret put {NAME} --name pylota-mail` on stdin. `PM_KEY_PEPPER` follows [§6.5](#65-the-bootstrap-key), which decides here whether a new pepper is uploaded | Existing secrets are never overwritten or read (Worker secrets are write-only), except a pepper replaced by §6.5 |
+| 13 | First deploy | `wrangler deploy --config <dir>/wrangler.toml` ([§5.1](#51-wrangler)) from the bundle directory. Creates the Worker `pylota-identity`, its Durable Object classes, queue consumers, cron triggers and the Custom Domain (two when the console host differs) | Skipped when `/health` already reports this version and the rendered file is unchanged since the last deploy ([§8.9](#89-no-op-redeploys)) |
+| 14 | Secrets | `GET /accounts/{a}/workers/scripts/pylota-identity/secrets` (names only); for each missing required secret, generate 32 bytes from the OS CSPRNG, base64, and pipe it to `wrangler secret put {NAME} --name pylota-identity` on stdin. `PM_KEY_PEPPER` follows [§6.5](#65-the-bootstrap-key), which decides here whether a new pepper is uploaded | Existing secrets are never overwritten or read (Worker secrets are write-only), except a pepper replaced by §6.5 |
 | 15 | Health | `GET https://{api_host}/health` every 5 s until `200` with `version` equal to the bundle's `VERSION`, at most 5 minutes (the Custom Domain's certificate can take minutes) | Pure read. A timeout is exit 13; a re-run continues here |
-| 16 | Event subscription | `GET /accounts/{a}/event_subscriptions/subscriptions` and look for `name = "pylota-mail {mail_domain}"`; if absent, `wrangler queues subscription create pm-delivery-events --source email.sending --events message.delivered,message.deferred,message.bounced,message.failed,message.rejected,message.complained --zone-id {z} --domain {mail_domain} --name "pylota-mail {mail_domain}"`, then list again to read its ID | Found by name. Wrangler's flags for the `email.sending` source are documented; the REST body for that source is not, so the CLI uses Wrangler here |
-| 17 | Catch-all to the Worker | `GET /zones/{z}/email/routing/rules/catch_all`; unless it is enabled with exactly one `worker` action whose value is `["pylota-mail"]`, `PUT /zones/{z}/email/routing/rules/catch_all` `{"actions":[{"type":"worker","value":["pylota-mail"]}],"matchers":[{"type":"all"}],"enabled":true,"name":"pylota-mail"}` | Read first; `PUT` only on a difference |
+| 16 | Event subscription | `GET /accounts/{a}/event_subscriptions/subscriptions` and look for `name = "pylota-identity {mail_domain}"`; if absent, `wrangler queues subscription create pm-delivery-events --source email.sending --events message.delivered,message.deferred,message.bounced,message.failed,message.rejected,message.complained --zone-id {z} --domain {mail_domain} --name "pylota-identity {mail_domain}"`, then list again to read its ID | Found by name. Wrangler's flags for the `email.sending` source are documented; the REST body for that source is not, so the CLI uses Wrangler here |
+| 17 | Catch-all to the Worker | `GET /zones/{z}/email/routing/rules/catch_all`; unless it is enabled with exactly one `worker` action whose value is `["pylota-identity"]`, `PUT /zones/{z}/email/routing/rules/catch_all` `{"actions":[{"type":"worker","value":["pylota-identity"]}],"matchers":[{"type":"all"}],"enabled":true,"name":"pylota-identity"}` | Read first; `PUT` only on a difference |
 | 18 | Read the records back | `GET /zones/{z}/email/routing/dns` and `GET /zones/{z}/email/sending/subdomains/{tag}/dns`; normalise to `{ type, name, value, priority, purpose, required }` and add the ownership TXT (FR-DOM-3) | Pure read |
 | 19 | Bootstrap key | D1 query API ([§6.5](#65-the-bootstrap-key)) | Skipped when the profile already holds a working platform key |
 | 20 | Platform domain row | D1 query API ([§6.6](#66-the-platform-domain-row)) | Upsert by `name` |
-| 21 | Default tenant | `GET /v1/tenants` (bootstrap key) and look for `address_suffix == ""`; if absent `POST /v1/tenants` with `Idempotency-Key: pmail-setup-default-tenant` and `{"slug":"default","name":"{tenant_name}","address_suffix":"","owner":{"email":"{owner_email}","name":"{owner_name}"}}` (`owner` omitted with `--no-console` and no `--owner-email`) | Found by suffix. The owner receives a sign-in link from the Worker ([Console design](console.md)) |
+| 21 | Default tenant | `GET /v1/tenants` (bootstrap key) and look for `address_suffix == ""`; if absent `POST /v1/tenants` with `Idempotency-Key: idvy-setup-default-tenant` and `{"slug":"default","name":"{tenant_name}","address_suffix":"","owner":{"email":"{owner_email}","name":"{owner_name}"}}` (`owner` omitted with `--no-console` and no `--owner-email`) | Found by suffix. The owner receives a sign-in link from the Worker ([Console design](console.md)) |
 | 22 | System identity | D1 query API: insert the `identities` row (`is_system = 1`, the default tenant, `username` and `display_name` from `PM_SYSTEM_FROM`, `owner_name = 'Operator'`, `owner_email` = `--owner-email` or `postmaster@{mail_domain}`, `send_policy_json = '{"daily_cap":50000}'`, `mailbox_do_id = ''`) and its `active` primary address on the platform domain, in one batch. The every-minute cron mints the mailbox and sends `Init` ([Identities, addresses and domains › The system identity](identity-domains.md#the-system-identity)) | Found by `is_system = 1`. A changed `PM_SYSTEM_FROM` inserts the new address as an `active` platform-domain alias in a D1 query API batch (setup's internal path: no reserved-name or role-name check, which the public `POST …/addresses` would apply to a name such as `noreply`), then promotes it through the API (bootstrap key); the old one retires as usual |
 | 23 | Mail test and `PM_TRUSTED_AUTHSERV_ID` | Run the `--mail-test` check of `doctor` ([§10](#10-doctor)) with the bootstrap key. Write the observed `Authentication-Results` authserv-id to `PM_TRUSTED_AUTHSERV_ID` in `deploy/wrangler.toml` and deploy once more (a variable change only) | Skipped when the rendered file already holds the observed value. A failed mail test is a warning: setup finishes, `PM_TRUSTED_AUTHSERV_ID` stays empty, and SPF-only alignment is treated as `unverified` until a re-run sets it ([Inbound › Authentication verdict](inbound.md#authentication-verdict)) |
 | 24 | Summary | `doctor` checks `dns.platform`, `routing.catch_all`, `sending.domains`, `sending.event_subscriptions`, `secrets`, `health` | Pure read |
@@ -552,7 +552,7 @@ Each step prints `created`, `exists`, `updated` or `skipped` with the resource a
 - **Mail test last** (23): it needs the catch-all, the system identity's domain and a key, and its
   result is the authserv-id that Cloudflare's MX stamps ([spike S2](index.md#spikes) records it first).
 
-Setup therefore performs the first deploy itself. `pmail deploy` run straight after it finds nothing
+Setup therefore performs the first deploy itself. `idvy deploy` run straight after it finds nothing
 to change and exits 0 ([§8.9](#89-no-op-redeploys)), so the documented sequence `setup`, `deploy`,
 `keys create` works as written.
 
@@ -571,7 +571,7 @@ Setup is the only time the CLI knows the pepper, because it generated it. The bo
 |---|---|---|
 | missing | any (normally 0) | Generate pepper `P` in memory, upload it in step 14, insert the key below |
 | present | 0 | The old pepper protects nothing. Generate a new `P`, upload it with `wrangler secret put PM_KEY_PEPPER`, insert the key |
-| present | > 0 | Stop with exit 3: "Keys exist; use `pmail login` with an existing platform key, or `pmail setup --rotate-pepper` (invalidates every key)" |
+| present | > 0 | Stop with exit 3: "Keys exist; use `idvy login` with an existing platform key, or `idvy setup --rotate-pepper` (invalidates every key)" |
 | present, with `--rotate-pepper` | > 0 | Typed confirmation of the platform domain, then as row 2. Every existing key stops working at once; this is the break-glass procedure in [Security §6.2](security.md#62-rotation-procedures) |
 
    **When.** The decision is taken in step 14, when the secret names are listed; the D1 migrations of
@@ -592,7 +592,7 @@ VALUES (?1, ?2, ?3, 'setup-bootstrap', 'platform', NULL, NULL, 'live', ?4, NULL,
 
 INSERT INTO audit_log (id, tenant_id, actor_key_id, action, target_type, target_id,
                        details_json, request_id, created_at)
-VALUES (?7, NULL, NULL, 'key.create', 'api_key', ?1, '{"via":"pmail setup"}', NULL, ?6);
+VALUES (?7, NULL, NULL, 'key.create', 'api_key', ?1, '{"via":"idvy setup"}', NULL, ?6);
 ```
 
    - `?1` `key_` + ULID; `?3` lower-case hex of `HMAC-SHA256(P, whole key string)`; `?4` the JSON array
@@ -604,7 +604,7 @@ VALUES (?7, NULL, NULL, 'key.create', 'api_key', ?1, '{"via":"pmail setup"}', NU
 6. Save the URL (`https://{api_host}`) and the key in the profile ([§2.1](#21-the-config-file)), and
    drop `P` from memory.
 
-The bootstrap key expires after 24 hours on purpose. `pmail keys create --level platform --name
+The bootstrap key expires after 24 hours on purpose. `idvy keys create --level platform --name
 first-key --permissions <list>` creates the long-lived key; a platform key needs an explicit
 `--permissions` ([§18](#18-other-client-side-behaviour)), so setup's summary prints the whole command
 with every permission a platform key may hold. When it runs interactively with a profile whose key is
@@ -642,7 +642,7 @@ ON CONFLICT(name) WHERE state <> 'removed' DO UPDATE SET
 the `* * * * *` cron selects `SELECT id, kind FROM domains WHERE monitor_do_id = '' LIMIT 20`, mints a
 `DomainMonitor` ID in `PM_JURISDICTION` for each, sets `monitor_do_id`, sends `DomainRequest::Init`,
 and emits `domain.created` for rows with a `tenant_id`. The same hook serves domains that
-`pmail domains add` onboarded with the local token ([§18.1](#181-domains-add-without-pm_cf_api_token)).
+`idvy domains add` onboarded with the local token ([§18.1](#181-domains-add-without-pm_cf_api_token)).
 Setup polls `SELECT monitor_do_id FROM domains WHERE kind = 'platform'` for up to 2 minutes and reports
 `monitor: started` or a warning naming the cron.
 
@@ -661,13 +661,13 @@ Setup polls `SELECT monitor_do_id FROM domains WHERE kind = 'platform'` for up t
 Human mode prints one line per step and then:
 
 ```text
-Pylota Mail 1.0.0 is running at https://mail.example.com
-Platform domain: agents.example (Email Routing catch-all → pylota-mail, Email Sending onboarded)
+Pylota Identity 1.0.0 is running at https://mail.example.com
+Platform domain: agents.example (Email Routing catch-all → pylota-identity, Email Sending onboarded)
 Default tenant: ten_01JA… (addresses look like name@agents.example)
 Console owner: sam@acmecarhire.example (sign-in link sent)
 Profile "default" holds a bootstrap key that expires in 24 hours.
-Next: pmail keys create --level platform --name first-key --permissions tenants:manage,platform:ops,…
-      pmail doctor --mail-test
+Next: idvy keys create --level platform --name first-key --permissions tenants:manage,platform:ops,…
+      idvy doctor --mail-test
 ```
 
 The real summary prints the `--permissions` list in full (every permission except `identities:sign`).
@@ -679,7 +679,7 @@ a log.
 
 ### 6.9 `setup ses`
 
-`pmail setup ses --region eu-west-2 [--allow-non-eu] [--prefix <prefix>] [--dir <path>] [--yes]`
+`idvy setup ses --region eu-west-2 [--allow-non-eu] [--prefix <prefix>] [--dir <path>] [--yes]`
 
 Connects the deployment to Amazon SES once, for the `dns_records`, `send_only` and `smtp_relay`
 (`inbound: ses`) methods and for the SES failover of [J5](../edge-cases.md). The resources and their
@@ -690,7 +690,7 @@ this section decides the CLI's part. It runs after `setup`, against the deployme
 |---|---|---|
 | `--region` | – (required) | The SES region, `PM_SES_REGION` |
 | `--allow-non-eu` | off | Accept a region outside the EU and the UK when `PM_JURISDICTION = "eu"` ([N30](../edge-cases.md)) |
-| `--prefix` | `pylota-mail-{aws-account-id}-{dep}` | Prefix of the inbound S3 bucket, `{prefix}-inbound`. The default holds the AWS account ID and the deployment label `{dep}` (the first 8 hex characters of `SHA-256(PM_API_HOST)`), so two accounts, or two deployments, never choose the same bucket name |
+| `--prefix` | `pylota-identity-{aws-account-id}-{dep}` | Prefix of the inbound S3 bucket, `{prefix}-inbound`. The default holds the AWS account ID and the deployment label `{dep}` (the first 8 hex characters of `SHA-256(PM_API_HOST)`), so two accounts, or two deployments, never choose the same bucket name |
 | `--dir` | `./deploy` | Deployment directory; its `wrangler.toml` must exist (setup ran) |
 | `--yes` | off | Accept the IAM policy without the interactive review |
 
@@ -701,12 +701,12 @@ resource up first, and creates or updates it only when it is missing or differs.
 `created`, `exists`, `updated` or `skipped`.
 
 **Checks before anything is created** (each stops the command). Every resource the command creates
-carries the tag `pylota-mail:api-host = {PM_API_HOST}` where the service accepts tags
+carries the tag `pylota-identity:api-host = {PM_API_HOST}` where the service accepts tags
 ([Domains on any DNS host §4.2](domain-connections.md#42-deployment-set-up-for-ses)):
 
 1. `deploy/wrangler.toml` exists, and `GET https://{PM_API_HOST}/health` answers with the CLI's version
    (the Worker must confirm the SNS subscriptions later, and step 10 deploys). A different version stops
-   with exit 2 and the fix `pmail upgrade`, so `setup ses` never changes the version as a side effect.
+   with exit 2 and the fix `idvy upgrade`, so `setup ses` never changes the version as a side effect.
    `PM_JURISDICTION` and `PM_PLATFORM_DOMAIN` are read from the file.
 2. **Region.** `--region` must be one of the regions that receive mail (the list on AWS's endpoints
    page, read 2026-10-09, compiled into the CLI); otherwise exit 2, because `dns_records` could not
@@ -723,7 +723,7 @@ carries the tag `pylota-mail:api-host = {PM_API_HOST}` where the service accepts
    warning names both prices.
 4. **Another deployment ([N31](../edge-cases.md)).** `DescribeActiveReceiptRuleSet`: a rule `pm-deliver`
    whose S3 action writes to a bucket other than `{prefix}-inbound`, or to a bucket whose
-   `pylota-mail:api-host` tag is not `PM_API_HOST`, stops the command with exit 14 ("another deployment
+   `pylota-identity:api-host` tag is not `PM_API_HOST`, stops the command with exit 14 ("another deployment
    receives mail in this AWS account and region; use a separate AWS account"). Then each resource of the
    steps below that already exists under its name (bucket, both topics, queue, configuration set, IAM user,
    platform identity) is read with its tags: a missing tag or another host's tag stops the command with
@@ -736,15 +736,15 @@ carries the tag `pylota-mail:api-host = {PM_API_HOST}` where the service accepts
 | # | Step | Notes |
 |---|---|---|
 | 1 | S3 bucket `{prefix}-inbound` and its policy [3] | The bucket policy names the rule `pm-deliver`, so it is written before the rule that writes to the bucket |
-| 2 | SNS topic `pylota-mail-inbound` [4] | `SetTopicAttributes` `SignatureVersion = 2` when the attribute differs (the default is 1) |
-| 3 | SQS queue `pylota-mail-inbound` and its subscription to the topic [6] | The backstop |
-| 4 | Receipt rule set and rule `pm-deliver` [7, 8] | An account that already has an active rule set keeps it: the rule is added to that set, and its name becomes `PM_SES_RULE_SET`. Otherwise the set `pylota-mail` is created and made active |
+| 2 | SNS topic `pylota-identity-inbound` [4] | `SetTopicAttributes` `SignatureVersion = 2` when the attribute differs (the default is 1) |
+| 3 | SQS queue `pylota-identity-inbound` and its subscription to the topic [6] | The backstop |
+| 4 | Receipt rule set and rule `pm-deliver` [7, 8] | An account that already has an active rule set keeps it: the rule is added to that set, and its name becomes `PM_SES_RULE_SET`. Otherwise the set `pylota-identity` is created and made active |
 | 5 | Configuration set, event destination and the delivery-events topic [10] | As in [Outbound › Amazon SES](outbound.md#amazon-ses). This topic, `PM_SES_SNS_TOPIC_ARN`, also gets `SignatureVersion = 2` |
 | 6 | Platform identity [9] | `CreateEmailIdentity` for the platform domain; its DKIM CNAMEs are written into the platform zone through the Cloudflare API (find, then create) |
-| 7 | IAM user `pylota-mail-worker-{dep}` and its policy [11] | The policy JSON is printed for review first. Interactive runs ask before applying it; non-interactive runs need `--yes`, else exit 2. An existing policy that differs is shown as a diff |
+| 7 | IAM user `pylota-identity-worker-{dep}` and its policy [11] | The policy JSON is printed for review first. Interactive runs ask before applying it; non-interactive runs need `--yes`, else exit 2. An existing policy that differs is shown as a diff |
 | 8 | The Worker's access key | Only when `PM_SES_ACCESS_KEY_ID` is not among the Worker's secret names (Worker secrets are write-only, so an existing key is never read or replaced). `CreateAccessKey`, then `PM_SES_ACCESS_KEY_ID` and `PM_SES_SECRET_ACCESS_KEY` are piped to `wrangler secret put` on stdin and dropped from memory. They are never written to disk or printed; `--print-secrets` does not exist here |
 | 9 | Variables | Renders `deploy/wrangler.toml` ([§7](#7-rendering-wranglertoml)) with `PM_SES_REGION`, `PM_SES_INBOUND_BUCKET`, `PM_SES_INBOUND_TOPIC_ARN`, `PM_SES_INBOUND_QUEUE_URL`, `PM_SES_RULE_SET` and `PM_SES_SNS_TOPIC_ARN` under `[vars]`. These six are owned by `setup ses`: a re-run writes the values it found |
-| 10 | Deploy | `pmail deploy` ([§8](#8-deploy)), so the Worker reads the new variables. A re-run that changed nothing is a no-op ([§8.9](#89-no-op-redeploys)) |
+| 10 | Deploy | `idvy deploy` ([§8](#8-deploy)), so the Worker reads the new variables. A re-run that changed nothing is a no-op ([§8.9](#89-no-op-redeploys)) |
 | 11 | HTTPS subscriptions [5] | `https://{PM_API_HOST}/hooks/ses/inbound` on the inbound topic and `https://{PM_API_HOST}/hooks/ses` on the delivery-events topic. They come after the deploy because the Worker confirms only a subscription for the topic it is configured with ([§4.5](domain-connections.md#45-inbound-through-ses)). The CLI waits up to 5 minutes for both to be confirmed (exit 13 after that; a re-run continues) |
 | 12 | Summary | The doctor's `ses` check ([§10](#10-doctor)) |
 
@@ -818,16 +818,16 @@ repository's template with `--from-source`). The output is the file in
 
 ## 8. `deploy`
 
-`pmail deploy [--version <v>] [--from-source [--source-dir <path>]] [--gradual] [--stages <list>] [--stage-wait <duration>] [--force] [--dir <path>]`
+`idvy deploy [--version <v>] [--from-source [--source-dir <path>]] [--gradual] [--stages <list>] [--stage-wait <duration>] [--force] [--dir <path>]`
 
 ### 8.1 Bundle download
 
 1. The version is `--version`, else the CLI's own version. A version newer than the CLI is refused
    (exit 2): the CLI implements the setup steps and migration runner for its own release.
-2. `GET https://api.github.com/repos/PILOTAAI/pylota-mail/releases/tags/v{version}` with
+2. `GET https://api.github.com/repos/PILOTAAI/pylota-identity/releases/tags/v{version}` with
    `Accept: application/vnd.github+json` and `X-GitHub-Api-Version: 2026-03-10`; a `404` is exit 2
    ("no such release"). From `assets[]`, take the `browser_download_url` of
-   `pylota-mail-worker-{version}.tar.gz`, `SHA256SUMS` and `SHA256SUMS.sig`.
+   `pylota-identity-worker-{version}.tar.gz`, `SHA256SUMS` and `SHA256SUMS.sig`.
 3. Download each to `<dir>/.bundle/{version}.partial/` with caps: `SHA256SUMS` ≤ 64 KB,
    `SHA256SUMS.sig` ≤ 4 KB, the tarball ≤ 64 MiB. HTTPS only; at most 5 redirects, each to an `https`
    URL. `HTTPS_PROXY` is honoured.
@@ -841,7 +841,7 @@ crate (pin at build time; "a small Rust library with no external dependencies", 
 
 Why minisign rather than cosign:
 
-- **Offline and self-contained.** The public key is compiled into `pmail`; verification needs no
+- **Offline and self-contained.** The public key is compiled into `idvy`; verification needs no
   network service. Keyless cosign verification depends on Sigstore's certificate authority and
   transparency log being reachable and on trusting an OIDC identity, which adds failure modes to every
   deploy.
@@ -859,7 +859,7 @@ Verification:
    `current` and `next`, so the signing key can be rotated with a release that adds the next key
    before it is used.
 2. Verify the signature over the exact bytes of `SHA256SUMS`, and the global signature over the
-   signature plus the trusted comment. The trusted comment must be `pylota-mail v{version}`, so a
+   signature plus the trusted comment. The trusted comment must be `pylota-identity v{version}`, so a
    valid signature from another release cannot be replayed.
 3. Parse `SHA256SUMS`: lines `<64 lower-case hex>␠␠<filename>`; filenames match
    `^[A-Za-z0-9._-]{1,128}$`; no duplicates.
@@ -915,7 +915,7 @@ Spike S1 checks it: its pass criteria include "a multi-statement D1 query-API re
 re-runnable (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `INSERT OR IGNORE`), the
 `schema_migrations` insert stays the last statement of the request, and a CI lint over `migrations/d1/`
 enforces both from then on. A request that fails part-way is then simply sent again by the next
-`pmail deploy`. Until v1.0 there is one migration, `0001_init.sql`
+`idvy deploy`. Until v1.0 there is one migration, `0001_init.sql`
 ([Build plan › M5](../build-plan.md#m5--worker-base-routing-auth-tenants-keys)).
 
 Local integration tests apply the same files with `wrangler d1 migrations apply --local`
@@ -925,7 +925,7 @@ in the throwaway local database and never meets a deployed one.
 ### 8.6 Code deploy and the gradual flag
 
 **Default (`--gradual` off).** `wrangler deploy --config <dir>/wrangler.toml
---message "pmail deploy v{version}"` ([§5.1](#51-wrangler)), run with the bundle directory as working directory, so `main =
+--message "idvy deploy v{version}"` ([§5.1](#51-wrangler)), run with the bundle directory as working directory, so `main =
 "build/index.js"` resolves. Wrangler's output is captured; on failure its last 40 lines are printed and
 the exit code is 10.
 
@@ -936,10 +936,10 @@ the exit code is 10.
    from the deployed ones (read from the previous rendered file), the change cannot be uploaded as a
    version (Cloudflare deployment management, read 2026-10-09), so the CLI says so and uses the default
    path at 100%.
-2. `wrangler versions upload --config … --message "pmail v{version}" --tag v{version}` and read the new
+2. `wrangler versions upload --config … --message "idvy v{version}" --tag v{version}` and read the new
    version ID from its output. `wrangler deployments list` gives the currently deployed version ID.
 3. **Smoke test at 0%:** `wrangler versions deploy {new}@0% {old}@100% -y`, then
-   `GET https://{api_host}/health` with `Cloudflare-Workers-Version-Overrides: pylota-mail="{new}"`
+   `GET https://{api_host}/health` with `Cloudflare-Workers-Version-Overrides: pylota-identity="{new}"`
    must return `200` with the new `version`.
 4. For each stage `p` in `--stages` (default `10,50,100`): `wrangler versions deploy {new}@{p}%
    {old}@{100-p}% -y` (at 100: `{new}@100%`), then wait `--stage-wait` (default 10 minutes; 0 allowed),
@@ -961,19 +961,19 @@ part runs in every `deploy` and `upgrade`, after rendering and before migrations
    and whether a `VECTORS_NEXT` binding and `PM_EMBED_MODEL_PREVIOUS` are present.
 2. Read the model of the bound index from its description
    (`GET /accounts/{a}/vectorize/v2/indexes/{name}`; setup wrote
-   `pylota-mail generation=N embed_model=…`).
+   `pylota-identity generation=N embed_model=…`).
 3. Decide:
 
 | State | Action |
 |---|---|
 | No `VECTORS_NEXT`, model equals the index's model | Nothing |
-| No `VECTORS_NEXT`, model differs | **Start.** Embed a probe through `POST /accounts/{a}/ai/run/{model}` with `{"text":["pylota-mail dimension probe"]}` and take the length of `data[0]` (the `text` input is the one `bge-m3` takes; another model's input schema is checked on its model page first). Create `pm-mail-chunks-g{N+1}` with that dimension, `metric: cosine`, description `pylota-mail generation={N+1} embed_model={model}`, and the eight metadata indexes. Render with `VECTORS` → old index, `VECTORS_NEXT` → new index, `PM_EMBED_MODEL` → new model, `PM_EMBED_MODEL_PREVIOUS` → old model. Ask for confirmation in interactive mode, printing the cost note from Search §7.3 |
+| No `VECTORS_NEXT`, model differs | **Start.** Embed a probe through `POST /accounts/{a}/ai/run/{model}` with `{"text":["pylota-identity dimension probe"]}` and take the length of `data[0]` (the `text` input is the one `bge-m3` takes; another model's input schema is checked on its model page first). Create `pm-mail-chunks-g{N+1}` with that dimension, `metric: cosine`, description `pylota-identity generation={N+1} embed_model={model}`, and the eight metadata indexes. Render with `VECTORS` → old index, `VECTORS_NEXT` → new index, `PM_EMBED_MODEL` → new model, `PM_EMBED_MODEL_PREVIOUS` → old model. Ask for confirmation in interactive mode, printing the cost note from Search §7.3 |
 | `VECTORS_NEXT` present, `PM_EMBED_MODEL` equals `PM_EMBED_MODEL_PREVIOUS` | **Cancel.** The deployer set the model back. Render without `VECTORS_NEXT` and `PM_EMBED_MODEL_PREVIOUS`; the Worker cancels the `reembed` job when the binding disappears. The orphan index is offered for deletion |
 | `VECTORS_NEXT` present, job not completed | Nothing; print progress from `SELECT status, result_json FROM jobs WHERE kind = 'reembed' ORDER BY created_at DESC LIMIT 1` |
 | `VECTORS_NEXT` present, latest `reembed` job `completed` | **Finalise.** Render with `VECTORS` → the new index and without `VECTORS_NEXT` and `PM_EMBED_MODEL_PREVIOUS`; after the deploy succeeds, offer to delete the old index (`DELETE /accounts/{a}/vectorize/v2/indexes/{old}`; never without confirmation) |
 
 `doctor` reports a completed job that has not been finalised as a `warn` on `bindings`, with the fix
-`pmail deploy`.
+`idvy deploy`.
 
 `VECTORS_NEXT` and `PM_EMBED_MODEL_PREVIOUS` are defined by Search §7.3 and listed in
 [Configuration › Bindings](../../reference/configuration.md#bindings) and
@@ -999,7 +999,7 @@ registry (checked against the lockfile's hashes) unless they are in the npm cach
 
 ### 8.9 No-op redeploys
 
-After a successful deploy the CLI writes `# pmail: deployed v{version} sha256={hash of the rendered
+After a successful deploy the CLI writes `# idvy: deployed v{version} sha256={hash of the rendered
 file without this line}` as the last line of `wrangler.toml`. `deploy` exits 0 without calling
 Wrangler when that line matches, migrations are up to date, and `/health` reports the same version.
 `--force` deploys anyway.
@@ -1007,7 +1007,7 @@ Wrangler when that line matches, migrations are up to date, and `/health` report
 ### 8.10 Output
 
 ```text
-Verified pylota-mail-worker-1.0.0.tar.gz (minisign key 7A3F…, sha256 9c1e…)
+Verified pylota-identity-worker-1.0.0.tar.gz (minisign key 7A3F…, sha256 9c1e…)
 Rendered deploy/wrangler.toml (no changes)
 D1 migrations: 0 pending
 Deployed v1.0.0 (version 095f00a7-…) to https://mail.example.com
@@ -1018,24 +1018,24 @@ JSON: `{ "version", "worker_version_id", "migrations_applied": [ … ], "gradual
 
 ## 9. `upgrade`
 
-`pmail upgrade [--stages 10,50,100] [--stage-wait 10m] [--no-gradual] [--dir <path>]`
+`idvy upgrade [--stages 10,50,100] [--stage-wait 10m] [--no-gradual] [--dir <path>]`
 
-1. `GET https://api.github.com/repos/PILOTAAI/pylota-mail/releases/latest`. If its tag is newer than
-   the CLI, print "pmail {cli} is older than the latest release {latest}; install the new CLI first"
+1. `GET https://api.github.com/repos/PILOTAAI/pylota-identity/releases/latest`. If its tag is newer than
+   the CLI, print "idvy {cli} is older than the latest release {latest}; install the new CLI first"
    with the install commands, and exit 2. The CLI's version decides the Worker version.
 2. `GET https://{api_host}/health`. If the deployed version equals the CLI's, exit 0 ("up to date").
    If the deployed version is newer than the CLI's, refuse (exit 2): that would be a rollback, which is
-   `pmail deploy --version <v>`.
+   `idvy deploy --version <v>`.
 3. Run `deploy` with `--gradual` (unless `--no-gradual`), including the index generation check.
 4. Run `doctor` and print its result. A doctor failure after an upgrade is exit 12; the new version
    stays deployed (the gradual stages already checked health and alerts).
 
 ## 10. `doctor`
 
-`pmail doctor [--mail-test] [--check <name>]… [--dir <path>]`
+`idvy doctor [--mail-test] [--check <name>]… [--dir <path>]`
 
 The checks, their failure conditions and fixes are defined in
-[Observability §7.2](observability.md#72-pmail-doctor). This section defines how the CLI runs them.
+[Observability §7.2](observability.md#72-idvy-doctor). This section defines how the CLI runs them.
 
 - Each check returns `pass`, `warn`, `fail` or `skip` (a prerequisite is missing, for example no API
   key for `alerts`). Checks run concurrently, at most 8 at a time, each with a 20-second timeout
@@ -1047,7 +1047,7 @@ The checks, their failure conditions and fixes are defined in
   ```text
   pass  dns.platform                 MX, SPF, DKIM, DMARC match on both resolvers
   fail  routing.catch_all            catch-all is disabled
-        fix: pmail setup (step 17), or PUT /zones/{zone_id}/email/routing/rules/catch_all …
+        fix: idvy setup (step 17), or PUT /zones/{zone_id}/email/routing/rules/catch_all …
   warn  security_txt                 PM_SECURITY_CONTACT is not set
   13 passed, 1 warning, 1 failed
   ```
@@ -1065,14 +1065,14 @@ Data sources:
 | `sending.domains` | D1 `SELECT name, zone_id FROM domains WHERE sending = 1 AND transport = 'cloudflare' AND state <> 'removed'`, then `GET /zones/{z}/email/sending/subdomains` per zone (`preview_enabled`) |
 | `sending.event_subscriptions` | `GET /accounts/{a}/event_subscriptions/subscriptions` compared with the same domains and each row's `event_subscription_id` |
 | `bindings` | D1, R2 (with the jurisdiction header), queues and their consumers (`GET /accounts/{a}/queues/{queue_id}/consumers`), the Vectorize index and its metadata indexes, as declared in the rendered file; plus the index generation state of [§8.7](#87-index-generation-changes). A bound index's dimensions are compared with those of the model named in its description (1,024 for `@cf/baai/bge-m3`, otherwise a probe embedding as in §8.7), never with a fixed number, because a re-embed may create an index of another dimension |
-| `secrets` | `GET /accounts/{a}/workers/scripts/pylota-mail/secrets` (names only): `fail` when a required secret is missing, or when the slot named by `PM_MASTER_KEY_ACTIVE` (default `a`) has no secret; `warn` only while `master_key.remaining` in `GET /v1/platform/status` is above 0 (an unfinished master-key rotation, [§12.1](#121-secrets-rotate-master); `skip` for that part without a key holding `audit:read`) |
+| `secrets` | `GET /accounts/{a}/workers/scripts/pylota-identity/secrets` (names only): `fail` when a required secret is missing, or when the slot named by `PM_MASTER_KEY_ACTIVE` (default `a`) has no secret; `warn` only while `master_key.remaining` in `GET /v1/platform/status` is above 0 (an unfinished master-key rotation, [§12.1](#121-secrets-rotate-master); `skip` for that part without a key holding `audit:read`) |
 | `observability` | The rendered file's `[observability]` table |
 | `worker.version`, `health` | `GET https://{api_host}/health` |
 | `agent_signup` | `GET /v1/platform/status` with the profile's key (a platform key with `audit:read`; `skip` without one): `skip` when `PM_AGENT_SIGNUP` is `off` in the rendered file; `warn` when it is `on` but `agent_signup.active` is `false` (the detail names `reason`), or when the `agent_signup` switch is `off` ([Agent self-sign-up § 21](agent-signup.md#21-observability)) |
 | `alerts` | `GET /v1/platform/status` with the profile's key (a platform key with `audit:read`; `skip` without one): `fail` on a firing page alert, on `alert_email: missing`, or when `frozen_since` is more than 4 hours ago; `warn` on a firing ticket alert |
 | `dlq` | D1 `SELECT queue, COUNT(*) AS n, MIN(first_seen_at) AS oldest FROM dlq_items WHERE redriven_at IS NULL GROUP BY queue` |
-| `quota` | Workers Analytics Engine SQL API (`POST /accounts/{a}/analytics_engine/sql`; verify at build time) over the `provider_quota_errors_total` points of the last 24 hours ([Observability §3](observability.md#3-metrics)). `warn` when `PM_DAILY_SEND_QUOTA` is unset in the rendered file, with the fix `pmail setup --daily-send-quota <n>` (or set it under `[vars]` and `pmail deploy`). The SQL API needs Account Analytics · Read on the token (Cloudflare's SQL API page, read 2026-10-09); when the call is refused for a missing permission, the check is `warn`, not `fail`, with the fix naming that permission ([Deploy to Cloudflare › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token)) |
-| `ses` | Only when `PM_SES_REGION` is set in the rendered file (otherwise `skip`); needs local AWS credentials ([§2.6](#26-aws-credentials); `skip` without them). `fail` when: SES `GetAccount` shows no production access, or sending paused; `PM_SES_INBOUND_TOPIC_ARN` is set and the active receipt rule set is not `PM_SES_RULE_SET` or does not contain `pm-deliver`; `PM_SES_REGION` is not a receiving region. `warn` when the region is outside the EU and the UK under `PM_JURISDICTION = "eu"` (only possible through `setup ses --allow-non-eu` or a hand edit, [N30](../edge-cases.md)). Identity count: the same count the Worker uses ([Domains on any DNS host §4.3](domain-connections.md#43-dns_records)), from D1 (`SELECT COUNT(*) FROM domains WHERE ses_region IS NOT NULL AND state <> 'removed'`, plus the `domain_onboarding` rows whose journal holds an SES identity, plus 1 for the platform identity) and from `ListEmailIdentities` with the local credentials, whichever is larger. `fail` also when a resource that `setup ses` created no longer carries this deployment's `pylota-mail:api-host` tag, or `pm-deliver` writes to another bucket ([N31](../edge-cases.md)). At 9,000 or more, `warn` `ses_identities_90pct` ([N26](../edge-cases.md)); at 10,000, `fail` (new SES domains are refused with `transport_unavailable`, `ses_identity_limit`). SES allows 10,000 identities per region (SES quotas, read 2026-10-09). Field and call names beyond `GetAccount`: verify at build time |
+| `quota` | Workers Analytics Engine SQL API (`POST /accounts/{a}/analytics_engine/sql`; verify at build time) over the `provider_quota_errors_total` points of the last 24 hours ([Observability §3](observability.md#3-metrics)). `warn` when `PM_DAILY_SEND_QUOTA` is unset in the rendered file, with the fix `idvy setup --daily-send-quota <n>` (or set it under `[vars]` and `idvy deploy`). The SQL API needs Account Analytics · Read on the token (Cloudflare's SQL API page, read 2026-10-09); when the call is refused for a missing permission, the check is `warn`, not `fail`, with the fix naming that permission ([Deploy to Cloudflare › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token)) |
+| `ses` | Only when `PM_SES_REGION` is set in the rendered file (otherwise `skip`); needs local AWS credentials ([§2.6](#26-aws-credentials); `skip` without them). `fail` when: SES `GetAccount` shows no production access, or sending paused; `PM_SES_INBOUND_TOPIC_ARN` is set and the active receipt rule set is not `PM_SES_RULE_SET` or does not contain `pm-deliver`; `PM_SES_REGION` is not a receiving region. `warn` when the region is outside the EU and the UK under `PM_JURISDICTION = "eu"` (only possible through `setup ses --allow-non-eu` or a hand edit, [N30](../edge-cases.md)). Identity count: the same count the Worker uses ([Domains on any DNS host §4.3](domain-connections.md#43-dns_records)), from D1 (`SELECT COUNT(*) FROM domains WHERE ses_region IS NOT NULL AND state <> 'removed'`, plus the `domain_onboarding` rows whose journal holds an SES identity, plus 1 for the platform identity) and from `ListEmailIdentities` with the local credentials, whichever is larger. `fail` also when a resource that `setup ses` created no longer carries this deployment's `pylota-identity:api-host` tag, or `pm-deliver` writes to another bucket ([N31](../edge-cases.md)). At 9,000 or more, `warn` `ses_identities_90pct` ([N26](../edge-cases.md)); at 10,000, `fail` (new SES domains are refused with `transport_unavailable`, `ses_identity_limit`). SES allows 10,000 identities per region (SES quotas, read 2026-10-09). Field and call names beyond `GetAccount`: verify at build time |
 | `domains.orphans` | D1 `zone_claims` rows still `pending` an hour after `created_at` and `domain_onboarding` rows older than two hours (the hourly cleanup should have removed both); for each pending claim, `GET /zones?name={zone_name}&account.id={a}`. `warn` per leftover, with the zone ID when a zone of that name was created after the claim, and the fix: delete that zone in the dashboard if no domain uses it ([Identities and domains › Cleanup after a failed add](identity-domains.md#cleanup-after-a-failed-add)) |
 | `routing.leftover_subdomains` | Only if spike S9 showed that a subdomain's routing cannot be removed on its own: each zone's routing subdomains (`GET /zones/{z}/email/routing/dns`, or the dashboard step S9 records) that no non-`removed` domain row names. `warn`, with the dashboard step (Email Routing › Settings › Subdomains) ([Identities and domains › Domain removal](identity-domains.md#domain-removal)) |
 | `cloudflare.zones` | `GET /zones?account.id={a}`: the number of zones in the account, always printed in the detail. Never `fail`; `warn` above 1,000, with the fix "ask Cloudflare to confirm the account's zone limit": the limit for a non-Enterprise account is not documented ([Domains on any DNS host §3.2](domain-connections.md#32-nameservers)) |
@@ -1081,19 +1081,19 @@ Data sources:
 | `mail_test` | Below |
 
 **`--mail-test`.** Runs with either a platform key (setup's bootstrap key, which also creates the identity)
-or an **identity key of `pmail-doctor`** holding `messages:send` (step 2), `search:read` (`wait`, step 3),
+or an **identity key of `idvy-doctor`** holding `messages:send` (step 2), `search:read` (`wait`, step 3),
 `messages:read` (the raw message, step 4) and `erasure:manage` (step 5). The heartbeat uses the identity
-key, so a stolen CI secret can send only as `pmail-doctor` and can never create another bare platform
+key, so a stolen CI secret can send only as `idvy-doctor` and can never create another bare platform
 address ([A18](../edge-cases.md)). Without a needed permission the check is `fail` with the missing
 permission in `detail`.
 
-1. With a platform key, create or reuse the identity `pmail-doctor` in the default tenant
-   (`client_id: "pmail:doctor"`, owner = the setup owner or `postmaster@{mail_domain}` as a placeholder
+1. With a platform key, create or reuse the identity `idvy-doctor` in the default tenant
+   (`client_id: "idvy:doctor"`, owner = the setup owner or `postmaster@{mail_domain}` as a placeholder
    the operator sees, `send_policy.require_known_recipient: true`); setup does this at its step 23. With
-   an identity key, use the key's own identity, and `fail` unless it is `pmail-doctor`.
-2. Send from it to its own platform address `pmail-doctor@{mail_domain}`, subject
-   `pmail doctor {ulid}`, `Idempotency-Key: pmail-doctor-{ulid}`.
-3. `GET /v1/identities/{id}/wait?subject_contains=pmail%20doctor%20{ulid}&timeout=60`, twice at most.
+   an identity key, use the key's own identity, and `fail` unless it is `idvy-doctor`.
+2. Send from it to its own platform address `idvy-doctor@{mail_domain}`, subject
+   `idvy doctor {ulid}`, `Idempotency-Key: idvy-doctor-{ulid}`.
+3. `GET /v1/identities/{id}/wait?subject_contains=idvy%20doctor%20{ulid}&timeout=60`, twice at most.
 4. `pass` when the inbound copy arrives with `trust.verdict: "pass"`. The detail prints the
    `Authentication-Results` authserv-id seen on the raw message (`GET …/messages/{id}/raw`, first such
    header), for `PM_TRUSTED_AUTHSERV_ID`.
@@ -1101,7 +1101,7 @@ permission in `detail`.
 
 ## 11. `destroy`
 
-`pmail destroy [--dry-run] [--confirm <platform-domain>] [--skip-erasure] [--keep-dns] [--include-ses] [--dir <path>]`
+`idvy destroy [--dry-run] [--confirm <platform-domain>] [--skip-erasure] [--keep-dns] [--include-ses] [--dir <path>]`
 
 Deletes the deployment and every Cloudflare resource setup created, and, with `--include-ses`, the AWS
 resources `setup ses` created. It is irreversible: point-in-time recovery cannot bring back a deleted
@@ -1127,7 +1127,7 @@ database or bucket.
 
 1. **Stop new mail.** `PUT /zones/{z}/email/routing/rules/catch_all` with `"enabled": false`.
 2. **Erase every tenant** through the product, unless `--skip-erasure`: for each tenant,
-   `POST /v1/erasure-requests` `{"tenant_id": …, "scope": "tenant", "reason": "pmail destroy"}`, then
+   `POST /v1/erasure-requests` `{"tenant_id": …, "scope": "tenant", "reason": "idvy destroy"}`, then
    poll `GET /v1/erasure-requests/{id}` until `completed` or `completed_with_holds` (deadline 2 hours;
    exit 13 after it, and a re-run resumes). This wipes mailboxes, R2 objects and vectors through the
    tested erasure path and removes tenant domains' routing, sending and subscriptions. An erasure skips
@@ -1146,24 +1146,24 @@ database or bucket.
    comes last. SES identities are left to step 4.
 4. **Amazon SES resources** (only with `--include-ses`; otherwise listed as above). With the local AWS
    credentials, in the reverse order of [§6.9](#69-setup-ses): the two HTTPS subscriptions; the Worker's
-   access key, then the IAM user `pylota-mail-worker-{dep}` and its policy; the SES identities of every domain
+   access key, then the IAM user `pylota-identity-worker-{dep}` and its policy; the SES identities of every domain
    row that still has `ses_identity` (left by `--skip-erasure`) and the platform identity, with the
    platform identity's DKIM CNAMEs removed from its zone through the Cloudflare API; the configuration
    set, its event destination and the delivery-events topic; the receipt rule `pm-deliver`, and the rule
-   set `pylota-mail` only when setup created it (an operator's own active rule set is kept, without the
+   set `pylota-identity` only when setup created it (an operator's own active rule set is kept, without the
    rule); the SQS queue and its subscription; the inbound SNS topic; the inbound S3 bucket, emptied
    first (it holds raw mail for at most 14 days). Each step reads first and treats AWS's not-found error
    as done; any other AWS error is exit 14, and a re-run continues. A resource whose
-   `pylota-mail:api-host` tag names another deployment, or an SES identity whose tags do not name this
+   `pylota-identity:api-host` tag names another deployment, or an SES identity whose tags do not name this
    one, is never deleted: it is listed and skipped. Operation names beyond those cited in
    [Domains on any DNS host §4.2](domain-connections.md#42-deployment-set-up-for-ses): verify at build
    time.
-5. **Delete the Worker:** `wrangler delete --name pylota-mail` ([§5.1](#51-wrangler)). Wrangler describes
+5. **Delete the Worker:** `wrangler delete --name pylota-identity` ([§5.1](#51-wrangler)). Wrangler describes
    this as deleting the Worker and its associated resources; whether the Durable Object namespaces'
    storage is removed with it is verified at build time. After step 2 no mail content remains in them.
 6. **Delete storage:** every Vectorize index named `pm-mail-chunks*`
    (`DELETE /accounts/{a}/vectorize/v2/indexes/{name}`); the ten queues
-   (`DELETE /accounts/{a}/queues/{queue_id}`); the R2 bucket (`DELETE /accounts/{a}/r2/buckets/pylota-mail-blobs`
+   (`DELETE /accounts/{a}/queues/{queue_id}`); the R2 bucket (`DELETE /accounts/{a}/r2/buckets/pylota-identity-blobs`
    with the jurisdiction header), and the `BACKUP` bucket when `PM_BACKUP_BUCKET` is set. R2 refuses to
    delete a bucket that still holds objects; staging objects expire within 15 days by the lifecycle rule
    (normally none is left: a staged object is deleted once it is routed), so the CLI reports the bucket
@@ -1180,23 +1180,23 @@ Each step is idempotent; a `404` carrying Cloudflare's own "not found" code coun
 
 ### 12.1 `secrets rotate-master`
 
-`pmail secrets rotate-master [--resume] [--discard-previous] [--yes]`
+`idvy secrets rotate-master [--resume] [--discard-previous] [--yes]`
 
 The procedure, with its two key slots, is [Security §6.2](security.md#62-rotation-procedures). The
-CLI's part needs the Cloudflare token (the per-Worker Editor role on `pylota-mail`, which writes its
+CLI's part needs the Cloudflare token (the per-Worker Editor role on `pylota-identity`, which writes its
 secrets; never account-wide Workers Scripts · Edit, [ADR 0010](../adr/0010-cloud-in-the-existing-cloudflare-account.md)) and a platform key with
 `audit:read` (to read `GET /v1/platform/status`); it makes no D1 query.
 
 1. Read `master_key` from `GET /v1/platform/status`: `active_slot`, the two slots with `present` and
    `kid`, `remaining`, `activated_at` and `resealed_at`.
 2. `remaining > 0`: a rotation is unfinished. Without `--resume`, exit 15 with the fix
-   `pmail secrets rotate-master --resume`. With `--resume`, go to step 5.
+   `idvy secrets rotate-master --resume`. With `--resume`, go to step 5.
 3. The inactive slot holds a key and `resealed_at` is less than 30 days ago: exit 15, naming the date
    from which a rotation is allowed, unless `--discard-previous`, which prints that a D1 restore to before `resealed_at` may no longer
    open sealed values and asks for confirmation (`--yes` in scripts).
 4. Generate `K2` (32 bytes, OS CSPRNG) and compute `kid(K2)` = first 8 bytes of `SHA-256(K2)`,
    lower-case hex ([Security §7.2](security.md#72-encryption-envelope)). Write it to the inactive slot
-   (`wrangler secret put PM_MASTER_KEY_B --name pylota-mail`, or `PM_MASTER_KEY` when `b` is active;
+   (`wrangler secret put PM_MASTER_KEY_B --name pylota-identity`, or `PM_MASTER_KEY` when `b` is active;
    value on stdin), drop it from memory, then `wrangler secret put PM_MASTER_KEY_ACTIVE` with the slot's
    letter. A failure between the two writes leaves the old slot active and the new key unused: a re-run
    without `--resume` writes a fresh key into the same inactive slot.
@@ -1213,7 +1213,7 @@ secrets; never account-wide Workers Scripts · Edit, [ADR 0010](../adr/0010-clou
 
 ### 12.2 Signing keys: `keys rotate thread|link|cursor|web_bot_auth`
 
-`pmail keys rotate thread|link|cursor|web_bot_auth [--revoke-previous] [--yes]`
+`idvy keys rotate thread|link|cursor|web_bot_auth [--revoke-previous] [--yes]`
 
 The keys that sign thread tokens, links and console tokens, search cursors, and Web Bot Auth HTTP
 signatures with their key directory are not Worker secrets: the Worker generates them into D1
@@ -1249,15 +1249,15 @@ read back: the API returns key IDs, never key material.
   in full. `--json` prints the response unchanged (`purpose`, `kid`, `created_at`, `previous.kid`,
   `previous.verify_until`, `previous.revoked`).
 - After a suspected leak of a signing key: rotate it with `--revoke-previous`, then run
-  `pmail secrets rotate-master` ([§12.1](#121-secrets-rotate-master)), because reading a signing key
+  `idvy secrets rotate-master` ([§12.1](#121-secrets-rotate-master)), because reading a signing key
   needs both D1 access and `PM_MASTER_KEY`.
 
 ### 12.3 Other secrets
 
 `PM_CF_API_TOKEN` and the SES keys (`PM_SES_ACCESS_KEY_ID`, `PM_SES_SECRET_ACCESS_KEY`) rotate with
-`pmail wrangler secret put` ([§5.1](#51-wrangler)) as listed in Security §6.2; the CLI does not wrap them, and a re-run of
+`idvy wrangler secret put` ([§5.1](#51-wrangler)) as listed in Security §6.2; the CLI does not wrap them, and a re-run of
 `setup ses` never replaces an existing SES key ([§6.9](#69-setup-ses)). `PM_KEY_PEPPER` rotates only
-through `pmail setup --rotate-pepper` ([§6.5](#65-the-bootstrap-key)). `PM_HASH_KEY` is not rotatable in
+through `idvy setup --rotate-pepper` ([§6.5](#65-the-bootstrap-key)). `PM_HASH_KEY` is not rotatable in
 v1.0.
 
 ## 13. `dlq`
@@ -1268,12 +1268,12 @@ platform API with a platform key holding `platform:ops`
 query, Queues API call or Cloudflare call, and needs no Cloudflare credentials: the Worker republishes
 through its own producer bindings.
 
-- `pmail dlq list [--queue <name>] [--status open|redriven] [--tenant <tenant>] [--limit <n>] [--all]`
+- `idvy dlq list [--queue <name>] [--status open|redriven] [--tenant <tenant>] [--limit <n>] [--all]`
   calls `GET /v1/platform/dlq` with the filters `queue`, `status` (default `open`), `tenant_id`,
   `limit` and `cursor`. Human mode shows ID, queue, kind, tenant, age and redrive count. The API never
   returns the stored body (inbound pointers carry envelope addresses), so the CLI has nothing to redact.
   `--json` prints the response unchanged.
-- `pmail dlq redrive (<dlq-id>… | --queue <name> [--tenant <tenant>]) [--yes]` calls
+- `idvy dlq redrive (<dlq-id>… | --queue <name> [--tenant <tenant>]) [--yes]` calls
   `POST /v1/platform/dlq/{dlq_id}/redrive` once per item, each with its own generated
   `Idempotency-Key`. With `--queue`, the CLI first lists the open items as `list --all` does, prints the
   count and asks for confirmation (non-interactive runs need `--yes`). One line per item; a failed item
@@ -1283,32 +1283,32 @@ through its own producer bindings.
 
 ## 14. `login` and `config`
 
-- `pmail login [--profile <name>]` asks for the API URL and the key (the key with hidden input), calls
+- `idvy login [--profile <name>]` asks for the API URL and the key (the key with hidden input), calls
   `GET /v1/me`, and on `200` writes the profile named by `--profile`, default `default`
   ([§2.2](#22-precedence)); it prints the key's level, tenant, identity and permissions. With
   `--key-env NAME` or `--key-command CMD` it stores that source instead of the key. Non-interactive
-  use: `--url` plus `PYLOTA_MAIL_KEY`. It warns when `PYLOTA_MAIL_KEY` will keep overriding the saved
+  use: `--url` plus `PYLOTA_IDENTITY_KEY`. It warns when `PYLOTA_IDENTITY_KEY` will keep overriding the saved
   key (§2.2).
-- `pmail config show` prints the resolved settings and where each came from (flag, environment, profile),
+- `idvy config show` prints the resolved settings and where each came from (flag, environment, profile),
   with the key shown as `pmk_live_7k2m…` (prefix and lookup only).
-- `pmail config set <key> <value> [--profile <name>]` sets `url`, `identity`, `tenant`, `account_id`,
+- `idvy config set <key> <value> [--profile <name>]` sets `url`, `identity`, `tenant`, `account_id`,
   `key_env`, `key_command` or `default_profile`. Setting `key` this way is refused (it would land in
-  shell history); use `pmail login`.
+  shell history); use `idvy login`.
 
 ## 15. `mcp config`
 
-`pmail mcp config [--client generic|claude-code|cursor|codex|claude-desktop|agent-sdk] [--name pylota-mail]`
+`idvy mcp config [--client generic|claude-code|cursor|codex|claude-desktop|agent-sdk] [--name pylota-identity]`
 prints configuration for the current profile's URL. It never prints a key; the configuration references an
 environment variable (or, for `claude-desktop`, runs the local bridge of [§22](#22-mcp-stdio), which reads the
 key from the profile).
 
 | `--client` | Output |
 |---|---|
-| `generic` (default) | `{ "mcpServers": { "pylota-mail": { "url": "https://mail.example.com/mcp", "headers": { "Authorization": "Bearer ${PYLOTA_MAIL_KEY}" } } } }` |
-| `claude-code` | The command `claude mcp add --transport http pylota-mail https://mail.example.com/mcp --header "Authorization: Bearer $PYLOTA_MAIL_KEY"`, and the `.mcp.json` form with `"type": "http"` |
-| `cursor` | The `~/.cursor/mcp.json` form with `"Authorization": "Bearer ${env:PYLOTA_MAIL_KEY}"` |
-| `codex` | The `~/.codex/config.toml` block `[mcp_servers.pylota-mail]` with `url`, `bearer_token_env_var = "PYLOTA_MAIL_KEY"`, `enabled_tools` and `tool_timeout_sec = 90`, because Codex's default of 60 seconds is shorter than a `mail_wait` ([Y59](../edge-cases.md)) |
-| `claude-desktop` | The `claude_desktop_config.json` entry `{ "command": "pmail", "args": ["mcp", "stdio", "--profile", "<profile>"] }`, and the custom-connector values (URL, **No sign-in**, request header `authorization`) for organisations that have the request-header beta |
+| `generic` (default) | `{ "mcpServers": { "pylota-identity": { "url": "https://mail.example.com/mcp", "headers": { "Authorization": "Bearer ${PYLOTA_IDENTITY_KEY}" } } } }` |
+| `claude-code` | The command `claude mcp add --transport http pylota-identity https://mail.example.com/mcp --header "Authorization: Bearer $PYLOTA_IDENTITY_KEY"`, and the `.mcp.json` form with `"type": "http"` |
+| `cursor` | The `~/.cursor/mcp.json` form with `"Authorization": "Bearer ${env:PYLOTA_IDENTITY_KEY}"` |
+| `codex` | The `~/.codex/config.toml` block `[mcp_servers.pylota-identity]` with `url`, `bearer_token_env_var = "PYLOTA_IDENTITY_KEY"`, `enabled_tools` and `tool_timeout_sec = 90`, because Codex's default of 60 seconds is shorter than a `mail_wait` ([Y59](../edge-cases.md)) |
+| `claude-desktop` | The `claude_desktop_config.json` entry `{ "command": "idvy", "args": ["mcp", "stdio", "--profile", "<profile>"] }`, and the custom-connector values (URL, **No sign-in**, request header `authorization`) for organisations that have the request-header beta |
 | `agent-sdk` | A Claude Agent SDK `mcpServers` entry (`type: "http"`, `url`, `headers`) with `allowedTools` naming the key's tools one by one, never a wildcard |
 
 The client formats are documented in the [MCP reference](../../reference/mcp.md#connect-a-client), and each
@@ -1318,7 +1318,7 @@ The command also prints which tools the current key would see (`GET /v1/me` perm
 
 ## 16. `webhooks verify`
 
-`pmail webhooks verify --secret-env WEBHOOK_SECRET (--headers <file> | --id <id> --timestamp <ts> --signature <sig>) [--body <file>] [--tolerance 300] [--now <unix>]`
+`idvy webhooks verify --secret-env WEBHOOK_SECRET (--headers <file> | --id <id> --timestamp <ts> --signature <sig>) [--body <file>] [--tolerance 300] [--now <unix>]`
 
 Verifies a captured delivery offline, with the same rules as the receiving guide
 ([Receiving › verifying](../../guides/receiving.md)) and [Webhooks design](webhooks.md):
@@ -1339,7 +1339,7 @@ Output: `valid` (exit 0), or `invalid: <reason>` (exit 11) where reason is `no_m
 
 ## 17. `ask`
 
-`pmail ask "<question>" (--identity <id|address> | --tenant <tenant>) [--max-steps 6] [--max-seconds 8] [--include-quarantined] [--no-stream] [--show-trace] [--stream]`
+`idvy ask "<question>" (--identity <id|address> | --tenant <tenant>) [--max-steps 6] [--max-seconds 8] [--include-quarantined] [--no-stream] [--show-trace] [--stream]`
 
 1. `POST /v1/identities/{id}/search` with `{"q": question, "mode": "agentic", "budget": {...},
    "stream": true}` and `Accept: text/event-stream` (needs `search:read` and `search:agentic`).
@@ -1451,7 +1451,7 @@ answered · confidence 0.86 · 3 steps · 2.8 s
   the shell history; values are write-only and never printed ([Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)).
 - **`domains records --format bind`** prints the records as a zone file
   (`GET /v1/domains/{id}/records?format=bind`), for example
-  `pmail domains records dom_01JA9G6M2WW7X2M5N6P8R0T1YR --format bind > mail.acmecarhire.example.zone`.
+  `idvy domains records dom_01JA9G6M2WW7X2M5N6P8R0T1YR --format bind > mail.acmecarhire.example.zone`.
 - **`keys create` and `webhooks create`** print the secret once. In human mode it is on its own line
   after the object, with "shown only once"; `--quiet` prints only the secret.
 - **`webhooks create --platform` and `--partner`** both call `POST /v1/webhooks`, whose endpoint scope
@@ -1522,7 +1522,7 @@ answered · confidence 0.86 · 3 steps · 2.8 s
 
 [Configuration](../../reference/configuration.md#secrets) and [Errors](../../reference/errors.md)
 (`cf_token_required`) say that a deployment without `PM_CF_API_TOKEN` can still add a `cloudflare_zone`
-apex with `pmail domains add`, using the operator's local token. The API has no request field for
+apex with `idvy domains add`, using the operator's local token. The API has no request field for
 registering a domain that a client has already onboarded, so the CLI does it itself, and only when asked
 with `--local-token`.
 
@@ -1532,12 +1532,12 @@ is not set up for the method" to exit 3 (`config`) instead of the API's exit 7:
 
 - `422 transport_unavailable`: the deployment or the tenant's policy lacks what the method needs. The
   CLI prints `details.reason` with its fix (`ses_not_configured` and `ses_receiving_not_configured`:
-  `pmail setup ses`; `subdomain_setup_disabled`: `PM_CF_SUBDOMAIN_SETUP = "on"`;
+  `idvy setup ses`; `subdomain_setup_disabled`: `PM_CF_SUBDOMAIN_SETUP = "on"`;
   `zone_creation_not_allowed`: the tenant policy `domains.allow_create_zone`; `ses_identity_limit`:
   raise the SES limit; `method_not_supported`: another method). `marketing_needs_ses` is never returned
   by a domain create (it is a send refusal), so `domains add` does not map it.
 - `422 cf_token_required`: the deployment has no `PM_CF_API_TOKEN`. The fix is "set `PM_CF_API_TOKEN` on
-  the deployment (`pmail wrangler secret put PM_CF_API_TOKEN`), or, for a zone apex, run again with
+  the deployment (`idvy wrangler secret put PM_CF_API_TOKEN`), or, for a zone apex, run again with
   `--local-token`".
 
 The CLI never falls back to the local token on its own.
@@ -1561,7 +1561,7 @@ The CLI never falls back to the local token on its own.
    `provider_objects_json` ([No adoption](identity-domains.md#no-adoption-of-provider-objects): this is a
    platform operation, so an existing sending domain or routing setup is used, never deleted later).
 4. Insert the row through the D1 query API (`POST /accounts/{a}/d1/database/{id}/query`), with the
-   account ID of step 1: the database is the one named `pylota-mail` in that account, found by name as
+   account ID of step 1: the database is the one named `pylota-identity` in that account, found by name as
    in setup step 2, or the `database_id` of `<dir>/wrangler.toml` when that file exists. The statement
    is the one of [§6.6](#66-the-platform-domain-row) with `tenant_id`, `kind = 'zone'`,
    `method = 'cloudflare_zone'`, `inbound = 'routing'`, `state = 'pending'`, `expected_ns_json` (the
@@ -1576,7 +1576,7 @@ A Cloudflare API or D1 failure in steps 3 and 4 is exit 10; every step reads fir
 
 ### 18.2 `domains add --method`
 
-`pmail domains add <name> --method <method> [flags]` builds the create body of
+`idvy domains add <name> --method <method> [flags]` builds the create body of
 [Domains on any DNS host §8](domain-connections.md#8-api) from its flags and calls
 `POST /v1/tenants/{t}/domains` (`domains:write`). `--method` is required; the CLI never sends the old
 `kind` spelling.
@@ -1626,21 +1626,21 @@ A Cloudflare API or D1 failure in steps 3 and 4 is exit 10; every step reads fir
   probe is running.
 - **`domains probe <domain>`** sends `POST /v1/domains/{domain_id}/probe` (`domains:write`) and prints
   the `probe_id` from the `202`. The result arrives as a domain health change, so the CLI points to
-  `pmail domains health <domain>`. More than one probe a minute is `429 rate_limited` (exit 8).
+  `idvy domains health <domain>`. More than one probe a minute is `429 rate_limited` (exit 8).
 - **`addresses test-forwarding <address>`** sends
   `POST /v1/identities/{identity_id}/addresses/{address_id}/test-forwarding` (`identities:write`). The
   argument is an address ID (with `--identity`) or the address itself, resolved through
   `GET /v1/identities/lookup` and the identity's address list. It prints that the test was sent; the
   result appears within 10 minutes as the address's `forwarding` (`ok` or `failed`) in
-  `pmail addresses list`. A domain without `inbound: forward` gives `422 transport_unavailable`
+  `idvy addresses list`. A domain without `inbound: forward` gives `422 transport_unavailable`
   (`method_not_supported`), exit 7.
 
 ### 18.4 `domains subscribe`
 
-`pmail domains subscribe <domain> [--tenant <tenant>]` exists for the spike S9 fallback
+`idvy domains subscribe <domain> [--tenant <tenant>]` exists for the spike S9 fallback
 ([Identities, addresses and domains › Kind `zone`](identity-domains.md#kind-zone)): a Cloudflare-transport
 domain created without an Email Sending event subscription reports `delivery_events: "manual"` and
-`details.action = "run pmail domains subscribe <domain>"`. Delivery events for that domain start once this
+`details.action = "run idvy domains subscribe <domain>"`. Delivery events for that domain start once this
 command has run.
 
 1. `GET /v1/domains/{domain_id}` (resolved by name as in [§2.4](#24-resolving-names-to-ids)). Anything
@@ -1658,7 +1658,7 @@ command has run.
    The domain then reports `delivery_events: "active"`.
 4. Print the domain. `--json` prints it unchanged. Wrangler or Cloudflare API failures are exit 10.
 
-`pmail doctor` (`sending.event_subscriptions`) fails for every `manual` domain, with this command as the
+`idvy doctor` (`sending.event_subscriptions`) fails for every `manual` domain, with this command as the
 fix.
 
 ### 18.5 `identity-keys`, `assertions` and `http-sign`
@@ -1672,17 +1672,17 @@ Key management works while the identity is paused ([Agent signing keys §2](agen
 **`identity-keys`** (`identities:read` to list, `identities:write` for the rest; platform, tenant or
 identity key):
 
-- `pmail identity-keys list --identity <identity> [--status active|retiring|retired] [--limit <n>] [--all]`
+- `idvy identity-keys list --identity <identity> [--status active|retiring|retired] [--limit <n>] [--all]`
   calls `GET /v1/identities/{id}/keys`. Human mode prints a table of kid, status, `created_at`,
   `verify_until` and `retired_at`, newest first, `retired` keys included. The public JWKs are in the JSON
   output only.
-- `pmail identity-keys create --identity <identity>` calls `POST /v1/identities/{id}/keys` with `{}`.
+- `idvy identity-keys create --identity <identity>` calls `POST /v1/identities/{id}/keys` with `{}`.
   `201` prints `Created key <kid>`; `200` prints `Active key <kid> already exists` and changes nothing.
   Both exit 0. Keys are also created on the first signing request, so this command is optional.
-- `pmail identity-keys rotate --identity <identity>` calls `POST …/keys/rotate` and prints the new kid
+- `idvy identity-keys rotate --identity <identity>` calls `POST …/keys/rotate` and prints the new kid
   and, when there was one, the previous kid with its `verify_until`. It asks no confirmation: the
   previous key keeps verifying through the overlap (`PM_IDENTITY_KEY_OVERLAP_DAYS`, default 7 days).
-- `pmail identity-keys revoke <kid> --identity <identity> [--yes]` calls `POST …/keys/{kid}/revoke`.
+- `idvy identity-keys revoke <kid> --identity <identity> [--yes]` calls `POST …/keys/{kid}/revoke`.
   Interactive runs ask first, saying that assertions signed with that key stop verifying at once, as
   soon as verifiers fetch the JWKS again (it is cached for up to 5 minutes); non-interactive runs need
   `--yes` (exit 2 otherwise). An unknown kid is `404 key_not_found` (exit 5); a key already `retired`
@@ -1691,7 +1691,7 @@ identity key):
 **`assertions create`** (`identities:sign`, tenant or identity key; a platform key cannot hold the
 permission and is refused with `403`, exit 4):
 
-`pmail assertions create --identity <identity> --audience <aud> [--expires-in <60-600>] [--nonce <nonce>] [--ext <json> | --ext-file <file>]`
+`idvy assertions create --identity <identity> --audience <aud> [--expires-in <60-600>] [--nonce <nonce>] [--ext <json> | --ext-file <file>]`
 
 - Sends `POST /v1/identities/{id}/assertions` with `audience`, `expires_in` (default 300), `nonce` and
   `ext`. `--ext` must parse as a JSON object (exit 2 otherwise); the size and claim-name rules are the
@@ -1703,7 +1703,7 @@ permission and is refused with `403`, exit 4):
 
 **`assertions verify`** (no API key and no Cloudflare credentials):
 
-`pmail assertions verify <token> --audience <aud> [--issuer <url>] [--now <unix-seconds>]`
+`idvy assertions verify <token> --audience <aud> [--issuer <url>] [--now <unix-seconds>]`
 
 Checks an assertion offline, the way a verifier should, by calling the SDK's `verify_assertion`
 ([Rust workspace §11](rust-workspace.md#11-the-rust-sdk-fr-sdk-1)), which follows
@@ -1712,7 +1712,7 @@ Checks an assertion offline, the way a verifier should, by calling the SDK's `ve
 1. The token comes from the argument, or from stdin when it is `-` (a token on the command line is
    visible in the process list, as in [§2.2](#22-precedence)).
 2. `--audience` is required (exit 2 without it). `--issuer` defaults to the resolved API URL
-   (`--url`, `PYLOTA_MAIL_URL` or the profile's `url`); with none of them, exit 3. It must be `https://`
+   (`--url`, `PYLOTA_IDENTITY_URL` or the profile's `url`); with none of them, exit 3. It must be `https://`
    except for `localhost`, `127.0.0.1` and `[::1]` (exit 2 otherwise).
 3. The header must have `alg: EdDSA` and `typ: agent-assertion+jwt`; `iss` must equal the issuer.
    Only then is `{iss}/.well-known/jwks/{sub}.json` fetched, without an `Authorization` header and
@@ -1734,7 +1734,7 @@ verdict. JSON: `{ "valid": true, "kid", "claims": { … } }` or `{ "valid": fals
 
 **`http-sign`** (`identities:sign`, tenant or identity key):
 
-`pmail http-sign --identity <identity> --url <https-url> [--method <METHOD>] [--expires-in <30-300>] [--component @method|@path|@query]…`
+`idvy http-sign --identity <identity> --url <https-url> [--method <METHOD>] [--expires-in <30-300>] [--component @method|@path|@query]…`
 
 - Sends `POST /v1/identities/{id}/http-signatures` with `url`, `method`, `expires_in` (default 60) and,
   when `--component` is given, `components`: `@authority`, `signature-agent` and `from` (always signed)
@@ -1755,7 +1755,7 @@ answers `429 rate_limited` (exit 8, after the retries of [§4](#4-http-behaviour
 
 ### 18.6 `events tail`
 
-`pmail events tail [--tenant <tenant>] [--after <cursor> | --since <time> | --consumer <name|id>]
+`idvy events tail [--tenant <tenant>] [--after <cursor> | --since <time> | --consumer <name|id>]
 [--types <pattern,…>] [--identity <identity>]… [--cursor-file <path>] [--transport stream|poll]` follows the
 tenant's event feed ([Event feed § 15.2](event-feed.md#152-cli)).
 
@@ -1786,7 +1786,7 @@ same page.
 
 ## 19. Command-to-endpoint map
 
-This is the command tree: every `pmail` command and what it calls. A command needs the permission of
+This is the command tree: every `idvy` command and what it calls. A command needs the permission of
 its endpoint ([REST API](../../reference/api.md#permissions)); the rows for platform operations,
 members, billing, the newer domain commands and the signing commands name it. Notification preferences
 have no command: they are set only in the console ([Notifications §2](notifications.md#2-preferences)).
@@ -1903,7 +1903,7 @@ Rules for `ops restore d1`:
   (`cli::ops::sqldump_parses_export`).
 - Statements are ordered by the foreign keys of `migrations/d1/` (inserts and updates parents first,
   deletes children first). Values are written as SQL literals with blobs in `X'…'` form; the file is
-  applied with `wrangler d1 execute pylota-mail --remote --file`, which accepts files up to 5 GiB
+  applied with `wrangler d1 execute pylota-identity --remote --file`, which accepts files up to 5 GiB
   (Import and export data, read 2026-10-10).
 - `--yes` skips the confirmation of the summary. Without it, a non-interactive run is exit 2.
 - `--replay-only <dir>` recomputes and applies the replay from an existing `before.sql` against a fresh
@@ -1915,16 +1915,16 @@ reached, and every step can be re-run.
 ## 21. `skills`
 
 ```text
-pmail skills generate [--output-dir <dir>] [--agent claude-code|codex|cursor|agents] [--for-current-key] [--force]
-pmail skills list [--output-dir <dir>]
+idvy skills generate [--output-dir <dir>] [--agent claude-code|codex|cursor|agents] [--for-current-key] [--force]
+idvy skills list [--output-dir <dir>]
 ```
 
-The agent skills are compiled into this `pmail`, so the files it writes always match the binary's API
+The agent skills are compiled into this `idvy`, so the files it writes always match the binary's API
 version ([SDKs, skills and agent tooling § 4.5](sdk-and-skills.md#45-versioning-and-distribution)).
 
 - `--agent` picks the directory: `claude-code` → `./.claude/skills`; `codex`, `cursor` and `agents` →
   `./.agents/skills`. `--output-dir` overrides it (for example `~/.agents/skills` for every project).
-- It writes `.pylota-mail-skills.json` (`cli_version`, the SHA-256 of every file written). A later run
+- It writes `.pylota-identity-skills.json` (`cli_version`, the SHA-256 of every file written). A later run
   replaces only files whose hash still matches; a file someone edited is left alone and reported, and the
   command exits 6 unless `--force` ([Y63](../edge-cases.md)). Files of skills a newer version dropped are
   removed only when unmodified.
@@ -1937,12 +1937,12 @@ version ([SDKs, skills and agent tooling § 4.5](sdk-and-skills.md#45-versioning
 
 ## 22. `mcp stdio`
 
-`pmail mcp stdio [--tools <names>] [--profile <name>] [--verbose]` is a local MCP server that forwards to the
+`idvy mcp stdio [--tools <names>] [--profile <name>] [--verbose]` is a local MCP server that forwards to the
 deployment's `/mcp`, for clients that run only local (stdio) servers and for Claude Desktop without the
-request-header beta ([SDKs, skills and agent tooling § 5.4](sdk-and-skills.md#54-the-stdio-bridge-pmail-mcp-stdio)).
-It is part of the signed `pmail` binary, so it needs no Node.js runtime and no package fetched at start-up.
+request-header beta ([SDKs, skills and agent tooling § 5.4](sdk-and-skills.md#54-the-stdio-bridge-idvy-mcp-stdio)).
+It is part of the signed `idvy` binary, so it needs no Node.js runtime and no package fetched at start-up.
 
-1. **Key.** From `PYLOTA_MAIL_KEY` or the profile (`key`, `key_env`, `key_command`), never from `--key`, which
+1. **Key.** From `PYLOTA_IDENTITY_KEY` or the profile (`key`, `key_env`, `key_command`), never from `--key`, which
    this command refuses with exit 2, so the key never sits in a client's configuration file or the process
    list. At start it calls `GET /v1/me`; a `401` or `403` writes the error to stderr (never the key) and exits
    4 before reading stdin ([Y57](../edge-cases.md)).
@@ -1972,7 +1972,7 @@ It is part of the signed `pmail` binary, so it needs no Node.js runtime and no p
 
 ## 23. `--schema`
 
-A global flag. `pmail <command> --schema` prints one JSON document describing the command and exits 0. It
+A global flag. `idvy <command> --schema` prints one JSON document describing the command and exits 0. It
 reads no configuration, needs no key and makes no request ([Y65](../edge-cases.md);
 [SDKs, skills and agent tooling § 6.1](sdk-and-skills.md#61---schema)).
 
@@ -1999,7 +1999,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 - `output` is the OpenAPI response schema for commands that are one API call, and the `utoipa` schema of the
   CLI's own output struct for the others (`setup`, `deploy`, `doctor`, `webhooks verify`, `skills generate`).
   `error` is the envelope with the CLI codes of [§3.3](#33-errors).
-- `pmail --schema` prints the index: every command with its summary and endpoint.
+- `idvy --schema` prints the index: every command with its summary and endpoint.
 - `cli::schema::y65_offline_and_valid` validates every document against the JSON Schema 2020-12 meta-schema
   and every `--json` output produced by the CLI test suite against its command's `output`.
 
@@ -2010,7 +2010,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::config::precedence` | Flag over environment over profile for URL, key, profile and defaults | FR-CLI-1 |
 | `cli::config::insecure_file_refused` | A group- or world-readable file, or one owned by another user, is refused with exit 3; writes are atomic with mode `0600` | FR-CLI-1 |
 | `cli::config::key_sources` | `key`, `key_env`, `key_command` (timeout, non-zero exit, bad output) and the one-source rule | FR-CLI-1 |
-| `cli::config::profile_written` | `setup` and `login` write the profile named by `--profile`, else `default`, whatever `PYLOTA_MAIL_PROFILE` and `default_profile` say; setup stores `account_id` and never the token; `login` warns when `PYLOTA_MAIL_KEY` differs from the saved key | FR-CLI-1 |
+| `cli::config::profile_written` | `setup` and `login` write the profile named by `--profile`, else `default`, whatever `PYLOTA_IDENTITY_PROFILE` and `default_profile` say; setup stores `account_id` and never the token; `login` warns when `PYLOTA_IDENTITY_KEY` differs from the saved key | FR-CLI-1 |
 | `cli::output::json_every_command` | Every command in the tree prints exactly one JSON document with `--json`, including errors, and nothing else on stdout; `ask --json --stream` prints NDJSON, one document per line | FR-CLI-1 |
 | `cli::output::terminal_safe` | ANSI escapes, C1 controls, bidi and zero-width characters from mail are neutralised in human output | FR-CLI-1, [E1] |
 | `cli::output::exit_codes` | Each HTTP status and CLI error maps to the code in §3.4; a `404` without envelope is exit 9 | FR-CLI-1 |
@@ -2030,7 +2030,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::setup::ses_region_check` | A region that cannot receive is exit 2; a region outside the EU and the UK under `PM_JURISDICTION = "eu"` is exit 2 without `--allow-non-eu` and accepted with it, and `eu-west-2` (London) is accepted without it; no production access is exit 14 with the console steps and nothing created; Essentials prints a warning | FR-DOM-8, [N30] |
 | `cli::setup::ses_policy_and_key` | The IAM policy JSON is printed before it is applied and needs a confirmation or `--yes`; the access key reaches Wrangler only on stdin, appears in no file, argument, output or log, and is not created again when `PM_SES_ACCESS_KEY_ID` exists | FR-DOM-8, [I5] |
 | `cli::render::preserves_vars` | Operator edits under `[vars]` and in `[observability.traces]` survive a re-render; owned sections (including `[observability]` and `[observability.logs]`) are restored with a diff | FR-OPS-2 |
-| `cli::wrangler::installs_from_signed_lockfile` | Against a recorded npm registry: `pmail` installs Wrangler only with `npm ci --ignore-scripts` from the verified bundle's `wrangler/package-lock.json` into `<dir>/.wrangler/{version}/`, reuses it only while `.lock-sha256` matches, runs it by absolute path after a `--version` check, and never runs `npm exec`, `npm install` by name or the npm package runner; a tampered lockfile is exit 11 before any install; a package whose bytes differ from its `integrity` hash stops the install (exit 10) before any Wrangler call; `pmail wrangler` passes arguments, stdin and the exit code through ([J34](../edge-cases.md)) | FR-OPS-2 |
+| `cli::wrangler::installs_from_signed_lockfile` | Against a recorded npm registry: `idvy` installs Wrangler only with `npm ci --ignore-scripts` from the verified bundle's `wrangler/package-lock.json` into `<dir>/.wrangler/{version}/`, reuses it only while `.lock-sha256` matches, runs it by absolute path after a `--version` check, and never runs `npm exec`, `npm install` by name or the npm package runner; a tampered lockfile is exit 11 before any install; a package whose bytes differ from its `integrity` hash stops the install (exit 10) before any Wrangler call; `idvy wrangler` passes arguments, stdin and the exit code through ([J34](../edge-cases.md)) | FR-OPS-2 |
 | `cli::deploy::tampered_bundle_refused` | A modified tarball, `SHA256SUMS`, signature, wrong key ID or replayed trusted comment is exit 11 and nothing is deployed | FR-OPS-2 (M16) |
 | `cli::deploy::safe_extraction` | Symlinks, `..`, absolute paths and oversized archives are refused | FR-OPS-2 |
 | `cli::deploy::migrations_before_code` | Migrations run before Wrangler; a failing migration stops the deploy; `schema_migrations` is updated | FR-OPS-2, [J9] |
@@ -2038,7 +2038,7 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::deploy::do_migration_forces_full_deploy` | A changed `[[migrations]]` tag uses `wrangler deploy`, not `versions upload` | FR-OPS-2, [J9] |
 | `cli::deploy::index_generation` | Start, in-progress, finalise and cancel render the bindings Search §7.3 requires | FR-SRCH-2 |
 | `cli::deploy::noop_redeploy` | `deploy` straight after `setup` calls no Wrangler command and exits 0 | FR-OPS-2 |
-| `cli::deploy::version_flag` | `pmail deploy --version <v>` downloads and deploys that release | M19 |
+| `cli::deploy::version_flag` | `idvy deploy --version <v>` downloads and deploys that release | M19 |
 | `cli::doctor::every_check_has_fix` | Each failing check prints a fix; exit 12 with a fail, 0 with warnings only | FR-OPS-3 (M16) |
 | `cli::doctor::warn_rules` | `secrets` warns only while `master_key.remaining` is above 0 and fails when the active slot is empty; `quota` warns when `PM_DAILY_SEND_QUOTA` is unset, and when the token lacks Account Analytics · Read (never `fail` for that); `cloudflare.zones` prints the count and warns above 1,000; a Cloudflare error in any other check is `fail` and exit 12, never 10 | FR-OPS-3 |
 | `cli::doctor::web_bot_auth` | `skip` with `PM_WEB_BOT_AUTH = "off"`; with `on`, `pass` for a directory signed once per listed key, `fail` for a missing signature, a wrong tag or content type, or more than three keys | FR-OPS-3, FR-IDN-8, [O12] |
@@ -2068,24 +2068,24 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 | `cli::http_sign::headers_and_errors` | Prints the four headers as `Name: value` lines in order, or the response with `--json`; `--component` adds only `@method`, `@path` or `@query`; `422 web_bot_auth_disabled` is exit 7 and `403 policy_denied` exit 4 | FR-IDN-8, [O9], [O13] |
 | `cli::webhooks::verify` | Valid signatures, rotation overlap (two signatures), tampered body, old timestamp | FR-WH-2 |
 | `cli::ask::render_stream` | Recorded SSE streams for each status render as specified; `--json` prints the `done` data; `--tenant` posts to `POST /v1/tenants/{t}/search` with `mode: agentic`, and an identity key gets exit 4 | FR-SRCH-3 |
-| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | [Drafts § 17.2](drafts.md#172-cli) |
+| `cli::drafts::send_key_derivation` | `idvy drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | [Drafts § 17.2](drafts.md#172-cli) |
 | `cli::events::tail_resume_and_exit_codes` | Against a recorded stream: reconnects with backoff, resumes from the cursor file, writes it atomically, acknowledges each batch, and exits with the codes of [§18.6](#186-events-tail), never reconnecting after `4400`, `4409`, `1008` or `1009` | [Event feed § 15.2](event-feed.md#152-cli), [R64](../edge-cases.md), [R68](../edge-cases.md) |
 | `cli::screening::commands` | `messages feedback`, `messages feedback-list`, the screening filters of `messages list` and `screening summary` against recorded API fakes | [Screening hold § 21](screening.md#21-console-mcp-and-cli) |
-| `cli::calendar::reply_and_send_flags` | `pmail calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli) |
-| `cli::uploads::create_and_attach` | Against recorded fakes: `pmail uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `pmail send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | [Uploads § 13](uploads.md#13-mcp-and-cli) |
-| `cli::metrics::rates_and_events` | Against recorded fakes: `pmail metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli) |
-| `cli::agent_signup::create_writes_profile` | `pmail agent-signup create` writes the key into the named profile with mode `0600` and prints it only with `--print-key`; the other subcommands map to their routes | [Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli) |
+| `cli::calendar::reply_and_send_flags` | `idvy calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | [Calendar invitations § 13](calendar-invitations.md#13-console-mcp-and-cli) |
+| `cli::uploads::create_and_attach` | Against recorded fakes: `idvy uploads create` sends the locally computed size and SHA-256, `PUT`s the file, retries a `409 upload_in_progress` after `Retry-After`, prints the ID; `idvy send --attach` inlines a 1 MiB file and uploads a 1 MiB + 1 byte file | [Uploads § 13](uploads.md#13-mcp-and-cli) |
+| `cli::metrics::rates_and_events` | Against recorded fakes: `idvy metrics rates` prints tripped windows first and exits 16 when a window is tripped or a pause exists; `events` warns on partial; without `--identity` or `--domain` neither command sends `scope` | [Deliverability metrics § 9](metrics.md#9-events-console-mcp-and-cli) |
+| `cli::agent_signup::create_writes_profile` | `idvy agent-signup create` writes the key into the named profile with mode `0600` and prints it only with `--print-key`; the other subcommands map to their routes | [Agent self-sign-up § 20](agent-signup.md#20-mcp-and-cli) |
 | `cli::mcp_stdio::y55_no_tools_call_retry` | A dropped connection during `tools/call` gives one `isError` result with `cli_outcome_unknown` and no second request; `tools/list` is retried once | [Y55](../edge-cases.md), FR-SDK-13 |
 | `cli::mcp_stdio::y56_tools_flag_narrows` | `--tools` removes tools from `tools/list` and answers `-32602` for them locally; a name the key cannot see stays hidden | [Y56](../edge-cases.md), FR-SDK-13 |
 | `cli::mcp_stdio::y57_key_never_on_stdout` | `--key` is exit 2; a bad key is exit 4 before stdin is read; captured stdout and stderr never contain the key | [Y57](../edge-cases.md), FR-SDK-13 |
 | `cli::mcp_stdio::y58_headers_and_cancel` | Modern and legacy requests carry the headers of [§22](#22-mcp-stdio); `notifications/cancelled` aborts that request; every stdout line parses as one JSON-RPC message | [Y58](../edge-cases.md), FR-SDK-13 |
-| `cli::mcp::y59_client_snippets` | `pmail mcp config --client` prints the five forms of [SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup) for the profile's URL, never a key; the Codex form has `tool_timeout_sec = 90`; the tool list applies `mcp_tools` | [Y59](../edge-cases.md), FR-SDK-13 |
+| `cli::mcp::y59_client_snippets` | `idvy mcp config --client` prints the five forms of [SDKs, skills and agent tooling § 5.5](sdk-and-skills.md#55-client-setup) for the profile's URL, never a key; the Codex form has `tool_timeout_sec = 90`; the tool list applies `mcp_tools` | [Y59](../edge-cases.md), FR-SDK-13 |
 | `cli::schema::y65_offline_and_valid` | `--schema` works with no config, key or network; every document validates against the 2020-12 meta-schema; every `--json` output of the CLI suite validates against its command's `output` | [Y65](../edge-cases.md), FR-SDK-14 |
 | `cli::query::y64_query_rules` | Invalid expressions exit 2 before any request; errors are unfiltered; `null` results exit 0; `--all` documents are queried whole; NDJSON lines are queried one by one; the JMESPath compliance suite passes | [Y64](../edge-cases.md), FR-SDK-14 |
 | `cli::skills::y63_generate_no_clobber` | A modified file is kept and reported with exit 6, replaced with `--force`; dropped skills' unmodified files are removed; the manifest records hashes | [Y63](../edge-cases.md), FR-SDK-14 |
 | `cli::skills::generate_for_key` | `--for-current-key` writes only the skills whose tools the key can use and `references/deployment.md` without a key | FR-SDK-14 |
 | `cli::messages::z12_label_many_chunks` | `messages label` with 250 IDs sends requests of 100, 100 and 50, prints the notice that the change is atomic per request only, and exits 0 only when all three succeed | [Parity additions § 2.7](parity-additions.md#27-interfaces-and-privacy), [Z12](../edge-cases.md) |
-| `cli::setup::z79_docs_url_validated` | `pmail setup` and `pmail deploy` refuse an invalid `PM_DOCS_URL` (exit 3) | [Parity additions § 10.1](parity-additions.md#101-the-field), [Z79](../edge-cases.md) |
+| `cli::setup::z79_docs_url_validated` | `idvy setup` and `idvy deploy` refuse an invalid `PM_DOCS_URL` (exit 3) | [Parity additions § 10.1](parity-additions.md#101-the-field), [Z79](../edge-cases.md) |
 | `cli::landing_examples` | The landing-page examples run verbatim against the workerd harness and the recorded Cloudflare fake | M16 |
 
 [E1]: ../edge-cases.md

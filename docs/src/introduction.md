@@ -1,6 +1,6 @@
 # Introduction
 
-Pylota Mail is an email and identity service for AI agents. It gives every agent its own
+Pylota Identity is an email and identity service for AI agents. It gives every agent its own
 **identity**: a stable mailbox with one or more addresses, authenticated sending, verified inbound
 mail, threads, attachments with extracted text, triage and search. It is source available under the
 Functional Source License (FSL-1.1-ALv2; each release becomes Apache-2.0 two years after it ships),
@@ -18,7 +18,7 @@ garages, insurers and councils. Nothing in it is specific to car rental.
 |---|---|
 | **An identity per agent** | Each agent has a mailbox, a primary address and aliases, a display name, a signature and an accountable human. Move the identity to another domain and its history and threads move with it |
 | **Your own domains, at any DNS host** | Every identity has an address on the deployment's platform domain, which is on Cloudflare. Tenants can add their own domains without moving their DNS: six connection methods cover a domain on Cloudflare, a subdomain at any DNS host, and agents that answer as existing Google Workspace or Microsoft 365 addresses ([Custom domains](guides/custom-domains.md)) |
-| **Three ways in** | A REST API (OpenAPI 3.1), an MCP server at `/mcp` and the `pmail` CLI. There is also a Rust SDK and, as P1 features, a TypeScript SDK and agent skills for Claude Code, Codex and Cursor. Signed webhooks, an ordered event feed with durable consumers, and a resumable live stream tell your application what happened, all from one log with one event ID |
+| **Three ways in** | A REST API (OpenAPI 3.1), an MCP server at `/mcp` and the `idvy` CLI. There is also a Rust SDK and, as P1 features, a TypeScript SDK and agent skills for Claude Code, Codex and Cursor. Signed webhooks, an ordered event feed with durable consumers, and a resumable live stream tell your application what happened, all from one log with one event ID |
 | **Inbound you can trust** | Every message is stored before it is acknowledged, parsed, and given an authentication verdict (SPF, DKIM, DMARC, ARC), a spam signal and trust metadata. Mail that fails authentication, looks like spam or carries an unsafe attachment is quarantined. An opt-in screening hold (P1) can keep mail that tries to steer agents away from them until it has a verdict. Calendar invitations arrive as verified, structured objects |
 | **Triage** | Every inbound message gets a category, a needs-reply score, an urgency from 0 to 3, a short summary and risk flags such as a payment-change request or suspected prompt injection |
 | **Approval before send** | An agent can write a draft that a person approves, bound to the exact text, before it leaves, and a draft can be scheduled. Drafts, scheduled sends and calendar replies all go through the one send pipeline ([Sending › Drafts, approval and scheduled send](guides/sending.md#drafts-approval-and-scheduled-send)) |
@@ -45,7 +45,7 @@ P1 marks a feature that ships in v1.0 unless it threatens the release, in which 
 
 ```text
                  ┌────────────────────── your Cloudflare account ──────────────────────┐
- sender ── SMTP ─▶ Email Routing ──▶ Pylota Mail Worker (Rust, WebAssembly)            │
+ sender ── SMTP ─▶ Email Routing ──▶ Pylota Identity Worker (Rust, WebAssembly)            │
                  │  (catch-all or      │                                               │
                  │   literal rules)    ├─ raw mail ─────────▶ R2                       │
                  │                     ├─ one mailbox per identity ─▶ Durable Objects  │
@@ -58,7 +58,7 @@ P1 marks a feature that ships in v1.0 unless it threatens the release, in which 
  recipient ◀──── Email Sending ◀── send ────────┘                                      │
                  └──────────────────────────────┬──────────────────────────────────────┘
                                                 │
-          REST /v1 · MCP /mcp · pmail CLI ──────┤  you call it
+          REST /v1 · MCP /mcp · idvy CLI ──────┤  you call it
           signed webhooks ◀─────────────────────┘  it calls you
 ```
 
@@ -78,7 +78,7 @@ The [Architecture](project/architecture.md) page has the full picture.
 
 ## What it is not
 
-Pylota Mail v1.0 deliberately does not include ([PRD §4](project/prd.md#4-goals-and-non-goals)):
+Pylota Identity v1.0 deliberately does not include ([PRD §4](project/prd.md#4-goals-and-non-goals)):
 
 - a mail client or webmail UI for humans. It is API-first;
 - IMAP, POP3 or SMTP submission access;
@@ -95,8 +95,8 @@ Pylota Mail v1.0 deliberately does not include ([PRD §4](project/prd.md#4-goals
 
 - [Quickstart](quickstart.md): create an identity, send with an idempotency key, receive a reply,
   search, and connect an MCP client.
-- [Deploy to Cloudflare](self-hosting.md): run your own deployment with `pmail setup` and
-  `pmail deploy`.
+- [Deploy to Cloudflare](self-hosting.md): run your own deployment with `idvy setup` and
+  `idvy deploy`.
 - [Concepts](concepts.md): tenants, identities, addresses, domains, threads, triage, search, events,
   keys and idempotency in one place.
 - Guides:
@@ -125,6 +125,6 @@ Pylota Mail v1.0 deliberately does not include ([PRD §4](project/prd.md#4-goals
   [Build plan](project/build-plan.md) ·
   [Decision records](project/adr/index.md)
 
-Pylota Mail is pre-release. The design is complete and the implementation follows the
+Pylota Identity is pre-release. The design is complete and the implementation follows the
 [build plan](project/build-plan.md). To report a vulnerability, see
-[SECURITY.md](https://github.com/PILOTAAI/pylota-mail/blob/main/SECURITY.md).
+[SECURITY.md](https://github.com/PILOTAAI/pylota-identity/blob/main/SECURITY.md).

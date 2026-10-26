@@ -1,10 +1,10 @@
 # SDKs, skills and agent tooling
 
 Binding for implementation. This page specifies everything a developer or a coding agent installs on
-their own side to use Pylota Mail safely: the TypeScript SDK `@pylotahq/mail`, the agent skills and
+their own side to use Pylota Identity safely: the TypeScript SDK `@pylotahq/identity`, the agent skills and
 plugins for Claude Code, Codex and Cursor, the client-facing MCP improvements (verified annotations,
 client hints, a per-key tool allow-list, a stdio bridge and exact setup for each client), the CLI
-additions `--schema`, `--query` and `pmail skills generate`, and the outline of the framework guides.
+additions `--schema`, `--query` and `idvy skills generate`, and the outline of the framework guides.
 The service already makes a retried send safe and an unknowable outcome `uncertain` (FR-OUT-1, FR-OUT-2).
 A client that generates a fresh idempotency key on retry, resends an `uncertain` message, verifies a
 webhook over re-serialised JSON or silently restarts an event stream from "now" throws those guarantees
@@ -14,9 +14,9 @@ away. These tools exist so that integrators and agents do not write that client 
 |---|---|
 | Requirements | FR-SDK-2 – FR-SDK-15 (this page); FR-SDK-1, FR-API-1, FR-API-2, FR-MCP-1, FR-CLI-1, FR-OUT-1, FR-OUT-2, FR-WH-2, FR-IDN-10 |
 | Edge cases | [Y20](../edge-cases.md)–[Y71](../edge-cases.md) |
-| Code | In this repository: `sdks/fixtures/` (HTTP exchange fixtures, JSON data read by both SDKs) and `sdks/typescript-tests.json` (the SDK's test inventory for `cargo xtask trace`); `integrations/pylota-mail-plugin/` (the skills and the plugin manifests); `integrations/skills-rules.toml`; `crates/worker/src/mcp/{tools.rs, schemas.rs}` (effect classes, annotations, `_meta` hints, the key allow-list); `crates/worker/src/auth.rs` and `handlers/keys.rs` (`mcp_tools`); `crates/cli/src/{schema.rs, query.rs, commands/skills.rs, commands/mcp.rs, commands/mcp_stdio.rs}`; `xtask/src/{gen_skills.rs, skills_check.rs}`. In the SDK repository `PILOTAAI/pylota-mail-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)): the npm package `@pylotahq/mail`, `src/{client.ts, transport.ts, retry.ts, idempotency.ts, errors.ts, outcomes.ts, pagination.ts, wait.ts, webhooks.ts, events.ts, drafts.ts, uploads.ts, enums.ts}`, `src/generated/{openapi.d.ts, operations.ts, methods.ts}`, `scripts/{fetch-contract.mjs, generate.mjs}`, `test/`, and the framework guides' compiled examples |
+| Code | In this repository: `sdks/fixtures/` (HTTP exchange fixtures, JSON data read by both SDKs) and `sdks/typescript-tests.json` (the SDK's test inventory for `cargo xtask trace`); `integrations/pylota-identity-plugin/` (the skills and the plugin manifests); `integrations/skills-rules.toml`; `crates/worker/src/mcp/{tools.rs, schemas.rs}` (effect classes, annotations, `_meta` hints, the key allow-list); `crates/worker/src/auth.rs` and `handlers/keys.rs` (`mcp_tools`); `crates/cli/src/{schema.rs, query.rs, commands/skills.rs, commands/mcp.rs, commands/mcp_stdio.rs}`; `xtask/src/{gen_skills.rs, skills_check.rs}`. In the SDK repository `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)): the npm package `@pylotahq/identity`, `src/{client.ts, transport.ts, retry.ts, idempotency.ts, errors.ts, outcomes.ts, pagination.ts, wait.ts, webhooks.ts, events.ts, drafts.ts, uploads.ts, enums.ts}`, `src/generated/{openapi.d.ts, operations.ts, methods.ts}`, `scripts/{fetch-contract.mjs, generate.mjs}`, `test/`, and the framework guides' compiled examples |
 | Tables | D1 `api_keys.mcp_tools_json` (new column, [§8](#8-storage)); no mailbox change |
-| Contracts | `mcp_tools` on `POST /v1/keys`, the key object and `GET /v1/me`; `400 invalid_request` with `details.reason` `unknown_mcp_tool` or `mcp_tool_not_permitted`; the tool `_meta` key `anthropic/maxResultSizeChars`; `x-sdk` now covers both SDKs; CLI global flags `--schema` and `--query`; commands `pmail skills generate`, `pmail mcp stdio` and `pmail mcp config --client codex\|claude-desktop\|agent-sdk`; the npm package `@pylotahq/mail`, built in its own repository; the release assets `openapi.json` and `sdk-fixtures-{version}.tar.gz` it is built from; the plugin and marketplace manifests |
+| Contracts | `mcp_tools` on `POST /v1/keys`, the key object and `GET /v1/me`; `400 invalid_request` with `details.reason` `unknown_mcp_tool` or `mcp_tool_not_permitted`; the tool `_meta` key `anthropic/maxResultSizeChars`; `x-sdk` now covers both SDKs; CLI global flags `--schema` and `--query`; commands `idvy skills generate`, `idvy mcp stdio` and `idvy mcp config --client codex\|claude-desktop\|agent-sdk`; the npm package `@pylotahq/identity`, built in its own repository; the release assets `openapi.json` and `sdk-fixtures-{version}.tar.gz` it is built from; the plugin and marketplace manifests |
 | Limits | `mcp_tools`: at most 64 names; SDK defaults in [§2.6](#26-retries-timeouts-and-rate-limits); webhook timestamp tolerance 1–600 s, default 300 s ([Limits › SDKs and agent tooling](../../reference/limits.md)) |
 | Built in | [M36](../build-plan.md) |
 
@@ -27,15 +27,15 @@ could not be read is marked "not verified" or "verify at build time" with what s
 
 | Question | Decision | Why |
 |---|---|---|
-| TypeScript package name | `@pylotahq/mail` | The npm scope `pylotahq` exists (registry `GET /-/org/pylotahq/package` answered `200 {}` on 2026-10-17, so it holds no public package yet) and is the organisation Pylota's own notes name for Slotlock. The scopes `pylotamail` and `pylota-mail` do not exist (`404 Scope not found`); the unscoped names `pylota-mail` and `pylotamail` are unregistered (`npm view` 404). A scoped name cannot be taken by anyone else, needs no new npm organisation, and does not collide with the `@pylota/*` workspace packages inside Pylota's monorepo. The scope `pylota` exists with no public packages and an owner this run could not establish, so it is not used. Ownership of `pylotahq` by TREFT LTD is an owner fact to confirm before M36; nothing is published by this design |
-| Where the SDK lives | Its own public repository, `PILOTAAI/pylota-mail-typescript`; this page stays its binding design | `AGENTS.md` allows no TypeScript or JavaScript source in this repository, and [ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md) keeps that rule. This repository publishes the contract and the shared fixtures as release assets ([§2.3](#23-generation)) |
+| TypeScript package name | `@pylotahq/identity` | The npm scope `pylotahq` exists (registry `GET /-/org/pylotahq/package` answered `200 {}` on 2026-10-17, so it holds no public package yet) and is the organisation Pylota's own notes name for Slotlock. The scopes `pylotamail` and `pylota-identity` do not exist (`404 Scope not found`); the unscoped names `pylota-identity` and `pylotamail` are unregistered (`npm view` 404), and so is `@pylotahq/identity` (`pylota-identity` names re-checked on 2026-10-24, after the rename of [ADR 0019](../adr/0019-pylota-identity.md)). A scoped name cannot be taken by anyone else, needs no new npm organisation, and does not collide with the `@pylota/*` workspace packages inside Pylota's monorepo. The scope `pylota` exists with no public packages and an owner this run could not establish, so it is not used. Ownership of `pylotahq` by TREFT LTD is an owner fact to confirm before M36; nothing is published by this design |
+| Where the SDK lives | Its own public repository, `PILOTAAI/pylota-identity-typescript`; this page stays its binding design | `AGENTS.md` allows no TypeScript or JavaScript source in this repository, and [ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md) keeps that rule. This repository publishes the contract and the shared fixtures as release assets ([§2.3](#23-generation)) |
 | Licence | FSL-1.1-ALv2, the same as this repository (`package.json` `license`, SPDX identifier `FSL-1.1-ALv2`) | One licence for the product and its client; each release becomes Apache-2.0 two years after it ships, as the product's do |
 | Generator | `openapi-typescript` 7.13.0 for types only, plus methods generated by the SDK repository's `scripts/generate.mjs` from the release's `openapi.json` | Types-only output adds no runtime code (openapi-ts.dev introduction, read 2026-10-17), it supports OpenAPI 3.1, and Pylota's integration spec already pins this exact version. `openapi-fetch` (0.17.0) and `@hey-api/openapi-ts` (0.99.0, still `0.x`) were rejected: both bring runtime behaviour (retries, keys, errors) that this page must control exactly |
 | Runtime dependencies | None | Every runtime in [§2.2](#22-runtimes) has `fetch`, Web Crypto and streams |
 | Runtimes | Node.js 22, 24 and 26; Cloudflare Workers; Deno; Bun | Node.js lines current on 2026-10-17 ([§2.2](#22-runtimes)) |
 | Retries | On by default, only for what the error envelope marks `retryable`, network errors and proxy `502/503/504`, always with the same key and the same bytes | A typical TypeScript integrator is an agent backend where transient failures are frequent and every retry is key-protected. The Rust SDK keeps retries off by default ([Rust workspace §11](rust-workspace.md#11-the-rust-sdk-fr-sdk-1)); the CLI turns them on |
 | Python SDK | P2 | [§3](#3-python) |
-| Skills location | A directory of this repository, `integrations/pylota-mail-plugin/`, released with the same tag and signature | The skills are checked against the `openapi.yaml`, MCP tool table and limits of the same commit ([§4.4](#44-staying-true-to-the-api)); a second repository would drift and need a second release process. Unlike the SDK, skills and manifests are Markdown and JSON data, not TypeScript or JavaScript source, so `AGENTS.md`'s Rust-only rule does not exclude them |
+| Skills location | A directory of this repository, `integrations/pylota-identity-plugin/`, released with the same tag and signature | The skills are checked against the `openapi.yaml`, MCP tool table and limits of the same commit ([§4.4](#44-staying-true-to-the-api)); a second repository would drift and need a second release process. Unlike the SDK, skills and manifests are Markdown and JSON data, not TypeScript or JavaScript source, so `AGENTS.md`'s Rust-only rule does not exclude them |
 | Per-key MCP allow-list | Key metadata `mcp_tools`, set when the key is minted | The MCP specification says the tool list "MUST NOT vary per-connection" but "MAY vary by the authorization presented on the request" ([Tools](https://modelcontextprotocol.io/specification/2026-07-28/server/tools), read 2026-10-17). A key field follows that rule; a per-connection `tools` parameter would not. Client-side narrowing exists in the bridge (`--tools`) and in the clients themselves |
 | `--query` language | JMESPath, crate `jmespath` 0.5.0 | The language AgentMail's CLI and the AWS CLI use, so agents already know it; no loops or recursion, unlike jq; the crate is the JMESPath project's own Rust implementation (MIT, published 2026-01-19, crates.io read 2026-10-17) |
 | Framework toolkits | No separate packages in v1.0 | Each framework already has an MCP client that sends headers ([§7](#7-framework-guides)); one fewer package to secure and version. A guide per framework instead |
@@ -43,7 +43,7 @@ could not be read is marked "not verified" or "verify at build time" with what s
 ## 2. The TypeScript SDK
 
 The SDK is built, tested, released and published in its own public repository,
-`PILOTAAI/pylota-mail-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)),
+`PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)),
 because `AGENTS.md` allows no TypeScript or JavaScript source in this one. This section stays the binding
 design for that repository: its behaviour, its edge-case rows and its `ts::` tests are specified here, and a
 change to them is written here first. This repository publishes the contract and the shared fixtures the
@@ -55,8 +55,8 @@ where its source lives.
 The SDK repository's layout:
 
 ```text
-PILOTAAI/pylota-mail-typescript
-  package.json          name "@pylotahq/mail", version per §2.16, "pylotaMail": { "contract": "<release>" },
+PILOTAAI/pylota-identity-typescript
+  package.json          name "@pylotahq/identity", version per §2.16, "pylotaIdentity": { "contract": "<release>" },
                         "license": "FSL-1.1-ALv2", "type": "module",
                         "engines": { "node": ">=22" }, "sideEffects": false, no "dependencies",
                         "exports": { ".": {types, default}, "./webhooks": …, "./events": …,
@@ -64,8 +64,8 @@ PILOTAAI/pylota-mail-typescript
   package-lock.json     committed; CI installs with `npm ci --ignore-scripts`
   tsconfig.json         strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess, module NodeNext
   biome.json            Biome 2.5.15, single quotes, `useImportType`, no `any`
-  release-keys.pub      the two minisign public keys (`current`, `next`) compiled into `pmail`
-  openapi.json          the release asset of the contract named in pylotaMail.contract (§2.3)
+  release-keys.pub      the two minisign public keys (`current`, `next`) compiled into `idvy`
+  openapi.json          the release asset of the contract named in pylotaIdentity.contract (§2.3)
   fixtures/             the release's sdk-fixtures tarball, unpacked (§2.15)
   scripts/fetch-contract.mjs  downloads and verifies the two assets of one release tag (§2.3)
   scripts/generate.mjs  runs openapi-typescript's Node API over openapi.json into src/generated/openapi.d.ts
@@ -84,7 +84,7 @@ compiled with 6.0.3 and its declarations are type-checked by consumers on TypeSc
 pin) and 7.0.2 in CI (`ts::compat::dts_consumers`), so the compiler choice cannot break a consumer
 unnoticed. The output is ES modules only (Pylota's packages are `"type": "module"`).
 
-`package.json` `pylotaMail.contract` names the Pylota Mail release whose `openapi.json` the package was
+`package.json` `pylotaIdentity.contract` names the Pylota Identity release whose `openapi.json` the package was
 generated from; the SDK's own release workflow fails when `openapi.json` is not that release's asset
 ([§2.16](#216-versioning-and-release)).
 
@@ -119,9 +119,9 @@ listed in `SHA256SUMS` and so covered by the owner's signature ([Rust workspace 
 **In the SDK repository**, `npm run generate` is the one command that changes `src/generated/`:
 
 1. `scripts/fetch-contract.mjs <tag>` downloads `SHA256SUMS`, `SHA256SUMS.sig`, `openapi.json` and the
-   fixtures tarball from that GitHub Release of `PILOTAAI/pylota-mail`, verifies the minisign signature
-   and its trusted comment `pylota-mail v{version}` against `release-keys.pub` and each file's SHA-256, and
-   only then writes `openapi.json` and `fixtures/` and sets `pylotaMail.contract`. Any mismatch stops it
+   fixtures tarball from that GitHub Release of `PILOTAAI/pylota-identity`, verifies the minisign signature
+   and its trusted comment `pylota-identity v{version}` against `release-keys.pub` and each file's SHA-256, and
+   only then writes `openapi.json` and `fixtures/` and sets `pylotaIdentity.contract`. Any mismatch stops it
    with nothing written.
 2. `scripts/generate.mjs`: openapi-typescript's Node API writes
    `src/generated/openapi.d.ts` with `--root-types`, `--export-type` and `--alphabetize`. Its `transform`
@@ -141,9 +141,9 @@ have no method in either SDK.
 ### 2.4 Client surface
 
 ```ts
-import { PylotaMail, idempotencyKey } from '@pylotahq/mail';
+import { PylotaIdentity, idempotencyKey } from '@pylotahq/identity';
 
-const mail = new PylotaMail({
+const mail = new PylotaIdentity({
   baseUrl: 'https://api.pylotamail.com', // host only; a trailing "/" or "/v1" is removed
   apiKey: readKeyFromYourSecretStore(),
 });
@@ -160,7 +160,7 @@ const sent = await mail.sendMessage({
 // A retry, by the SDK or by you, with the same key returns this message with deduplicated: true.
 ```
 
-- **Construction.** `new PylotaMail(config)` validates synchronously and throws `ConfigError`: a missing
+- **Construction.** `new PylotaIdentity(config)` validates synchronously and throws `ConfigError`: a missing
   `apiKey` or one that fails `^pmk_(live|test)_[0-9a-hjkmnp-tv-z]{12}_[0-9a-hjkmnp-tv-z]{52}$`
   ([Security §4.1](security.md#41-key-format)); a `baseUrl` that is not `https://`, except `localhost`,
   `127.0.0.1` and `[::1]`, or that has a query or fragment; a browser environment ([§2.14](#214-secrets-and-safety-in-the-client)).
@@ -178,7 +178,7 @@ const sent = await mail.sendMessage({
   `Uint8Array` or `ReadableStream` ([§2.12](#212-drafts-and-uploads)).
 - **Helpers.** `mail.paginate()` and `mail.collect()` ([§2.9](#29-pagination-and-wait)),
   `mail.waitForMessage()`, `mail.outcomes` ([§2.8](#28-send-outcomes-and-uncertain)), `mail.events`
-  ([§2.11](#211-event-feed-and-stream)), and the separate entry point `@pylotahq/mail/webhooks`
+  ([§2.11](#211-event-feed-and-stream)), and the separate entry point `@pylotahq/identity/webhooks`
   ([§2.10](#210-webhook-verification)), which needs no API key.
 
 Every option, its default and its bound are in [§2.6](#26-retries-timeouts-and-rate-limits). Examples
@@ -236,7 +236,7 @@ job ([Using it from an agent › Idempotency keys come from the task](../../guid
 | `collect.max` | 10,000 | 1–1,000,000 | Items `collect()` gathers before it stops with `truncated: true` |
 | `events.reconnectMs` | 1,000 doubling to 60,000 | – | Stream reconnect backoff with full jitter |
 | `webhooks.toleranceSeconds` | 300 | 1–600 | Accepted distance between `webhook-timestamp` and the clock |
-| `dedupe.leaseSeconds` | 60 | 15–3,600 | How long a claim on an event ID holds before another channel may take it over (§2.11); longer than the slowest handler, and 4 times Pylota Mail's 15-second webhook attempt timeout |
+| `dedupe.leaseSeconds` | 60 | 15–3,600 | How long a claim on an event ID holds before another channel may take it over (§2.11); longer than the slowest handler, and 4 times Pylota Identity's 15-second webhook attempt timeout |
 
 The transport decides each failure in this order:
 
@@ -325,15 +325,15 @@ pure, so a webhook consumer can call it on `message.uncertain` without a request
 
 ### 2.10 Webhook verification
 
-`@pylotahq/mail/webhooks` follows Standard Webhooks v1 as [Webhooks and events › Signing](webhooks.md#signing-standard-webhooks)
+`@pylotahq/identity/webhooks` follows Standard Webhooks v1 as [Webhooks and events › Signing](webhooks.md#signing-standard-webhooks)
 specifies and as the specification defines it: content `msg_id.timestamp.payload`, HMAC-SHA256,
 space-delimited signatures for rotation, secrets `whsec_` + base64 of 24–64 bytes, constant-time
 comparison, and `webhook-id` as the idempotency key ([Standard Webhooks specification](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md),
-read 2026-10-17; it states no tolerance value, so 300 s is a Pylota Mail choice, the same as
-`pmail webhooks verify`).
+read 2026-10-17; it states no tolerance value, so 300 s is a Pylota Identity choice, the same as
+`idvy webhooks verify`).
 
 ```ts
-import { verifyWebhook } from '@pylotahq/mail/webhooks';
+import { verifyWebhook } from '@pylotahq/identity/webhooks';
 
 const result = await verifyWebhook({
   secrets: [currentSecret, previousSecret], // 1–4 entries, each whsec_…
@@ -365,10 +365,10 @@ throws. Its answers are fixed ([Y33](../edge-cases.md)):
 |---|---|
 | Signature invalid | `401`; nothing is claimed |
 | `webhook-id` already completed | `200`, `onEvent` not called |
-| `webhook-id` claimed by another delivery still running (a live lease) | `503` with `Retry-After` = the seconds left on the lease (at least 1), `onEvent` not called; Pylota Mail retries, and the retry finds the ID completed, or free again if the other run threw |
+| `webhook-id` claimed by another delivery still running (a live lease) | `503` with `Retry-After` = the seconds left on the lease (at least 1), `onEvent` not called; Pylota Identity retries, and the retry finds the ID completed, or free again if the other run threw |
 | `onEvent` resolved | `200`; the ID is completed |
 | `onEvent` resolved but `complete` failed | `200`, because the work is done; `onError` receives the store error. The claim lapses after `dedupe.leaseSeconds`, so a copy on another channel may run `onEvent` again: `onEvent` must tolerate a rare repeat |
-| `onEvent` threw | `500`, so Pylota Mail retries; the claim is released, so the retry runs `onEvent` again |
+| `onEvent` threw | `500`, so Pylota Identity retries; the claim is released, so the retry runs `onEvent` again |
 | The store fails at `claim` | `500`, `onEvent` not called; `onError` receives the store error |
 | Event type this SDK does not know | `onUnknownEvent` (default: nothing) under the same claim, then `200` |
 
@@ -381,7 +381,7 @@ counts towards auto-disable ([Webhooks › Dead deliveries and auto-disable](web
 
 These helpers use the routes of [Event feed and live stream](event-feed.md): `GET /v1/events`
 (`after`, `types`, `identity_id`, `limit`, `wait`), the durable consumers under `/v1/event-consumers`,
-`POST /v1/events/stream-tokens` and `GET /v1/events/stream` (subprotocol `pylota-mail.events.v1`). Their
+`POST /v1/events/stream-tokens` and `GET /v1/events/stream` (subprotocol `pylota-identity.events.v1`). Their
 parameters, close codes and token format are that page's. The SDK relies only on what it guarantees: every
 event has one `evt_` ID everywhere, which is the deduplication key; a reader that resumes from an `ec_`
 cursor receives every event appended after it, at least once; and a cursor whose events are gone is
@@ -499,8 +499,8 @@ against a newer deployment ([Y40](../edge-cases.md)):
   ([Y44](../edge-cases.md)).
 - Every request uses `redirect: 'error'`, so the `Authorization` header never follows a redirect to
   another host ([Y45](../edge-cases.md)).
-- `User-Agent` (or `X-Pylota-Mail-Client` where a runtime forbids setting `User-Agent`) is
-  `pylota-mail-ts/{version} ({runtime}/{runtime major})` plus the caller's optional suffix. It carries no
+- `User-Agent` (or `X-Pylota-Identity-Client` where a runtime forbids setting `User-Agent`) is
+  `pylota-identity-ts/{version} ({runtime}/{runtime major})` plus the caller's optional suffix. It carries no
   host name, user or tenant data.
 - The SDK sends no telemetry and stores nothing outside the process: its only caches are the server
   version (10 minutes) and the clock offset.
@@ -534,24 +534,24 @@ checks their names against `sdks/typescript-tests.json` ([Testing § 11.2](testi
 
 ### 2.16 Versioning and release
 
-All of this runs in the SDK repository, `PILOTAAI/pylota-mail-typescript`, with the same controls as this
+All of this runs in the SDK repository, `PILOTAAI/pylota-identity-typescript`, with the same controls as this
 repository's release pipeline ([Rust workspace § 10](rust-workspace.md#10-ci-pipeline)).
 
 - **Semver tied to the API.** The SDK's major version is the REST API's path version (`/v1` → `1.x.y`).
-  Each SDK release is generated from one Pylota Mail release's `openapi.json`, which `package.json`
-  `pylotaMail.contract` names (for example `"1.4.0"`) and the npm README repeats. An SDK release that
+  Each SDK release is generated from one Pylota Identity release's `openapi.json`, which `package.json`
+  `pylotaIdentity.contract` names (for example `"1.4.0"`) and the npm README repeats. An SDK release that
   adopts a newer contract with new operations is a minor version; an SDK-only fix is a patch and needs no
   product release. Nothing in the SDK's public surface is removed or renamed within a major version; a
   deprecated helper stays until 2.0. Because `/v1` changes are additive, any 1.x SDK works with any 1.y
   deployment for the operations both know ([§2.13](#213-forward-compatibility)).
 - **Built and signed like a product release.** The SDK repository's `release.yml`, on a `v*` tag, runs the
   full CI gate, refuses a tag that differs from `package.json` `version` or an `openapi.json` that is not
-  the named release's asset, runs `npm pack`, attests `pylotahq-mail-{version}.tgz` and lists it in an
+  the named release's asset, runs `npm pack`, attests `pylotahq-identity-{version}.tgz` and lists it in an
   unsigned `SHA256SUMS` on a draft GitHub Release. The owner signs it offline with the same minisign key as
   product releases ([Security §11](security.md#11-supply-chain)), through the same tool:
-  `cargo xtask release sign <tag> --repo PILOTAAI/pylota-mail-typescript` checks the checksum and the
+  `cargo xtask release sign <tag> --repo PILOTAAI/pylota-identity-typescript` checks the checksum and the
   attestation (provenance naming that repository's `release.yml` on that tag) and signs with the trusted
-  comment `pylota-mail-typescript v{version}`, so a product signature can never pass for an SDK one.
+  comment `pylota-identity-typescript v{version}`, so a product signature can never pass for an SDK one.
 - **Published by trusted publishing.** The SDK repository's `release-publish.yml` (environment `release`,
   started by `workflow_dispatch` on the tag) verifies that signature, then runs `npm publish` on that
   tarball with GitHub OIDC trusted publishing: no npm token exists in any workflow, provenance is
@@ -562,7 +562,7 @@ repository's release pipeline ([Rust workspace § 10](rust-workspace.md#10-ci-pi
   workflow is started by `workflow_dispatch`, the trusted publisher is configured for that workflow, which
   the same page requires. The package setting "Require two-factor authentication and disallow tokens" is
   on, so a stolen token cannot publish ([Y67](../edge-cases.md)). `package.json` `repository` must match
-  `PILOTAAI/pylota-mail-typescript` case-sensitively
+  `PILOTAAI/pylota-identity-typescript` case-sensitively
   ([npm provenance](https://docs.npmjs.com/generating-provenance-statements), read 2026-10-17). That page
   does not say whether a pre-built tarball can be published with provenance: verify at build time; if it
   cannot, the job packs again from the tag and publishes only when the new tarball's SHA-256 equals the
@@ -580,7 +580,7 @@ Rust SDK and the TypeScript SDK already cover the typed clients this page has to
 third SDK would add a third runtime matrix, fixture consumer and release path for a solo owner
 ([ADR 0015](../adr/0015-solo-operator.md)); and the safety value of an SDK lies in the rules of
 [§2.5](#25-idempotency)–[§2.8](#28-send-outcomes-and-uncertain), which Python users can follow without
-one. The PyPI names `pylota-mail`, `pylotamail` and `pylota` were unregistered on 2026-10-17
+one. The PyPI name `pylota-identity` was unregistered on 2026-10-24, and `pylotamail` and `pylota` on 2026-10-17
 (`pypi.org/pypi/<name>/json` answered `404`); reserving one is an owner choice, not part of this design.
 
 What v1.0 offers Python users:
@@ -616,25 +616,25 @@ page of that day, and the parts that stay unverified are left out of the release
 ### 4.2 Where it lives
 
 ```text
-.claude-plugin/marketplace.json          Claude Code marketplace "pylota-mail" (repository root)
+.claude-plugin/marketplace.json          Claude Code marketplace "pylota-identity" (repository root)
 .agents/plugins/marketplace.json         Codex marketplace
 .cursor-plugin/marketplace.json          Cursor marketplace (fields verified at build time)
 integrations/
   skills-rules.toml                      the rule registry (§4.4)
-  pylota-mail-plugin/                    one plugin directory for all three clients
-    .claude-plugin/plugin.json           name "pylota-mail", version = release, userConfig api_url, api_key
+  pylota-identity-plugin/                    one plugin directory for all three clients
+    .claude-plugin/plugin.json           name "pylota-identity", version = release, userConfig api_url, api_key
     plugin.json                          Codex portable manifest
     .cursor-plugin/plugin.json           Cursor manifest (verified at build time)
     .mcp.json                            Claude Code: the remote server, with ${user_config.*}
     mcp.json                             Codex: the remote server (header support verified at build time)
     skills/
-      pylota-mail-sending/SKILL.md       and references/errors.md (generated)
-      pylota-mail-untrusted-mail/SKILL.md
-      pylota-mail-verification-codes/SKILL.md
-      pylota-mail-drafts/SKILL.md
-      pylota-mail-search/SKILL.md        and references/operators.md (generated from the query grammar)
-      pylota-mail-events/SKILL.md        and references/webhooks.md
-      pylota-mail-cli/SKILL.md           and references/commands.md (generated from `pmail --schema`)
+      pylota-identity-sending/SKILL.md       and references/errors.md (generated)
+      pylota-identity-untrusted-mail/SKILL.md
+      pylota-identity-verification-codes/SKILL.md
+      pylota-identity-drafts/SKILL.md
+      pylota-identity-search/SKILL.md        and references/operators.md (generated from the query grammar)
+      pylota-identity-events/SKILL.md        and references/webhooks.md
+      pylota-identity-cli/SKILL.md           and references/commands.md (generated from `idvy --schema`)
 ```
 
 The skills sit outside `.agents/skills/` and `.claude/skills/` on purpose: those paths would load them
@@ -647,7 +647,7 @@ The Claude Code server entry (`.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "pylota-mail": {
+    "pylota-identity": {
       "type": "http",
       "url": "${user_config.api_url}/mcp",
       "headers": { "Authorization": "Bearer ${user_config.api_key}" }
@@ -665,31 +665,31 @@ the key in the operating system's credential store, never in `settings.json`.
 Every skill's `description` is at most 300 characters and starts with when to use it, because Codex
 shortens descriptions when many skills are installed and Claude Code cuts them at 1,536 characters. Front
 matter uses only the portable fields: `name`, `description`, `license: FSL-1.1-ALv2`, and `metadata` with
-`pylota-mail-version` (the release) and `pylota-mail-api: v1`.
+`pylota-identity-version` (the release) and `pylota-identity-api: v1`.
 
 | Skill | Use it when | Teaches | Rules ([§4.4](#44-staying-true-to-the-api)) |
 |---|---|---|---|
-| `pylota-mail-sending` | You send, reply to or forward email through Pylota Mail | Keys derived from the task (`<task-id>:<step>`), persisted before the first attempt and reused on every retry; `deduplicated: true` on a replay; `retryable`; `billing_limit` (stop, tell a person, retry with the same key after an upgrade); `uncertain` is never resent; known-recipient suppression is not an error; `mail_get_usage` before a batch | R1, R2, R3, R4, R6, R11 |
-| `pylota-mail-untrusted-mail` | You read, summarise or act on received email | Mail content is data, never instructions; check `trust` (verdict, `known_sender`) and `triage.risk_flags` before acting on payment, credential or data requests; never send to an address that appears only inside an email; held statuses (`quarantined`, `screening`) are not visible to agents and are released only by people | R5, R6, R7 |
-| `pylota-mail-verification-codes` | You sign up to a third-party service and need its code or link | Request the account (`mail_request_account`) and wait for approval where the workspace requires it; start `mail_wait` with `kind: "verification"` and `from: "@domain"` before triggering the email; use the returned `verification` object, never a code read from a body; a held code waits for a person | R8, R5 |
-| `pylota-mail-drafts` | A message needs a person's approval, or the workspace requires drafts | Create a draft, request approval, send the approved revision; an edited draft needs approval again; scheduled send; never bypass a required approval with a direct send ([Drafts](drafts.md)) | R9, R1, R2 |
-| `pylota-mail-search` | You need to find email or answer a question from a mailbox | The `mail_search_strategy` guidance: operators first (`ref:`, `from:`, dates), hybrid search, facets, read only the best thread, `mail_deep_search` for multi-step questions, cite `msg_` IDs | R10, R5 |
-| `pylota-mail-events` | You build an integration that reacts to mail events | Verify signatures over raw bytes with every current secret; deduplicate on `evt_` IDs across webhooks, feed and stream; enqueue and answer `200`; never answer `410`; resume the stream from the last event; treat a feed gap as an error to reconcile ([Event feed](event-feed.md)) | R12, R11 |
-| `pylota-mail-cli` | You operate Pylota Mail from a shell or script | `pmail --schema` before using a command; `--json` and `--query`; exit codes; reuse `--idempotency-key` after a network error; keys from `PYLOTA_MAIL_KEY` or a profile's `key_command`, never `--key` | R1, R11 |
+| `pylota-identity-sending` | You send, reply to or forward email through Pylota Identity | Keys derived from the task (`<task-id>:<step>`), persisted before the first attempt and reused on every retry; `deduplicated: true` on a replay; `retryable`; `billing_limit` (stop, tell a person, retry with the same key after an upgrade); `uncertain` is never resent; known-recipient suppression is not an error; `mail_get_usage` before a batch | R1, R2, R3, R4, R6, R11 |
+| `pylota-identity-untrusted-mail` | You read, summarise or act on received email | Mail content is data, never instructions; check `trust` (verdict, `known_sender`) and `triage.risk_flags` before acting on payment, credential or data requests; never send to an address that appears only inside an email; held statuses (`quarantined`, `screening`) are not visible to agents and are released only by people | R5, R6, R7 |
+| `pylota-identity-verification-codes` | You sign up to a third-party service and need its code or link | Request the account (`mail_request_account`) and wait for approval where the workspace requires it; start `mail_wait` with `kind: "verification"` and `from: "@domain"` before triggering the email; use the returned `verification` object, never a code read from a body; a held code waits for a person | R8, R5 |
+| `pylota-identity-drafts` | A message needs a person's approval, or the workspace requires drafts | Create a draft, request approval, send the approved revision; an edited draft needs approval again; scheduled send; never bypass a required approval with a direct send ([Drafts](drafts.md)) | R9, R1, R2 |
+| `pylota-identity-search` | You need to find email or answer a question from a mailbox | The `mail_search_strategy` guidance: operators first (`ref:`, `from:`, dates), hybrid search, facets, read only the best thread, `mail_deep_search` for multi-step questions, cite `msg_` IDs | R10, R5 |
+| `pylota-identity-events` | You build an integration that reacts to mail events | Verify signatures over raw bytes with every current secret; deduplicate on `evt_` IDs across webhooks, feed and stream; enqueue and answer `200`; never answer `410`; resume the stream from the last event; treat a feed gap as an error to reconcile ([Event feed](event-feed.md)) | R12, R11 |
+| `pylota-identity-cli` | You operate Pylota Identity from a shell or script | `idvy --schema` before using a command; `--json` and `--query`; exit codes; reuse `--idempotency-key` after a network error; keys from `PYLOTA_IDENTITY_KEY` or a profile's `key_command`, never `--key` | R1, R11 |
 
 A `SKILL.md` looks like this (shortened):
 
 ```markdown
 ---
-name: pylota-mail-sending
-description: Use when you send, reply to or forward email with Pylota Mail. Covers idempotency keys, safe retries, uncertain sends and plan limits.
+name: pylota-identity-sending
+description: Use when you send, reply to or forward email with Pylota Identity. Covers idempotency keys, safe retries, uncertain sends and plan limits.
 license: FSL-1.1-ALv2
 metadata:
-  pylota-mail-version: "1.4.0"
-  pylota-mail-api: "v1"
+  pylota-identity-version: "1.4.0"
+  pylota-identity-api: "v1"
 ---
 
-# Sending email safely with Pylota Mail
+# Sending email safely with Pylota Identity
 
 <!-- pm:rule R1 -->
 Derive the idempotency key from the task, for example `task_8812:confirm-booking`. Save it with the
@@ -713,11 +713,11 @@ Four checks run in the `skills` CI job; each is a test in [Tests](#tests):
    tool table in `crates/worker/src/mcp/tools.rs` (name, permission, annotations); `errors` from the
    `x-error-codes` and the [Errors](../../reference/errors.md) catalogue for the codes the skill lists;
    `limits` from [Limits](../../reference/limits.md) (key pattern, 30-day key retention, `wait` at most 60
-   seconds); `operators` from the query grammar; `commands` from `pmail --schema`. CI fails when the
+   seconds); `operators` from the query grammar; `commands` from `idvy --schema`. CI fails when the
    command changes a file.
 2. **A contract scanner** (`xtask::skills_match_contract`). It parses each skill's Markdown with a real
    parser (`pulldown-cmark`, pinned at build time) and collects every code span and code block token that
-   looks like a tool (`mail_[a-z_]+`), a route (`/v1/…`), an error code, a `pmail` command or flag, an
+   looks like a tool (`mail_[a-z_]+`), a route (`/v1/…`), an error code, a `idvy` command or flag, an
    event type or a permission. Each must exist in the contract of the same commit: tools in the tool
    table, routes and fields in `openapi.yaml`, codes in the catalogue, commands and flags in the CLI's
    schema, events in [Webhook events](../../reference/events.md). A name a later release removes therefore
@@ -760,26 +760,26 @@ model-dependent score is not a deterministic test.
 ### 4.5 Versioning and distribution
 
 - **Versioned with the release.** `plugin.json` `version` and each skill's
-  `metadata.pylota-mail-version` equal the release version. Claude Code keeps users on a plugin's
+  `metadata.pylota-identity-version` equal the release version. Claude Code keeps users on a plugin's
   `version` until it changes ([Plugin manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference)),
   so users move with releases, not with every commit. `cargo xtask release --check-version` fails when a
   manifest, a skill or a marketplace entry differs from the tag ([Y68](../edge-cases.md)).
 - **Marketplaces point at signed releases.** Each marketplace entry is a `git-subdir` source with `path:
-  integrations/pylota-mail-plugin` and `ref: v{version}`, written in the release commit before the tag is
+  integrations/pylota-identity-plugin` and `ref: v{version}`, written in the release commit before the tag is
   cut. A user who adds the marketplace from `main` therefore installs the last released skills, never
   unreleased ones; tags are never moved ([Rust workspace §10](rust-workspace.md#10-ci-pipeline)). A user can
-  pin the marketplace itself: `claude plugin marketplace add PILOTAAI/pylota-mail@v1.4.0`.
+  pin the marketplace itself: `claude plugin marketplace add PILOTAAI/pylota-identity@v1.4.0`.
 - **Install.**
 
   | Client | Steps |
   |---|---|
-  | Claude Code | `claude plugin marketplace add PILOTAAI/pylota-mail`, then `claude plugin install pylota-mail@pylota-mail`; Claude Code asks for the API URL and key. `--sparse` with `.claude-plugin` avoids a full checkout (the flag sets `sparsePaths`; its argument form is verified at build time) |
-  | Codex | `codex plugin marketplace add PILOTAAI/pylota-mail`, then install the plugin from the Codex or ChatGPT desktop app, as Codex's page directs; or `pmail skills generate --agent codex` |
-  | Cursor | Customize › import from GitHub repository `PILOTAAI/pylota-mail` (it has `.cursor-plugin/marketplace.json`), then install the plugin |
-  | Any Agent Skills client | `pmail skills generate --output-dir ~/.agents/skills` ([§6.3](#63-pmail-skills-generate)) |
+  | Claude Code | `claude plugin marketplace add PILOTAAI/pylota-identity`, then `claude plugin install pylota-identity@pylota-identity`; Claude Code asks for the API URL and key. `--sparse` with `.claude-plugin` avoids a full checkout (the flag sets `sparsePaths`; its argument form is verified at build time) |
+  | Codex | `codex plugin marketplace add PILOTAAI/pylota-identity`, then install the plugin from the Codex or ChatGPT desktop app, as Codex's page directs; or `idvy skills generate --agent codex` |
+  | Cursor | Customize › import from GitHub repository `PILOTAAI/pylota-identity` (it has `.cursor-plugin/marketplace.json`), then install the plugin |
+  | Any Agent Skills client | `idvy skills generate --output-dir ~/.agents/skills` ([§6.3](#63-idvy-skills-generate)) |
 
 - **Releases carry them.** The plugin directory is part of the signed source tag; the skills are also
-  compiled into `pmail`, so a CLI and the skills it writes always share a version.
+  compiled into `idvy`, so a CLI and the skills it writes always share a version.
 
 ## 5. MCP improvements
 
@@ -853,7 +853,7 @@ The list is stored with the key, returned on the key object and on `GET /v1/me`,
 ([Security §4.5](security.md#45-rotation)). It cannot be edited: a key's tool list, like its permissions,
 changes only when the key is replaced, which is why `tools/list` keeps `listChanged: false`. A key minted
 by a key with `mcp_tools` does not inherit the list ([Y52](../edge-cases.md)). The CLI sets it with
-`pmail keys create … --mcp-tools mail_search,mail_get_thread` (an empty value sends `[]`).
+`idvy keys create … --mcp-tools mail_search,mail_get_thread` (an empty value sends `[]`).
 
 **At request time.** `auth::authenticate` already reads the key row; `Scope` gains
 `mcp_tools: Option<Vec<String>>` from the same read. In [MCP server §3](mcp.md#3-authentication-and-tool-filtering)
@@ -868,14 +868,14 @@ with all its permissions, so for an agent that can make HTTP requests the bounda
 permissions and level; the docs say so wherever `mcp_tools` appears. It is the right tool for an agent
 that has only an MCP client (Claude Desktop, a chat product), and for keeping a model's tool list short.
 
-### 5.4 The stdio bridge: `pmail mcp stdio`
+### 5.4 The stdio bridge: `idvy mcp stdio`
 
 Some clients run only local (stdio) servers, and Claude Desktop without the request-header beta cannot
-send a key to a remote server ([§5.6](#56-oauth-21-stays-v11)). `pmail mcp stdio` is a local MCP server
-that forwards to the deployment's `/mcp`. It is part of the signed `pmail` binary, so it needs no Node.js
+send a key to a remote server ([§5.6](#56-oauth-21-stays-v11)). `idvy mcp stdio` is a local MCP server
+that forwards to the deployment's `/mcp`. It is part of the signed `idvy` binary, so it needs no Node.js
 runtime and no package fetched at start-up.
 
-1. **Key.** From `PYLOTA_MAIL_KEY` or the profile (`key`, `key_env`, `key_command`), never from `--key`,
+1. **Key.** From `PYLOTA_IDENTITY_KEY` or the profile (`key`, `key_env`, `key_command`), never from `--key`,
    which this command refuses with exit 2, so the key never sits in a client's configuration file or the
    process list. At start it calls `GET /v1/me`; a `401` or `403` writes the error to stderr (never the
    key) and exits 4 before reading stdin ([Y57](../edge-cases.md)).
@@ -909,7 +909,7 @@ runtime and no package fetched at start-up.
 
 ### 5.5 Client setup
 
-`pmail mcp config --client …` prints each of these for the current profile's URL, without the key.
+`idvy mcp config --client …` prints each of these for the current profile's URL, without the key.
 Each line below was checked against the client's page on 2026-10-17.
 
 **Claude Code** ([MCP](https://code.claude.com/docs/en/mcp)): `--transport` before the name, `--header`
@@ -919,8 +919,8 @@ configured `Authorization` that the server rejects is reported as a failed conne
 OAuth.
 
 ```bash
-claude mcp add --transport http --scope user pylota-mail https://api.pylotamail.com/mcp \
-  --header "Authorization: Bearer $PYLOTA_MAIL_KEY"
+claude mcp add --transport http --scope user pylota-identity https://api.pylotamail.com/mcp \
+  --header "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 **Claude Desktop.** Either a custom connector ([Add a connector](https://claude.com/docs/connectors/custom/add-unlisted)):
@@ -932,7 +932,7 @@ bridge in `claude_desktop_config.json` (`~/Library/Application Support/Claude/` 
 `%APPDATA%\Claude\` on Windows; [Connect to local MCP servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers)):
 
 ```json
-{ "mcpServers": { "pylota-mail": { "command": "pmail", "args": ["mcp", "stdio", "--profile", "agents"] } } }
+{ "mcpServers": { "pylota-identity": { "command": "idvy", "args": ["mcp", "stdio", "--profile", "agents"] } } }
 ```
 
 with the profile's `key_command` reading the key from the operating system's keychain.
@@ -941,8 +941,8 @@ with the profile's `key_command` reading the key from the operating system's key
 `${env:NAME}` expands in `url` and `headers`; remote servers do not support `envFile`.
 
 ```json
-{ "mcpServers": { "pylota-mail": { "url": "https://api.pylotamail.com/mcp",
-    "headers": { "Authorization": "Bearer ${env:PYLOTA_MAIL_KEY}" } } } }
+{ "mcpServers": { "pylota-identity": { "url": "https://api.pylotamail.com/mcp",
+    "headers": { "Authorization": "Bearer ${env:PYLOTA_IDENTITY_KEY}" } } } }
 ```
 
 **Codex** ([MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)): `~/.codex/config.toml`. The
@@ -951,9 +951,9 @@ snippet sets 90 ([Y59](../edge-cases.md)). The page documents no CLI flag for a 
 snippet is a file block.
 
 ```toml
-[mcp_servers.pylota-mail]
+[mcp_servers.pylota-identity]
 url = "https://api.pylotamail.com/mcp"
-bearer_token_env_var = "PYLOTA_MAIL_KEY"
+bearer_token_env_var = "PYLOTA_IDENTITY_KEY"
 enabled_tools = ["mail_search", "mail_get_thread", "mail_get_message", "mail_wait"]
 tool_timeout_sec = 90
 ```
@@ -969,13 +969,13 @@ const run = query({
   prompt: task,
   options: {
     mcpServers: {
-      'pylota-mail': {
+      'pylota-identity': {
         type: 'http',
         url: 'https://api.pylotamail.com/mcp',
         headers: { Authorization: `Bearer ${mailKey}` },
       },
     },
-    allowedTools: ['mcp__pylota-mail__mail_search', 'mcp__pylota-mail__mail_get_thread'],
+    allowedTools: ['mcp__pylota-identity__mail_search', 'mcp__pylota-identity__mail_get_thread'],
   },
 });
 ```
@@ -989,7 +989,7 @@ This page changes nothing there. From the clients' pages read on 2026-10-17:
 | Client | Connects with an API key in v1.0 |
 |---|---|
 | Claude Code, Claude Agent SDK, Cursor, Codex, Vercel AI SDK, OpenAI Agents SDK, LangChain | Yes: each sends a configured `Authorization` header |
-| Claude Desktop | Yes through the local bridge ([§5.4](#54-the-stdio-bridge-pmail-mcp-stdio)); as a custom connector only in organisations that have the request-header beta |
+| Claude Desktop | Yes through the local bridge ([§5.4](#54-the-stdio-bridge-idvy-mcp-stdio)); as a custom connector only in organisations that have the request-header beta |
 | claude.ai on the web, and Claude's mobile apps | Only in organisations that have the request-header beta: custom connectors are reached from Anthropic's side by URL, so a local bridge cannot help, and the other choices are OAuth or no authentication |
 | ChatGPT (developer-mode apps) | No: the authentication choices are OAuth, no authentication, or mixed, with no static header. Read from OpenAI's developer and help pages through search results on 2026-10-17; both pages refused a direct fetch (`404` and `403`), so re-check before quoting |
 
@@ -997,7 +997,7 @@ This page changes nothing there. From the clients' pages read on 2026-10-17:
 
 ### 6.1 `--schema`
 
-A global flag. `pmail <command> --schema` prints one JSON document describing the command and exits 0.
+A global flag. `idvy <command> --schema` prints one JSON document describing the command and exits 0.
 It reads no configuration, needs no key and makes no request ([Y65](../edge-cases.md)).
 
 ```json
@@ -1023,7 +1023,7 @@ It reads no configuration, needs no key and makes no request ([Y65](../edge-case
 - `output` is the OpenAPI response schema for commands that are one API call, and the `utoipa` schema of
   the CLI's own output struct for the others (`setup`, `deploy`, `doctor`, `webhooks verify`, `skills
   generate`). `error` is the envelope with the CLI codes.
-- `pmail --schema` prints the index: every command with its summary and endpoint.
+- `idvy --schema` prints the index: every command with its summary and endpoint.
 - `cli::schema::y65_offline_and_valid` validates every document against the JSON Schema 2020-12
   meta-schema and validates every `--json` output produced by the CLI test suite against its command's
   `output`.
@@ -1041,21 +1041,21 @@ A global flag taking a JMESPath expression ([§1](#1-decisions)). It implies `--
   `null` result exits 0.
 
 ```bash
-pmail messages list --identity bookings@acme.example.com --all \
+idvy messages list --identity bookings@acme.example.com --all \
   --query "data[?triage.needs_reply > \`0.7\`].{id: id, from: from.address}"
 ```
 
-### 6.3 `pmail skills generate`
+### 6.3 `idvy skills generate`
 
 ```text
-pmail skills generate [--output-dir <dir>] [--agent claude-code|codex|cursor|agents] [--for-current-key] [--force]
-pmail skills list [--output-dir <dir>]
+idvy skills generate [--output-dir <dir>] [--agent claude-code|codex|cursor|agents] [--for-current-key] [--force]
+idvy skills list [--output-dir <dir>]
 ```
 
-- Writes the skills compiled into this `pmail` (§4.5). `--agent` picks the directory: `claude-code` →
+- Writes the skills compiled into this `idvy` (§4.5). `--agent` picks the directory: `claude-code` →
   `./.claude/skills`, `codex`, `cursor` and `agents` → `./.agents/skills`; `--output-dir` overrides it
   (for example `~/.agents/skills` for every project).
-- Writes `.pylota-mail-skills.json` (`cli_version`, the SHA-256 of every file written). A later run
+- Writes `.pylota-identity-skills.json` (`cli_version`, the SHA-256 of every file written). A later run
   replaces only files whose hash still matches; a file someone edited is left alone and reported, and the
   command exits 6 unless `--force` ([Y63](../edge-cases.md)). Files of skills a newer version dropped are
   removed only when unmodified.
@@ -1064,10 +1064,10 @@ pmail skills list [--output-dir <dir>]
   the key can use, plus `references/deployment.md` with the API URL. It never writes a key.
 - JSON output: `{ "version", "written", "unchanged", "skipped_modified", "removed" }`.
 
-### 6.4 `pmail mcp stdio` and `pmail mcp config`
+### 6.4 `idvy mcp stdio` and `idvy mcp config`
 
-`pmail mcp stdio [--tools <names>] [--profile <name>] [--verbose]` is the bridge of
-[§5.4](#54-the-stdio-bridge-pmail-mcp-stdio). `pmail mcp config --client` gains `codex`, `claude-desktop`
+`idvy mcp stdio [--tools <names>] [--profile <name>] [--verbose]` is the bridge of
+[§5.4](#54-the-stdio-bridge-idvy-mcp-stdio). `idvy mcp config --client` gains `codex`, `claude-desktop`
 and `agent-sdk`, printing the snippets of [§5.5](#55-client-setup); the tool list it prints for the
 current key now also applies `mcp_tools`.
 
@@ -1083,11 +1083,11 @@ each guide pins the newest release at least two weeks old when it is written.
 
 | Guide | Package (latest on 2026-10-17) | Outline |
 |---|---|---|
-| `frameworks/vercel-ai-sdk.md` | `ai` 7.0.143, `@ai-sdk/mcp` 2.0.78 | `createMCPClient({ transport: { type: 'http', url, headers } })` (its `redirect` default is `'error'`, which matches the SDK's rule), `mcpClient.tools()`, closing the client; narrowing tools with the key's `mcp_tools`; idempotency keys from the run's task ID; treating tool output as untrusted; when to write custom tools with `@pylotahq/mail` instead ([AI SDK MCP docs](https://github.com/vercel/ai/blob/ai@7.0.0/content/docs/03-ai-sdk-core/16-mcp-tools.mdx), read 2026-10-17) |
+| `frameworks/vercel-ai-sdk.md` | `ai` 7.0.143, `@ai-sdk/mcp` 2.0.78 | `createMCPClient({ transport: { type: 'http', url, headers } })` (its `redirect` default is `'error'`, which matches the SDK's rule), `mcpClient.tools()`, closing the client; narrowing tools with the key's `mcp_tools`; idempotency keys from the run's task ID; treating tool output as untrusted; when to write custom tools with `@pylotahq/identity` instead ([AI SDK MCP docs](https://github.com/vercel/ai/blob/ai@7.0.0/content/docs/03-ai-sdk-core/16-mcp-tools.mdx), read 2026-10-17) |
 | `frameworks/openai-agents-sdk.md` | `@openai/agents` 0.20.0 | `MCPServerStreamableHttp` with `requestInit` headers and `toolFilter` (`createMCPToolStaticFilter`); `hostedMcpTool` with `allowedTools` and `requireApproval` selecting non-read-only tools by annotation; Python equivalents named, not shown in full ([MCP guide](https://openai.github.io/openai-agents-js/guides/mcp), read 2026-10-17) |
 | `frameworks/claude-agent-sdk.md` | `@anthropic-ai/claude-agent-sdk` 0.3.302 | The §5.5 snippet; `allowedTools` by name; reading the `init` message for `failed` or `needs-auth`; output limits and the `_meta` hint; running the agent on a test tenant first |
 | `frameworks/langchain.md` | `@langchain/mcp-adapters` 2.0.1, `@langchain/core` 1.2.18 | `MultiServerMCPClient({ mcp: { transport: 'http', url, headers } })`, `getTools()`; `beforeToolCall` to add a per-call trace header, never to change arguments; Python `langchain-mcp-adapters` named ([LangChain MCP](https://docs.langchain.com/oss/javascript/langchain/mcp-v1), read 2026-10-17) |
-| `typescript-sdk.md` | `@pylotahq/mail` | Install, where the source lives (`PILOTAAI/pylota-mail-typescript`) and which contract a version was built from, client, sends with keys, outcomes, pagination, `waitForMessage`, webhooks (`createWebhookHandler` on Workers, Node.js, Deno, Bun), events with resume and dedupe, errors and their fixes |
+| `typescript-sdk.md` | `@pylotahq/identity` | Install, where the source lives (`PILOTAAI/pylota-identity-typescript`) and which contract a version was built from, client, sends with keys, outcomes, pagination, `waitForMessage`, webhooks (`createWebhookHandler` on Workers, Node.js, Deno, Bun), events with resume and dedupe, errors and their fixes |
 | `python.md` | – | §3: generating a client from `/openapi.json`, the rules a client must keep, webhook verification with `standardwebhooks`, MCP from Python frameworks |
 | `agent-skills.md` | – | §4: what each skill teaches, installing in Claude Code, Codex, Cursor and plain directories, updating, and that skills never contain keys |
 
@@ -1119,7 +1119,7 @@ feed positions) lives in its own system ([§17](#17-pylota-agentic-os)).
   ([Y23](../edge-cases.md)).
 - **The bridge** runs requests concurrently and serialises only its stdout writes, so a long `mail_wait`
   never blocks a `tools/list`.
-- **`pmail skills generate`** writes each file to a temporary file in the same directory and renames it;
+- **`idvy skills generate`** writes each file to a temporary file in the same directory and renames it;
   two concurrent runs leave complete files, and the manifest of the last run wins.
 
 ## 10. Failure handling
@@ -1154,7 +1154,7 @@ feed positions) lives in its own system ([§17](#17-pylota-agentic-os)).
 - **Supply chain, the plugin**: plugins can carry hooks, monitors, executables on `PATH` and commands
   ([Plugin manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference)). The Pylota
   Mail plugin carries none: only skills (Markdown) and one remote MCP server entry.
-  `xtask::skills_format` fails when `integrations/pylota-mail-plugin/` contains `hooks/`, `bin/`,
+  `xtask::skills_format` fails when `integrations/pylota-identity-plugin/` contains `hooks/`, `bin/`,
   `scripts/`, `monitors/`, `commands/` or `agents/`, or a manifest declares them, so installing the plugin
   runs no code on the user's machine.
 - **The bridge** connects only to the profile's `https://` URL, follows no redirects, refuses `--key`, and
@@ -1194,14 +1194,14 @@ No new event type. The `key.create` audit row's `details` gains `mcp_tools` (the
   it as §5.3 does and shows the reason next to the field; the page needs no JavaScript (FR-CON-1). The
   key's detail row shows the list or "all allowed tools".
 - **Connect your agent** (`/console/connect`): adds the Codex block, the Cursor block, the Claude Desktop
-  bridge block, the Agent SDK snippet and `pmail skills generate`, each with the workspace's API URL and
+  bridge block, the Agent SDK snippet and `idvy skills generate`, each with the workspace's API URL and
   the key's ID, never a secret ([Console › Screens](console.md#screens)).
 
 ## 16. Observability
 
 | Metric | Kind | Labels | Emitted by |
 |---|---|---|---|
-| `api_client_requests_total` | counter | `client` (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), `client_version` (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Mail-Client`; MCP requests are already counted by `mcp_method` |
+| `api_client_requests_total` | counter | `client` (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), `client_version` (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Identity-Client`; MCP requests are already counted by `mcp_method` |
 
 The labels are bounded: unknown products count as `other` and versions keep only major and minor. The
 operator dashboard gains a "Client versions" panel: requests by `client` and `client_version`, and the
@@ -1210,13 +1210,13 @@ old client is not an outage. The log schema gains `client` (one of the label val
 
 ## 17. Pylota agentic OS
 
-**Who uses what.** Pylota's API server is the only Pylota component that talks to Pylota Mail Cloud, with
+**Who uses what.** Pylota's API server is the only Pylota component that talks to Pylota Identity Cloud, with
 its partner key K1 and the tenant and identity keys K2–K7 it mints (Pylota's integration spec,
-`docs/plans/pylota-mail-integration.md` in the Pylota repository, §6; "spec" below). It should use `@pylotahq/mail` instead of the hand-written
+`docs/plans/pylota-mail-integration.md` in the Pylota repository, §6; "spec" below). It should use `@pylotahq/identity` instead of the hand-written
 `openapi-fetch` client of spec task W1.1. Pylota's agents in Claude Managed Agents (the operator
 coordinator and the specialists) reach mail only through Pylota's own internal capability routes, which
 choose the identity key from the session's agent spec, never from model input (spec §6, "Correction to the
-plan"). They never hold a Pylota Mail key, never load the MCP server and never load these skills in the
+plan"). They never hold a Pylota Identity key, never load the MCP server and never load these skills in the
 runtime. The public-webchat coordinator reaches no mail at all. MCP and the plugin are for people's local
 tools: the owner or an operator's staff using Claude Code or Claude Desktop with a narrow key minted by
 the partner key, for example a read-only identity key with `mcp_tools` set on a test tenant.
@@ -1225,7 +1225,7 @@ the partner key, for example a read-only identity key with `mcp_tools` set on a 
 
 | Guarantee | Pylota code it replaces or protects | Test |
 |---|---|---|
-| A send carries the caller's key, never a generated one; with `requireExplicitIdempotencyKeys: true` every `POST` does (spec W1.1: "sends the Idempotency-Key it is given and never invents one") | the Pylota Mail adapter's refusal of a send without a key (§7.1) | `ts::idempotency::y21_send_key_required`, `ts::idempotency::y71_explicit_mode` |
+| A send carries the caller's key, never a generated one; with `requireExplicitIdempotencyKeys: true` every `POST` does (spec W1.1: "sends the Idempotency-Key it is given and never invents one") | the Pylota Identity adapter's refusal of a send without a key (§7.1) | `ts::idempotency::y21_send_key_required`, `ts::idempotency::y71_explicit_mode` |
 | Every retry sends the same key and the same bytes | the adapter's retries of `5xx`, `429` and network errors (§7.1) | `ts::retry::y20_timeout_retries_same_key_and_bytes` |
 | An exhausted send ends in `OutcomeUnknownError` carrying the key | `queued_unconfirmed` rows and the 5-minute redrive with the sealed body (§7.1) | `ts::errors::y22_outcome_unknown_carries_key` |
 | `409 request_in_progress` waits and replays; `409 idempotency_conflict` is never retried or re-keyed | §7.1's rules for both codes | `ts::retry::y23_request_in_progress_budget`, `ts::retry::y24_conflict_not_retried` |
@@ -1233,7 +1233,7 @@ the partner key, for example a read-only identity key with `mcp_tools` set on a 
 | `402 billing_limit` and `429 daily_cap_reached` are surfaced with `details`, never slept for hours | the redrive's "not before `details.resets_at`" rule | `ts::retry::y26_long_retry_after_not_slept`, `ts::retry::y27_billing_limit_same_key` |
 | Webhook verification over raw bytes with the current and previous secret, 300-second tolerance, never `410` | `verifyStandardWebhook` of W1.2 and §8.2 steps 1–2 | `ts::webhooks::y29_clock_skew`, `ts::webhooks::y30_rotation_overlap`, `ts::webhooks::y31_raw_body_only`, `ts::webhooks::y33_status_codes_never_410` |
 | An event whose handler throws is retried, never marked done; two channels never run one event at once | the `mail_webhook_events` deduplication of §8.2 | `ts::events::y32_dedupe_across_channels`, `ts::webhooks::y33_status_codes_never_410` |
-| A `404` without the envelope is not evidence | W1.1's "treats a 404 without a Pylota Mail error code as not evidence" | `ts::errors::y28_envelope_decides` |
+| A `404` without the envelope is not evidence | W1.1's "treats a 404 without a Pylota Identity error code as not evidence" | `ts::errors::y28_envelope_decides` |
 | `/health` and `/openapi.json` are called at the host root | W1.1's root client | `ts::coverage::every_operation` (root `servers`) |
 | Unknown statuses, events and codes from a newer Cloud are tolerated | the daily spec-drift job (W1.1) | `ts::compat::y40_unknown_values_tolerated`, `ts::outcomes::y41_unknown_status_not_resendable` |
 | The key never appears in errors or logs | the key-boundary contract test (W1.2) | `ts::secrets::y43_key_never_serialised` |
@@ -1260,22 +1260,22 @@ rollback happened; `EventGapError` (if Pylota adopts the event feed) → the rec
 **What the integration spec must add** (for its owner):
 
 1. W1.1: replace `openapi-typescript@7.13.0`, `openapi-fetch@0.17.0` and the hand-written `client.ts`
-   with `@pylotahq/mail` at an exact version; construct it with `requireExplicitIdempotencyKeys: true`;
-   point `spec-compare.ts` at the contract the package ships (`@pylotahq/mail/openapi.json`) instead of a
+   with `@pylotahq/identity` at an exact version; construct it with `requireExplicitIdempotencyKeys: true`;
+   point `spec-compare.ts` at the contract the package ships (`@pylotahq/identity/openapi.json`) instead of a
    separately pinned file, keeping the daily drift job.
 2. **Node.js first.** `apps/api` runs `node:20.18.0-bookworm-slim` (`apps/api/Dockerfile`, lines 7 and
    23), and Node.js 20 reached end of life on 2026-04-30. The SDK supports Node.js 22 and later. Add a task
    before W1.1 adopts the SDK that moves `apps/api` (and the agent runtime embedded in it) to Node.js 24
    LTS, or keep the generated client until then.
-3. W1.2: build `verifyStandardWebhook` on `verifyWebhook` from `@pylotahq/mail/webhooks`, passing
+3. W1.2: build `verifyStandardWebhook` on `verifyWebhook` from `@pylotahq/identity/webhooks`, passing
    `[current, previous]`; keep Pylota's existing signature vectors as an extra test; keep "never answer
    `410`" (`createWebhookHandler` already does).
-4. The key-boundary test (W1.2): `apps/agent-runtime` must not import `@pylotahq/mail`; only the files
+4. The key-boundary test (W1.2): `apps/agent-runtime` must not import `@pylotahq/identity`; only the files
    that may read keys construct a client.
 5. Map the SDK's error classes to the adapter's `error_code` values in one table, and test each mapping.
 6. Optional, owner's choice: the event feed consumer (`mail.events.iterate`) as the source for the replay
    runbook of §8.5 instead of webhook replay windows.
-7. Renovate (or the monorepo's update process) must keep `@pylotahq/mail` exactly pinned and never group
+7. Renovate (or the monorepo's update process) must keep `@pylotahq/identity` exactly pinned and never group
    it with other updates, so a new contract arrives in a reviewed change.
 8. A migration adding `lease_until` and `completed_at` to `mail_webhook_events` (rows that exist then get
    `completed_at = received_at`, and the feed reconciliation of [Event feed § 17](event-feed.md#17-pylota-agentic-os)
@@ -1288,8 +1288,8 @@ rollback happened; `EventGapError` (if Pylota adopts the event feed) → the rec
 To add to [PRD §6.11](../prd.md#611-interfaces) after FR-SDK-1. All are P1 except where the scope table
 says otherwise; FR-SDK-11 extends the P0 annotations of M15.
 
-- **FR-SDK-2** The project **must** ship a TypeScript SDK, the npm package `@pylotahq/mail`, built in its
-  own repository `PILOTAAI/pylota-mail-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)), with exactly one method per
+- **FR-SDK-2** The project **must** ship a TypeScript SDK, the npm package `@pylotahq/identity`, built in its
+  own repository `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)), with exactly one method per
   `openapi.yaml` operation not marked `x-sdk: false`, generated from the `openapi.json` a release
   publishes, with no runtime dependencies. It **must** run on every Node.js line from its first release to
   its end of life, starting with Node.js 22, on Cloudflare Workers, on Deno and on Bun, and its
@@ -1321,7 +1321,7 @@ says otherwise; FR-SDK-11 extends the P0 annotations of M15.
   refuse to run in a browser or against a base URL that is not `https` (localhost excepted), and **must**
   follow no redirect.
 - **FR-SDK-9** The TypeScript SDK's major version **must** be the API's path version, and each SDK
-  release **must** name the Pylota Mail release whose contract it was generated from. It **must** be
+  release **must** name the Pylota Identity release whose contract it was generated from. It **must** be
   published only by the SDK repository's release workflow through npm trusted publishing with
   provenance, from a tarball listed in that repository's owner-signed `SHA256SUMS`, and a pre-release
   **must not** be published.
@@ -1338,14 +1338,14 @@ says otherwise; FR-SDK-11 extends the P0 annotations of M15.
   its permissions and level allow. A tool outside the list **must** be hidden and answer as an unknown
   tool. The list **must** be validated when the key is minted, kept by rotation, returned on the key
   object and on `GET /v1/me`, and recorded in the audit log.
-- **FR-SDK-13** `pmail mcp stdio` **must** bridge a stdio MCP client to the deployment's `/mcp` with the
+- **FR-SDK-13** `idvy mcp stdio` **must** bridge a stdio MCP client to the deployment's `/mcp` with the
   key from the environment or a profile, never from a flag; it **must** only narrow the tool list and
-  **must never** retry `tools/call`. `pmail mcp config` **must** print setup for Claude Code, Claude
+  **must never** retry `tools/call`. `idvy mcp config` **must** print setup for Claude Code, Claude
   Desktop, Cursor, Codex and the Claude Agent SDK without the key.
 - **FR-SDK-14** Every CLI command **must** describe itself with `--schema` (input, output and error
   schemas and exit codes) without reading configuration, needing a key or using the network, and **must**
   accept a JMESPath `--query` that applies only to success documents and never changes the exit code.
-  `pmail skills generate` **must** write the skills of its own version and **must not** overwrite a
+  `idvy skills generate` **must** write the skills of its own version and **must not** overwrite a
   locally modified file unless forced.
 - **FR-SDK-15** The docs **must** include guides for the Vercel AI SDK, the OpenAI Agents SDK, the Claude
   Agent SDK and LangChain, a TypeScript SDK guide, a Python guide and an agent skills guide, whose code
@@ -1366,7 +1366,7 @@ Section Y, rows Y20 onward (Y1–Y19 belong to [Deliverability metrics](metrics.
 | Y26 | `429` with `Retry-After` over 60 s, `daily_cap_reached`, `agentic_budget_exhausted` or `upstream_rate_limited` with a long wait | Thrown at once with `retryAfterSeconds` and `details` (`resets_at`); a `rate_limited` wait of at most 60 s is slept and counts as a retry; no client-side throttle from the absent `RateLimit-Remaining` | S | `ts::retry::y26_long_retry_after_not_slept` |
 | Y27 | `402 billing_limit` on a send | Not retried; `details.feature`, `resets_at` and `upgrade_url` exposed; the same key succeeds after an upgrade or top-up | S+I | `ts::retry::y27_billing_limit_same_key`, `ts::it::send::y27_billing_limit_then_upgrade` |
 | Y28 | A response without the service's envelope (proxy HTML, Cloudflare `52x`, a `404` from a wrong host), or an envelope whose `retryable` disagrees with its status | `UpstreamError`; `502/503/504` retried as transport failures; `UpstreamNotFoundError` for `404`, never read as "deleted"; the envelope's `retryable` decides over the status | S | `ts::errors::y28_envelope_decides` |
-| Y29 | A webhook's timestamp is outside the tolerance (receiver clock skew, a replayed capture) | `valid: false`, `reason: "timestamp_out_of_tolerance"`, `skewSeconds`; the handler answers `401`, Pylota Mail retries with a fresh timestamp, and a corrected clock recovers; tolerance 1–600 s, default 300 | S+I | `ts::webhooks::y29_clock_skew` |
+| Y29 | A webhook's timestamp is outside the tolerance (receiver clock skew, a replayed capture) | `valid: false`, `reason: "timestamp_out_of_tolerance"`, `skewSeconds`; the handler answers `401`, Pylota Identity retries with a fresh timestamp, and a corrected clock recovers; tolerance 1–600 s, default 300 | S+I | `ts::webhooks::y29_clock_skew` |
 | Y30 | Webhook secret rotation overlap | Each `v1,` entry is compared with each configured secret; either secret verifies; `matchedSecretIndex` names it | S | `ts::webhooks::y30_rotation_overlap` |
 | Y31 | Verification over a parsed and re-serialised body | An object body is a `TypeError`; only bytes or the received text are accepted; the vectors show that re-serialised JSON fails | S | `ts::webhooks::y31_raw_body_only` |
 | Y32 | One event arrives by webhook, replay, feed and stream, also at the same moment | `createEventDeduper` claims the `evt_` ID with a lease, so one channel runs the handler: a completed ID answers the webhook `200` without calling `onEvent`, a live claim answers `503` with `Retry-After`, and the feed and stream wait and claim again; a handler that throws releases the claim, so the event is handled on a later delivery and never marked done unhandled | S+I | `ts::events::y32_dedupe_across_channels` |
@@ -1393,14 +1393,14 @@ Section Y, rows Y20 onward (Y1–Y19 belong to [Deliverability metrics](metrics.
 | Y53 | A tool result over 50,000 characters reaches Claude Code | Every tool under the 96 KB cap carries `_meta["anthropic/maxResultSizeChars"]: 100000`, so the result stays in the conversation | S | `it::mcp::y53_result_size_meta` |
 | Y54 | A long tool description or server instructions | Each is at most 4,096 characters; each description's safety rule is within its first 1,024 | S | `it::mcp::y54_description_budgets` |
 | Y55 | The bridge loses its connection during `tools/call` | No retry; a tool result with `isError: true` and the `cli_outcome_unknown` envelope telling the model to retry with the same `idempotency_key`; only discovery and list calls are retried, once | S | `cli::mcp_stdio::y55_no_tools_call_retry` |
-| Y56 | `pmail mcp stdio --tools` names a tool the key cannot see | Nothing is widened; filtered tools are absent from `tools/list` and answer `-32602` locally | S | `cli::mcp_stdio::y56_tools_flag_narrows` |
+| Y56 | `idvy mcp stdio --tools` names a tool the key cannot see | Nothing is widened; filtered tools are absent from `tools/list` and answer `-32602` locally | S | `cli::mcp_stdio::y56_tools_flag_narrows` |
 | Y57 | Key handling in the bridge | `--key` refused (exit 2); key from the environment or profile; a bad key exits 4 before reading stdin; the key never reaches stdout or stderr | S | `cli::mcp_stdio::y57_key_never_on_stdout` |
 | Y58 | Protocol headers and cancellation through the bridge | Modern requests get `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` from the body; legacy requests the negotiated version; `notifications/cancelled` closes that request's stream; stdout carries only one MCP message per line | S | `cli::mcp_stdio::y58_headers_and_cancel` |
 | Y59 | A client's tool timeout is shorter than `mail_wait` (Codex defaults to 60 s) | The Codex snippet sets `tool_timeout_sec = 90`; every snippet is checked against its client's documented keys | S | `cli::mcp::y59_client_snippets` |
 | Y60 | A skill names a tool, route, field, error code, command, event type, permission or limit the contract lacks, or a generated block is stale | CI fails on that pull request | S | `xtask::skills_match_contract`, `xtask::skills_generated_current` |
 | Y61 | A skill loses or rewords a rule the registry assigns to it | CI fails | S | `xtask::skills_rules_present` |
 | Y62 | A key, webhook secret, token or credential URL appears in a skill or plugin file, or the plugin gains hooks, executables, scripts, monitors, commands or agents | CI fails; plugin configuration references only the sensitive `userConfig` value or an environment variable | S | `xtask::skills_no_secrets`, `xtask::skills_format` |
-| Y63 | `pmail skills generate` meets a skill file someone edited, or a skill a newer version dropped | The edited file is left and reported, exit 6 unless `--force`; a dropped skill's files are removed only when unmodified | S | `cli::skills::y63_generate_no_clobber` |
+| Y63 | `idvy skills generate` meets a skill file someone edited, or a skill a newer version dropped | The edited file is left and reported, exit 6 unless `--force`; a dropped skill's files are removed only when unmodified | S | `cli::skills::y63_generate_no_clobber` |
 | Y64 | `--query` with an invalid expression, on an error, or with an empty result | Invalid: exit 2 before any request; errors printed unfiltered; an empty or `null` result exits 0; a `--quiet` string result passes `terminal_safe` on a terminal | S | `cli::query::y64_query_rules` |
 | Y65 | `--schema` with no configuration, no key and no network | Exits 0 with a document valid against JSON Schema 2020-12; every `--json` output in the CLI suite validates against its command's `output` | S | `cli::schema::y65_offline_and_valid` |
 | Y66 | The SDK in a Cloudflare Worker | No Node.js built-in; Web Crypto for webhooks; requests serial within the request's lifetime; the stream uses the `fetch` upgrade | S | `ts::runtime::y66_workers_smoke` |
@@ -1412,7 +1412,7 @@ Section Y, rows Y20 onward (Y1–Y19 belong to [Deliverability metrics](metrics.
 
 ## Tests
 
-`ts::` tests run in the SDK repository, `PILOTAAI/pylota-mail-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)),
+`ts::` tests run in the SDK repository, `PILOTAAI/pylota-identity-typescript` ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)),
 and are defined here. `ts::<module>::<name>` tests are Vitest tests in its `test/` directory with a fake
 `fetch`, a fake WebSocket and the shared fixtures; `ts::it::<area>::<name>` tests run with Vitest against
 this repository's workerd harness, started at the contract's tag with `cargo xtask itest --serve`;
@@ -1487,7 +1487,7 @@ pull request copies to `sdks/typescript-tests.json` here, where `cargo xtask tra
 | `cli::mcp_stdio::y56_tools_flag_narrows` | `--tools` removes tools from `tools/list` and answers `-32602` for them locally; a name the key cannot see stays hidden | Y56, FR-SDK-13 |
 | `cli::mcp_stdio::y57_key_never_on_stdout` | `--key` is exit 2; a bad key is exit 4 before stdin is read; captured stdout and stderr never contain the key | Y57, FR-SDK-13 |
 | `cli::mcp_stdio::y58_headers_and_cancel` | Modern and legacy requests carry the headers of §5.4; `notifications/cancelled` aborts that request; every stdout line parses as one JSON-RPC message | Y58, FR-SDK-13 |
-| `cli::mcp::y59_client_snippets` | `pmail mcp config --client` prints the five forms of §5.5 for the profile's URL, never a key; the Codex form has `tool_timeout_sec = 90`; the tool list applies `mcp_tools` | Y59, FR-SDK-13 |
+| `cli::mcp::y59_client_snippets` | `idvy mcp config --client` prints the five forms of §5.5 for the profile's URL, never a key; the Codex form has `tool_timeout_sec = 90`; the tool list applies `mcp_tools` | Y59, FR-SDK-13 |
 | `cli::schema::y65_offline_and_valid` | `--schema` works with no config, key or network; every document validates against the 2020-12 meta-schema; every `--json` output of the CLI suite validates against its command's `output` | Y65, FR-SDK-14 |
 | `cli::query::y64_query_rules` | Invalid expressions exit 2 before any request; errors are unfiltered; `null` results exit 0; `--all` documents are queried whole; NDJSON lines are queried one by one; the JMESPath compliance suite passes | Y64, FR-SDK-14 |
 | `cli::skills::y63_generate_no_clobber` | A modified file is kept and reported with exit 6, replaced with `--force`; dropped skills' unmodified files are removed; the manifest records hashes | Y63, FR-SDK-14 |
@@ -1515,7 +1515,7 @@ verification or stream resume.
 **Files:** in this repository, `sdks/fixtures/**`, `sdks/typescript-tests.json`, `integrations/**`,
 `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `.cursor-plugin/marketplace.json`,
 `xtask/src/{gen_skills.rs, skills_check.rs}`, `crates/cli/src/{schema.rs, query.rs, commands/skills.rs,
-commands/mcp_stdio.rs}`, the new guides. In the SDK repository `PILOTAAI/pylota-mail-typescript`
+commands/mcp_stdio.rs}`, the new guides. In the SDK repository `PILOTAAI/pylota-identity-typescript`
 ([ADR 0018](../adr/0018-typescript-sdk-in-its-own-repository.md)): the package, its generator, tests, compiled guide examples and
 release workflows ([SDKs, skills and agent tooling § 2.1](#21-package-and-layout)). Hooks in other
 milestones' files, each reviewed by that file's owner:
@@ -1529,7 +1529,7 @@ milestones' files, each reviewed by that file's owner:
 | `crates/cli/src/commands/mcp.rs` (M16) | `mcp config --client codex\|claude-desktop\|agent-sdk` |
 | `console/pages/keys.rs`, `console/pages/connect.rs` (M21) | The MCP tools fieldset; the new snippets |
 | `.github/workflows/ci.yml` (M19) | Job `skills` |
-| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-mail-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` and prints a name it lacks as `pending (SDK)` |
+| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-identity-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` and prints a name it lacks as `pending (SDK)` |
 
 **Tasks.**
 
@@ -1539,7 +1539,7 @@ milestones' files, each reviewed by that file's owner:
 2. Webhook verification and the handler (§2.10).
 3. `mcp_tools` end to end: column, minting rules, filter, `GET /v1/me`, console fieldset.
 4. Effect classes, `_meta` hints and description budgets in the MCP server.
-5. `pmail mcp stdio`, `mcp config` clients, `--schema`, `--query`, `skills generate`.
+5. `idvy mcp stdio`, `mcp config` clients, `--schema`, `--query`, `skills generate`.
 6. The skills, the rule registry, `gen-skills`, the checks and the three marketplaces.
 7. The SDK repository's release path: `npm pack` and the owner's signature in its `release.yml`, trusted
    publishing in its `release-publish.yml`, the contract and version checks, the npm trusted-publisher
@@ -1547,9 +1547,9 @@ milestones' files, each reviewed by that file's owner:
 8. After M30: the event helpers of §2.11. After M29 and M33: the draft and upload helpers of §2.12.
 9. The guides of §7.
 
-**Human prerequisites.** Create the public repository `PILOTAAI/pylota-mail-typescript` (FSL-1.1-ALv2).
+**Human prerequisites.** Create the public repository `PILOTAAI/pylota-identity-typescript` (FSL-1.1-ALv2).
 Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com, configure the trusted publisher
-for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail-typescript`, workflow `release-publish.yml`,
+for `@pylotahq/identity` (repository `PILOTAAI/pylota-identity-typescript`, workflow `release-publish.yml`,
 environment `release`) and turn on "Require two-factor authentication and disallow tokens" after the first
 publish. Give the SDK repository a staging test key for `ts::live::round_trip`. Pin Deno and Bun
 versions for the SDK repository's CI.
@@ -1570,7 +1570,7 @@ versions for the SDK repository's CI.
   and the extended `it::security::mcp_tools_follow_key`; `it::mcp::inspector_replay` still replays green.
 - `cli::skills::generate_for_key` and `cli::mcp::y59_client_snippets`; the `skills` job green with
   `skills-ref validate` (and `claude plugin validate --strict` if it runs without signing in).
-- The SDK repository's first release candidate produces `pylotahq-mail-{version}.tgz` in its draft
+- The SDK repository's first release candidate produces `pylotahq-identity-{version}.tgz` in its draft
   release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
@@ -1581,17 +1581,17 @@ versions for the SDK repository's CI.
 AgentMail facts are from the inventory files of 2026-10-17 and, where marked, from the npm and PyPI
 registries read the same day.
 
-| AgentMail | Pylota Mail | Verdict |
+| AgentMail | Pylota Identity | Verdict |
 |---|---|---|
-| Python and TypeScript SDKs (npm `agentmail` 0.5.46, PyPI `agentmail` 2.0.18, registries read 2026-10-17) | Rust SDK (v1.0) and TypeScript SDK `@pylotahq/mail`; Python is P2, served by the OpenAPI document, MCP and the CLI | Deliberately different: one TypeScript user today, and a third SDK triples the safety-critical surface for one owner (§3) |
+| Python and TypeScript SDKs (npm `agentmail` 0.5.46, PyPI `agentmail` 2.0.18, registries read 2026-10-17) | Rust SDK (v1.0) and TypeScript SDK `@pylotahq/identity`; Python is P2, served by the OpenAPI document, MCP and the CLI | Deliberately different: one TypeScript user today, and a third SDK triples the safety-critical surface for one owner (§3) |
 | SDKs auto-retry `429`; the sample backs off 3 times | Retries only what the envelope marks `retryable`, network failures and proxy `5xx`; same key and bytes; typed `OutcomeUnknownError` with the key; long waits thrown, not slept | Exceed |
 | Optional `Idempotency-Key` on sends, kept 24 hours; `client_id` on creates | Key required on sends and kept 30 days; the SDK never generates one for a send; keys derivable from the task | Exceed |
 | Webhook verification left to the integrator (Svix-compatible helper in the LangChain package) | Built-in Standard Webhooks verification over raw bytes with rotation overlap and a handler that never answers `410` | Exceed |
 | TypeScript WebSocket client "with automatic reconnection"; no replay documented | Stream that resumes from a cursor with no gap, a gap error on `410 cursor_expired`, stop on revoked keys, one deduplicator across channels | Exceed |
-| `agentmail-cli` (npm 1.9.0): `--schema`, `--dry-run`, `--format json\|table\|yaml\|csv\|raw\|jsonl\|http`, JMESPath `--query`, `generate-skills` | `pmail`: `--schema` (offline, with output schemas and exit codes), JMESPath `--query`, `--json`, `skills generate` (no clobbering, tailored to the key), server-side dry run on sends | Match, and deliberately fewer output formats: `--json` with `--query` covers extraction |
+| `agentmail-cli` (npm 1.9.0): `--schema`, `--dry-run`, `--format json\|table\|yaml\|csv\|raw\|jsonl\|http`, JMESPath `--query`, `generate-skills` | `idvy`: `--schema` (offline, with output schemas and exit codes), JMESPath `--query`, `--json`, `skills generate` (no clobbering, tailored to the key), server-side dry run on sends | Match, and deliberately fewer output formats: `--json` with `--query` covers extraction |
 | Skills repository and plugins for Claude Code, Codex, Cursor, ChatGPT and OpenClaw; plugins sign in with OAuth | Skills and plugins in the product repository, released and signed with the product, checked against the contract of the same commit; Claude Code, Codex and Cursor; API key in Claude Code's secure `userConfig` | Exceed on drift and supply chain; OpenClaw deliberately left out (format not verified, no user), and ChatGPT until MCP OAuth 2.1, because it offers no static header ([§5.6](#56-oauth-21-stays-v11)) |
 | Hosted MCP with 43 tools, OAuth or `x-api-key` | MCP with API keys as `Authorization: Bearer`; OAuth 2.1 in v1.1 | Deliberately different ([ADR 0016](../adr/0016-plan-items-changed-for-v1.md)) |
-| stdio bridge `agentmail-mcp` (npm 1.1.0) with `--tools` | `pmail mcp stdio --tools` in the signed binary, key from a profile or keychain, never retries `tools/call`; plus a server-side per-key allow-list | Exceed |
+| stdio bridge `agentmail-mcp` (npm 1.1.0) with `--tools` | `idvy mcp stdio --tools` in the signed binary, key from a profile or keychain, never retries `tools/call`; plus a server-side per-key allow-list | Exceed |
 | Tool annotations on some tools (from the truncated manifest) | All four annotations on every tool from effect classes, tested; Claude Code result-size hint; description budgets | Exceed |
 | Framework toolkits: `agentmail-toolkit` (npm 0.15.1, PyPI 0.3.2) for OpenAI Agents, LangChain, Vercel AI SDK, LiveKit; `langchain-agentmail` | Guides that use each framework's own MCP client or the TypeScript SDK; no toolkit packages in v1.0 | Deliberately different: fewer packages to secure and keep current |
 | Claude Agent SDK guide: `allowedTools` required | Same rule, and never a wildcard on a key that can send | Match |

@@ -31,7 +31,7 @@ of `wait` would not stop it: the mail itself must be held.
    domain of an authenticated (`verdict: pass`) `From` is one of the entry's sender domains, and the
    message was delivered to the entry's address. Senders on the receive-allow list are exempt. `wait` with
    `kind=verification` **must** refuse a domain without an approved entry (`403 policy_denied`).
-4. `accounts.require_approval` **must** be off in the built-in defaults, on in Pylota Mail Cloud's
+4. `accounts.require_approval` **must** be off in the built-in defaults, on in Pylota Identity Cloud's
    `PM_DEFAULT_POLICY`, and lower-only with `false` as the looser value.
 5. Changes **must** emit `account.requested`, `account.approved`, `account.rejected` and `account.closed`.
 

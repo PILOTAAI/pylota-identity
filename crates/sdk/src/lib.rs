@@ -1,7 +1,7 @@
-//! The Rust client for the Pylota Mail REST API, the event stream and the agent-assertion verifier
+//! The Rust client for the Pylota Identity REST API, the event stream and the agent-assertion verifier
 //! (build plan M16, [Rust workspace §11]).
 //!
-//! [Rust workspace §11]: https://github.com/PILOTAAI/pylota-mail/blob/main/docs/src/project/design/rust-workspace.md
+//! [Rust workspace §11]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/rust-workspace.md
 #![forbid(unsafe_code)]
 
 #[cfg(test)]

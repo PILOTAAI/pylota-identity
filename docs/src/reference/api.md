@@ -303,7 +303,7 @@ with `policy:write`.
 }
 ```
 
-- `address_suffix` defaults to `"." + slug`. Only one tenant (the default tenant made by `pmail setup`)
+- `address_suffix` defaults to `"." + slug`. Only one tenant (the default tenant made by `idvy setup`)
   can have an empty suffix. Every tenant shares the platform domain, so a suffix must not pass for
   someone else ([D12](../project/edge-cases.md)). Its fold (the confusable fold of
   [Identities › Username validation](../project/design/identity-domains.md#username-validation), without the
@@ -443,7 +443,7 @@ suspended, otherwise `null`. Tenants are deleted through an erasure request with
 ## Partners
 
 A **partner** is an integrator that creates tenants for its own customers on a shared deployment and
-manages them with **partner keys**. On Pylota Mail Cloud, Pylota is a partner: each car-rental operator
+manages them with **partner keys**. On Pylota Identity Cloud, Pylota is a partner: each car-rental operator
 is a tenant created with Pylota's partner key, billed `exempt`, and no Pylota key reaches another Cloud
 customer ([FR-KEY-4](../project/prd.md#61-tenancy-and-access)). The routes in this section need a
 platform key with `partners:manage`, which a partner key can never hold.
@@ -723,7 +723,7 @@ No body. For an address on a domain with `inbound: forward` (method `send_only`,
 Any other address returns `422 transport_unavailable` with `details.reason: "method_not_supported"`.
 
 It sends a short message to the address, from `mailer-daemon@{platform domain}` with the subject
-"Pylota Mail forwarding check" and a one-time token. If the token reaches the identity's platform address
+"Pylota Identity forwarding check" and a one-time token. If the token reaches the identity's platform address
 within 10 minutes, the address's `forwarding` becomes `ok`; otherwise `failed`
 ([N12](../project/edge-cases.md)). The check is never stored as a message and does not count as a plan
 send. Returns `202` with the [Address](#address-object); read the address again for the result. No
@@ -967,7 +967,7 @@ operator side is in [Self-hosting › Signed HTTP requests](../self-hosting.md#s
 
 The service sign-up ledger: an agent records each third-party account it wants to create with its
 identity's address, and an operator approves or rejects it. Where the tenant's `accounts.require_approval`
-is `true` (the default on Pylota Mail Cloud), verification mail from a service reaches the agent only when
+is `true` (the default on Pylota Identity Cloud), verification mail from a service reaches the agent only when
 an approved entry matches it; other such mail is quarantined with `account_unapproved`
 ([Service sign-up ledger](../project/design/service-accounts.md)). Every change emits an `account.*`
 [event](events.md#service-accounts) and writes an audit row (`account.request`, `account.approve`,
@@ -1051,7 +1051,7 @@ it as untrusted text.
 
 ## Agent sign-up
 
-Self-sign-up for agents on Pylota Mail Cloud, behind `PM_AGENT_SIGNUP` (FR-ASU,
+Self-sign-up for agents on Pylota Identity Cloud, behind `PM_AGENT_SIGNUP` (FR-ASU,
 [Agent self-sign-up](../project/design/agent-signup.md)). One call without a key creates a provisional
 workspace, one inbox `agent.{username}@{platform domain}` and one identity key; the named human verifies
 with a six-digit code or a link; an unverified workspace is erased after 7 days. Until then every key of
@@ -1072,7 +1072,7 @@ The body may be at most 4,096 bytes (`413 payload_too_large`, `details.limit: 40
   "username": "travel-planner",
   "human_email": "sam@brightwell.example",
   "agent_name": "Travel planner",
-  "source": "pylota-mail-python/1.2.0",
+  "source": "pylota-identity-python/1.2.0",
   "accept_terms": true
 }
 ```
@@ -1141,7 +1141,7 @@ first failing check decides the answer:
             "emails_left_this_hour": 2, "email": "queued" },
   "permissions": ["identities:read", "messages:read", "messages:send", "messages:write",
                   "attachments:read", "search:read", "events:read", "usage:read"],
-  "verified_at": null, "verified_via": null, "source": "pylota-mail-python/1.2.0",
+  "verified_at": null, "verified_via": null, "source": "pylota-identity-python/1.2.0",
   "created_at": "2026-10-17T09:00:00Z"
 }
 ```
@@ -1222,7 +1222,7 @@ What each method checks before the domain is created:
 
 - **`cloudflare_zone`, `nameservers` and `delegated_subdomain`** need `PM_CF_API_TOKEN` on the Worker;
   without it the request fails with `422 cf_token_required`. For an apex `cloudflare_zone`,
-  `pmail domains add --local-token` with your own Cloudflare token works instead (catch-all, no literal
+  `idvy domains add --local-token` with your own Cloudflare token works instead (catch-all, no literal
   rules).
 - **Zone permission** (tenant and partner keys): `cloudflare_zone`, and `replace_mx` with it, work only on
   a zone this deployment created for the tenant (with `nameservers` or `delegated_subdomain`) or one
@@ -1238,7 +1238,7 @@ What each method checks before the domain is created:
   (`409 domain_exists`, [H10](../project/edge-cases.md)). Platform keys may use it when the Worker's
   Cloudflare token can create zones; tenant and partner keys only when the tenant's policy also has
   `domains.allow_create_zone: true` (otherwise `422 transport_unavailable`,
-  `details.reason: "zone_creation_not_allowed"`). Pylota Mail Cloud does not offer it. Moving the
+  `details.reason: "zone_creation_not_allowed"`). Pylota Identity Cloud does not offer it. Moving the
   nameservers hands the whole domain to this
   deployment, so when the name has A, AAAA or MX records, or `www` has a CNAME, A or AAAA record, the request
   needs `"confirm_dedicated": true`; otherwise it fails with `409 domain_not_dedicated` and
@@ -1273,7 +1273,7 @@ Also:
   another tenant (in any state), or one for which the deployment's Cloudflare or AWS account already holds a
   zone, sending domain, routing setup or SES identity it did not create for you, returns `409 domain_exists`
   with one body for all of these cases, so the answer reveals nothing about others. Its `details.claim` is a
-  TXT record, `_pylota-mail.{name}` = `pm-claim=…`. If you control the name's DNS, publish it and repeat
+  TXT record, `_pylota-identity.{name}` = `pm-claim=…`. If you control the name's DNS, publish it and repeat
   the request with `"claim": true`: a holder that never verified the domain is evicted, the answer is
   `409 domain_claim_pending` with `Retry-After` until its removal finishes, and then the same request
   succeeds. A verified holder is never evicted ([H14](../project/edge-cases.md)).
@@ -1302,7 +1302,7 @@ Re-reads the expected records from the provider APIs and checks each against DNS
 ```json
 {
   "data": [
-    { "type": "TXT", "name": "_pylota-mail.mail.acmecarhire.example", "host": "_pylota-mail.mail",
+    { "type": "TXT", "name": "_pylota-identity.mail.acmecarhire.example", "host": "_pylota-identity.mail",
       "value": "pm-verify=8f2k…", "purpose": "ownership", "required": true, "status": "ok",
       "observed": ["pm-verify=8f2k…"] },
     { "type": "TXT", "name": "cf-bounce._domainkey.mail.acmecarhire.example", "host": "cf-bounce._domainkey.mail",
@@ -1378,7 +1378,7 @@ No body. Runs the alignment probe now, for a domain whose transport is `smtp` (o
 ```
 
 The probe sends a message `From: {probe_from}` through the relay to an address on the platform domain. It
-passes when the `From` header arrives unchanged and DMARC for the domain passes on Pylota Mail's own
+passes when the `From` header arrives unchanged and DMARC for the domain passes on Pylota Identity's own
 check. The result arrives as a domain health change within 15 minutes: in the domain's `probe`, and on
 failure as the issue `smtp_unaligned`, `smtp_from_rewritten` or `smtp_probe_timeout`
 ([Domains on any DNS host › The probe](../project/design/domain-connections.md#53-proving-alignment-the-probe)).
@@ -1449,8 +1449,8 @@ in the background, so `DELETE` never waits for it.
 | `smtp` | `smtp_relay` only, otherwise `null`: `{ "host", "port", "username", "probe_from" }`. Never the password |
 | `probe` | `smtp` transport only, otherwise `null`: `{ "last_at", "result" }`. `result` is `pass` or the issue code of the failure (`smtp_unaligned`, `smtp_from_rewritten`, `smtp_probe_timeout`, `smtp_auth_failed`, `smtp_tls_required`); both are `null` before the first probe |
 | `state_reason` | The first issue code; `zone_expired` on a `nameservers` domain whose zone Cloudflare deleted; `evicted` or `unverified_expired` on a never-verified domain being or already removed |
-| `delivery_events` | `active` (provider delivery events reach the service), `manual` (a Cloudflare-transport domain created without an event subscription: run `pmail domains subscribe <domain>`; until then its sends go out from each identity's platform address, marked `sent_via_fallback`), or `none` (`sending: false`). See [Identities and domains › Kind `zone`](../project/design/identity-domains.md#kind-zone) |
-| `details` | `null`, or `{ "action": "run pmail domains subscribe <domain>" }` while `delivery_events` is `manual`: the operator step that remains |
+| `delivery_events` | `active` (provider delivery events reach the service), `manual` (a Cloudflare-transport domain created without an event subscription: run `idvy domains subscribe <domain>`; until then its sends go out from each identity's platform address, marked `sent_via_fallback`), or `none` (`sending: false`). See [Identities and domains › Kind `zone`](../project/design/identity-domains.md#kind-zone) |
+| `details` | `null`, or `{ "action": "run idvy domains subscribe <domain>" }` while `delivery_events` is `manual`: the operator step that remains |
 
 ---
 
@@ -1776,7 +1776,7 @@ Moves a quarantined message to `received`, emits `message.released` and, when th
 received, `message.received` with `released: true` (in that order, in one transaction), and runs triage. A
 message still being screened gets `409 not_quarantined` with `details.status = "screening"` and
 `details.deadline_at`. Audit-logged
-(`quarantine.release`, with the key). When `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Mail Cloud),
+(`quarantine.release`, with the key). When `PM_QUARANTINE_KEY_RELEASE` is `off` (Pylota Identity Cloud),
 every API key gets `403 permission_denied` and the release has to be done by a person in the console
 (FR-CON-6), unless the message's tenant has `policy.quarantine.key_release: true`: then a platform key, or
 the partner key of the tenant's own partner, with `quarantine:review` may release it; tenant and identity
@@ -2634,8 +2634,8 @@ live (unredeemed and unexpired) per tenant (`429 rate_limited`, `details.bucket:
 
 ### `GET /v1/events/stream` — `events:read`, WebSocket
 
-Upgrade with `Authorization: Bearer …`, or with the subprotocols `pylota-mail.events.v1` and
-`pylota-mail.token.{token}`. Never put a key or token in the URL (`400 invalid_request`,
+Upgrade with `Authorization: Bearer …`, or with the subprotocols `pylota-identity.events.v1` and
+`pylota-identity.token.{token}`. Never put a key or token in the URL (`400 invalid_request`,
 `details.reason: "credential_in_url"`). Send `{"type":"subscribe","after":"ec_…"}` (or `since`, or
 `consumer_id`) within 60 seconds; receive `subscribed`, `events`, `heartbeat` and `error` messages; send
 `ack` with a cursor (optional below 1,000 events per connection) and `{"type":"ping"}`. At most 100
@@ -3303,7 +3303,7 @@ their own requests: the jobs started here, and the `retention`, `backup` and `do
 ### `GET /v1/platform/status`
 
 Platform keys with `audit:read` (the external heartbeat's key holds only that). The deployment's
-operational state, read by `pmail doctor`, `pmail ops status` and the heartbeat
+operational state, read by `idvy doctor`, `idvy ops status` and the heartbeat
 ([Observability § 5.5](../project/design/observability.md#55-alert-email-and-the-external-heartbeat)):
 
 ```json
@@ -3389,7 +3389,7 @@ Invites the oldest confirmed, not yet invited entries of the sign-up waitlist
 ([Cloud sign-up › The waitlist](../project/design/cloud-signup.md#61-before-launch-the-waitlist)). `count`
 is 1–500. `plan` (optional) invites only entries whose plan of interest is that plan. Each invited person
 gets a sign-up link valid for 7 days. The audit action is `waitlist.invite`. `Idempotency-Key` is
-optional. The CLI equivalent is `pmail waitlist invite --count N [--plan P]`. Returns `200` with the
+optional. The CLI equivalent is `idvy waitlist invite --count N [--plan P]`. Returns `200` with the
 number invited and the number of confirmed entries still waiting:
 
 ```json

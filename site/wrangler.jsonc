@@ -1,4 +1,4 @@
-// Pylota Mail landing page and docs, deployed as an assets-only Worker:
+// Pylota Identity landing page and docs, deployed as an assets-only Worker:
 // no Worker script ("main") and no bindings.
 //
 // Build the docs first (`mdbook build docs` writes them to site/public/docs), then, in site/:
@@ -15,7 +15,7 @@
 
   // Production hostnames. A Custom Domain makes Cloudflare create the DNS record
   // and certificate on deploy. pylotamail.com is also the shared mail domain of
-  // Pylota Mail Cloud: its MX, SPF and DKIM records are separate DNS records and are
+  // Pylota Identity Cloud: its MX, SPF and DKIM records are separate DNS records and are
   // not touched by this. Self-hosters: replace these with your own hostnames (the
   // zone must be on Cloudflare in the same account), or delete the block to serve
   // the site on workers.dev only.

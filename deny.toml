@@ -42,13 +42,13 @@ exceptions = [
     # The Mozilla root certificates as data (Security § 11 is the record the allow-list rule asks for).
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
     # This repository's own crates.
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-core" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-platform" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-api-types" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-worker" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-cli" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-mail-conformance" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-core" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-platform" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-api-types" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-worker" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-cli" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-conformance" },
     { allow = ["FSL-1.1-ALv2"], crate = "xtask" },
 ]
 

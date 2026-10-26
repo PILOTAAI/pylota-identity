@@ -2,21 +2,21 @@
 
 Binding for implementation. This page defines what the deployment records about itself (logs, metrics,
 alert state), how service-level objectives are measured, which alerts fire and how they reach a person,
-the dead-letter queue consumers, `/health` and `pmail doctor`, and the runbooks. Nothing here may record
+the dead-letter queue consumers, `/health` and `idvy doctor`, and the runbooks. Nothing here may record
 mail content or clear-text addresses ([Security › Logging rules](security.md#12-logging-rules)).
 
 | | |
 |---|---|
 | Requirements | FR-OPS-3, FR-OPS-4, FR-PRV-6, FR-DLV-3, FR-DLV-5, FR-DOM-9, FR-IDN-6…8, FR-CON-14, FR-CON-15, FR-BILL-13, NFR-REL-1…4, NFR-PERF-1…6, NFR-PRV-1, NFR-OPS-2, NFR-OPS-3 |
 | Edge cases | [D4](../edge-cases.md), [D5](../edge-cases.md), [G3](../edge-cases.md), [G8](../edge-cases.md), [I5](../edge-cases.md), [J4](../edge-cases.md), [J5](../edge-cases.md), [J6](../edge-cases.md), [J8](../edge-cases.md), [N1](../edge-cases.md), [N4](../edge-cases.md), [N10](../edge-cases.md), [O24](../edge-cases.md), [O25](../edge-cases.md), [I6](../edge-cases.md), [J30](../edge-cases.md)–[J33](../edge-cases.md) |
-| Code | `crates/worker/src/log.rs`, `crates/worker/src/metrics.rs`, `crates/worker/src/ops/` (alert evaluator, alert email, containment rules, switches, freeze, restore, DLQ consumer), `crates/core/src/slo.rs` (alert rule evaluation, pure), `crates/cli/src/ops/` (`pmail ops`), `.github/workflows/heartbeat.yml` |
+| Code | `crates/worker/src/log.rs`, `crates/worker/src/metrics.rs`, `crates/worker/src/ops/` (alert evaluator, alert email, containment rules, switches, freeze, restore, DLQ consumer), `crates/core/src/slo.rs` (alert rule evaluation, pure), `crates/cli/src/ops/` (`idvy ops`), `.github/workflows/heartbeat.yml` |
 
 ## 1. Signals
 
 | Signal | Where | Retention | Holds |
 |---|---|---|---|
 | Structured logs | Workers Logs (one JSON object per `console.log` line) | 7 days (Cloudflare) | IDs, codes, counts, durations, pseudonyms (section 2) |
-| Metrics | Workers Analytics Engine dataset `pylota_mail_metrics`, binding `METRICS` | 3 months (Cloudflare) | Counters and observations with low-cardinality labels (section 3) |
+| Metrics | Workers Analytics Engine dataset `pylota_identity_metrics`, binding `METRICS` | 3 months (Cloudflare) | Counters and observations with low-cardinality labels (section 3) |
 | Alert state | D1 `audit_log` rows `alert.fired` / `alert.resolved`, plus an `alert_fired` metric and, for page alerts, alert email (section 5.5) | Life of the deployment | Alert key, severity, values |
 | Events | Webhooks (`domain.failing`, `quota.warning`, `webhook.disabled`, `erasure.failed`, `identity.paused`, …) | [Webhook events](../../reference/events.md) | Tenant-facing conditions |
 | Traces | Workers traces | 7 days (Cloudflare) | Staging only (below) |
@@ -46,7 +46,7 @@ enabled = false                # production; staging sets true with head_samplin
 
 [[analytics_engine_datasets]]
 binding = "METRICS"
-dataset = "pylota_mail_metrics"
+dataset = "pylota_identity_metrics"
 ```
 
 Cloudflare's invocation log for a `fetch` is the method and full URL, and for the email handler it is
@@ -151,13 +151,13 @@ Every metric is written to `METRICS` with the same layout, so one SQL shape read
   `tenant_id` are, because their counts are bounded by configuration.
 - Writes never fail a request: an error from the binding is logged once per isolate and ignored.
 
-Reading (Analytics SQL API dataset `events.analyticsEngine."pylota_mail_metrics"`, account scope; sample
+Reading (Analytics SQL API dataset `events.analyticsEngine."pylota_identity_metrics"`, account scope; sample
 weights are applied to `COUNT`, `SUM` and `AVG` automatically, per the SQL API datasets page read
 2026-10-09):
 
 ```sql
 SELECT blob4 AS domain_id, SUM(double1) AS value
-FROM events.analyticsEngine."pylota_mail_metrics"
+FROM events.analyticsEngine."pylota_identity_metrics"
 WHERE accountTag = '<ACCOUNT_TAG>'
   AND timestamp >= NOW() - INTERVAL '1' HOUR
   AND blob1 = 'bounces_total' AND blob2 = 'production'
@@ -317,7 +317,7 @@ GROUP BY domain_id
 | `agent_signup_ended_total` | counter | reason (`expired`, `abandoned`, `refused`) | `signup/end.rs`, `crons/agent_signup.rs` |
 | `agent_signup_mail_total` | counter | result (`queued`, `not_sent`, `delivered`, `bounced`, `complained`) | `signup/mail.rs`, `signup/outcomes.rs` |
 | `agent_signup_refusals_total` | counter | reason (`refused`, `complaint`, `lifted`) | `signup/end.rs`, `signup/outcomes.rs` |
-| `api_client_requests_total` | counter | client (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), client_version (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Mail-Client`; MCP requests are already counted by `mcp_method` ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)) |
+| `api_client_requests_total` | counter | client (`ts_sdk`, `rust_sdk`, `cli`, `mcp_bridge`, `other`), client_version (`major.minor` from the product token, or `unknown`) | `fetch`, from `User-Agent` or `X-Pylota-Identity-Client`; MCP requests are already counted by `mcp_method` ([SDKs, skills and agent tooling § 16](sdk-and-skills.md#16-observability)) |
 | `messages_batch_total` | counter | op (`get`, `update`), result (`ok` or the error code) | `fetch` ([Parity additions § 11](parity-additions.md#11-observability)) |
 | `messages_batch_ids` | observation | op | `fetch`: IDs per request |
 | `label_events_total` | counter | source (`message`, `thread`, `batch`) | mailbox |
@@ -356,7 +356,7 @@ NFR-COST-1 is checked by reviewing Cloudflare usage after a week of idling on st
 
 ### 5.1 How alerts reach the operator
 
-Pylota Mail Cloud is run by one person, who is also its developer: there is no second person and no
+Pylota Identity Cloud is run by one person, who is also its developer: there is no second person and no
 on-call rota. Alerting is therefore built so that nothing depends on someone watching a dashboard, on a
 single delivery path, or on the deployment itself still running ([ADR 0015](../adr/0015-solo-operator.md),
 NFR-OPS-3, [J32](../edge-cases.md)).
@@ -369,7 +369,7 @@ NFR-OPS-3, [J32](../edge-cases.md)).
 | **Heartbeat** | A scheduled GitHub Actions workflow outside Cloudflare (section 5.5) | A failed workflow run, which GitHub notifies to the owner by email |
 
 Custom Alerts are created in the Cloudflare dashboard from the queries in `deploy/observability/alerts/`;
-no creation API was found in the documentation on 2026-10-09, so `pmail doctor` cannot check that they
+no creation API was found in the documentation on 2026-10-09, so `idvy doctor` cannot check that they
 exist. That is why no condition that needs action relies on a Custom Alert alone: every page-severity
 condition is a state alert (class B), which the Worker emails itself and the heartbeat checks.
 
@@ -420,7 +420,7 @@ the window (the Custom Alert "minimum event count").
 | `domain_failing:{domain_id}` | B + C | Domain enters `failing` or `suspended` (`domain.failing`, `domain.suspended`) | ticket | [Domain failing](#domain-failing) |
 | `platform_domain_failing` | B | The platform domain enters `failing`, or shows `dns_unresolvable` or `dnssec_bogus`: all system mail and every fallback send depend on it ([H9](../edge-cases.md)) | page | [Domain failing](#domain-failing) (the platform domain is never suspended; `POST /v1/domains/{id}/reprove` re-reads its zone) |
 | `domain_remove_failed:{domain_id}` | B | A `domain_remove` job is `failed` after 10 attempts on one step; the domain stays `removing` and the job restarts once a day ([H12](../edge-cases.md)) | ticket | [Domain failing](#domain-failing) (read the job's `last_error`; `DELETE /v1/domains/{id}` restarts it at once) |
-| `delivery_events_manual:{domain_id}` | B | A Cloudflare-transport domain with `sending` has no event subscription (`delivery_events: "manual"`); its sends use the platform address meanwhile ([H17](../edge-cases.md)) | ticket | Run `pmail domains subscribe <domain>` |
+| `delivery_events_manual:{domain_id}` | B | A Cloudflare-transport domain with `sending` has no event subscription (`delivery_events: "manual"`); its sends use the platform address meanwhile ([H17](../edge-cases.md)) | ticket | Run `idvy domains subscribe <domain>` |
 | `inbound_throttled` | A | `inbound_throttled_total` > 100 over 1 h: one or more senders exceed `inbound.per_sender_per_hour` and their excess is stored `throttled` ([D5](../edge-cases.md)) | ticket | [Abusive identity](#abusive-identity) (the affected mailbox's `rate_windows` rows name the sender; add a receive-block if it is abuse) |
 | `stripe_webhook_errors` | B | Only with `PM_BILLING=stripe`: at least one `billing_events` row with `outcome` starting `error:` received in the last hour (the detail lists each `type` and code) | ticket | [Billing design › Stripe webhook](billing.md#stripe-integration) (fix the endpoint's event list, or the customer mismatch) |
 | `mailbox_size:{identity_id}` | B | Mailbox SQLite size > 70% of 10 GB (7,516,192,768 bytes), reported by the mailbox's size check (at most hourly, after a write; [Data model › Mailbox notes](data-model.md#mailbox-notes)) | ticket | [Abusive identity](#abusive-identity) (archive or split) |
@@ -448,7 +448,7 @@ the window (the Custom Alert "minimum event count").
 | `ai_backlog` | B | `ai_deferred_total` > 1,000 over 15 minutes, or `ai_rate_limited_total` > 20 over 5 minutes ([F16](../edge-cases.md)) | ticket | Compare the deferrals per tenant with the Workers AI limits; lower a tenant's `triage.daily_model_cap`, or ask Cloudflare for higher limits |
 | `delivery_orphaned` | A | `delivery_orphaned_total` > 10 over 1 h | ticket | [Email Sending outage](#email-sending-outage) |
 | `panics` | A | `panics_total` > 0 over 5 minutes | ticket | [Parser bug](#parser-bug) |
-| `config_invalid` | A | `config_invalid_total` > 0 | page | `pmail doctor` |
+| `config_invalid` | A | `config_invalid_total` > 0 | page | `idvy doctor` |
 | `webhook_secret_unavailable` | A | `webhook_attempts_total{result=secret_unavailable}` > 0 over 15 minutes (a sealed secret no longer opens: wrong or rotated `PM_MASTER_KEY`, [Webhooks](webhooks.md#secrets)) | page | [Security › Rotation procedures](security.md#62-rotation-procedures) (`PM_MASTER_KEY`) |
 | `webhook_ssrf_blocked` | A | `webhook_ssrf_blocked_total` > 20 over 1 h | ticket | [Integrator API down](#integrator-api-down) (an endpoint's DNS now points at a blocked range) |
 | `notification_send_failures` | A | `notifications_failed_total` > 0 in each of 3 consecutive hours, or > 20 in one hour | ticket | [Domain failing](#domain-failing) for the platform domain first (system mail has no fallback, [Notifications §7](notifications.md#7-when-system-mail-cannot-be-sent)), then [Email Sending outage](#email-sending-outage) |
@@ -565,9 +565,9 @@ The `* * * * *` cron runs `ops::alerts::evaluate`:
 at 08:00 UTC a summary of every firing ticket alert, as an ordinary `transactional` send from the system
 identity on the default tenant ([Identities › The system identity](identity-domains.md#the-system-identity)),
 through the normal outbound pipeline with `Idempotency-Key: alert-{alert_key}-{fired_at}` (for a
-re-notification, `-{n}`). The subject is `[pylota-mail {env}] {severity}: {alert_key}`; the body holds the
+re-notification, `-{n}`). The subject is `[pylota-identity {env}] {severity}: {alert_key}`; the body holds the
 alert key, severity, values, the time it fired, the runbook's URL in the published docs and the
-`pmail` command that shows more. Like every alert row it holds IDs and numbers only, never content or
+`idvy` command that shows more. Like every alert row it holds IDs and numbers only, never content or
 addresses. At most 20 alert emails are sent per hour; above that one email says how many more are
 firing. They count against the system identity's daily cap like any of its sends, and as class `account`
 of the system-mail budgets (`QuotaRequest::SystemMail { class: Account }`,
@@ -582,16 +582,16 @@ cannot leave while the platform domain is failing or the system identity is refu
 `read_only` switch does not hold it back: sends from the system identity are exempt (section 5.6). The
 heartbeat below does not depend on the deployment sending anything.
 
-**The heartbeat.** `.github/workflows/heartbeat.yml` in `PILOTAAI/pylota-mail` runs on GitHub's
+**The heartbeat.** `.github/workflows/heartbeat.yml` in `PILOTAAI/pylota-identity` runs on GitHub's
 infrastructure, outside the Cloudflare account it watches:
 
 - `on: schedule` with `*/15 * * * *` (GitHub's shortest interval is 5 minutes; schedules run on the
   default branch, in UTC, and can be delayed under load: [Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows),
   read 2026-10-10), plus `workflow_dispatch`.
-- It installs the released `pmail` binary of the deployed version, verifies its signature, and runs
-  `pmail doctor --json --check health --check alerts` against production, with `PYLOTA_MAIL_API_URL` and
-  `PYLOTA_MAIL_KEY` from the GitHub Environment `ops` (secret `HEARTBEAT_KEY`).
-- Once a day (the 06:00 UTC run) it also runs `pmail doctor --json --mail-test --check mail_test` (only that check) with the secret
+- It installs the released `idvy` binary of the deployed version, verifies its signature, and runs
+  `idvy doctor --json --check health --check alerts` against production, with `PYLOTA_IDENTITY_API_URL` and
+  `PYLOTA_IDENTITY_KEY` from the GitHub Environment `ops` (secret `HEARTBEAT_KEY`).
+- Once a day (the 06:00 UTC run) it also runs `idvy doctor --json --mail-test --check mail_test` (only that check) with the secret
   `HEARTBEAT_MAIL_TEST_KEY`, so mail flow end to end is proven daily.
 - The job fails when `doctor` exits non-zero, when `GET /health` does not answer within 20 seconds, when a
   page alert is firing, when `alert_email` is `missing` in `GET /v1/platform/status` (no alert address
@@ -602,14 +602,14 @@ infrastructure, outside the Cloudflare account it watches:
   settings.
 - The two keys are created on the production deployment and stored by the owner:
   `HEARTBEAT_KEY` is a platform key holding only `audit:read` (it reads `GET /v1/platform/status`); its ID
-  is set as `PM_HEARTBEAT_KEY_ID`. `HEARTBEAT_MAIL_TEST_KEY` is an **identity key of `pmail-doctor`** with
+  is set as `PM_HEARTBEAT_KEY_ID`. `HEARTBEAT_MAIL_TEST_KEY` is an **identity key of `idvy-doctor`** with
   exactly the permissions `--mail-test` needs (`messages:send`, `messages:read`, `search:read`,
   `erasure:manage`; [CLI and setup §10](cli.md#10-doctor)), never a tenant key of the default tenant, which
   could create bare platform addresses ([A18](../edge-cases.md)). Both expire after
   90 days. A rotation keeps a key's `expires_at` ([Security § 4.5](security.md#45-rotation)), so every
   quarter (the break-glass review, section 5.7) the owner **replaces** them: creates a new platform key
-  (`pmail keys create --level platform --permissions audit:read --expires-in 90d`), sets
-  `PM_HEARTBEAT_KEY_ID` to its ID under `[vars]` and runs `pmail deploy` (a variable change only),
+  (`idvy keys create --level platform --permissions audit:read --expires-in 90d`), sets
+  `PM_HEARTBEAT_KEY_ID` to its ID under `[vars]` and runs `idvy deploy` (a variable change only),
   stores it as `HEARTBEAT_KEY` (`gh secret set HEARTBEAT_KEY --env ops`), runs the workflow once
   (`gh workflow run heartbeat.yml`), and only then revokes the old key. The mail-test key is replaced the
   same way, without the redeploy. A key that expires anyway stops the heartbeat, which
@@ -641,7 +641,7 @@ alert evaluator for D1 conditions, the delivery-event consumer for outcome rates
 `ops_switches` ([Data model](data-model.md#1-d1-control-plane)) holds one row per switch: `read_only`,
 `free_sending`, `emergency_prune` and `agent_signup`. Readers cache a row for 60 seconds per isolate, so a
 switch takes effect within a minute everywhere. `GET /v1/platform/status` shows every switch, and the
-operator can also set one by hand (`pmail ops switch <name> on|off`), for example `free_sending off` during a
+operator can also set one by hand (`idvy ops switch <name> on|off`), for example `free_sending off` during a
 sign-up abuse wave, or `agent_signup off`, which stops new agent sign-ups and their mail.
 
 `GET /v1/platform/status` also has an `agent_signup` block: `configured`, `active`, the `reason` when inactive
@@ -657,15 +657,15 @@ for a suspended partner, and quarantine of suspicious inbound mail.
 ### 5.7 Break-glass record
 
 Every credential that the operator would need to recover Cloud is written down in one record, kept in
-two places: the operator's password manager (a vault named `pylota-mail-break-glass`) and a printed,
+two places: the operator's password manager (a vault named `pylota-identity-break-glass`) and a printed,
 sealed copy stored away from the operator's usual workplace. No credential lives only on one laptop. The
 record lists, for each item, where it is and how to use it:
 
 | Item | Where it is kept |
 |---|---|
 | Cloudflare account login, its two-factor device and recovery codes | Password manager; recovery codes also on the printed copy |
-| The break-glass platform key (`break-glass`: the session permissions, 400 days; its ID is `PM_BREAK_GLASS_KEY_ID`) | The `pylota-mail-break-glass` vault and the printed copy only, never a `pmail` profile; any use pages ([J36](../edge-cases.md)) |
-| The `pmail` profile and the current day's session platform key | Password manager (`key_command` reads it, [CLI › Configuration](cli.md#2-configuration-and-credentials)); each day's key is minted with the previous one, or with the break-glass key after a lapse |
+| The break-glass platform key (`break-glass`: the session permissions, 400 days; its ID is `PM_BREAK_GLASS_KEY_ID`) | The `pylota-identity-break-glass` vault and the printed copy only, never a `idvy` profile; any use pages ([J36](../edge-cases.md)) |
+| The `idvy` profile and the current day's session platform key | Password manager (`key_command` reads it, [CLI › Configuration](cli.md#2-configuration-and-credentials)); each day's key is minted with the previous one, or with the break-glass key after a lapse |
 | The minisign release key and its password (section 11 of [Security](security.md#11-supply-chain)) | The encrypted removable drive, and a second drive in the sealed copy's location; password in the password manager |
 | GitHub account (owner of `PILOTAAI`), two-factor device and recovery codes | Password manager and printed copy |
 | AWS root login and the SES IAM user | Password manager |
@@ -673,13 +673,13 @@ record lists, for each item, where it is and how to use it:
 | Domain registrar for `pylotamail.com` | Password manager |
 | `PM_HASH_KEY`, `PM_KEY_PEPPER` and the master-key slots | Never written down: they live only as Worker secrets and cannot be read back ([Security §6.1](security.md#61-inventory)). The record says so, and that losing the Worker means rotating them |
 
-`pmail doctor` cannot check this record. The owner reviews it every quarter, when the heartbeat keys are
+`idvy doctor` cannot check this record. The owner reviews it every quarter, when the heartbeat keys are
 rotated, and writes the date in the incident log. The review rehearses the break-glass path: it mints a
 1-day session key with the break-glass key (the expected `break_glass_key_used` page confirms the alert
 works) and revokes it, and it replaces the break-glass key when fewer than 120 days remain (a new key,
 the record and `PM_BREAK_GLASS_KEY_ID` updated, the old key revoked). Session keys live one day, so
 without this key a gap of more than a day would leave no key that can mint another, and the only way back
-would be `pmail setup --rotate-pepper`, which invalidates every key of every tenant
+would be `idvy setup --rotate-pepper`, which invalidates every key of every tenant
 ([Security §6.2](security.md#62-rotation-procedures), [J36](../edge-cases.md)).
 
 ### 5.8 When a store is full
@@ -747,9 +747,9 @@ API, so it works from any tool that can call that API.
   or secret is missing or malformed, or an optional variable is malformed; `config_invalid` is logged
   with the variable's name, and the body's `details.config_invalid` names it). Every other handler
   returns the same.
-- It is a liveness check. Dependency health is `pmail doctor`'s job.
+- It is a liveness check. Dependency health is `idvy doctor`'s job.
 
-### 7.2 `pmail doctor`
+### 7.2 `idvy doctor`
 
 `doctor` runs every check, prints one line per check with `pass`, `warn` or `fail`, and a fix for each
 failure (FR-OPS-3). Output format and exit codes are defined in [CLI and setup](cli.md). The checks:
@@ -759,18 +759,18 @@ failure (FR-OPS-3). Output format and exit codes are defined in [CLI and setup](
 | `dns.platform` | MX, SPF, DKIM or DMARC for the platform domain missing or different from the provider API's expected records, on either resolver | The exact record to add |
 | `routing.catch_all` | The platform domain's catch-all rule does not target the Worker | The API call or dashboard step |
 | `sending.domains` | A sending domain is not onboarded, or has `preview_enabled = true` ([Privacy](privacy.md#3-jurisdiction-and-residency)) | Onboarding step; `PATCH … {"preview_enabled": false}` |
-| `sending.event_subscriptions` | A sending domain has no event subscription to `pm-delivery-events` (`delivery_events: "manual"`, the spike S9 fallback), or a subscription is left over from a removed domain | `pmail domains subscribe <domain>`; for a left-over one, `wrangler queues subscription delete <id>` |
-| `bindings` | A resource in the generated `wrangler.toml` is missing; D1 or R2 jurisdiction differs from `PM_JURISDICTION`; a queue lacks its dead-letter consumer; a bound Vectorize index (`VECTORS`, and `VECTORS_NEXT` during a re-embed) is not cosine with the eight metadata indexes, or its dimensions differ from those of the model named in its description (`embed_model=…`): 1,024 for `@cf/baai/bge-m3`, otherwise the length of a probe embedding from that model, as the re-embed step does ( [Search §7.3](search.md#73-re-embed-job-embedding-model-change)); `METRICS` missing | The resource to create or `pmail setup` |
-| `secrets` | A required secret is missing (names only; values are never read), or the slot named by `PM_MASTER_KEY_ACTIVE` has no secret. `warn` while a master-key rotation is unfinished (`master_key.remaining` > 0 in `GET /v1/platform/status`) | The secret to set, or `pmail secrets rotate-master --resume` |
+| `sending.event_subscriptions` | A sending domain has no event subscription to `pm-delivery-events` (`delivery_events: "manual"`, the spike S9 fallback), or a subscription is left over from a removed domain | `idvy domains subscribe <domain>`; for a left-over one, `wrangler queues subscription delete <id>` |
+| `bindings` | A resource in the generated `wrangler.toml` is missing; D1 or R2 jurisdiction differs from `PM_JURISDICTION`; a queue lacks its dead-letter consumer; a bound Vectorize index (`VECTORS`, and `VECTORS_NEXT` during a re-embed) is not cosine with the eight metadata indexes, or its dimensions differ from those of the model named in its description (`embed_model=…`): 1,024 for `@cf/baai/bge-m3`, otherwise the length of a probe embedding from that model, as the re-embed step does ( [Search §7.3](search.md#73-re-embed-job-embedding-model-change)); `METRICS` missing | The resource to create or `idvy setup` |
+| `secrets` | A required secret is missing (names only; values are never read), or the slot named by `PM_MASTER_KEY_ACTIVE` has no secret. `warn` while a master-key rotation is unfinished (`master_key.remaining` > 0 in `GET /v1/platform/status`) | The secret to set, or `idvy secrets rotate-master --resume` |
 | `observability` | `invocation_logs` is not `false`, or traces are enabled with `PM_ENV = production` | The `wrangler.toml` lines |
-| `worker.version` | The deployed version differs from the CLI's | `pmail upgrade` |
-| `health` | `GET /health` is not `200`, or reports `degraded` (a `warn` that names the feature that is off), or `frozen: true` (a `warn`) | Section 7.1; the missing variable or secret; `pmail ops unfreeze` once a restore is done |
-| `agent_signup` (when `PM_AGENT_SIGNUP = "on"`; otherwise `skip`) | Never fails. `warn` when the feature is configured but inactive (`agent_signup.active: false` in `GET /v1/platform/status`; the reason is printed) or when the `agent_signup` switch is `off` ([Agent self-sign-up § 21](agent-signup.md#21-observability)) | The reason's fix; `pmail ops switch agent_signup on` once the cause is fixed |
+| `worker.version` | The deployed version differs from the CLI's | `idvy upgrade` |
+| `health` | `GET /health` is not `200`, or reports `degraded` (a `warn` that names the feature that is off), or `frozen: true` (a `warn`) | Section 7.1; the missing variable or secret; `idvy ops unfreeze` once a restore is done |
+| `agent_signup` (when `PM_AGENT_SIGNUP = "on"`; otherwise `skip`) | Never fails. `warn` when the feature is configured but inactive (`agent_signup.active: false` in `GET /v1/platform/status`; the reason is printed) or when the `agent_signup` switch is `off` ([Agent self-sign-up § 21](agent-signup.md#21-observability)) | The reason's fix; `idvy ops switch agent_signup on` once the cause is fixed |
 | `alerts` | Any page alert is firing, the deployment has been frozen for more than 4 hours, or `alert_email` is `missing` (`GET /v1/platform/status`, which needs a platform key with `audit:read`). A firing ticket alert is a `warn` | The alert's runbook; set `PM_ALERT_EMAIL` |
-| `dlq` | Open `dlq_items` exist | `pmail dlq list` (`GET /v1/platform/dlq`) |
+| `dlq` | Open `dlq_items` exist | `idvy dlq list` (`GET /v1/platform/dlq`) |
 | `quota` | Provider quota errors in the last 24 hours (Analytics Engine SQL API); `warn` when `PM_DAILY_SEND_QUOTA` is unset, and `warn` (never `fail`) when the operator's token lacks Account Analytics · Read, so the errors cannot be counted | [Quota exhausted](#quota-exhausted); the permission in [Deploy › step 2](../../self-hosting.md#2-create-a-cloudflare-api-token) |
-| `web_bot_auth` (when `PM_WEB_BOT_AUTH = "on"`; otherwise `skip`) | `GET /.well-known/http-message-signatures-directory` does not answer `200` with `Content-Type: application/http-message-signatures-directory+json`, lists no key or more than three, or lacks a valid `http-message-signatures-directory` signature for each listed key ([Agent signing keys §3.2](agent-keys.md#32-web-bot-auth-key-directory)) | `pmail keys rotate web_bot_auth`; [Deploy › Signed HTTP requests](../../self-hosting.md#signed-http-requests-web-bot-auth) |
-| `ses` (when `PM_SES_REGION` is set) | `GetAccount`: production access not enabled, or account sending paused; with SES receiving configured, the active receipt rule set is not `PM_SES_RULE_SET` or lacks `pm-deliver`; `PM_SES_REGION` cannot receive mail; the region holds 10,000 identities (new SES domains are refused with `ses_identity_limit`); a resource `setup ses` created no longer carries this deployment's `pylota-mail:api-host` tag, or `pm-deliver` writes to another bucket ([N31](../edge-cases.md)). `warn` at 9,000 or more identities (`ses_identities_90pct`), and when the region is outside the EU and the UK under `PM_JURISDICTION=eu` ([CLI › Doctor](cli.md#10-doctor)) | [SES account and receiving](#ses-account-and-receiving) |
+| `web_bot_auth` (when `PM_WEB_BOT_AUTH = "on"`; otherwise `skip`) | `GET /.well-known/http-message-signatures-directory` does not answer `200` with `Content-Type: application/http-message-signatures-directory+json`, lists no key or more than three, or lacks a valid `http-message-signatures-directory` signature for each listed key ([Agent signing keys §3.2](agent-keys.md#32-web-bot-auth-key-directory)) | `idvy keys rotate web_bot_auth`; [Deploy › Signed HTTP requests](../../self-hosting.md#signed-http-requests-web-bot-auth) |
+| `ses` (when `PM_SES_REGION` is set) | `GetAccount`: production access not enabled, or account sending paused; with SES receiving configured, the active receipt rule set is not `PM_SES_RULE_SET` or lacks `pm-deliver`; `PM_SES_REGION` cannot receive mail; the region holds 10,000 identities (new SES domains are refused with `ses_identity_limit`); a resource `setup ses` created no longer carries this deployment's `pylota-identity:api-host` tag, or `pm-deliver` writes to another bucket ([N31](../edge-cases.md)). `warn` at 9,000 or more identities (`ses_identities_90pct`), and when the region is outside the EU and the UK under `PM_JURISDICTION=eu` ([CLI › Doctor](cli.md#10-doctor)) | [SES account and receiving](#ses-account-and-receiving) |
 | `domains.orphans` | Never fails. `warn` for a `zone_claims` row still `pending` an hour after it was written, or a `domain_onboarding` row older than two hours: the hourly cleanup did not remove it ([Identities and domains › Cleanup after a failed add](identity-domains.md#cleanup-after-a-failed-add)) | Names the zone (when one was created after the claim) to delete in the dashboard if no domain uses it |
 | `routing.leftover_subdomains` (only if spike S9 showed that a subdomain's routing cannot be removed on its own) | Never fails. `warn` for a routing subdomain that no domain row names | The dashboard step: Email Routing › Settings › Subdomains |
 | `cloudflare.zones` | Never fails. Prints the account's zone count, and `warn`s above 1,000, because the zone limit of a non-Enterprise account is not documented ([Domains on any DNS host §3.2](domain-connections.md#32-nameservers)) | Ask Cloudflare to confirm the account's zone limit |
@@ -804,13 +804,13 @@ Cloudflare message ID (unique per queue), the body as received, its SHA-256, the
 redrive bookkeeping. Rows are deleted after 14 days by the global retention job
 ([Privacy](privacy.md#53-global-retention-job)).
 
-<a id="83-pmail-ops-dlq"></a>
+<a id="83-idvy-ops-dlq"></a>
 
 ### 8.3 Listing and redriving
 
 Dead-letter items are read and redriven through the platform API, with a platform key holding
 `platform:ops` ([REST API › Platform operations](../../reference/api.md#platform-operations)). The CLI
-wraps it as `pmail dlq list` and `pmail dlq redrive` ([CLI and setup](cli.md)).
+wraps it as `idvy dlq list` and `idvy dlq redrive` ([CLI and setup](cli.md)).
 
 - `GET /v1/platform/dlq` lists items (filters `queue`, `status`, `tenant_id`). It returns the queue,
   kind, tenant and timestamps, never the stored body: pointers can carry envelope addresses.
@@ -907,7 +907,7 @@ incident with the alert key, the times, the commands run and any follow-up.
 
    ```bash
    curl -X PATCH https://mail.example.com/v1/domains/dom_01JA… \
-     -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
      -d '{"transport": "ses"}'
    ```
 
@@ -941,7 +941,7 @@ incident with the alert key, the times, the commands run and any follow-up.
 
 ### SES account and receiving
 
-1. **Diagnose.** `pmail doctor --check ses` shows production access, the sending status, the receipt
+1. **Diagnose.** `idvy doctor --check ses` shows production access, the sending status, the receipt
    rule set and the identity count. For `ses_object_lost`, the `ses_ingest` row with status `lost` names
    the object and recipient: both the SNS push and the SQS backstop failed to get the message ingested
    before the 14-day lifecycle rule deleted it. Look for `pm-inbound` dead-letter items and backstop
@@ -952,7 +952,7 @@ incident with the alert key, the times, the commands run and any follow-up.
      to have sending resumed (the steps are AWS's; verify them at the time). For a domain that must keep
      sending meanwhile, the transport runbook's failover to Cloudflare is a decision for the owner
      ([J5](../edge-cases.md)).
-   - `ses_rule_missing`: run `pmail setup ses` again. It is idempotent, adds `pm-deliver` to the active
+   - `ses_rule_missing`: run `idvy setup ses` again. It is idempotent, adds `pm-deliver` to the active
      rule set and never deactivates another set. Until then, mail to SES domains does not reach the
      Worker.
    - `ses_identities_90pct`: the limit of 10,000 identities per Region can be raised only through the AWS
@@ -962,17 +962,17 @@ incident with the alert key, the times, the commands run and any follow-up.
      (`details.reason = "ses_identity_limit"`).
    - `ses_object_lost`: the message cannot be recovered (the sender's server got a success reply). Tell
      the affected tenant, then fix why ingestion stalled (DLQ growth, a failing backstop).
-3. **Verify.** `pmail doctor --check ses` passes and the alert resolves; for a lost object, new mail to
+3. **Verify.** `idvy doctor --check ses` passes and the alert resolves; for a lost object, new mail to
    the same recipient arrives.
 
 ### DLQ growth
 
-1. **Diagnose.** `pmail dlq list --queue <queue>` (`GET /v1/platform/dlq?queue=…`): the `kind` and
+1. **Diagnose.** `idvy dlq list --queue <queue>` (`GET /v1/platform/dlq?queue=…`): the `kind` and
    tenant of each item, and the matching `error` log lines (by `request_id` or `message_id`).
    `inbound_tempfail` means R2 writes are failing in `email()` ([J1](../edge-cases.md)): senders are
    retrying, nothing is lost.
 2. **Mitigate.** Fix the cause (a bug: deploy the fix; a dependency outage: wait). Then
-   `pmail dlq redrive --queue <queue>`, which calls `POST /v1/platform/dlq/{dlq_id}/redrive` for each
+   `idvy dlq redrive --queue <queue>`, which calls `POST /v1/platform/dlq/{dlq_id}/redrive` for each
    open item. Items are kept for 14 days.
 3. **Verify.** Redriven items leave the open set; `dlq:{queue}` resolves; for inbound items, the
    messages appear in their mailboxes.
@@ -988,7 +988,7 @@ incident with the alert key, the times, the commands run and any follow-up.
 
    ```bash
    curl -X POST https://mail.example.com/v1/webhooks/whk_01J9…/replay \
-     -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
      -d '{"since": "2026-10-08T00:00:00Z", "until": "2026-10-09T00:00:00Z", "status": "dead"}'
    ```
 
@@ -1035,7 +1035,7 @@ incident with the alert key, the times, the commands run and any follow-up.
    `rpc_owner_mismatch`, treat it as a possible isolation bug: the deployment is already read-only for
    non-platform keys (`containment:read_only`, section 5.6). Capture the logged IDs, open a private
    security advisory, deploy the fix, and only then set the switch back
-   (`pmail ops switch read_only off`).
+   (`idvy ops switch read_only off`).
 4. **Verify.** Requests with the old key return `401 key_revoked`.
 
 ### Abusive identity
@@ -1062,7 +1062,7 @@ incident with the alert key, the times, the commands run and any follow-up.
      `stripe_api_errors_total{call=subscription_cancel}` for the cause. Do it at once: until the
      subscriptions are canceled Stripe can still charge the workspace.
    - `erasure_failed` (the retry window ended with the step still failing): fix the cause, then run
-     `pmail erasure retry <era_id>`. It sends a new request for the same scope and target, which resumes
+     `idvy erasure retry <era_id>`. It sends a new request for the same scope and target, which resumes
      the failed job at its failed step and keeps `deadline_at`, for every scope
      ([Privacy § 6.1](privacy.md#61-request)); a counterparty erasure needs `--address` again, because the
      failed job deleted its copy. The alert resolves once the resumption exists; the receipt is
@@ -1101,13 +1101,13 @@ incident with the alert key, the times, the commands run and any follow-up.
    `HEARTBEAT_KEY` (an expired or revoked key gets `401`).
 2. **Mitigate.** Re-enable the workflow (`gh workflow enable heartbeat.yml`; the person who re-enables a
    scheduled workflow becomes the one GitHub notifies), replace an expired key as section 5.5 describes (a rotation keeps the expiry), or fix the billing. Until the heartbeat runs again, run
-   `pmail doctor --check health --check alerts` by hand twice a day.
+   `idvy doctor --check health --check alerts` by hand twice a day.
 3. **Verify.** A heartbeat run passes and `heartbeat_missing` resolves.
 
 ### Capacity
 
-1. **Diagnose.** `pmail ops status` shows D1's size, the vector count and the tenant count with their
-   percentages. For D1, `wrangler d1 info pylota-mail` confirms the size; the largest tables are normally
+1. **Diagnose.** `idvy ops status` shows D1's size, the vector count and the tenant count with their
+   percentages. For D1, `wrangler d1 info pylota-identity` confirms the size; the largest tables are normally
    `event_index` and `webhook_deliveries` (about four rows per inbound message).
 2. **Mitigate.**
    - `capacity_70:*` (ticket): write the sharding ADR now. For D1 the first step is planned: move
@@ -1126,7 +1126,7 @@ incident with the alert key, the times, the commands run and any follow-up.
 
 1. **Diagnose.** The `containment:{rule}` email and the audit row (`ops.switch`, `partner.auto_suspend`,
    `tenant.auto_pause`) name the rule, the target and the values that triggered it.
-   `pmail ops status` shows every switch.
+   `idvy ops status` shows every switch.
 2. **Mitigate.**
    - `read_only`: follow [Compromised key](#compromised-key) for `rpc_owner_mismatch`. Keep the switch on
      until the cause is fixed and deployed.
@@ -1137,7 +1137,7 @@ incident with the alert key, the times, the commands run and any follow-up.
      lift the pause (`PATCH /v1/tenants/{tenant_id}` `{"sending_paused": false}`) only once the cause is
      fixed.
    - `free_sending_off`: review the paused identities of Free and ramped workspaces; suspend abusive
-     workspaces; then `pmail ops switch free_sending on`.
+     workspaces; then `idvy ops switch free_sending on`.
    - `emergency_prune`: follow [Capacity](#capacity); turn it off once D1 is below 80%.
    - `agent_signup_off`: follow [Agent sign-up abuse](#agent-sign-up-abuse).
 3. **Verify.** The switch or status is back, the alert resolved, and the trigger has not recurred within a
@@ -1159,13 +1159,13 @@ incident with the alert key, the times, the commands run and any follow-up.
 ([Event feed § 16](event-feed.md#16-observability))
 
 1. **Diagnose.** Find the tenants: `event_log_append_failures_total` and `event_log_lag_ms` by `index1`;
-   `pmail dlq list --queue pm-webhooks`. Check the object: `pmail events list --tenant <tenant> --limit 1`
+   `idvy dlq list --queue pm-webhooks`. Check the object: `idvy events list --tenant <tenant> --limit 1`
    with a platform key. Repeated `503 unavailable` means the object is failing; an `rpc_owner_mismatch` alert
    at the same time is a security incident ([Compromised key](#compromised-key)).
 2. **Mitigate.**
-   - Once the object answers, redrive the dead-letter items (`pmail dlq redrive`): each appends once and fans
+   - Once the object answers, redrive the dead-letter items (`idvy dlq redrive`): each appends once and fans
      out once.
-   - If it cannot recover (a schema or data fault), rebuild it: `pmail jobs start event_log_rebuild
+   - If it cannot recover (a schema or data fault), rebuild it: `idvy jobs start event_log_rebuild
      --tenant <tenant>` ([Event feed § 9.3](event-feed.md#93-rebuilding-a-log)), and tell the tenant, or its
      partner, that cursors and consumers must be reset.
    - For `event_log_size`: compare the tenant's inbound volume with its `webhook_text_bytes`. Lowering
@@ -1207,15 +1207,15 @@ incident with the alert key, the times, the commands run and any follow-up.
 
 ([Agent self-sign-up § 21](agent-signup.md#21-observability))
 
-1. **Diagnose.** List the last hour's sign-ups with `pmail agent-signups list --since <RFC 3339 time an
+1. **Diagnose.** List the last hour's sign-ups with `idvy agent-signups list --since <RFC 3339 time an
    hour ago>` (CLI times are RFC 3339 or a date); look for one network or source, then list that network
    with `--network <hash>`. For `containment:agent_signup_off`, read the bounce and complaint counts of
    sign-up mail and look at the sign-ups of the last day.
 2. **Mitigate.**
-   - `agent_signup_spike`: if it is abuse, `pmail ops switch agent_signup off`.
+   - `agent_signup_spike`: if it is abuse, `idvy ops switch agent_signup off`.
    - `agent_signup_cap_80`: decide whether to raise `PM_AGENT_SIGNUP_DAILY_CAP`.
    - `containment:agent_signup_off`: fix the cause, then switch it back on
-     (`pmail ops switch agent_signup on`).
+     (`idvy ops switch agent_signup on`).
 3. **Verify.** The alert resolved and the outcome rates in `GET /v1/platform/status` are back under the
    thresholds of [Agent self-sign-up § 13.2](agent-signup.md#132-the-automatic-switch).
 
@@ -1247,13 +1247,13 @@ suppressions, member removals, session revocations, suspensions, address and key
 removals and erasure records. So the runbook exports the database before it restores, and afterwards
 re-applies every change made after `T` except what the restore is meant to undo ([I6](../edge-cases.md)).
 The tooling is built by M17 Completion ([Build plan](../build-plan.md#m17--observability-and-operations-track-3)):
-`pmail ops freeze|unfreeze|restore`, `POST /v1/platform/identities/{identity_id}/restore`, the
+`idvy ops freeze|unfreeze|restore`, `POST /v1/platform/identities/{identity_id}/restore`, the
 `restore_reconcile` job and `POST /v1/platform/erasure-requests/{erasure_id}/reapply`.
 
 1. **Scope.** Decide what to restore: D1, one or more mailboxes, or both. Pick the target time `T`, just
    before the damage, and write down what the restore must undo (the tables, columns or rows the damage
    touched).
-2. **Freeze the whole deployment:** `pmail ops freeze`. It sets `PM_FREEZE = "on"` under `[vars]` in the
+2. **Freeze the whole deployment:** `idvy ops freeze`. It sets `PM_FREEZE = "on"` under `[vars]` in the
    rendered `wrangler.toml` and redeploys the deployed bundle (a variable change only,
    [CLI and setup § 20](cli.md#20-ops)). The flag lives in the Worker's configuration, not in D1, so the
    D1 restore cannot undo it. Tenants are **not** suspended: suspension pauses identities, and the
@@ -1274,15 +1274,15 @@ The tooling is built by M17 Completion ([Build plan](../build-plan.md#m17--obser
      `JobRunner` alarms of `restore_reconcile` jobs and of erasure requests whose reason starts with
      `reapply_after_restore:` (step 5).
 3. **Restore D1 and replay what came after `T`:**
-   `pmail ops restore d1 --at <T> [--exclude <table>[.<column>]]… [--exclude-row <table>:<key>]…`.
+   `idvy ops restore d1 --at <T> [--exclude <table>[.<column>]]… [--exclude-row <table>:<key>]…`.
    It refuses unless `/health` reports `frozen: true`, then:
    1. exports the whole database as it is now
-      (`wrangler d1 export pylota-mail --remote --output <dir>/restore-<ts>/before.sql`, through the
+      (`wrangler d1 export pylota-identity --remote --output <dir>/restore-<ts>/before.sql`, through the
       pinned Wrangler as every CLI call). An export blocks
       other requests to the database while it runs ([Import and export data](https://developers.cloudflare.com/d1/best-practices/import-export-data/),
       read 2026-10-10), which the freeze makes harmless;
-   2. restores: `wrangler d1 time-travel info pylota-mail --timestamp=<T>`, then
-      `wrangler d1 time-travel restore pylota-mail --bookmark=<bookmark>`. The restore is destructive and
+   2. restores: `wrangler d1 time-travel info pylota-identity --timestamp=<T>`, then
+      `wrangler d1 time-travel restore pylota-identity --bookmark=<bookmark>`. The restore is destructive and
       in place, and prints a bookmark that undoes it (D1 Time Travel docs, read 2026-10-09); the CLI
       writes that bookmark to `<dir>/restore-<ts>/undo-bookmark` and prints it;
    3. exports the restored database the same way (`after.sql`);
@@ -1291,12 +1291,12 @@ The tooling is built by M17 Completion ([Build plan](../build-plan.md#m17--obser
       (delete it), a row that differs was changed after `T` (update it to the `before` values). It skips
       `schema_migrations`, every `--exclude` table or column and every `--exclude-row`: exactly what the
       restore is meant to undo. A column that `before` has and the restored schema lacks (a migration ran
-      after `T`) is reported; re-apply the fixed migration with `pmail deploy` first, then run
-      `pmail ops restore d1 --replay-only <dir>/restore-<ts>`;
+      after `T`) is reported; re-apply the fixed migration with `idvy deploy` first, then run
+      `idvy ops restore d1 --replay-only <dir>/restore-<ts>`;
    5. writes `replay.sql` in foreign-key order (parents inserted before children, children deleted
       before parents) and a summary of inserted, updated and deleted rows per table, prints the summary
       and asks for confirmation (`--yes` in scripts), then applies it with
-      `wrangler d1 execute pylota-mail --remote --file <dir>/restore-<ts>/replay.sql` (a file of up to
+      `wrangler d1 execute pylota-identity --remote --file <dir>/restore-<ts>/replay.sql` (a file of up to
       5 GiB, per the same page).
 
    The replay brings back, among the rest, every erasure request and its receipt, every revoked key,
@@ -1304,7 +1304,7 @@ The tooling is built by M17 Completion ([Build plan](../build-plan.md#m17--obser
    `T`, and the `ses_ingest` rows of mail received through SES after `T`. A D1 restore to before a
    finished master-key rotation still opens every sealed value: the previous key stays in its slot for
    30 days ([Security § 6.2](security.md#62-rotation-procedures)).
-4. **Restore a mailbox:** `pmail ops restore mailbox <identity> --at <T>` calls
+4. **Restore a mailbox:** `idvy ops restore mailbox <identity> --at <T>` calls
    `POST /v1/platform/identities/{identity_id}/restore` (`platform:ops`; `409 not_frozen` unless the
    deployment is frozen). Inside the object: `ctx.storage.getBookmarkForTime(T)`, then
    `ctx.storage.onNextSessionRestoreBookmark(bookmark)` (which returns an undo bookmark), then abort the
@@ -1337,8 +1337,8 @@ The tooling is built by M17 Completion ([Build plan](../build-plan.md#m17--obser
    identity scope from `identity_id`, tenant scope over the identities its receipt lists (the tenant
    stays `erased`), counterparty scope by `counterparty_hash` ([Privacy § 11](privacy.md#11-what-remains-after-deletion)).
    The CLI waits until every re-applied request and reconcile job has completed.
-6. **Unfreeze and verify:** `pmail ops unfreeze`, then `pmail doctor --mail-test`. Queued work drains,
-   senders' retries arrive, and the alert evaluator resumes. Last, `pmail ops restore cleanup` deletes
+6. **Unfreeze and verify:** `idvy ops unfreeze`, then `idvy doctor --mail-test`. Queued work drains,
+   senders' retries arrive, and the alert evaluator resumes. Last, `idvy ops restore cleanup` deletes
    the working files, which hold every D1 row ([Privacy § 11](privacy.md#11-what-remains-after-deletion)).
 
 RPO and RTO (NFR-OPS-2): D1 and Durable Object recovery is continuous, which meets the 1-minute RPO for
@@ -1360,7 +1360,7 @@ drill.
 | `it::ops::restore_replays_changes` | With the D1 export and restore steps faked by two SQLite snapshots (before and after a restore to `T`), the replay re-inserts an API key, an identity, a domain, a webhook endpoint, a signing key, an identity key and a `ses_ingest` row created after `T`; re-applies a suppression added, a member removed, a session revoked, a tenant suspended, an address tombstoned and a domain removed after `T`; leaves an `--exclude`d column at its restored value; and orders statements so no foreign key fails | [I6](../edge-cases.md) |
 | `it::ops::j30_d1_capacity` | With the D1 size faked through `meta.size_after`: `capacity_70:d1` (ticket) at 70%, `capacity_80:d1` (page, emailed) at 80%, the `emergency_prune` switch and `containment:emergency_prune` at 90%, after which retention prunes `event_index` and `webhook_deliveries` at 7 days; a write failing with "Exceeded maximum DB size" answers `503 unavailable` (`storage_full`) while an inbound message is still accepted and its outbox event waits | [J30](../edge-cases.md) |
 | `it::ops::j31_vector_capacity` | `capacity_70:vectors`, `capacity_80:vectors` and `capacity_70:namespaces` fire from the reconciliation's `index_count` and the tenant count; while `capacity_80:vectors` fires, a failing upsert leaves chunks `pending`, acks the index job without a retry and puts nothing in the dead-letter queue, and hybrid search reports `degraded` | [J31](../edge-cases.md) |
-| `it::ops::j32_alert_channels` | A page alert sends one alert email through the system identity to `PM_ALERT_EMAIL` and another after 6 hours; ticket alerts arrive in one summary at 08:00 UTC; more than 20 emails in an hour collapse into one; `GET /v1/platform/status` reports `alert_email: missing` when no address is configured; `pmail doctor --check alerts` fails on a firing page alert and on `missing`; with the `read_only` switch on, an alert email from the system identity still leaves while a tenant's queued send is re-enqueued | [J32](../edge-cases.md), section 5.5 |
+| `it::ops::j32_alert_channels` | A page alert sends one alert email through the system identity to `PM_ALERT_EMAIL` and another after 6 hours; ticket alerts arrive in one summary at 08:00 UTC; more than 20 emails in an hour collapse into one; `GET /v1/platform/status` reports `alert_email: missing` when no address is configured; `idvy doctor --check alerts` fails on a firing page alert and on `missing`; with the `read_only` switch on, an alert email from the system identity still leaves while a tenant's queued send is re-enqueued | [J32](../edge-cases.md), section 5.5 |
 | `it::ops::j36_break_glass_key` | With `PM_BREAK_GLASS_KEY_ID` set and every session platform key expired, the break-glass key mints a new 1-day platform key; the request writes `key.break_glass_used` and fires `break_glass_key_used` (a page and an alert email) at once; any other key's use fires nothing; a revoked break-glass key gets `401`; with the variable unset nothing fires ([J36](../edge-cases.md)) | [J36](../edge-cases.md), section 5.7 |
 | `it::ops::heartbeat_missing` | With `PM_HEARTBEAT_KEY_ID` set, `heartbeat_missing` fires when that key's `last_used_at` (or, never used, its `created_at`) is more than an hour old, or the key is revoked, and resolves after the key is used again; a replacement key the heartbeat has not used yet does not fire in its first hour | [J32](../edge-cases.md) |
 | `it::ops::j33_auto_containment` | An `rpc_owner_mismatch` turns `read_only` on (non-platform writes `503 read_only`, queued sends re-enqueued and not canceled, inbound still stored); five auto-paused identities across three of one partner's tenants within an hour suspend the partner, and five in one tenant do not; a tenant above 10% bounces with ≥ 200 outcomes on one domain gets `sending_paused_at` with `sending_pause_reason = 'abuse_burst'` (sends `409 sending_paused`, queued sends held, inbound still stored), and its system identity's bounces count towards nothing; five auto-paused Free workspaces within an hour turn `free_sending` off (`403 policy_denied`, `free_sending_off`); each writes its audit row and pages `containment:{rule}`, which stays firing while the switch is set or the target is suspended and resolves two runs after a platform key undoes it; only a platform key undoes each | [J33](../edge-cases.md), section 5.6 |
@@ -1370,7 +1370,7 @@ drill.
 | `it::events::append_failure_retries_then_dlq` ([Event feed § 20](event-feed.md#20-tests)) | With the object failing, no `Deliver` is queued for that tenant, another tenant in the batch is delivered, retries follow the age schedule, the messages reach `pm-webhooks-dlq` after 13 deliveries, and a redrive appends once and delivers once; `event_log_append_failing` fires | [R3](../edge-cases.md), section 5.3 |
 | `it::events::size_budget_prune` | Above the budget the oldest events are deleted to 5,000,000,000 bytes of `log_bytes` (with a small budget in the test build), `floor_reason` is `size_limit`, `event_log_size` is reported, and a cursor behind the floor gets `410` with `size_limit`; a database size over the watch line reports `event_log_size` while `log_bytes` is under budget | [R8](../edge-cases.md), section 5.3 |
 | `it::uploads::q100_restore_object_missing` ([Uploads](uploads.md)) | A `ready` upload with its object removed counts `uploads_expired_total{reason=object_missing}`, and the evaluator fires `upload_object_missing` only when no freeze is set | [Q100](../edge-cases.md), section 5.3 |
-| `it::signup::platform_listing_and_status` ([Agent self-sign-up](agent-signup.md)) | `GET /v1/platform/status` and `pmail doctor` report the agent sign-up state; `agent_signup_spike` fires on a fixture of audit rows | FR-ASU-15, section 5.3 |
+| `it::signup::platform_listing_and_status` ([Agent self-sign-up](agent-signup.md)) | `GET /v1/platform/status` and `idvy doctor` report the agent sign-up state; `agent_signup_spike` fires on a fixture of audit rows | FR-ASU-15, section 5.3 |
 | `it::retention::z56_dependency_failure` ([Parity additions § 15](parity-additions.md#15-tests)) | Back-off, kept rows, `retention_expiry_errors_total` and the `retention_expiry_overdue` alert | [Z56](../edge-cases.md), section 5.3 |
 | `it::logs::i5_no_content_in_logs` | No canary content or address in any captured log line, including `metric` lines | [I5](../edge-cases.md), FR-PRV-6 |
 | `it::ops::metrics_emitted` | Each catalogued metric with its labels appears as `event = "metric"` lines for the flows that emit it; no metric carries a message or identity ID as a label | section 3 |
@@ -1387,7 +1387,7 @@ drill.
 | `core::slo::burn_rate_targets` | The Custom Alert targets in section 5.2 follow from the formula | section 5.2 |
 | `core::slo::alert_state_machine` | Transition rules are pure and deterministic | section 5.4 |
 | `live::ops::metrics_reach_analytics_engine` | On staging, metrics written by a send are queryable through the SQL API | section 3 |
-| `live::ops::restore_drill` | Staging drill of the whole runbook with `pmail ops`: freeze, D1 export, Time Travel restore and replay with one excluded table, a mailbox PITR restore, the reconcile job, re-applied erasures (one counterparty erasure by hash), unfreeze and the mail test, within 4 hours; mail sent to staging during the freeze arrives after it | NFR-OPS-2 |
+| `live::ops::restore_drill` | Staging drill of the whole runbook with `idvy ops`: freeze, D1 export, Time Travel restore and replay with one excluded table, a mailbox PITR restore, the reconcile job, re-applied erasures (one counterparty erasure by hash), unfreeze and the mail test, within 4 hours; mail sent to staging during the freeze arrives after it | NFR-OPS-2 |
 | `live::ops::heartbeat_workflow` | On staging, the heartbeat workflow passes against a healthy deployment and fails when a page alert is forced to fire; the mail-test run passes | [J32](../edge-cases.md) |
 | `it::ops::slo_from_metrics` | Each SLO row of section 4 (NFR-REL-1 to NFR-REL-4, NFR-PERF-1 to NFR-PERF-6, NFR-PRV-1) is computed by the SLO evaluator from metric lines that a scripted flow emitted, with the expected good and total counts | section 4 |
 | `it::bench::send_api_p95` | 1,000 sends through the simulator in workerd: `send_api_ms` p95 ≤ 500 ms; reports the figure, CI warns above | NFR-PERF-1 |

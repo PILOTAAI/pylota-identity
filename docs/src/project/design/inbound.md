@@ -123,7 +123,7 @@ setup registers no Email Routing destination address
    | Any other reserved role name (`info`, `sales`, `support`, `marketing` and the rest of the RFC 2142 list) | No special handling: no identity can own them, so the directory lookup (step 4) finds nothing and step 5 rejects `550 5.1.1` |
 
    **Forwarding check** ([Domains on any DNS host § 4.4](domain-connections.md#44-send_only), [N12](../edge-cases.md)).
-   Before the rows above, a message to any platform-domain address whose header `X-Pylota-Mail-Check`
+   Before the rows above, a message to any platform-domain address whose header `X-Pylota-Identity-Check`
    holds a token is offered to that token's `DomainMonitor`. When the token is pending and the envelope
    recipient is the platform address of the identity that owns the tested address, the monitor sets the
    address's `forwarding` to `ok` and `forwarding_checked_at`; the message is not stored and the handler
@@ -159,9 +159,9 @@ setup registers no Email Routing destination address
       tenant owner's address. A destination **routes back into this deployment** when its domain is
       `PM_PLATFORM_DOMAIN` or the name of any `domains` row that is not `removed` (one D1 query, cached
       for 60 seconds per isolate). Such a destination is never used: the owner falls back to
-      `PM_SECURITY_CONTACT`, and a `PM_SECURITY_CONTACT` that routes back counts as unset (`pmail doctor`
+      `PM_SECURITY_CONTACT`, and a `PM_SECURITY_CONTACT` that routes back counts as unset (`idvy doctor`
       reports it as an error, and setup refuses it).
-   2. **Loop guard.** A message that already carries `X-Pylota-Mail-Role-Hop`, or whose envelope sender
+   2. **Loop guard.** A message that already carries `X-Pylota-Identity-Role-Hop`, or whose envelope sender
       is the system identity's address, is refused with `set_reject("550 5.4.6 Routing loop detected")`.
    3. **Rate limits.** `DomainMonitorRequest::AdmitRoleMail { sender_hash, now }` on the destination
       domain's `DomainMonitor` (the platform domain's for operational names) admits at most 30 role
@@ -187,7 +187,7 @@ setup registers no Email Routing destination address
       mail. On `Spent` the pointer is retried with a 1-hour delay; one still refused 24 hours after it was
       received is dropped and counted in `role_mail_failed_total{reason="budget"}`.
       Its internal submit input carries `role_relay: true`, which makes the service add
-      `X-Pylota-Mail-Role-Hop: 1` and `Auto-Submitted: auto-generated` ([Outbound › Headers](outbound.md#headers));
+      `X-Pylota-Identity-Role-Hop: 1` and `Auto-Submitted: auto-generated` ([Outbound › Headers](outbound.md#headers));
       like `list_unsubscribe`, the field exists only on the internal input. The original is attached as
       `message/rfc822` (at most 4 MiB) only when the destination is the deployment's
       `PM_SECURITY_CONTACT` (`destination_kind = "security_contact"`), its verdict is `pass`, none of its
@@ -546,7 +546,7 @@ caps are applied while walking the parsed tree:
 
 `ParsedMessage` holds: header fields (`From` list, `Sender`, `To`, `Cc`, `Reply-To`, `Subject`, `Date`,
 `Message-ID`, `In-Reply-To`, `References`, `Auto-Submitted`, `List-*`, `Precedence`, `Content-Type`,
-`X-Pylota-Mail-Hop`, `Authentication-Results`, `Disposition-Notification-To`), the selected text and HTML
+`X-Pylota-Identity-Hop`, `Authentication-Results`, `Disposition-Notification-To`), the selected text and HTML
 bodies, the attachment parts, and flags.
 
 Rules:
@@ -800,13 +800,13 @@ from every row is collected into `automated_json.evidence`.
 | 1 | `Content-Type: multipart/report; report-type=delivery-status` (RFC 3464); or a heuristic bounce: `From` local part `mailer-daemon` or `postmaster`, a subject matching `undeliver|delivery status notification|mail delivery failed|returned mail|failure notice`, and a `message/rfc822` or `text/rfc822-headers` part | `dsn` |
 | 2 | `multipart/report; report-type=disposition-notification` (RFC 8098) | `mdn` |
 | 3 | `List-Id`, `List-Unsubscribe` or `List-Post` present, or `Precedence: list` or `bulk` | `list` |
-| 4 | `Auto-Submitted` present with a value other than `no` (RFC 3834 `auto-generated`, `auto-replied`; RFC 5436 `auto-notified`); `X-Autoreply`, `X-Autorespond`; `X-Auto-Response-Suppress` containing `All` or `OOF`; `Precedence: junk` or `auto_reply`; a subject starting `Out of Office`, `Automatic reply:`, `Auto:`, `Autosvar:`, `Abwesenheitsnotiz`, `Réponse automatique`; `From` local part `noreply`, `no-reply`, `donotreply`, `do-not-reply`; the null envelope sender; `X-Pylota-Mail-Hop` ≥ `MAX_HOP` (10) | `automated` |
+| 4 | `Auto-Submitted` present with a value other than `no` (RFC 3834 `auto-generated`, `auto-replied`; RFC 5436 `auto-notified`); `X-Autoreply`, `X-Autorespond`; `X-Auto-Response-Suppress` containing `All` or `OOF`; `Precedence: junk` or `auto_reply`; a subject starting `Out of Office`, `Automatic reply:`, `Auto:`, `Autosvar:`, `Abwesenheitsnotiz`, `Réponse automatique`; `From` local part `noreply`, `no-reply`, `donotreply`, `do-not-reply`; the null envelope sender; `X-Pylota-Identity-Hop` ≥ `MAX_HOP` (10) | `automated` |
 | 5 | A calendar object was read at step 10a, and none of the above (step 10a upgrades `normal` to `calendar`) | `calendar` |
 | 6 | Otherwise | `normal` |
 
 - `trust.automated` is true for `dsn`, `mdn`, `list` and `automated`. Agents must not auto-reply to these;
   the send path refuses `kind: auto_reply` replies to them ([Outbound](outbound.md)).
-- `X-Pylota-Mail-Hop: n` is set by our own outbound mail ([Outbound](outbound.md#composition)). Any value
+- `X-Pylota-Identity-Hop: n` is set by our own outbound mail ([Outbound](outbound.md#composition)). Any value
   ≥ 1 adds evidence `pylota_agent`; ≥ `MAX_HOP` (10, a constant in `core::policy`) makes the message
   `automated` (a loop breaker). The value is stored as `automated_json.hop`, and the send path refuses
   any send whose computed hop would reach `MAX_HOP`, whatever its `kind` (`409 loop_detected`,
@@ -1508,7 +1508,7 @@ POST {PM_SCANNER_URL}
 Content-Type: application/octet-stream
 X-Pylota-Attachment-Sha256: 9f86d081884c7d65…
 X-Pylota-Sniffed-Type: application/pdf
-User-Agent: PylotaMail/1.0
+User-Agent: PylotaIdentity/1.0
 
 <attachment bytes>
 ```
@@ -1892,7 +1892,7 @@ The `message.received` event reaches the Notifier through the webhook fan-out
 | Test | Covers |
 |---|---|
 | `it::inbound::a4_role_mail_routing` | `postmaster@` and `abuse@` the platform domain become a new message from the system identity to `PM_SECURITY_CONTACT` (nothing stored in a tenant mailbox); with the variable unset they get `550 5.1.1`; `info@` the platform domain gets `550 5.1.1`; `postmaster@` a tenant domain goes to the owner, and to `PM_SECURITY_CONTACT` when the tenant has no owner or the owner's address is on a deployment domain ([A4](../edge-cases.md)) |
-| `it::inbound::d14_role_mail_relay_guarded` | The 31st role message in an hour to one domain, and the 6th from one sender, get a temporary failure; a message carrying `X-Pylota-Mail-Role-Hop`, or from the system identity, gets `550 5.4.6`; a relay of a message whose verdict is not `pass`, or that has a risky attachment, attaches only `text/rfc822-headers`; the same raw message delivered twice is relayed once (`role:` idempotency key); a suppressed `PM_SECURITY_CONTACT` ends in `role_mail_failed_total` with no retry; a `PM_SECURITY_CONTACT` on the platform domain counts as unset ([D14](../edge-cases.md)) |
+| `it::inbound::d14_role_mail_relay_guarded` | The 31st role message in an hour to one domain, and the 6th from one sender, get a temporary failure; a message carrying `X-Pylota-Identity-Role-Hop`, or from the system identity, gets `550 5.4.6`; a relay of a message whose verdict is not `pass`, or that has a risky attachment, attaches only `text/rfc822-headers`; the same raw message delivered twice is relayed once (`role:` idempotency key); a suppressed `PM_SECURITY_CONTACT` ends in `role_mail_failed_total` with no retry; a `PM_SECURITY_CONTACT` on the platform domain counts as unset ([D14](../edge-cases.md)) |
 | `it::inbound::a16_dictionary_guard` | 50 messages in one second to random unknown addresses on one domain: the first 20 are looked up in D1 and get `550 5.1.1`, the rest get a temporary failure with no D1 query; a known address that is cached still gets through; with D1 down, an address on a domain that is not a deployment domain gets `550 5.1.1` instead of being staged ([A16](../edge-cases.md), [J7](../edge-cases.md)) |
 | `it::inbound::d11_forged_dsn_ignored` | A DSN naming a Cloudflare- or SES-sent message changes no delivery and creates no suppression; for an SMTP-relay send, a DSN with verdict `fail`, from a domain aligned with neither the recipient nor the relay, or whose returned `From` differs, is ignored (`dsn_untrusted`); a trusted one marks the recipient `bounced` (hard) with a suppression that expires after 30 days, emits `suppression.created` once, and adds nothing to the abuse window, so eleven of them never pause the identity ([D11](../edge-cases.md), [N19](../edge-cases.md)) |
 | `core::trust::d12_platform_domain_not_known` | A `pass` sender on the platform domain from another tenant is not `known_sender` and carries `shared_domain_sender`; the same sender with `outbound_count > 0` is known; a sender on the tenant's own domain with `pass` is known; a platform-domain local part whose suffix folds to the receiving tenant's suffix gets `lookalike_domain` ([D12](../edge-cases.md)) |

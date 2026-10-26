@@ -124,7 +124,7 @@ not for faster action.
 | `hidden_text` | Hidden text was found and removed ([B11](../project/edge-cases.md)) |
 
 Risk flags come from built-in rules (for example the payment-change and hidden-text detectors), from
-the authentication and attachment checks, and from the model. Pylota Mail never acts on them. Your
+the authentication and attachment checks, and from the model. Pylota Identity never acts on them. Your
 application decides what they mean: for example, require a person's approval before an agent acts on
 any message with `payment_change_request` or `prompt_injection_suspected`.
 
@@ -233,7 +233,7 @@ triaged, [re-run triage](#re-run-triage) on it.
 ## Use triage
 
 - **Thread lists:** `GET /v1/identities/{identity_id}/threads?needs_reply_gte=0.7&category=customer_request`
-  returns the threads waiting for an answer, newest first. The CLI equivalent is `pmail triage list`.
+  returns the threads waiting for an answer, newest first. The CLI equivalent is `idvy triage list`.
 - **Search:** `category:billing`, `category:legal_compliance is:needs_reply`
   ([Search](search.md#query-operators)).
 - **Webhooks:** subscribe to `message.triaged` to route work as soon as triage finishes, instead of on
@@ -245,11 +245,11 @@ triaged, [re-run triage](#re-run-triage) on it.
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_01J9…/triage \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 Re-running needs `messages:write` and returns `202`. A new `message.triaged` event follows. The CLI
-command is `pmail triage rerun`. Re-run after changing categories or rules, or after a `failed`
+command is `idvy triage rerun`. Re-run after changing categories or rules, or after a `failed`
 result. A message released from quarantine is triaged automatically.
 
 ## Triage is advisory
@@ -264,7 +264,7 @@ cannot make anything happen. Actions stay with your application, and the people 
 - Triage runs on Workers AI **in your own Cloudflare account**. The model is set by
   `PM_TRIAGE_MODEL` (default `@cf/openai/gpt-oss-20b`).
 - If you set `PM_AI_GATEWAY`, model calls (which carry mail content) pass through that AI Gateway.
-  Pylota Mail turns off the gateway's log collection and caching on every call that carries mail
+  Pylota Identity turns off the gateway's log collection and caching on every call that carries mail
   content, so the gateway keeps only request metadata (model, time, tokens) for those calls. Its rate
   limits and other settings still apply.
 - Mail content is never written to logs at any log level.

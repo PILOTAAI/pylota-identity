@@ -19,7 +19,7 @@ pub fn run(root: &Path) -> Result<(), String> {
     }
 }
 
-/// Rule 1: only `pylota-mail-platform` may depend on these directly.
+/// Rule 1: only `pylota-identity-platform` may depend on these directly.
 const WORKER_FAMILY: &[&str] = &[
     "worker",
     "worker-sys",
@@ -33,16 +33,19 @@ const WORKER_FAMILY: &[&str] = &[
 /// dependencies. Rule 1 already covers the `worker` family.
 const FORBIDDEN: &[(&str, &[&str])] = &[
     (
-        "pylota-mail-core",
-        &["pylota-mail-platform", "reqwest", "tokio"],
+        "pylota-identity-core",
+        &["pylota-identity-platform", "reqwest", "tokio"],
     ),
     (
-        "pylota-mail-platform",
-        &["pylota-mail-core", "tokio", "reqwest"],
+        "pylota-identity-platform",
+        &["pylota-identity-core", "tokio", "reqwest"],
     ),
-    ("pylota-mail-worker", &["tokio", "reqwest"]),
-    ("pylota-mail", &["pylota-mail-platform", "pylota-mail-core"]),
-    ("pylota-mail-cli", &["pylota-mail-platform"]),
+    ("pylota-identity-worker", &["tokio", "reqwest"]),
+    (
+        "pylota-identity",
+        &["pylota-identity-platform", "pylota-identity-core"],
+    ),
+    ("pylota-identity-cli", &["pylota-identity-platform"]),
 ];
 
 /// `api-types` may depend on these and nothing else.
@@ -79,9 +82,9 @@ pub fn check_manifest(root: &Path) -> Result<Vec<Violation>, String> {
             let dep_name = dep["name"].as_str().unwrap_or_default();
             let kind = dep["kind"].as_str().unwrap_or("normal");
             let shipped = kind == "normal" || kind == "build";
-            if shipped && name != "pylota-mail-platform" && WORKER_FAMILY.contains(&dep_name) {
+            if shipped && name != "pylota-identity-platform" && WORKER_FAMILY.contains(&dep_name) {
                 violations.push(format!(
-                    "rule 1: {name} depends on `{dep_name}` ({kind}); only pylota-mail-platform may"
+                    "rule 1: {name} depends on `{dep_name}` ({kind}); only pylota-identity-platform may"
                 ));
             }
             if shipped {
@@ -91,9 +94,9 @@ pub fn check_manifest(root: &Path) -> Result<Vec<Violation>, String> {
                         "rule 2: {name} must not depend on `{dep_name}` ({kind})"
                     ));
                 }
-                if name == "pylota-mail-api-types" && !API_TYPES_ALLOWED.contains(&dep_name) {
+                if name == "pylota-identity-api-types" && !API_TYPES_ALLOWED.contains(&dep_name) {
                     violations.push(format!(
-                        "rule 2: pylota-mail-api-types may depend only on serde, serde_json and utoipa, not `{dep_name}`"
+                        "rule 2: pylota-identity-api-types may depend only on serde, serde_json and utoipa, not `{dep_name}`"
                     ));
                 }
             }
@@ -164,7 +167,7 @@ fn check_wasm_graph(root: &Path) -> Result<Vec<Violation>, String> {
                 "tree",
                 "--locked",
                 "-p",
-                "pylota-mail-worker",
+                "pylota-identity-worker",
                 "--target",
                 "wasm32-unknown-unknown",
                 "-e",
@@ -286,7 +289,7 @@ mod tests {
         );
         fx.crate_with(
             "platform",
-            "pylota-mail-platform",
+            "pylota-identity-platform",
             "worker = { workspace = true }",
         );
         fx.crate_with("logic", "fixture-logic", "worker = { workspace = true }");
@@ -302,7 +305,7 @@ mod tests {
         assert!(
             !violations
                 .iter()
-                .any(|v| v.starts_with("rule 1: pylota-mail-platform ")),
+                .any(|v| v.starts_with("rule 1: pylota-identity-platform ")),
             "platform may depend on worker: {violations:?}"
         );
     }
@@ -319,7 +322,8 @@ mod tests {
     /// Rule 3 accepts tokio with no features under `worker` only.
     #[test]
     fn check_layering_rejects_tokio_outside_worker() {
-        let good = "0tokio v1.54.0 \n1worker v0.8.7 d1,queue\n2pylota-mail-platform v0.1.0 (/x)\n";
+        let good =
+            "0tokio v1.54.0 \n1worker v0.8.7 d1,queue\n2pylota-identity-platform v0.1.0 (/x)\n";
         assert!(tokio_violations(good).is_empty());
         let featured = "0tokio v1.54.0 rt,time\n1worker v0.8.7 d1,queue\n";
         assert_eq!(tokio_violations(featured).len(), 1);

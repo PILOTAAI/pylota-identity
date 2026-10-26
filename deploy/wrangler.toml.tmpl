@@ -1,8 +1,8 @@
-# The wrangler.toml that `pmail setup` renders into <dir>/wrangler.toml (Rust workspace § 8, CLI and
+# The wrangler.toml that `idvy setup` renders into <dir>/wrangler.toml (Rust workspace § 8, CLI and
 # setup § 7). Values in {…} are filled by setup; a placeholder left after rendering is an error.
-# Secrets are never written here: they go up with `pmail wrangler secret put`.
+# Secrets are never written here: they go up with `idvy wrangler secret put`.
 
-name               = "pylota-mail"
+name               = "pylota-identity"
 main               = "build/index.js"          # worker-build 0.8.7 output
 compatibility_date = "2026-09-01"              # ≥ 2026-02-24: deleteAll() also deletes the alarm
 
@@ -40,16 +40,16 @@ PM_NOTIFICATIONS       = "on"                  # always written
 
 [[d1_databases]]
 binding       = "DB"
-database_name = "pylota-mail"
+database_name = "pylota-identity"
 database_id   = "{d1-id}"                      # jurisdiction is fixed when the database is created
 migrations_dir = "migrations/d1"               # Wrangler resolves it against this file's directory and uses
                                                # it only for `wrangler d1 migrations` (the itest harness, whose
-                                               # file in deploy/ gets "../migrations/d1"); pmail deploy applies
+                                               # file in deploy/ gets "../migrations/d1"); idvy deploy applies
                                                # the bundle's files itself (cli.md §8.5)
 
 [[r2_buckets]]
 binding      = "BLOBS"
-bucket_name  = "pylota-mail-blobs"
+bucket_name  = "pylota-identity-blobs"
 jurisdiction = "eu"                            # omitted when PM_JURISDICTION = default
 
 # only when PM_BACKUP_BUCKET is set:
@@ -224,4 +224,4 @@ enabled = false                                # staging sets enabled = true, he
 
 [[analytics_engine_datasets]]                  # METRICS (Configuration › Bindings)
 binding = "METRICS"
-dataset = "pylota_mail_metrics"
+dataset = "pylota_identity_metrics"

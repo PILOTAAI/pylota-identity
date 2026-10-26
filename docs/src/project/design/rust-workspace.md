@@ -24,28 +24,28 @@ rust-toolchain.toml        stable channel, exact version pinned at build time (�
 .cargo/config.toml         target-specific rustflags (none required), alias `xtask = "run -p xtask --"`
 deny.toml                  cargo-deny: licences, advisories, bans, sources
 crates/
-  core/                    package pylota-mail-core        lib pylota_mail_core
-  platform/                package pylota-mail-platform    lib pylota_mail_platform (publish = false)
-  api-types/               package pylota-mail-api-types   lib pylota_mail_api_types
-  worker/                  package pylota-mail-worker      cdylib + rlib (the Worker; publish = false)
-  sdk/                     package pylota-mail             lib pylota_mail
-  cli/                     package pylota-mail-cli         bin pmail
-  conformance/             package pylota-mail-conformance (corpus, runners; publish = false)
+  core/                    package pylota-identity-core        lib pylota_identity_core
+  platform/                package pylota-identity-platform    lib pylota_identity_platform (publish = false)
+  api-types/               package pylota-identity-api-types   lib pylota_identity_api_types
+  worker/                  package pylota-identity-worker      cdylib + rlib (the Worker; publish = false)
+  sdk/                     package pylota-identity             lib pylota_identity
+  cli/                     package pylota-identity-cli         bin idvy
+  conformance/             package pylota-identity-conformance (corpus, runners; publish = false)
 xtask/                     package xtask (publish = false)
 fuzz/                      cargo-fuzz project (outside the workspace members, nightly only)
 migrations/d1/             D1 SQL migrations, 0001_init.sql …
-deploy/wrangler.toml.tmpl  template rendered by `pmail setup`
+deploy/wrangler.toml.tmpl  template rendered by `idvy setup`
 sdks/fixtures/             recorded exchanges shared by the Rust and TypeScript SDKs, JSON data (SDKs, skills
                            and agent tooling § 2.15); the TypeScript SDK itself is built in its own repository,
-                           PILOTAAI/pylota-mail-typescript (ADR 0018)
+                           PILOTAAI/pylota-identity-typescript (ADR 0018)
 sdks/typescript-tests.json the TypeScript SDK's test inventory, copied from its release, read by `trace`
 integrations/              agent skills, the plugin for Claude Code, Codex and Cursor, skills-rules.toml (§ 4.2)
 spikes/                    M1 spike programs (not shipped)
 ```
 
-Package names carry the `pylota-mail-` prefix because a package named `core` would shadow Rust's `core`
+Package names carry the `pylota-identity-` prefix because a package named `core` would shadow Rust's `core`
 and one named `worker` would clash with the `worker` dependency. Commands use the package names, for
-example `cargo test -p pylota-mail-api-types`.
+example `cargo test -p pylota-identity-api-types`.
 
 All crates use edition 2024, `rust-version` equal to the toolchain pin, and
 `#![forbid(unsafe_code)]` except `platform` (which needs `wasm-bindgen` glue).
@@ -59,26 +59,26 @@ All crates use edition 2024, `rust-version` equal to the toolchain pin, and
 | `api-types` | Request, response, object and event types; `ErrorCode`; OpenAPI generation | `serde`, `serde_json`, `utoipa` | everything else |
 | `worker` | HTTP router and handlers, `email`/`queue`/`scheduled` handlers, the seven Durable Object classes, consumers, transports, MCP endpoint, agentic loop | `core`, `api-types`, `platform`, pure crates | `worker` (the dependency), `wasm-bindgen`, `js-sys`, `web-sys` directly; `tokio`, `reqwest` |
 | `sdk` | Rust client for the REST API, the event stream (feature `stream`), and the agent-assertion verifier ([§11](#11-the-rust-sdk-fr-sdk-1)) | `api-types`, `reqwest`, `serde`, `serde_json`, `ed25519-dalek`, `base64`; `tokio-tungstenite` with the `stream` feature | `worker`, `platform`, `core` |
-| `cli` | `pmail` | `sdk` (with `stream`), `api-types`, `core` (address validation, DNS record parsing for `doctor`), `clap`, `reqwest`, `utoipa` (the output structs of `--schema`), `jmespath` (`--query`), `tokio-tungstenite` (`events tail`, through `sdk`) | `worker`, `platform` |
+| `cli` | `idvy` | `sdk` (with `stream`), `api-types`, `core` (address validation, DNS record parsing for `doctor`), `clap`, `reqwest`, `utoipa` (the output structs of `--schema`), `jmespath` (`--query`), `tokio-tungstenite` (`events tail`, through `sdk`) | `worker`, `platform` |
 | `conformance` | MIME corpus, expected outputs, RFC conformance runner, golden-set generators | `core`, `api-types`, `sdk`; dev: `rmcp` (native) | `worker` (the dependency) |
 | `xtask` | Build, size budget, layering check, itest, fuzz, release, OpenAPI, evals, Unicode table generation, the skills generators and checks, the TypeScript SDK's release assets, the CLDR Windows-zone table, the docs anchor check | anything native, including `pulldown-cmark` (the skills contract scanner) | – |
 
 **Only `platform` imports `worker`.** `cargo xtask check-layering` enforces the table with
 `cargo metadata`:
 
-1. For every workspace package except `pylota-mail-platform`, no **direct** normal or build dependency
+1. For every workspace package except `pylota-identity-platform`, no **direct** normal or build dependency
    named `worker`, `worker-sys`, `worker-macros`, `wasm-bindgen`, `js-sys` or `web-sys` (transitive ones,
    such as `wasm-bindgen` under `getrandom`, are allowed).
-2. `pylota-mail-core` has no direct dependency on `pylota-mail-platform`, `reqwest` or `tokio`.
+2. `pylota-identity-core` has no direct dependency on `pylota-identity-platform`, `reqwest` or `tokio`.
    (`mail-auth`'s `dns-doh` feature brings `reqwest`'s wasm backend in transitively; it is never
    called, because DNS answers are pre-filled, see section 3.)
-3. In the normal dependency graph of `pylota-mail-worker` for `wasm32-unknown-unknown`, `tokio` appears
+3. In the normal dependency graph of `pylota-identity-worker` for `wasm32-unknown-unknown`, `tokio` appears
    only as a dependency of `worker`, with no features enabled, and `gethostname` and `hickory-resolver` do
    not appear at all. `worker` 0.8.7 itself depends on `tokio ^1.28` with default features off, for every
    target (crates.io sparse index, read 2026-10-10); a tokio with no features has no runtime, timers or
    I/O. `rmcp`, which enables tokio's `rt`, `time`, `sync` and `macros` features, is a native
    dev-dependency only (see [S5](index.md#spikes)). The check reads the graph with
-   `cargo tree -p pylota-mail-worker --target wasm32-unknown-unknown -e no-dev -i tokio -f '{p} {f}'`, so
+   `cargo tree -p pylota-identity-worker --target wasm32-unknown-unknown -e no-dev -i tokio -f '{p} {f}'`, so
    features enabled only by dev-dependencies do not count: the output must be exactly one path, through
    `worker`, with an empty feature list. The same rule is enforced again by `cargo deny`
    ([Security › Supply chain](security.md#11-supply-chain)).
@@ -100,7 +100,7 @@ generates the same JavaScript glue with `$crate` paths:
 
 ```rust
 // crates/worker/src/lib.rs
-pylota_mail_platform::export_worker! {
+pylota_identity_platform::export_worker! {
     app: crate::App,                                   // impl platform::cf::WorkerApp (fetch, email, queue, scheduled)
     durable_objects: {
         IdentityMailbox => crate::mailbox::MailboxObject,   // impl platform::cf::ObjectApp (new, fetch, alarm)
@@ -118,7 +118,7 @@ The expansion contains only `#[wasm_bindgen(…, wasm_bindgen = $crate::cf::glue
 (the `fetch`, `email`, `queue` and `scheduled` functions and the seven classes with their constructor,
 `fetch` and `alarm` methods, `TenantEvents` with its three WebSocket handlers as well,
 [Event feed § 7.9](event-feed.md#79-hibernation-and-what-workers-rs-087-provides)), each a one-line call into an ordinary function in
-`pylota_mail_platform::cf::glue` that converts the JS values and invokes the trait. The glue mirrors what
+`pylota_identity_platform::cf::glue` that converts the JS values and invokes the trait. The glue mirrors what
 `worker-macros` 0.8.7 generates, including its `Result`-to-exception behaviour. Spike S1 proves it
 (including async exports through the re-exported `wasm-bindgen-futures`). If it cannot be made to work,
 the fallback is an ADR allowing exactly one file, `crates/worker/src/entry.rs`, to use the `worker`
@@ -251,9 +251,9 @@ Notes on specific crates (all read 2026-10-09):
   `pic` by default. `default-features = false` with `svg` keeps the SVG renderer and leaves out the
   optional `image` dependency.
 - **`tokio-tungstenite` 0.30.0** is the event stream's WebSocket client in the SDK's `stream` feature and
-  so in `pmail events tail` (Rust 1.85 or later). It is a native dependency of `sdk` only, never of the
+  so in `idvy events tail` (Rust 1.85 or later). It is a native dependency of `sdk` only, never of the
   Worker ([Event feed § 15.2](event-feed.md#152-cli)).
-- **`jmespath` 0.5.0** is the JMESPath project's own Rust implementation, the language of `pmail --query`
+- **`jmespath` 0.5.0** is the JMESPath project's own Rust implementation, the language of `idvy --query`
   ([SDKs, skills and agent tooling § 1](sdk-and-skills.md#1-decisions)).
 - **`rmcp` 3.4.1** depends on `tokio` (features `sync`, `macros`, `rt`, `time`) unconditionally, so it is only a native dev-dependency (MCP client tests); the Worker implements the MCP JSON-RPC types itself ([MCP server](mcp.md), [S5](index.md#spikes)). It is the newest release at least two weeks old (crates.io sparse index, read 2026-10-10: 3.4.1 published 2026-09-23; 3.5.0 on 2026-09-28 and 3.5.1 on 2026-10-05 are newer). 3.5.1 lists the same features and the same tokio dependency, and nothing in these designs needs a 3.5-only feature; that `rmcp::model` 3.4.1 has the `2026-07-28` protocol-version constant is verified at build time (the 3.x line started with 3.0.0 on 2026-07-28).
 
@@ -320,7 +320,7 @@ These hold for every crate compiled into the Worker (`core`, `api-types`, `platf
    measured CPU time; the value is lowered to twice the measured p100 on the corpus. Spike S11 adds a
    39 MB message received through SES ([N5](../edge-cases.md)).
 7. **`core` builds for both targets**, checked in CI with
-   `cargo build -p pylota-mail-core --target wasm32-unknown-unknown`.
+   `cargo build -p pylota-identity-core --target wasm32-unknown-unknown`.
 
 ## 6. The `platform` crate
 
@@ -367,7 +367,7 @@ pub struct Config {
     pub mailbox_provider_domains: Vec<String>, // PM_MAILBOX_PROVIDER_DOMAINS, added to the built-in list
                                            // (service-accounts.md, request validation)
     pub frozen: bool,                      // PM_FREEZE = "on" (observability.md › Restore from PITR)
-    pub frozen_since: Option<String>,      // PM_FREEZE_SINCE, written by pmail ops freeze
+    pub frozen_since: Option<String>,      // PM_FREEZE_SINCE, written by idvy ops freeze
     pub eval_rest: bool,                   // PM_EVAL_REST = "on", honoured only with PM_ENV = local
                                            // (testing.md § 9.2)
     pub ses_inbound: Option<SesInbound>,   // PM_SES_INBOUND_{BUCKET,TOPIC_ARN,QUEUE_URL}; Some only when all three are set
@@ -396,7 +396,7 @@ pub struct Secrets {                 // each decoded from base64; 32 bytes for t
 }
 ```
 
-`cf_account_id` comes from the variable `PM_CF_ACCOUNT_ID`, which `pmail setup` writes. It is needed
+`cf_account_id` comes from the variable `PM_CF_ACCOUNT_ID`, which `idvy setup` writes. It is needed
 by the Cloudflare REST calls the Worker makes (zone creation, event subscriptions, the Email Sending
 suppression list, the REST fallbacks below). `ses_sns_topic_arn` comes from `PM_SES_SNS_TOPIC_ARN`, the
 only SNS topic whose notifications the SES event endpoint accepts ([Outbound › Amazon SES](outbound.md#amazon-ses)).
@@ -411,13 +411,13 @@ than `closed` without `PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL` and `PM_TER
 |---|---|
 | A required variable is missing, or a required secret is missing or of the wrong length | Every handler answers `503 unavailable`; the log line `config_invalid` names the variable; `/health` answers `503 unavailable` with `details.config_invalid = "<NAME>"` |
 | An optional variable is set but malformed (not one of its allowed values, not a number where one is required, an unparsable `PM_SYSTEM_FROM`, `PM_DOH_RESOLVERS` without exactly two `https://` URLs, invalid JSON in `PM_DEFAULT_POLICY` or `PM_PLAN_CATALOG`) | The same as a missing required variable: a startup error naming the variable (`config_invalid`). An optional value is never silently ignored or replaced by its default |
-| SES credentials and `PM_SES_REGION` are set, but `PM_SES_SNS_TOPIC_ARN` is missing | The Worker starts. The SES transport is off: `ses` is `None`, so domains needing it get `422 transport_unavailable` (`ses_not_configured`) and `PATCH` to `ses` is refused. `/health` reports `"status": "degraded"` with `"ses": "sns_topic_missing"`, and `pmail doctor` fails `ses` |
-| `PM_BILLING=stripe` without `PM_STRIPE_SECRET_KEY` or `PM_STRIPE_WEBHOOK_SECRET` | The Worker starts with billing not started: every workspace behaves as `disabled` (no plan checks; holds still run), Checkout, Portal and `/billing/stripe/webhook` answer `503 unavailable`, `/health` reports `"status": "degraded"` with `"billing": "stripe_secrets_missing"`, and `pmail doctor` fails `secrets` |
+| SES credentials and `PM_SES_REGION` are set, but `PM_SES_SNS_TOPIC_ARN` is missing | The Worker starts. The SES transport is off: `ses` is `None`, so domains needing it get `422 transport_unavailable` (`ses_not_configured`) and `PATCH` to `ses` is refused. `/health` reports `"status": "degraded"` with `"ses": "sns_topic_missing"`, and `idvy doctor` fails `ses` |
+| `PM_BILLING=stripe` without `PM_STRIPE_SECRET_KEY` or `PM_STRIPE_WEBHOOK_SECRET` | The Worker starts with billing not started: every workspace behaves as `disabled` (no plan checks; holds still run), Checkout, Portal and `/billing/stripe/webhook` answer `503 unavailable`, `/health` reports `"status": "degraded"` with `"billing": "stripe_secrets_missing"`, and `idvy doctor` fails `secrets` |
 | `PM_SIGNUP` is not `closed` and a `PM_TERMS_*`, `PM_PRIVACY_URL` or `PM_DPA_URL` value is missing | `config_invalid`, as above |
 | `PM_WEB_BOT_AUTH=on` in a release built without signed HTTP requests (spike S13 failed, so its fallback was taken) | `config_invalid` naming `PM_WEB_BOT_AUTH`: the variable cannot be turned on, and is never silently ignored |
 | The master-key slot named by `PM_MASTER_KEY_ACTIVE` (default `a`) is empty, `PM_MASTER_KEY_ACTIVE` is not `a` or `b`, or both slots hold keys with the same key ID | `config_invalid` naming the secret ([Security §6.2](security.md#62-rotation-procedures)) |
 | `PM_AGENT_SIGNUP` not `on` or `off`, or `PM_AGENT_SIGNUP_DAILY_CAP` outside 1–10,000 | `config_invalid`, as above ([Agent self-sign-up § 1](agent-signup.md#1-when-agent-sign-up-is-on)) |
-| `PM_DOCS_URL` is not `https`, has a query or fragment, or is over 200 bytes | The one exception to the malformed-optional-variable rule: the Worker starts, uses the default `https://pylotamail.com/docs` for every error's `docs` link and logs `docs_url_invalid` once per isolate, because a wrong documentation link must never take the API down. `pmail setup` and `pmail deploy` refuse the value before it is deployed ([Parity additions § 10.1](parity-additions.md#101-the-field), [CLI and setup §7](cli.md#7-rendering-wranglertoml)) |
+| `PM_DOCS_URL` is not `https`, has a query or fragment, or is over 200 bytes | The one exception to the malformed-optional-variable rule: the Worker starts, uses the default `https://pylotamail.com/docs` for every error's `docs` link and logs `docs_url_invalid` once per isolate, because a wrong documentation link must never take the API down. `idvy setup` and `idvy deploy` refuse the value before it is deployed ([Parity additions § 10.1](parity-additions.md#101-the-field), [CLI and setup §7](cli.md#7-rendering-wranglertoml)) |
 | `PM_FREEZE=on` | The Worker starts frozen: `/health` adds `"frozen": true` and every handler follows the freeze rules of [Observability › Restore from PITR](observability.md#restore-from-pitr) |
 
 Test: `platform::config::startup_rules` covers each row.
@@ -817,7 +817,7 @@ extern "C" {
 call is for: the `index_name` of the `VECTORS` binding, or of `VECTORS_NEXT` during a re-embed
 (`pm-mail-chunks`, then `pm-mail-chunks-g{N}`, [Search § 7.3](search.md#73-re-embed-job-embedding-model-change)),
 never a fixed name. A Worker cannot read a binding's index name, so when a Vectorize REST fallback is taken
-`pmail deploy` also writes the two names into `[vars]` (`PM_VECTORS_INDEX`, and `PM_VECTORS_NEXT_INDEX`
+`idvy deploy` also writes the two names into `[vars]` (`PM_VECTORS_INDEX`, and `PM_VECTORS_NEXT_INDEX`
 while `VECTORS_NEXT` is bound), added to Configuration with the spike result:
 
 | Call | REST endpoint |
@@ -832,19 +832,19 @@ while `VECTORS_NEXT` is bound), added to Configuration with the spike result:
 
 Once any REST fallback is taken, `PM_CF_API_TOKEN` (with Vectorize Write and Workers AI Read) becomes
 required on every deployment, not only for some domain methods: `/health` reports `degraded` and
-`pmail doctor` fails `secrets` without it. [Configuration](../../reference/configuration.md#secrets)
+`idvy doctor` fails `secrets` without it. [Configuration](../../reference/configuration.md#secrets)
 and [Deploy](../../self-hosting.md#tenant-domains) are updated in the same change as the spike result.
 
 ## 8. Generated `wrangler.toml`
 
-`pmail setup` renders `deploy/wrangler.toml` from `deploy/wrangler.toml.tmpl`. The bindings are exactly
+`idvy setup` renders `deploy/wrangler.toml` from `deploy/wrangler.toml.tmpl`. The bindings are exactly
 those in [Configuration › Bindings](../../reference/configuration.md#bindings), including the `METRICS`
 Analytics Engine dataset that the [Observability](observability.md) design requires and the optional
 `BACKUP` bucket. Values in `{…}` are filled by setup. Syntax checked against the Wrangler configuration reference on 2026-10-09; the pinned
 Wrangler is `4.139.0` (2026-09-24; it bundles workerd 1.20260923.1, which runs the `2026-09-01` compatibility date locally, and needs Node.js 22 or later; checked with `npm view` on 2026-10-09).
 
 ```toml
-name               = "pylota-mail"
+name               = "pylota-identity"
 main               = "build/index.js"          # worker-build 0.8.7 output
 compatibility_date = "2026-09-01"              # ≥ 2026-02-24: deleteAll() also deletes the alarm
 
@@ -882,16 +882,16 @@ PM_NOTIFICATIONS       = "on"                  # always written
 
 [[d1_databases]]
 binding       = "DB"
-database_name = "pylota-mail"
+database_name = "pylota-identity"
 database_id   = "{d1-id}"                      # jurisdiction is fixed when the database is created
 migrations_dir = "migrations/d1"               # Wrangler resolves it against this file's directory and uses
                                                # it only for `wrangler d1 migrations` (the itest harness, whose
-                                               # file in deploy/ gets "../migrations/d1"); pmail deploy applies
+                                               # file in deploy/ gets "../migrations/d1"); idvy deploy applies
                                                # the bundle's files itself (cli.md §8.5)
 
 [[r2_buckets]]
 binding      = "BLOBS"
-bucket_name  = "pylota-mail-blobs"
+bucket_name  = "pylota-identity-blobs"
 jurisdiction = "eu"                            # omitted when PM_JURISDICTION = default
 
 # only when PM_BACKUP_BUCKET is set:
@@ -1049,7 +1049,7 @@ enabled = false                                # staging sets enabled = true, he
 
 [[analytics_engine_datasets]]                  # METRICS (Configuration › Bindings)
 binding = "METRICS"
-dataset = "pylota_mail_metrics"
+dataset = "pylota_identity_metrics"
 ```
 
 - Secrets (`PM_MASTER_KEY`, `PM_KEY_PEPPER`, `PM_HASH_KEY`, and the optional `PM_MASTER_KEY_B` and
@@ -1081,8 +1081,8 @@ dataset = "pylota_mail_metrics"
 |---|---|
 | `cargo xtask build-worker` | Runs `worker-build --release` (0.8.7) in `crates/worker` with three build-time values in the environment: `PM_BUILD_VERSION` (the workspace version, or the tag without its `v` in a release), `PM_BUILD_COMMIT` (`git rev-parse --short=7 HEAD`) and `PM_BUILD_DATE` (the UTC date of `SOURCE_DATE_EPOCH` when set, which `xtask release` sets to the tagged commit's time, otherwise today). `crates/worker/build.rs` passes them to the compiler with `cargo:rustc-env` and `cargo:rerun-if-env-changed`, defaulting to `CARGO_PKG_VERSION`, `unknown` and `1970-01-01` for native and test builds. `/health` reads `version` and `commit` from them, and `security.txt` computes `Expires` as `PM_BUILD_DATE` plus 365 days. Then measures `build/index.js` + `build/index_bg.wasm`: gzip level 9 total must be ≤ 10,485,760 bytes (NFR-SEC-2) and uncompressed ≤ 64 MiB, else it fails. Prints a size table by crate (from `twiggy`-style name-section data in a non-stripped copy) and warns above 8 MiB compressed. M0 (2026-10-19): it runs `worker-build --release --locked`, measures gzip level 9 as miniz_oxide's level-9 DEFLATE stream plus the 18 bytes of gzip framing, and prints the table by file; the table by crate comes with spike S4, which measures the bundle |
 | `cargo xtask check-layering` | The checks in section 2: rules 1, 2 and 4 from `cargo metadata`, rule 3 (tokio only under `worker`, with no features; no `gethostname` or `hickory-resolver`) from `cargo tree` on the wasm32 graph without dev-dependencies |
-| `cargo xtask itest` | Builds the Worker with the `itest-hooks` cargo feature, renders `deploy/wrangler.itest.toml` (same bindings, local resources, `PM_ENV = "local"`, test secrets, the fake-server URL and test token), starts the fake server on `127.0.0.1:8798`, applies D1 migrations with `--local --persist-to target/itest/state`, writes a throwaway TLS certificate, starts `npx --yes wrangler@4.139.0 dev --local --port 8799 --local-protocol https` with that certificate (`--persist-to target/itest/state --test-scheduled --config deploy/wrangler.itest.toml`), waits for `GET https://localhost:8799/health`, then runs `cargo test -p pylota-mail-worker --features itest-hooks --test it -- --test-threads=1` with `PM_ITEST_URL`. Email events are injected through the local email-event endpoint that `wrangler dev` provides, and cron and alarm time through its scheduled-event endpoint and the `/__test/alarm` hook. Fault injection (R2 failure, D1 failure, transport outcomes) uses `PM_ENV = "local"`-only test hooks compiled behind `itest-hooks`, never in release bundles. The full sequence and the fakes are in [Testing › What cargo xtask itest does](testing.md#61-what-cargo-xtask-itest-does). From M21 on it then runs the Playwright browser suite against the same Worker ([Testing › Browser suite](testing.md#68-browser-suite-browser)); `--suite it` or `--suite browser` runs one of the two. `--serve` stops after the harness is up and keeps the Worker and the fake server running, writing `target/itest/serve.json` (URL, CA path, platform key), for the TypeScript SDK repository's `ts::it::` tests |
-| `cargo xtask live [--manual]` | Runs `cargo test -p pylota-mail-worker --features live --test live -- --test-threads=1` against staging ([Testing › Live suite](testing.md#10-live-end-to-end-suite-live)). `--manual` runs only the tests marked manual, which pause for a person's browser steps and record the results |
+| `cargo xtask itest` | Builds the Worker with the `itest-hooks` cargo feature, renders `deploy/wrangler.itest.toml` (same bindings, local resources, `PM_ENV = "local"`, test secrets, the fake-server URL and test token), starts the fake server on `127.0.0.1:8798`, applies D1 migrations with `--local --persist-to target/itest/state`, writes a throwaway TLS certificate, starts `npx --yes wrangler@4.139.0 dev --local --port 8799 --local-protocol https` with that certificate (`--persist-to target/itest/state --test-scheduled --config deploy/wrangler.itest.toml`), waits for `GET https://localhost:8799/health`, then runs `cargo test -p pylota-identity-worker --features itest-hooks --test it -- --test-threads=1` with `PM_ITEST_URL`. Email events are injected through the local email-event endpoint that `wrangler dev` provides, and cron and alarm time through its scheduled-event endpoint and the `/__test/alarm` hook. Fault injection (R2 failure, D1 failure, transport outcomes) uses `PM_ENV = "local"`-only test hooks compiled behind `itest-hooks`, never in release bundles. The full sequence and the fakes are in [Testing › What cargo xtask itest does](testing.md#61-what-cargo-xtask-itest-does). From M21 on it then runs the Playwright browser suite against the same Worker ([Testing › Browser suite](testing.md#68-browser-suite-browser)); `--suite it` or `--suite browser` runs one of the two. `--serve` stops after the harness is up and keeps the Worker and the fake server running, writing `target/itest/serve.json` (URL, CA path, platform key), for the TypeScript SDK repository's `ts::it::` tests |
+| `cargo xtask live [--manual]` | Runs `cargo test -p pylota-identity-worker --features live --test live -- --test-threads=1` against staging ([Testing › Live suite](testing.md#10-live-end-to-end-suite-live)). `--manual` runs only the tests marked manual, which pause for a person's browser steps and record the results |
 | `cargo xtask trace` | Checks the edge-case register and the PRD against the test names and `Covers:` lines, and prints the traceability matrix ([Testing](testing.md#112-cargo-xtask-trace)); `ts::` names are checked against `sdks/typescript-tests.json`, and one it lacks is `pending (SDK)`, never a failure |
 | `cargo xtask fuzz --target <t> --time <s>` | Runs `cargo +nightly fuzz run <t> -- -max_total_time=<s>` in `fuzz/` |
 | `cargo xtask openapi` | Generates `openapi.json` from `api-types` and compares it semantically with `docs/src/reference/openapi.yaml` |
@@ -1093,10 +1093,10 @@ dataset = "pylota_mail_metrics"
 | `cargo xtask eval-setup` | Deletes and recreates the `pm-mail-chunks-eval` index in the evaluation account and waits until it answers ([Testing § 9.2](testing.md#92-running)) |
 | `cargo xtask eval-search`, `eval-agentic`, `eval-triage` | Quality gates on the golden set (build plan M18): three runs each, scored by the median ([Testing § 9.3](testing.md#93-metrics-and-gates)) |
 | `cargo xtask eval-screening` | Nightly: the screening classifier against the labelled steering set, recall ≥ 0.90 on steering mail and false-positive rate ≤ 0.02 on legitimate business mail ([Screening hold › Tests](screening.md#tests)) |
-| `cargo xtask release --check-version <tag>` | Fails unless `<tag>` is `v` followed by the workspace version, `[workspace.package] version` in the root `Cargo.toml`. That is the one place the version is set: every crate uses `version.workspace = true`, `/health` reports `CARGO_PKG_VERSION`, and the bundle's `VERSION` file is written from it. The version is SemVer, optionally with a pre-release part (`1.0.0-rc.1`). It also fails when a plugin manifest under `integrations/`, a skill's `metadata.pylota-mail-version` or a marketplace entry's `ref` differs from the tag ([SDKs, skills and agent tooling § 4.5](sdk-and-skills.md#45-versioning-and-distribution), [Y68](../edge-cases.md)) |
-| `cargo xtask release --version <v>` | Runs the `--check-version` rule, builds the Worker, then writes `dist/pylota-mail-worker-<v>.tar.gz` containing `build/index.js`, `build/index_bg.wasm`, `build/worker/shim.mjs`, `migrations/d1/*.sql`, `deploy/wrangler.toml.tmpl`, `wrangler/package.json` and `wrangler/package-lock.json` (copied from `deploy/wrangler/`, so the signature covers the Wrangler that `pmail` installs, [CLI and setup §5.1](cli.md#51-wrangler)) and `VERSION`; writes `dist/openapi.json` (`docs/src/reference/openapi.yaml` as JSON) `dist/sdk-fixtures-<v>.tar.gz` (`sdks/fixtures/`) and `dist/ts-tests-required.json` (every `ts::` name the register and the design tables use, with its rows), the contract the TypeScript SDK's own repository builds from ([SDKs, skills and agent tooling § 2.3](sdk-and-skills.md#23-generation)); collects the CLI binaries built by the CI matrix; writes `dist/SHA256SUMS` (`<sha256 hex>␠␠<filename>` per line). It does not sign: the signing key never enters CI ([Security › Supply chain](security.md#11-supply-chain)). Verification by `pmail deploy` is specified in [CLI and setup](cli.md) |
-| `cargo xtask release sign <tag>` | Run by the owner on their own machine with the offline minisign key: downloads `SHA256SUMS` and every listed file from the draft release, checks each checksum and `gh attestation verify` (provenance naming `release.yml` on that tag), then signs `SHA256SUMS` with the `minisign` crate (pure Rust, MIT; 0.10.0 on crates.io, read 2026-10-10; pinned at build time like `minisign-verify`), the secret key read from the removable drive and its password prompted for, with the trusted comment `pylota-mail v{version}` that `pmail deploy` requires ([CLI and setup §8.2](cli.md#82-signature-and-checksums)). It verifies its own output with `minisign-verify` and the compiled-in public keys, so a wrong key fails here and not at the first deploy, then uploads `SHA256SUMS.sig` to the draft release and starts `release-publish.yml` on the tag (`gh workflow run release-publish.yml --ref <tag>`; GitHub CLI manual, read 2026-10-10). `--repo PILOTAAI/pylota-mail-typescript` does the same for a TypeScript SDK release: the draft release and the provenance are that repository's (`release.yml` on that tag), the trusted comment is `pylota-mail-typescript v{version}`, and it starts that repository's `release-publish.yml`; any other `--repo` is refused ([SDKs, skills and agent tooling § 2.16](sdk-and-skills.md#216-versioning-and-release)) |
-| `cargo xtask release crates v<x.y.z>` | Run by the owner on their own machine, after `release-publish.yml` has made the release a full release: refuses unless the GitHub Release is published, not a pre-release, and its `SHA256SUMS.sig` verifies against the keys in the source; clones the tag into a new temporary directory (`git clone --branch v<x.y.z> --depth 1`), checks that the tag's commit is the one the release names and that `Cargo.toml`'s version matches, then runs `cargo publish --locked` there for `pylota-mail-api-types`, `pylota-mail` and `pylota-mail-cli`, in that order, with the crates.io token from the owner's password manager in that shell only. A crate version already on crates.io is skipped, so a re-run finishes a partial publish. No workflow holds the crates.io token ([J35](../edge-cases.md)) |
+| `cargo xtask release --check-version <tag>` | Fails unless `<tag>` is `v` followed by the workspace version, `[workspace.package] version` in the root `Cargo.toml`. That is the one place the version is set: every crate uses `version.workspace = true`, `/health` reports `CARGO_PKG_VERSION`, and the bundle's `VERSION` file is written from it. The version is SemVer, optionally with a pre-release part (`1.0.0-rc.1`). It also fails when a plugin manifest under `integrations/`, a skill's `metadata.pylota-identity-version` or a marketplace entry's `ref` differs from the tag ([SDKs, skills and agent tooling § 4.5](sdk-and-skills.md#45-versioning-and-distribution), [Y68](../edge-cases.md)) |
+| `cargo xtask release --version <v>` | Runs the `--check-version` rule, builds the Worker, then writes `dist/pylota-identity-worker-<v>.tar.gz` containing `build/index.js`, `build/index_bg.wasm`, `build/worker/shim.mjs`, `migrations/d1/*.sql`, `deploy/wrangler.toml.tmpl`, `wrangler/package.json` and `wrangler/package-lock.json` (copied from `deploy/wrangler/`, so the signature covers the Wrangler that `idvy` installs, [CLI and setup §5.1](cli.md#51-wrangler)) and `VERSION`; writes `dist/openapi.json` (`docs/src/reference/openapi.yaml` as JSON) `dist/sdk-fixtures-<v>.tar.gz` (`sdks/fixtures/`) and `dist/ts-tests-required.json` (every `ts::` name the register and the design tables use, with its rows), the contract the TypeScript SDK's own repository builds from ([SDKs, skills and agent tooling § 2.3](sdk-and-skills.md#23-generation)); collects the CLI binaries built by the CI matrix; writes `dist/SHA256SUMS` (`<sha256 hex>␠␠<filename>` per line). It does not sign: the signing key never enters CI ([Security › Supply chain](security.md#11-supply-chain)). Verification by `idvy deploy` is specified in [CLI and setup](cli.md) |
+| `cargo xtask release sign <tag>` | Run by the owner on their own machine with the offline minisign key: downloads `SHA256SUMS` and every listed file from the draft release, checks each checksum and `gh attestation verify` (provenance naming `release.yml` on that tag), then signs `SHA256SUMS` with the `minisign` crate (pure Rust, MIT; 0.10.0 on crates.io, read 2026-10-10; pinned at build time like `minisign-verify`), the secret key read from the removable drive and its password prompted for, with the trusted comment `pylota-identity v{version}` that `idvy deploy` requires ([CLI and setup §8.2](cli.md#82-signature-and-checksums)). It verifies its own output with `minisign-verify` and the compiled-in public keys, so a wrong key fails here and not at the first deploy, then uploads `SHA256SUMS.sig` to the draft release and starts `release-publish.yml` on the tag (`gh workflow run release-publish.yml --ref <tag>`; GitHub CLI manual, read 2026-10-10). `--repo PILOTAAI/pylota-identity-typescript` does the same for a TypeScript SDK release: the draft release and the provenance are that repository's (`release.yml` on that tag), the trusted comment is `pylota-identity-typescript v{version}`, and it starts that repository's `release-publish.yml`; any other `--repo` is refused ([SDKs, skills and agent tooling § 2.16](sdk-and-skills.md#216-versioning-and-release)) |
+| `cargo xtask release crates v<x.y.z>` | Run by the owner on their own machine, after `release-publish.yml` has made the release a full release: refuses unless the GitHub Release is published, not a pre-release, and its `SHA256SUMS.sig` verifies against the keys in the source; clones the tag into a new temporary directory (`git clone --branch v<x.y.z> --depth 1`), checks that the tag's commit is the one the release names and that `Cargo.toml`'s version matches, then runs `cargo publish --locked` there for `pylota-identity-api-types`, `pylota-identity` and `pylota-identity-cli`, in that order, with the crates.io token from the owner's password manager in that shell only. A crate version already on crates.io is skipped, so a re-run finishes a partial publish. No workflow holds the crates.io token ([J35](../edge-cases.md)) |
 | `cargo xtask release-gate --version <v>` | The security pre-release checklist as a gate ([Security §16](security.md#16-pre-release-checklist)). Fails unless `release-gates/v{version}.md` has every checklist item ticked, each with a link to its evidence (for `1.0.0`, the external penetration test report and its retest), and names its candidate (`candidate: v{version}-rc.N`), and unless the facts it can check itself hold: the tagged tree equals the candidate's except the workspace `version` and the gate file; the candidate's `release.yml` `gate` job and its `release-publish.yml` `staging` and `live` jobs passed, and so did this run's; the SBOMs, `SHA256SUMS`, `SHA256SUMS.sig` and attestations exist on both releases; no open issue carries the label `fuzz-crash`; CodeQL reports no open alert of high severity or above (read with `gh api`, read-only); the 24-hour fuzz record named in the file covers the candidate's commit. A manual `live --manual` run of the candidate is recorded in the same file with its date. With `--pre-release` (any `-rc.N` tag) it checks only this run's jobs and artefacts, the `fuzz-crash` label and CodeQL |
 | `cargo xtask stripe-setup [--live] --api-host <h> --out <file> [--catalog <file>] [--vat-from <date>]` | Sets up the Stripe account of a deployment that sells plans and writes the plan catalog with every Stripe ID filled in ([Billing › Stripe account setup](billing.md#stripe-account-setup)). Uses `STRIPE_SETUP_KEY`, never a Worker secret |
 
@@ -1133,7 +1133,7 @@ from M32); all run nightly for 10 minutes each.
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings`, then the same for `core`, `platform` and `worker` with `--target wasm32-unknown-unknown`, because `platform::cf` and the Worker's entry compile only there | any warning |
 | `test` | `cargo test --workspace` (native: core, api-types, platform fakes, worker logic, sdk, cli, conformance corpus) | any failure |
 | `layering` | `cargo xtask check-layering` | a forbidden dependency |
-| `wasm` | `cargo build -p pylota-mail-core --target wasm32-unknown-unknown`, then `cargo xtask build-worker` | build error or size budget exceeded |
+| `wasm` | `cargo build -p pylota-identity-core --target wasm32-unknown-unknown`, then `cargo xtask build-worker` | build error or size budget exceeded |
 | `itest` | `cargo xtask itest --suite it` (Node.js 22 and Wrangler 4.139.0 installed) | any failure |
 | `browser` | `cargo xtask itest --suite browser` (as `itest`, plus the Playwright Chromium build) | a console page that needs JavaScript, or an axe violation of impact `serious` or `critical` |
 | `fuzz-smoke` | `cargo xtask fuzz --target {mime_parse,query_parse,address_parse,sanitize,dsn_parse,ical_parse} --time 60` | a crash |
@@ -1153,7 +1153,7 @@ audit` on `main`, and the `live::` suite against staging when staging credential
 
 Release (`.github/workflows/release.yml` on a `v*` tag, then `.github/workflows/release-publish.yml`). This is
 the one definition of the release pipeline; [Testing › CI workflows](testing.md#12-ci-workflows-and-required-checks)
-and build plan M19 refer to it. It **publishes a release** and never changes Pylota Mail Cloud. The signing
+and build plan M19 refer to it. It **publishes a release** and never changes Pylota Identity Cloud. The signing
 key never enters CI ([Security › Supply chain](security.md#11-supply-chain)), so the pipeline is two
 workflows with the owner's offline signature between them.
 
@@ -1175,8 +1175,8 @@ environment's tag rule applies). Its jobs, in order:
 
 | Job | Environment | Does |
 |---|---|---|
-| `verify` | – | Refuses unless the ref is a `v*` tag whose `release.yml` run passed. Downloads `SHA256SUMS`, `SHA256SUMS.sig` and every listed file from the draft release; verifies the signature and its trusted comment `pylota-mail v{version}` against the public keys compiled into `pmail` (`minisign-verify`) and every checksum; then publishes the draft as a GitHub Release marked **pre-release** |
-| `staging` | `staging` | Deploys that pre-release to staging with the just-built `pmail deploy --version <v>`, which downloads and verifies it like any deployer ([CLI and setup §8](cli.md#8-deploy)) |
+| `verify` | – | Refuses unless the ref is a `v*` tag whose `release.yml` run passed. Downloads `SHA256SUMS`, `SHA256SUMS.sig` and every listed file from the draft release; verifies the signature and its trusted comment `pylota-identity v{version}` against the public keys compiled into `idvy` (`minisign-verify`) and every checksum; then publishes the draft as a GitHub Release marked **pre-release** |
+| `staging` | `staging` | Deploys that pre-release to staging with the just-built `idvy deploy --version <v>`, which downloads and verifies it like any deployer ([CLI and setup §8](cli.md#8-deploy)) |
 | `live` | `staging` | The `live::` suite against staging (the tests not marked manual) |
 | `publish` | `release` | `cargo xtask release-gate --version <v>` (with `--pre-release` for an `-rc.N` version); then, for a version without a pre-release part, marks the GitHub Release as a full release. The npm package is published from its own repository ([SDKs, skills and agent tooling § 2.16](sdk-and-skills.md#216-versioning-and-release)). Nothing is published to crates.io from CI: the owner runs `cargo xtask release crates v<x.y.z>` afterwards ([§9](#9-xtask)). A pre-release version (`-rc.N`) stays a pre-release: it exists for staging and rehearsals, and is never published to crates.io |
 
@@ -1192,25 +1192,25 @@ candidate.
 
 Cloud rollout (`.github/workflows/cloud-deploy.yml`, `workflow_dispatch` with the input `version`,
 environment `production`) is a separate, later step that only the owner starts. It downloads the
-released `pmail` for Linux x64 with `SHA256SUMS` and `SHA256SUMS.sig`, and runs nothing until all three
+released `idvy` for Linux x64 with `SHA256SUMS` and `SHA256SUMS.sig`, and runs nothing until all three
 checks pass: the signature verifies with `minisign` (an exact version whose archive SHA-256 is written in
 the workflow) against the public keys **written in the workflow file itself**, never keys taken from the
-downloaded binary, with the trusted comment `pylota-mail v<v>`; the binary's SHA-256 matches its line of
-`SHA256SUMS`; and `gh attestation verify pmail --repo PILOTAAI/pylota-mail --signer-workflow
-PILOTAAI/pylota-mail/.github/workflows/release.yml --source-ref refs/tags/v<v> --deny-self-hosted-runners`
+downloaded binary, with the trusted comment `pylota-identity v<v>`; the binary's SHA-256 matches its line of
+`SHA256SUMS`; and `gh attestation verify idvy --repo PILOTAAI/pylota-identity --signer-workflow
+PILOTAAI/pylota-identity/.github/workflows/release.yml --source-ref refs/tags/v<v> --deny-self-hosted-runners`
 passes (flags from the GitHub CLI manual, read 2026-10-17). The keys in the workflow are the `current`
-and `next` keys `pmail` compiles in, and `xtask::cloud_deploy_workflow_pins` keeps the two lists equal, so
+and `next` keys `idvy` compiles in, and `xtask::cloud_deploy_workflow_pins` keeps the two lists equal, so
 a key rotation edits both in one change ([J35](../edge-cases.md)). It then
-runs `pmail deploy --version <v> --gradual` (10% → 50% → 100%, [CLI and setup §8.6](cli.md#86-code-deploy-and-the-gradual-flag))
-against Pylota Mail Cloud's configuration with the `production` environment's `PROD_CLOUDFLARE_API_TOKEN`
+runs `idvy deploy --version <v> --gradual` (10% → 50% → 100%, [CLI and setup §8.6](cli.md#86-code-deploy-and-the-gradual-flag))
+against Pylota Identity Cloud's configuration with the `production` environment's `PROD_CLOUDFLARE_API_TOKEN`
 and `PROD_CLOUDFLARE_ACCOUNT_ID` (build plan M0, human prerequisites; the token's permissions and its
-24-hour life are in [Cloud commissioning §3](../cloud-commissioning.md)). `pmail` installs Wrangler from
+24-hour life are in [Cloud commissioning §3](../cloud-commissioning.md)). `idvy` installs Wrangler from
 the signed bundle's lockfile ([CLI and setup §5.1](cli.md#51-wrangler)). It refuses a pre-release
-version. No other workflow deploys Pylota Mail Cloud.
+version. No other workflow deploys Pylota Identity Cloud.
 
 ## 11. The Rust SDK (FR-SDK-1)
 
-`crates/sdk` is the published crate `pylota-mail` (lib `pylota_mail`): the Rust client the CLI is built
+`crates/sdk` is the published crate `pylota-identity` (lib `pylota_identity`): the Rust client the CLI is built
 on (build plan M16). It is native only (never compiled to wasm) and depends only on `api-types`,
 `reqwest` (rustls), `serde` and `serde_json` (section 2), plus `tokio-tungstenite` behind its `stream`
 feature.
@@ -1226,7 +1226,7 @@ feature.
   `sdk::coverage::every_operation` compares it with the operations of `openapi.yaml` that are not marked
   `x-sdk: false`: a missing or extra operation fails CI, and so does an `x-sdk: false` operation outside
   those three. That test is what "covers the whole REST API" means.
-- **Types.** `pylota_mail::types` re-exports `pylota_mail_api_types`, whose type names are the
+- **Types.** `pylota_identity::types` re-exports `pylota_identity_api_types`, whose type names are the
   component schema names of `openapi.yaml` (`SendRequest`, `Recipient`, `SendResponse`, `Message`). Every
   request struct derives `Default`, so a caller sets the fields it needs and ends with
   `..Default::default()`. A schema built with `allOf` from an object and extra fields is a struct that
@@ -1240,7 +1240,7 @@ feature.
   `http://localhost` and `http://127.0.0.1`, is `Error::Config`), with timeouts of
   10 s to connect and 30 s per request; `wait_for_message` uses its `timeout` plus 15 s, and the agentic
   stream aborts after 30 s without a byte (the server sends a keep-alive every 10 s of silence). The
-  default `User-Agent` is `pylota-mail-rs/{version}`, which the service counts as `rust_sdk`
+  default `User-Agent` is `pylota-identity-rs/{version}`, which the service counts as `rust_sdk`
   ([Observability § 3.2](observability.md#32-catalogue)).
 - **Errors.** `Error::Api { status, code: ErrorCode, message, fix, docs, details, request_id, retryable }`
   from the error envelope (`docs` is the documentation link of
@@ -1261,13 +1261,13 @@ feature.
   through `#[cfg(doctest)] #[doc = include_str!(…)]` on a private module (`no_run`, so nothing calls a
   server), and the landing page's example (`site/public/index.html`, the `code-rust` block) must equal
   `crates/sdk/examples/confirm_booking.rs` byte for byte after its HTML is unescaped and its tags removed,
-  and that example builds with `cargo build -p pylota-mail --examples`.
+  and that example builds with `cargo build -p pylota-identity --examples`.
 
   ```rust,no_run
-  use pylota_mail::{Client, IdempotencyKey};
-  use pylota_mail::types::{Recipient, SendRequest};
+  use pylota_identity::{Client, IdempotencyKey};
+  use pylota_identity::types::{Recipient, SendRequest};
 
-  async fn confirm_booking(key: String) -> Result<(), pylota_mail::Error> {
+  async fn confirm_booking(key: String) -> Result<(), pylota_identity::Error> {
       let client = Client::builder()
           .base_url("https://mail.example.com")
           .api_key(key)
@@ -1302,9 +1302,9 @@ feature.
   directory for `ts::fixtures::rust_parity` in the SDK repository, so the Rust and TypeScript SDKs cannot
   disagree about a shape
   ([SDKs, skills and agent tooling § 2.15](sdk-and-skills.md#215-contract-tests-fixtures-and-ci)).
-- **Webhooks.** `pylota_mail::webhooks::verify(secret, headers, body, now)` checks a Standard Webhooks
-  signature as [Webhooks and events](webhooks.md) specifies; `pmail webhooks verify` uses it.
-- **Agent assertions.** `pylota_mail::assertions::Verifier` checks an agent assertion for a service that
+- **Webhooks.** `pylota_identity::webhooks::verify(secret, headers, body, now)` checks a Standard Webhooks
+  signature as [Webhooks and events](webhooks.md) specifies; `idvy webhooks verify` uses it.
+- **Agent assertions.** `pylota_identity::assertions::Verifier` checks an agent assertion for a service that
   receives one, exactly as [Agent signing keys §4.3](agent-keys.md#43-how-a-verifier-checks-it)
   specifies. It needs no API key and is not an `openapi.yaml` operation, so the coverage table does not
   list it:
@@ -1333,7 +1333,7 @@ feature.
   `application/jwk-set+json`, caches it for at most 5 minutes, refetches once on an unknown `kid`, and
   picks the key whose `kid` matches; (5) verifies the Ed25519 signature over the JWS signing input;
   (6) checks `aud`, `nbf` and `exp` with the leeway; (7) records `jti` until `exp` and rejects a repeat.
-  `AgentAssertion` holds the claims of [§4.2](agent-keys.md#42-token). `pmail assertions verify` uses it.
+  `AgentAssertion` holds the claims of [§4.2](agent-keys.md#42-token). `idvy assertions verify` uses it.
 
 Tests: `sdk::coverage::every_operation` (above), `sdk::errors::envelope_round_trip` (every `ErrorCode`
 of [Errors](../../reference/errors.md) decodes with its `retryable` flag), `it::assertions::sdk_verifies`
@@ -1348,12 +1348,12 @@ integration tests that call every method against the workerd harness.
 | `sdk::coverage::every_operation` | The SDK has exactly one method per `openapi.yaml` operation not marked `x-sdk: false`, and only the two SES hooks and `getSecurityTxt` carry that mark (FR-SDK-1) |
 | `sdk::types::y40_unknown_enum_values` | The Rust SDK decodes an unknown enum value and an unknown error code as `Unknown(String)` ([Y40](../edge-cases.md), FR-SDK-7) |
 | `sdk::doctest::published_examples` | The Rust examples of `quickstart.md` compile as rustdoc tests; the landing page's example equals `crates/sdk/examples/confirm_booking.rs`, which builds (FR-SDK-1, build plan M16) |
-| `xtask::release_version_matches_tag` | `release --check-version` passes for `v` + the workspace version and fails for any other tag, including a pre-release part that differs; the signed `SHA256SUMS.sig` carries the trusted comment `pylota-mail v{version}` and verifies with the compiled-in key (build plan M19) |
+| `xtask::release_version_matches_tag` | `release --check-version` passes for `v` + the workspace version and fails for any other tag, including a pre-release part that differs; the signed `SHA256SUMS.sig` carries the trusted comment `pylota-identity v{version}` and verifies with the compiled-in key (build plan M19) |
 | `xtask::release_gate_refuses` | `release-gate` fails with a missing or partly ticked `release-gates/v{version}.md`, a file naming no candidate, a tagged tree that differs from the candidate's in anything but the workspace `version` and the gate file, a missing SBOM or attestation, an open `fuzz-crash` issue, or a failed `live` job, and passes when all hold; with `--pre-release` it passes without a gate file (build plan M19, [Security §16](security.md#16-pre-release-checklist)) |
 | `xtask::release_crates_refuses` | Against a recorded GitHub Release and a local registry: `release crates` refuses a pre-release, a draft, a signature that does not verify, and a tag whose commit differs from the release's; a second run publishes nothing; the publish runs in a fresh clone, never in the working tree ([J35](../edge-cases.md)) |
-| `xtask::cloud_deploy_workflow_pins` | Parses `.github/workflows/cloud-deploy.yml`: the minisign public keys equal the `current` and `next` keys compiled into `pmail`; `minisign` is pinned to an exact version with a SHA-256; the attestation step passes `--signer-workflow PILOTAAI/pylota-mail/.github/workflows/release.yml`, `--source-ref refs/tags/v${version}` and `--deny-self-hosted-runners`; no step runs `pmail` before the three checks, and no step installs a package by name ([J34](../edge-cases.md), [J35](../edge-cases.md)) |
-| `xtask::release_sign_sdk_repo` | Against a recorded draft release of the SDK repository: `release sign --repo PILOTAAI/pylota-mail-typescript` signs with the trusted comment `pylota-mail-typescript v{version}`, refuses provenance naming this repository's workflow, and refuses any other `--repo` |
-| `xtask::release_sign_refuses` | Against a recorded draft release: `release sign` refuses a file whose checksum does not match `SHA256SUMS`, a file without an attestation, and an attestation whose provenance names another workflow or tag; in each case it uploads nothing and starts no workflow. With matching files it writes a signature that `minisign-verify` accepts with the trusted comment `pylota-mail v{version}` |
+| `xtask::cloud_deploy_workflow_pins` | Parses `.github/workflows/cloud-deploy.yml`: the minisign public keys equal the `current` and `next` keys compiled into `idvy`; `minisign` is pinned to an exact version with a SHA-256; the attestation step passes `--signer-workflow PILOTAAI/pylota-identity/.github/workflows/release.yml`, `--source-ref refs/tags/v${version}` and `--deny-self-hosted-runners`; no step runs `idvy` before the three checks, and no step installs a package by name ([J34](../edge-cases.md), [J35](../edge-cases.md)) |
+| `xtask::release_sign_sdk_repo` | Against a recorded draft release of the SDK repository: `release sign --repo PILOTAAI/pylota-identity-typescript` signs with the trusted comment `pylota-identity-typescript v{version}`, refuses provenance naming this repository's workflow, and refuses any other `--repo` |
+| `xtask::release_sign_refuses` | Against a recorded draft release: `release sign` refuses a file whose checksum does not match `SHA256SUMS`, a file without an attestation, and an attestation whose provenance names another workflow or tag; in each case it uploads nothing and starts no workflow. With matching files it writes a signature that `minisign-verify` accepts with the trusted comment `pylota-identity v{version}` |
 | `xtask::openapi_matches_contract` | `cargo xtask openapi`: the generated `openapi.json` (OpenAPI 3.1; every path under `/v1`, except the root paths `/health`, `/openapi.json`, `/hooks/*` and `/.well-known/*`, whose path items override `servers`) equals `docs/src/reference/openapi.yaml` semantically (FR-API-1) |
 | `xtask::check_layering_rejects_worker_dep` | A fixture crate depending on `worker` fails the check (AGENTS.md rule) |
 | `platform::config::startup_rules` | Each row of the startup rules in §6.1: a malformed optional variable is `config_invalid` naming it; SES without `PM_SES_SNS_TOPIC_ARN` and `PM_BILLING=stripe` without its secrets start with `/health` `degraded` and the feature off; `PM_WEB_BOT_AUTH=on` in a release without signed requests is `config_invalid`; `PM_CONSOLE_HOST`, `PM_SYSTEM_FROM` and `PM_NOTIFICATIONS` are read with `PM_CONSOLE=off` |

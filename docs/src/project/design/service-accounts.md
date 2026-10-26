@@ -117,7 +117,7 @@ key; never an identity key, so an agent cannot approve its own request), with an
    `quarantine.key_release: true` and the key is a platform key or the tenant's partner key; otherwise
    `403 permission_denied` with `details.reason = "person_required"`. A key never approves an entry it
    requested (`requested_by_key_id` equals the key's ID): `403 permission_denied`,
-   `details.reason = "self_approval"` ([E11](../edge-cases.md)). On Pylota Mail Cloud a self-serve
+   `details.reason = "self_approval"` ([E11](../edge-cases.md)). On Pylota Identity Cloud a self-serve
    workspace therefore approves in the console, and Pylota, whose operators' tenants have
    `quarantine.key_release: true`, approves from its own review screen with its partner key.
 2. **State.** One D1 batch: `UPDATE service_accounts SET status = …, decided_* = …, note = ?,
@@ -141,7 +141,7 @@ from=@{service})` for the code.
 ## 5. The verification gate
 
 The gate applies only while the tenant's effective `accounts.require_approval` is `true`. It is off in the
-built-in defaults and on in Pylota Mail Cloud's `PM_DEFAULT_POLICY`
+built-in defaults and on in Pylota Identity Cloud's `PM_DEFAULT_POLICY`
 ([Cloud commissioning §5](../cloud-commissioning.md#5-the-cloud-default-policy)), where it is lower-only
 with `false` as the looser value, so no workspace or partner can turn it off
 ([Workspace policy §2](workspace-policy.md#2-classes-and-ceilings)).
@@ -266,7 +266,7 @@ holds no counterparty data and no mail content. The audit rows keep IDs and `ser
 |---|---|---|
 | MCP `mail_request_account` | `POST /v1/identities/{identity_id}/accounts` | `accounts:request` |
 | MCP `mail_list_accounts` | `GET /v1/identities/{identity_id}/accounts` | `accounts:request` |
-| CLI `pmail accounts request\|list\|get\|approve\|reject\|close\|delete` | The eight routes | As the route |
+| CLI `idvy accounts request\|list\|get\|approve\|reject\|close\|delete` | The eight routes | As the route |
 
 There is deliberately no MCP tool to approve: approval belongs to people and to the operator's own systems,
 not to agents ([MCP › Tools](mcp.md#4-tools)).

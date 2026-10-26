@@ -176,8 +176,8 @@ alarm; an expired key behaves as new.
 | 9 | `kind: marketing` has `unsubscribe.url` (HTTPS) and `consent` ([G9](../edge-cases.md), FR-OUT-8). Its transport is checked at step 15, once step 13 has resolved the sending address | `400 marketing_requirements_missing` |
 | 10 | `kind: auto_reply` only for reply or reply-all, to a message whose `kind` is `normal` or `calendar`, with `policy.auto_reply.allowed`, identity `send_policy.auto_reply` not `"denied"` (the default is `"allowed"`), and under the exchange cap ([D6](../edge-cases.md), FR-OUT-7) | `409 auto_reply_not_allowed` |
 | 9a | Calendar payload, only when `calendar` is present, run after steps 9 and 10: `kind: transactional`, operation `send` or `reply`, size, read, iTIP structure, normalisation ([Calendar invitations §5.2](calendar-invitations.md#52-validation-in-pipeline-order)) | `400 invalid_request`, `413 calendar_too_large`, `400 calendar_invalid` |
-| 10a | Loop guard, for every `kind`: the computed hop (`X-Pylota-Mail-Hop` of [Headers](#headers): 1 for a new send, else 1 + the hop of the message replied to or forwarded, or of the latest message of the thread for a threaded send) must be below `MAX_HOP` (10). An agent replying with the default kind is stopped as an auto-reply is ([N13](../edge-cases.md), [D6](../edge-cases.md)) | `409 loop_detected`, `details.hop` |
-| 10b | Reply rate, for every `kind`: a correspondent that neither echoes `X-Pylota-Mail-Hop` nor marks its mail as automatic (RFC 3834) restarts the hop count at 1 every round, so step 10a never stops that loop. A reply, reply-all, forward or threaded send is refused when, in the last 24 hours (`received_at`, the accept time for an outbound row), this identity already sent `MAX_REPLIES_PER_DAY` (25) messages in the same thread (index `messages_thread`), or, for a reply or reply-all, the address the target message came from has sent this identity 25 messages (index `messages_from`). The second catches a correspondent that also drops `In-Reply-To`, so that every round opens a new thread. Outbound rows that are `canceled`, `rejected`, `failed` or `suppressed` are not counted. A fresh `send` with no `thread_id` is never refused here ([N35](../edge-cases.md)) | `409 loop_detected`, `details.reason` = `thread_rate` or `sender_rate`, `details.retry_after` (seconds until the oldest counted message is 24 hours old) |
+| 10a | Loop guard, for every `kind`: the computed hop (`X-Pylota-Identity-Hop` of [Headers](#headers): 1 for a new send, else 1 + the hop of the message replied to or forwarded, or of the latest message of the thread for a threaded send) must be below `MAX_HOP` (10). An agent replying with the default kind is stopped as an auto-reply is ([N13](../edge-cases.md), [D6](../edge-cases.md)) | `409 loop_detected`, `details.hop` |
+| 10b | Reply rate, for every `kind`: a correspondent that neither echoes `X-Pylota-Identity-Hop` nor marks its mail as automatic (RFC 3834) restarts the hop count at 1 every round, so step 10a never stops that loop. A reply, reply-all, forward or threaded send is refused when, in the last 24 hours (`received_at`, the accept time for an outbound row), this identity already sent `MAX_REPLIES_PER_DAY` (25) messages in the same thread (index `messages_thread`), or, for a reply or reply-all, the address the target message came from has sent this identity 25 messages (index `messages_from`). The second catches a correspondent that also drops `In-Reply-To`, so that every round opens a new thread. Outbound rows that are `canceled`, `rejected`, `failed` or `suppressed` are not counted. A fresh `send` with no `thread_id` is never refused here ([N35](../edge-cases.md)) | `409 loop_detected`, `details.reason` = `thread_rate` or `sender_rate`, `details.retry_after` (seconds until the oldest counted message is 24 hours old) |
 | 11 | Custom headers ([Headers](#headers)) | `400 header_not_allowed` / `400 invalid_request` |
 | 12 | Content: `text` or `html` present; subject ≤ 998 characters; ≤ 32 attachments, each inline with valid base64 or an upload of this identity that is `ready` ([Uploads § 4.1](uploads.md#41-policy-step-12-extended)); every attachment classified; attachments total ≤ 26,214,400 decoded bytes; `content_id` on inline parts; labels and metadata within limits | `400 invalid_request`; `404 upload_not_found`, `409 upload_not_ready`, `410 upload_expired`, `422 attachment_risky`, `413 message_too_large` (`attachments_total`) |
 | 13 | From address ([From](#from-address-and-fallback)): an `active` address of the identity, or `retiring` on a thread that already uses it ([G7](../edge-cases.md)) | `400 invalid_request` (`details.errors[0].path = "from_address"`) |
@@ -410,9 +410,9 @@ In this order:
 |---|---|---|
 | `In-Reply-To`, `References` | Service | Replies, threaded sends, forwards (References only) |
 | `Auto-Submitted: auto-replied` | Service | `kind: auto_reply` (FR-OUT-7) |
-| `X-Pylota-Mail-Hop: n` | Service | Always: `n` = 1 for a new send, else 1 + the hop of the message replied to or forwarded (stored as `automated_json.hop` on inbound messages, 0 when absent) |
+| `X-Pylota-Identity-Hop: n` | Service | Always: `n` = 1 for a new send, else 1 + the hop of the message replied to or forwarded (stored as `automated_json.hop` on inbound messages, 0 when absent) |
 | `X-AI-Generated: true` | Service | `ai_disclosure.mode = "header"` |
-| `X-Pylota-Mail-Role-Hop: 1`, `Auto-Submitted: auto-generated` | Service | A role-mail relay from the system identity, whose internal submit input carries `role_relay: true` ([Inbound › Role mail relay](inbound.md#role-mail-relay)); the field exists only on the internal input, and the mailbox refuses it on any other identity |
+| `X-Pylota-Identity-Role-Hop: 1`, `Auto-Submitted: auto-generated` | Service | A role-mail relay from the system identity, whose internal submit input carries `role_relay: true` ([Inbound › Role mail relay](inbound.md#role-mail-relay)); the field exists only on the internal input, and the mailbox refuses it on any other identity |
 | `List-Unsubscribe`, `List-Unsubscribe-Post` | Service | `kind: marketing`; or a `kind: transactional` notification from the system identity whose internal submit input carries `list_unsubscribe` ([Body](#body-signature-disclosure-unsubscribe)). A caller can never set either name: it falls under "anything else" |
 | `X-*` | Caller | A name matching `^X-[A-Za-z0-9_-]+$` (the `X-` prefix in either case), except the reserved `X-Pylota-*` and `X-AI-Generated`, which are refused in any case |
 | `Importance` | Caller | Value `high`, `normal` or `low` |
@@ -1050,7 +1050,7 @@ domain the counters are hourly instead ([Per-domain outcome counters](#per-domai
 The identity thresholds above are looser than the provider's own enforcement: Amazon SES places an account
 under review at a complaint rate of 0.1% and may pause it at 0.5%, and reviews it at a bounce rate of 5%
 and may pause it at 10% ([SES sending review FAQ](https://docs.aws.amazon.com/ses/latest/dg/faqs-enforcement.html),
-read 2026-10-10). Cloudflare's Email Sending quota and reputation are per account, and on Pylota Mail
+read 2026-10-10). Cloudflare's Email Sending quota and reputation are per account, and on Pylota Identity
 Cloud that account is shared with Pylota. A tenant that spreads its mail over many identities stays under
 every identity threshold while the account is harmed. So `RecordOutcome` also evaluates the tenant and
 each tenant sending domain over the 7 UTC days ending with the current day, the pinned window of
@@ -1199,7 +1199,7 @@ custom MAIL FROM, so during a failover SPF does not align and DMARC passes on DK
 - **Identity limit.** SES allows 10,000 verified identities per AWS Region
   ([quotas](https://docs.aws.amazon.com/ses/latest/dg/quotas.html), read 2026-10-09). The count is the
   `domains` rows with `ses_region` set that are not `removed`, plus the platform identity. At 9,000 the
-  operator alert `ses_identities_90pct` fires and `pmail doctor` warns. At 10,000, creating a domain that
+  operator alert `ses_identities_90pct` fires and `idvy doctor` warns. At 10,000, creating a domain that
   needs an SES identity (`dns_records`, `send_only`, or `smtp_relay` with `inbound: ses`) fails with
   `422 transport_unavailable` and `details.reason = "ses_identity_limit"`.
 
@@ -1209,7 +1209,7 @@ custom MAIL FROM, so during a failover SPF does not align and DMARC passes on DK
 { "FromEmailAddress": "bookings@acme.example.com",
   "Destination": { "ToAddresses": ["jo@example.net"], "CcAddresses": [], "BccAddresses": [] },
   "Content": { "Raw": { "Data": "<base64 of the composed MIME>" } },
-  "ConfigurationSetName": "pylota-mail" }
+  "ConfigurationSetName": "pylota-identity" }
 ```
 
 The MIME is the stored `.eml` (no `Bcc` header; the `Reply-To` header carries the token when the domain
@@ -1235,7 +1235,7 @@ service model, read 2026-10-09). Errors are classified by the error type in the 
 response header (or the body's error type), as in the outcome table (verify the exact location at build
 time, S8). `core::ses::sigv4` is tested against AWS's published SigV4 test vectors.
 
-**Events.** Setup creates the configuration set `pylota-mail` with an SNS event destination for
+**Events.** Setup creates the configuration set `pylota-identity` with an SNS event destination for
 `SEND`, `DELIVERY`, `BOUNCE`, `COMPLAINT`, `REJECT`, `DELIVERY_DELAY` and `RENDERING_FAILURE`, sets
 `SignatureVersion=2` on that topic (the default is 1,
 [SetTopicAttributes](https://docs.aws.amazon.com/sns/latest/api/API_SetTopicAttributes.html), read
@@ -1356,7 +1356,7 @@ tenant, or of another test tenant with the same non-null `partner_id`, is delive
 
 The sender's `rfc_message_id` is the composed one. A test tenant's send may carry the option
 `screening_test` (`clear`, `suspect`, `unavailable` or `deadline`; test tenants only, `400 invalid_request`
-otherwise), which the loopback transport writes as `X-Pylota-Mail-Screening-Test`, so the recipient's
+otherwise), which the loopback transport writes as `X-Pylota-Identity-Screening-Test`, so the recipient's
 ingest forces that screening verdict ([Screening hold §23](screening.md#23-test-tenants)). Live tenants never use loopback: mail to an address
 on the same deployment leaves through the transport and returns through Email Routing like any other
 mail ([G11](../edge-cases.md)).
@@ -1635,7 +1635,7 @@ Agent        API handler      IdentityMailbox     pm-outbound consumer   Cloudfl
 | `it::send::g4_suppressed_after_submit` | A recipient suppressed (a hard bounce from another send) between submit and transport becomes a `suppressed` delivery at `BeginTransport` and is never handed to the transport; with no recipient left the message ends `suppressed` and the `sends` hold settles with nothing consumed; a provider suppression scoped to the shared platform domain makes the delivery `suppressed` without writing a `suppressions` row or emitting `suppression.created` ([G4](../edge-cases.md)) |
 | `it::send::stale_claim_outcome` | A claim older than 5 minutes is resolved to `uncertain` with the deliveries' `updated_at` = `claimed_at`; a late `RecordTransportOutcome` with that stale token and `Accepted` sets the provider ID, makes the deliveries `submitted`, adds `reconciled` and emits `message.reconciled`; a late `Unknown` with the stale token changes nothing and increments `stale_claim_outcome_total` ([G2](../edge-cases.md)) |
 | `it::send::g2_delivery_failed_recipients` | Cloudflare `E_DELIVERY_FAILED` on a one-recipient send → `rejected` (`provider_validation`); on a three-recipient send → `uncertain` (`provider_outcome_unknown`), never resent ([G2](../edge-cases.md)) |
-| `it::send::n35_reply_rate` | An identity and a recorded external responder that strips `X-Pylota-Mail-Hop` and sets no `Auto-Submitted` reply to each other with `kind: normal`: the 26th reply in the thread within 24 hours gets `409 loop_detected` with `details.reason: "thread_rate"` and a `retry_after` that matches the oldest counted reply; with a responder that also drops `In-Reply-To`, so every round is a new thread, the reply after its 25th message in 24 hours gets `details.reason: "sender_rate"`; canceled and suppressed sends are not counted; a fresh `send` is accepted; after 24 hours of test time a reply is accepted again ([N35](../edge-cases.md)) |
+| `it::send::n35_reply_rate` | An identity and a recorded external responder that strips `X-Pylota-Identity-Hop` and sets no `Auto-Submitted` reply to each other with `kind: normal`: the 26th reply in the thread within 24 hours gets `409 loop_detected` with `details.reason: "thread_rate"` and a `retry_after` that matches the oldest counted reply; with a responder that also drops `In-Reply-To`, so every round is a new thread, the reply after its 25th message in 24 hours gets `details.reason: "sender_rate"`; canceled and suppressed sends are not counted; a fresh `send` is accepted; after 24 hours of test time a reply is accepted again ([N35](../edge-cases.md)) |
 | `it::send::n13_loop_guard` | Two identities that reply to each other with `kind: normal` are stopped at hop 10 with `409 loop_detected` (`details.hop: 10`); a fresh `send` starts at hop 1; a forward of a hop-9 message is refused ([N13](../edge-cases.md), FR-OUT-14) |
 | `it::send::sending_paused_refuses` | A send from a tenant with `sending_paused_at` set gets `409 sending_paused` before any recipient check, and a dry run reports the same error ([G12](../edge-cases.md)) |
 | `it::send::system_identity_exemptions` | With the default tenant's `tenant_daily_send_cap` set to 2 and the system identity's `send_policy.daily_cap` to 4 (platform key), the system identity's third and fourth sends are accepted and the fifth gets `429 daily_cap_reached`; the system identity's sends neither are checked against nor increment the tenant `sends` counter (its `Reserve` passes `tenant_cap: None`, and a cancelled send's `Release` leaves the tenant count unchanged), so another identity of the default tenant is still held to the tenant cap of 2 after them; eleven bounces in the system identity's 200 window are recorded but never pause it |

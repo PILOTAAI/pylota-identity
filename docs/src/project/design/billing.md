@@ -38,14 +38,14 @@ Each workspace has one mode in `billing_accounts.mode` (FR-BILL-1):
 
 | Mode | Plan checks | Used for | `granted` in `TenantQuota` |
 |---|---|---|---|
-| `metered` | Yes: the plan's allowances plus top-ups | Pylota Mail Cloud customers, or any deployment that sells plans | Numbers from the catalog |
+| `metered` | Yes: the plan's allowances plus top-ups | Pylota Identity Cloud customers, or any deployment that sells plans | Numbers from the catalog |
 | `exempt` | None | The operator's own workspaces on a deployment that sells plans | `NULL` (unlimited) |
 | `disabled` | None. The daily caps in tenant policy (`identity_daily_send_cap`, `tenant_daily_send_cap`, `search.agentic_daily_cap`) still apply, as on every workspace | Self-hosting without billing | `NULL` (unlimited) |
 
 - `POST /v1/tenants` sets the mode from `billing.mode`. The default is `metered` on plan `free` when
   `PM_BILLING=stripe`, and `disabled` otherwise. A tenant created with a partner key gets its partner's
   `default_billing_mode` (`exempt` or `metered`) instead, and the partner key cannot send `billing`
-  (`403 scope_denied`); on Pylota Mail Cloud, Pylota's operators are `exempt` this way
+  (`403 scope_denied`); on Pylota Identity Cloud, Pylota's operators are `exempt` this way
   ([REST API › Partners](../../reference/api.md#partners)).
 - `PATCH /v1/tenants/{id}/billing` (platform key, `tenants:manage`; a partner key gets `403 scope_denied`) changes `mode`, and sets `plan_id` on a
   workspace with no Stripe subscription (a complimentary plan). On a workspace whose plan is paid through
@@ -60,7 +60,7 @@ Each workspace has one mode in `billing_accounts.mode` (FR-BILL-1):
 ## Plan catalog
 
 The catalog is data, not code (FR-BILL-2). `PM_PLAN_CATALOG` holds it as JSON. When the variable is unset,
-the built-in catalog is used: the Pylota Mail Cloud plans from PRD §13, with every Stripe price ID `null`.
+the built-in catalog is used: the Pylota Identity Cloud plans from PRD §13, with every Stripe price ID `null`.
 A deployment that sells plans sets `PM_PLAN_CATALOG` with its own Stripe price IDs.
 
 ```json
@@ -117,7 +117,7 @@ A deployment that sells plans sets `PM_PLAN_CATALOG` with its own Stripe price I
 `GET /v1/plans` and the `plans` array of `GET /v1/usage` expose each plan as `plan_id`, `name`, `price`,
 `currency`, `interval`, `included`, `topups` and `support`. Stripe price IDs are never returned.
 
-**Validation.** `pmail deploy` parses the catalog and refuses to upload an invalid one. At runtime the
+**Validation.** `idvy deploy` parses the catalog and refuses to upload an invalid one. At runtime the
 Worker parses it once per isolate. If it is invalid anyway, the Worker logs `plan_catalog_invalid`, raises a
 state alert, and uses the built-in catalog, so limits stay enforced and mail keeps flowing; Checkout is then
 unavailable because the built-in catalog has no price IDs.
@@ -377,7 +377,7 @@ assertions and signed HTTP requests (they are counted in `usage_daily` as `asser
 search is bounded by the per-key rate limit and the tenant's daily `agentic_daily_cap`
 ([Search](search.md)), not by an allowance (PRD §13).
 
-The default tenant's own mail (sign-in codes, invitations) is not metered. `pmail setup` creates the
+The default tenant's own mail (sign-in codes, invitations) is not metered. `idvy setup` creates the
 default tenant with billing `disabled` ([CLI and setup](cli.md)), and it must stay `disabled` or `exempt`.
 
 ## Ordering relative to idempotency
@@ -834,7 +834,7 @@ Mail must not depend on Stripe. Each dependency fails open or closed for a state
 
 **Contrast with goshen-email.** goshen asks Autumn, a third-party billing service, before each metered
 action, and fails closed: when Autumn does not answer, metered operations return `503 billing_unavailable`
-and nothing is written. Pylota Mail keeps balances in its own Durable Object, so a Stripe outage changes
+and nothing is written. Pylota Identity keeps balances in its own Durable Object, so a Stripe outage changes
 nothing for agents. The only closed failure is its own `TenantQuota`, which is no less available than the
 mailbox the action needs anyway.
 
@@ -852,7 +852,7 @@ mailbox the action needs anyway.
 - `/billing/stripe/webhook`, `/console/plan/checkout`, `/console/plan/portal`, `/console/plan/downgrade` and
   `/console/plan/keep` are not registered
   (`404`). The console's plan page shows usage only.
-- No Stripe account or Stripe secret is needed; `pmail setup` does not ask for one.
+- No Stripe account or Stripe secret is needed; `idvy setup` does not ask for one.
 
 Turning billing on is an operator choice: set `PM_BILLING=stripe`, `PM_PLAN_CATALOG` with price IDs, and
 both Stripe secrets, then redeploy. Existing workspaces keep their stored mode until a platform key
@@ -887,7 +887,7 @@ missing; a found object whose settings differ is reported, not changed.
 | 6. Failed payments | A person, in the Dashboard (subscription settings, "Manage failed payments") | Any retry schedule; when all retries fail, **cancel the subscription**; subscription status follows the most recent invoice. [Grace](#grace) assumes `past_due` and then `canceled` |
 | 7. Payment methods | A person, in the Dashboard | Cards only (with the card wallets), so the Portal's payment-method update offers no delayed method; Checkout sends `payment_method_types[0]=card` anyway |
 | 8. Keys | A person, in the Dashboard (restricted keys are created there only) | The Worker key with the permissions in [Stripe integration](#stripe-integration), stored with `wrangler secret put PM_STRIPE_SECRET_KEY`; the setup key `STRIPE_SETUP_KEY` with Write on Products, Prices, Customer portal, Webhook Endpoints and Tax settings and registrations, and None elsewhere |
-| 9. Catalog | `stripe-setup` writes `--out` | The catalog JSON with every `stripe_price_id`, `topup.stripe_price_ids` and `stripe.portal_configurations` filled in. The operator sets it as `PM_PLAN_CATALOG` and runs `pmail deploy`, whose catalog validation refuses a paid plan without a price ID or a missing Portal configuration |
+| 9. Catalog | `stripe-setup` writes `--out` | The catalog JSON with every `stripe_price_id`, `topup.stripe_price_ids` and `stripe.portal_configurations` filled in. The operator sets it as `PM_PLAN_CATALOG` and runs `idvy deploy`, whose catalog validation refuses a paid plan without a price ID or a missing Portal configuration |
 
 The staging catalog of build plan M20 step 11 is a test-mode catalog made the same way, with small
 allowances. Test: `xtask::stripe_setup_idempotent` runs the command twice against the recorded Stripe

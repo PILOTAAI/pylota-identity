@@ -14,7 +14,7 @@ needs consent and RFC 8058 one-click unsubscribe (FR-OUT-8).
 
 The default transport is Cloudflare Email Service. Its FAQ says the service "is intended only for
 transactional emails", with marketing support planned later (Cloudflare Email Service FAQ, read
-2026-10-10). The platform domain always sends through it, and on Pylota Mail Cloud the account, its
+2026-10-10). The platform domain always sends through it, and on Pylota Identity Cloud the account, its
 sending reputation and its daily quota are shared with Pylota's own mail. Marketing mail sent through
 it would break the provider's terms and could cost every tenant, and Pylota, its ability to send.
 

@@ -54,7 +54,7 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Clippy on the wasm32-only code (platform::cf and the Worker's entry)
         run: >-
-          cargo clippy --locked -p pylota-mail-core -p pylota-mail-platform -p pylota-mail-worker
+          cargo clippy --locked -p pylota-identity-core -p pylota-identity-platform -p pylota-identity-worker
           --target wasm32-unknown-unknown -- -D warnings
 
   test:
@@ -98,7 +98,7 @@ jobs:
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
       - name: core builds for wasm32
-        run: cargo build --locked -p pylota-mail-core --target wasm32-unknown-unknown
+        run: cargo build --locked -p pylota-identity-core --target wasm32-unknown-unknown
       - name: Install worker-build
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
       - name: Build the Worker and check the size budget (xtask::size_budget, NFR-SEC-2)

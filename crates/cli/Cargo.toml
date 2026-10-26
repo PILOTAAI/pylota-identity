@@ -1,6 +1,6 @@
 [package]
-name = "pylota-mail-cli"
-description = "pmail, the Pylota Mail command-line tool"
+name = "pylota-identity-cli"
+description = "idvy, the Pylota Identity command-line tool"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,5 +9,5 @@ repository.workspace = true
 
 
 [[bin]]
-name = "pmail"
+name = "idvy"
 path = "src/main.rs"

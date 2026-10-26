@@ -1,4 +1,4 @@
-# Response headers for the Pylota Mail site (Workers static assets).
+# Response headers for the Pylota Identity site (Workers static assets).
 # Docs: https://developers.cloudflare.com/workers/static-assets/headers/
 # When a request matches several rules, their headers are merged. A header set twice is
 # joined with a comma, so a rule that replaces one must detach it first with "! Name".

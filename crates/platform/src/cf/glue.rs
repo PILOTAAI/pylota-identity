@@ -6,7 +6,7 @@
 //! M0 carries the subset of [Rust workspace §6.3] that a `fetch` answering `200` needs. Spike S1
 //! extends it to the other handlers and validates it against the real runtime; M4 hardens it.
 //!
-//! [Rust workspace §6.3]: https://github.com/PILOTAAI/pylota-mail/blob/main/docs/src/project/design/rust-workspace.md
+//! [Rust workspace §6.3]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/rust-workspace.md
 
 pub use js_sys;
 pub use wasm_bindgen;
@@ -44,7 +44,7 @@ pub enum HttpResponseOut {
 /// What the Worker implements. Futures are not `Send`: the Worker is single-threaded
 /// ([Rust workspace §5], rule 1).
 ///
-/// [Rust workspace §5]: https://github.com/PILOTAAI/pylota-mail/blob/main/docs/src/project/design/rust-workspace.md
+/// [Rust workspace §5]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/rust-workspace.md
 #[allow(async_fn_in_trait)]
 pub trait WorkerApp: Sized + 'static {
     /// Called once per invocation.

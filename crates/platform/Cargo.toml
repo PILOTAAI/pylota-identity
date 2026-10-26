@@ -1,6 +1,6 @@
 [package]
-name = "pylota-mail-platform"
-description = "Pylota Mail's Cloudflare capability layer: the only crate that imports worker"
+name = "pylota-identity-platform"
+description = "Pylota Identity's Cloudflare capability layer: the only crate that imports worker"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

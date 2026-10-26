@@ -6,7 +6,7 @@
 //! export. Spike S1 adds the `email`, `queue` and `scheduled` exports and the Durable Object classes;
 //! M4 adds the trait set, the fakes and `Config`.
 //!
-//! [Rust workspace §6]: https://github.com/PILOTAAI/pylota-mail/blob/main/docs/src/project/design/rust-workspace.md
+//! [Rust workspace §6]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/rust-workspace.md
 
 #[cfg(target_arch = "wasm32")]
 pub mod cf;
@@ -19,19 +19,19 @@ pub mod cf;
 /// one-line call into `cf::glue`. M0 exports `fetch` alone:
 ///
 /// ```ignore
-/// pylota_mail_platform::export_worker! {
-///     app: crate::App, // impl pylota_mail_platform::cf::glue::WorkerApp
+/// pylota_identity_platform::export_worker! {
+///     app: crate::App, // impl pylota_identity_platform::cf::glue::WorkerApp
 /// }
 /// ```
 ///
-/// [Rust workspace §2]: https://github.com/PILOTAAI/pylota-mail/blob/main/docs/src/project/design/rust-workspace.md
+/// [Rust workspace §2]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/rust-workspace.md
 // rustfmt re-indents attributes inside macro_rules! bodies on every run, so it never settles.
 #[rustfmt::skip]
 #[macro_export]
 macro_rules! export_worker {
     (app: $app:path $(,)?) => {
         #[doc(hidden)]
-        mod __pylota_mail_export_fetch {
+        mod __pylota_identity_export_fetch {
             #[allow(unused_imports)]
             use $crate::cf::glue::wasm_bindgen;
             use $crate::cf::glue::wasm_bindgen::prelude::wasm_bindgen;

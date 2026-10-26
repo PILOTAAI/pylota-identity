@@ -1,4 +1,4 @@
-# 0015 One person builds and operates Pylota Mail Cloud
+# 0015 One person builds and operates Pylota Identity Cloud
 
 | | |
 |---|---|
@@ -9,7 +9,7 @@
 
 ## Context
 
-The owner of TREFT LTD is the only developer of Pylota Mail and also the operator of Pylota Mail Cloud.
+The owner of TREFT LTD is the only developer of Pylota Identity and also the operator of Pylota Identity Cloud.
 There is no second person and no on-call rota. Several controls in the design assumed one: a person who
 did not build the service timing the deploy rehearsal (NFR-OPS-1), a "required reviewer" on the staging
 and release environments, release signing gated by reviewers, alerts that reach "a person" through a
@@ -25,7 +25,7 @@ Facts this decision rests on, read on 2026-10-10:
   cron; scheduled workflows in a public repository are disabled after 60 days without repository
   activity ([Notifications for workflow runs](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs),
   [Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)).
-- Cloudflare Custom Alerts are created in the dashboard; no creation API was found, so `pmail doctor`
+- Cloudflare Custom Alerts are created in the dashboard; no creation API was found, so `idvy doctor`
   cannot check that they exist (Cloudflare Notifications docs, read 2026-10-09).
 
 ## Decision
@@ -56,7 +56,7 @@ Every control that relied on a second person is replaced by a mechanical one:
    ([Observability § 5.7](../design/observability.md#57-break-glass-record)).
 7. **Review of high-risk changes.** "Human sign-off" means the owner. It comes after the CI gates and an
    independent adversarial agent review of the change, never instead of them.
-8. **System boundaries still hold.** Pylota's servers never hold a Pylota Mail platform key.
+8. **System boundaries still hold.** Pylota's servers never hold a Pylota Identity platform key.
 
 ## Consequences
 

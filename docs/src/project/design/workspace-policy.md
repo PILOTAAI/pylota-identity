@@ -83,7 +83,7 @@ pauses later; longer retention keeps more). For the switches `auto_reply.allowed
 `inbound.extract_image_text`, `triage.enabled` and `search.agentic_enabled`, `true` is looser (it sends mail
 or spends Workers AI). For `accounts.require_approval`, `false` is looser: it lets agents receive
 verification codes from services nobody approved ([Service sign-up ledger](service-accounts.md)), which
-spends the reputation of the shared addresses with third-party services. So on Pylota Mail Cloud, whose
+spends the reputation of the shared addresses with third-party services. So on Pylota Identity Cloud, whose
 `PM_DEFAULT_POLICY` sets it to `true` ([Cloud commissioning](../cloud-commissioning.md#5-the-cloud-default-policy)),
 no workspace and no partner can turn it off; only a platform key can.
 
@@ -99,7 +99,7 @@ the tenant lower sets the field, which sets the value and the ceiling together.
 
 ## 3. Decisions reserved for people
 
-FR-CON-6 makes releasing quarantined mail a person's decision on Pylota Mail Cloud, because an agent's
+FR-CON-6 makes releasing quarantined mail a person's decision on Pylota Identity Cloud, because an agent's
 key can be steered by the mail it reads. Three more decisions have the same effect, letting mail or codes
 that nobody reviewed reach agents, or mail that nobody approved leave them, so they follow the same rule,
 implemented once in `auth::people::key_may_decide(decision, scope, tenant_policy) -> bool`:
@@ -263,7 +263,7 @@ same refusals for the `policy` it carries, with the same `details`.
 
 ## 8. A partner's tenants
 
-On Pylota Mail Cloud, Pylota's partner key creates each operator's workspace and sets its policy, for
+On Pylota Identity Cloud, Pylota's partner key creates each operator's workspace and sets its policy, for
 example `quarantine.key_release: true`, `drafts.key_approval: true` and a lower `tenant_daily_send_cap`. Every lower-only value it sets
 becomes that tenant's partner ceiling, so:
 

@@ -1,6 +1,6 @@
 [package]
-name = "pylota-mail"
-description = "Rust client for the Pylota Mail API"
+name = "pylota-identity"
+description = "Rust client for the Pylota Identity API"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

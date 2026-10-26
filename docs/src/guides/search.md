@@ -21,14 +21,14 @@ every result reports how much of the mailbox is embedded (`semantic_coverage`).
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/search \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"q":"from:@brightwell.example ref:AB12CDE has:attachment newer_than:45d","mode":"hybrid","limit":10}'
 ```
 
 The same with the CLI:
 
 ```bash
-pmail search "from:@brightwell.example ref:AB12CDE has:attachment newer_than:45d" \
+idvy search "from:@brightwell.example ref:AB12CDE has:attachment newer_than:45d" \
   --identity maintenance@acme.example.com --mode hybrid
 ```
 
@@ -210,7 +210,7 @@ curl -X POST https://mail.example.com/v1/tenants/ten_01J9…/search \
   -d '{"q":"ref:AB12CDE","mode":"keyword","identity_ids":["idn_01J9Z3K8V4","idn_01J9Z3K8V5"]}'
 ```
 
-CLI: `pmail search "ref:AB12CDE" --tenant acme`.
+CLI: `idvy search "ref:AB12CDE" --tenant acme`.
 
 - Hits carry `identity_id`.
 - Up to 100 identities. A tenant with more needs an `identity_ids` filter, otherwise
@@ -218,7 +218,7 @@ CLI: `pmail search "ref:AB12CDE" --tenant acme`.
 - An identity key asking for tenant scope gets `403 scope_denied` ([F3](../project/edge-cases.md)).
 - Every mode works here, `agentic` included: agentic search runs at identity or tenant scope, and at
   tenant scope it needs a tenant, partner or platform key with `search:read` and `search:agentic`. CLI:
-  `pmail ask "<question>" --tenant acme`.
+  `idvy ask "<question>" --tenant acme`.
 - If one identity's mailbox is slow or unavailable, the others are returned after a 900 ms deadline per
   identity, with `partial: true` and the missing ones in `failed_identities[]`
   ([F15](../project/edge-cases.md)).
@@ -239,7 +239,7 @@ verifies every citation before the answer is returned ([FR-SRCH-8](../project/pr
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V5/search \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"q":"Did the insurer accept the Golf claim after we sent the photos?","mode":"agentic",
        "budget":{"max_steps":6,"max_seconds":8},"stream":false}'
 ```
@@ -307,7 +307,7 @@ data: {"status":"answered","answer":{…},"evidence":[…],"trace":[…],"degrad
 `evidence` events carry the hits not sent before, `step` events carry each trace entry when it is
 complete, `answer` comes once, and `done` is always last. `done` carries the complete response, the same
 body as a call without `stream`, so a client may ignore every other event. A keep-alive comment
-(`: keep-alive`) is sent after every 10 seconds of silence. Streams cannot be resumed. `pmail ask` uses
+(`: keep-alive`) is sent after every 10 seconds of silence. Streams cannot be resumed. `idvy ask` uses
 the stream to show progress.
 
 ### Budgets and costs

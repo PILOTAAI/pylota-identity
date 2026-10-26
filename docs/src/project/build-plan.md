@@ -1,6 +1,6 @@
 # Build plan
 
-This is the order of work for building Pylota Mail from an empty repository to v1.0, written for a
+This is the order of work for building Pylota Identity from an empty repository to v1.0, written for a
 coding agent (or a team) working through it in one pass. Each milestone lists:
 
 - the files it creates;
@@ -242,30 +242,30 @@ the other's arm.
 
 A coding agent cannot create these. A person provides each one before the milestone or spike that
 needs it, and stores the credential under the name in the last column. Local values go in the shell or in
-`spikes/.env` (git-ignored); CI values are GitHub Actions secrets on `PILOTAAI/pylota-mail`, in the
+`spikes/.env` (git-ignored); CI values are GitHub Actions secrets on `PILOTAAI/pylota-identity`, in the
 environment named in brackets. Nothing in this table is ever committed.
 
 | Item | Who provides it | Needed by | Secret or config name |
 |---|---|---|---|
-| Production: Pylota's existing Cloudflare account, on the Workers Paid plan ("shared, tightened", [ADR 0010](adr/0010-cloud-in-the-existing-cloudflare-account.md)). Staging and the spikes: a **separate** Cloudflare account on the Workers Paid plan, because setup uses fixed resource names (`pylota-mail`, `pylota-mail-blobs`, `pm-*`) and production's tokens list only production's zones | Owner (TREFT LTD) | M1 (every spike except S10 and S13, in the staging account), M20 | `CLOUDFLARE_ACCOUNT_ID` (local); `PM_CF_ACCOUNT_ID` (written by `pmail setup`); Actions: `STAGING_CLOUDFLARE_ACCOUNT_ID` [`staging`] |
+| Production: Pylota's existing Cloudflare account, on the Workers Paid plan ("shared, tightened", [ADR 0010](adr/0010-cloud-in-the-existing-cloudflare-account.md)). Staging and the spikes: a **separate** Cloudflare account on the Workers Paid plan, because setup uses fixed resource names (`pylota-identity`, `pylota-identity-blobs`, `pm-*`) and production's tokens list only production's zones | Owner (TREFT LTD) | M1 (every spike except S10 and S13, in the staging account), M20 | `CLOUDFLARE_ACCOUNT_ID` (local); `PM_CF_ACCOUNT_ID` (written by `idvy setup`); Actions: `STAGING_CLOUDFLARE_ACCOUNT_ID` [`staging`] |
 | The `pylotamail.com` zone in the production account (bought 2026-10-09, [Cloud sign-up §2](design/cloud-signup.md#2-hostnames)); in the staging account, a staging platform zone apex and a **staging tenant zone** (a second apex, listed in the live suite's test tenant's `domains.cloudflare_zones`, for M20 step 4's zone subdomain and zone apex) | Owner | M1 (S2, S7, S9 use a scratch zone or the staging zones), M20 | `PM_PLATFORM_DOMAIN`, `PM_API_HOST`, `PM_CONSOLE_HOST` in `deploy/wrangler.toml`; Actions: `STAGING_TENANT_ZONE` [`staging`] |
-| The setup API tokens, with the permissions and scopes in [Deploy › step 2](../self-hosting.md#2-create-a-cloudflare-api-token): a short-lived first-run token with Workers Admin at product scope (it creates the Worker and its Custom Domain, then is deleted), then a deploy token with per-Worker Editor on `pylota-mail` and specific zones only; and the Worker's token, limited to named zones (on production `pylotamail.com` and `pylota.io`, with `domains.allow_create_zone` off) | Owner | M1, M20 | `CLOUDFLARE_API_TOKEN` (local, used by `pmail` and Wrangler); `PM_CF_API_TOKEN` (Worker secret, a separate token with the "Worker token" permissions of that table, stored by the operator with `pmail wrangler secret put`, [Deploy › Domains on Cloudflare](../self-hosting.md)); Actions: `STAGING_CLOUDFLARE_API_TOKEN` [`staging`] |
+| The setup API tokens, with the permissions and scopes in [Deploy › step 2](../self-hosting.md#2-create-a-cloudflare-api-token): a short-lived first-run token with Workers Admin at product scope (it creates the Worker and its Custom Domain, then is deleted), then a deploy token with per-Worker Editor on `pylota-identity` and specific zones only; and the Worker's token, limited to named zones (on production `pylotamail.com` and `pylota.io`, with `domains.allow_create_zone` off) | Owner | M1, M20 | `CLOUDFLARE_API_TOKEN` (local, used by `idvy` and Wrangler); `PM_CF_API_TOKEN` (Worker secret, a separate token with the "Worker token" permissions of that table, stored by the operator with `idvy wrangler secret put`, [Deploy › Domains on Cloudflare](../self-hosting.md)); Actions: `STAGING_CLOUDFLARE_API_TOKEN` [`staging`] |
 | A separate Cloudflare account for the nightly evaluations (Workers Paid), and an API token on it with exactly Workers AI · Read, Workers AI · Edit and Vectorize · Edit ([Testing § 9.2](design/testing.md#92-running)) | Owner | M18 | Actions: `PM_EVAL_CF_ACCOUNT_ID` and `PM_EVAL_CF_API_TOKEN` (repository secrets). Never the production account: Vectorize permissions are account-wide |
 | A Cloudflare Enterprise account (optional) | Owner, through Cloudflare sales | S10 only | `S10_CLOUDFLARE_ACCOUNT_ID`, `S10_CLOUDFLARE_API_TOKEN` in `spikes/.env`. **S10 may be skipped:** without it `delegated_subdomain` stays off (`PM_CF_SUBDOMAIN_SETUP=off`) and the spike result says "skipped, no Enterprise account" |
-| Two AWS accounts with SES production access in `eu-west-2` (London, decided 2026-10-09), on the à la carte plan: one for production and one for staging and the spikes. One region of one account holds one receiving deployment (`pmail setup ses` refuses a second, [Domains on any DNS host §4.2](design/domain-connections.md#42-deployment-set-up-for-ses)) | Owner; production access is requested in the AWS console and approved by AWS, which can take a day | S8, S11, then M23 and M20 step 5 | `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE` (local); `PM_SES_ACCESS_KEY_ID` and `PM_SES_SECRET_ACCESS_KEY` (Worker secrets, written by `pmail setup ses`); Actions: `STAGING_AWS_ACCESS_KEY_ID`, `STAGING_AWS_SECRET_ACCESS_KEY` [`staging`] |
+| Two AWS accounts with SES production access in `eu-west-2` (London, decided 2026-10-09), on the à la carte plan: one for production and one for staging and the spikes. One region of one account holds one receiving deployment (`idvy setup ses` refuses a second, [Domains on any DNS host §4.2](design/domain-connections.md#42-deployment-set-up-for-ses)) | Owner; production access is requested in the AWS console and approved by AWS, which can take a day | S8, S11, then M23 and M20 step 5 | `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE` (local); `PM_SES_ACCESS_KEY_ID` and `PM_SES_SECRET_ACCESS_KEY` (Worker secrets, written by `idvy setup ses`); Actions: `STAGING_AWS_ACCESS_KEY_ID`, `STAGING_AWS_SECRET_ACCESS_KEY` [`staging`] |
 | Two real SMTP submission providers (for example a Google Workspace mailbox and a Microsoft 365 mailbox), each with a sending account on a test domain | Owner | S12 | `S12_SMTP_A_HOST`, `S12_SMTP_A_USERNAME`, `S12_SMTP_A_PASSWORD`, and the same for `S12_SMTP_B_*`, in `spikes/.env` |
 | Gmail (Google Workspace) and Microsoft 365 test mailboxes holding only synthetic mail, with API access for the harness | Owner | M20 (the live suite) | Actions: `STAGING_GMAIL_CLIENT_ID`, `STAGING_GMAIL_CLIENT_SECRET`, `STAGING_GMAIL_REFRESH_TOKEN`, `STAGING_M365_TENANT_ID`, `STAGING_M365_CLIENT_ID`, `STAGING_M365_CLIENT_SECRET` [`staging`] |
 | A domain at an external DNS provider (not Cloudflare) and that provider's API token | Owner | M20 step 5 (`live::domains::dns_records_external_host`) | Actions: `STAGING_EXTERNAL_DNS_TOKEN`, `STAGING_EXTERNAL_DOMAIN` [`staging`] |
-| A staging platform key (90-day expiry) | Created by the agent with `pmail keys create` on staging; stored by a person | M20 | Actions: `STAGING_PLATFORM_KEY` [`staging`] |
+| A staging platform key (90-day expiry) | Created by the agent with `idvy keys create` on staging; stored by a person | M20 | Actions: `STAGING_PLATFORM_KEY` [`staging`] |
 | A Stripe account in test mode | Owner | M22 (recorded fixtures), M20 step 11 | `PM_STRIPE_SECRET_KEY` (a restricted key, `rk_test_…`) and `PM_STRIPE_WEBHOOK_SECRET` (Worker secrets on staging); Actions: `STAGING_STRIPE_SECRET_KEY`, `STAGING_STRIPE_WEBHOOK_SECRET` [`staging`]; `STRIPE_SETUP_KEY` (a test-mode restricted key on the owner's machine for `cargo xtask stripe-setup`, [Billing › Stripe account setup](design/billing.md#stripe-account-setup)) |
 | A Google OAuth client and a GitHub OAuth app, with redirect URLs on the staging and production console hosts | Owner | M24 (its gate re-reads both providers' documentation), M20 step 10 | `PM_OAUTH_GOOGLE_CLIENT_ID`, `PM_OAUTH_GITHUB_CLIENT_ID` (variables); `PM_OAUTH_GOOGLE_CLIENT_SECRET`, `PM_OAUTH_GITHUB_CLIENT_SECRET` (Worker secrets) |
-| The minisign release key pair, generated offline by the owner (`minisign -G`) | Owner | M19 | Secret key: never in GitHub or any online store; kept on an encrypted removable drive (two copies) with its password in the owner's password manager, and used only by `cargo xtask release sign` on the owner's machine ([Security § 11](design/security.md#11-supply-chain)). Public key: compiled into `pmail` as the `current` key ([CLI and setup §8.2](design/cli.md#82-signature-and-checksums)); a second key pair becomes `next` before the first rotation |
-| The GitHub environment `production` (deployments from `main` only; the owner is the only person who can start `cloud-deploy.yml`) | Owner | M19 (site deploy); the Cloud rollout after v1.0 | Actions [`production`]: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for `site.yml`, a token with the per-Worker Editor role on `pylota-mail-site` and Workers Routes · Edit on the `pylotamail.com` zone, nothing else (the header of `.github/workflows/site.yml`); `PROD_CLOUDFLARE_API_TOKEN` and `PROD_CLOUDFLARE_ACCOUNT_ID` for `cloud-deploy.yml`, a token with the per-Worker Editor role on `pylota-mail`, D1 Edit and Queues Edit, no zone, created for one rollout with a 24-hour expiry ([Cloud commissioning §3](cloud-commissioning.md)). The account is shared with Pylota, so neither token may reach Pylota's Workers or zones. Immutable releases turned on in the repository settings (M19) |
-| Terms of service, privacy notice and data processing agreement for Pylota Mail Cloud, published by TREFT LTD | Owner (TREFT LTD) | M24 (sign-up does not start without them), M20 step 10 | `PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL` and `PM_TERMS_VERSION` (variables on staging and production) |
+| The minisign release key pair, generated offline by the owner (`minisign -G`) | Owner | M19 | Secret key: never in GitHub or any online store; kept on an encrypted removable drive (two copies) with its password in the owner's password manager, and used only by `cargo xtask release sign` on the owner's machine ([Security § 11](design/security.md#11-supply-chain)). Public key: compiled into `idvy` as the `current` key ([CLI and setup §8.2](design/cli.md#82-signature-and-checksums)); a second key pair becomes `next` before the first rotation |
+| The GitHub environment `production` (deployments from `main` only; the owner is the only person who can start `cloud-deploy.yml`) | Owner | M19 (site deploy); the Cloud rollout after v1.0 | Actions [`production`]: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for `site.yml`, a token with the per-Worker Editor role on `pylota-mail-site` and Workers Routes · Edit on the `pylotamail.com` zone, nothing else (the header of `.github/workflows/site.yml`); `PROD_CLOUDFLARE_API_TOKEN` and `PROD_CLOUDFLARE_ACCOUNT_ID` for `cloud-deploy.yml`, a token with the per-Worker Editor role on `pylota-identity`, D1 Edit and Queues Edit, no zone, created for one rollout with a 24-hour expiry ([Cloud commissioning §3](cloud-commissioning.md)). The account is shared with Pylota, so neither token may reach Pylota's Workers or zones. Immutable releases turned on in the repository settings (M19) |
+| Terms of service, privacy notice and data processing agreement for Pylota Identity Cloud, published by TREFT LTD | Owner (TREFT LTD) | M24 (sign-up does not start without them), M20 step 10 | `PM_TERMS_URL`, `PM_PRIVACY_URL`, `PM_DPA_URL` and `PM_TERMS_VERSION` (variables on staging and production) |
 | Stripe live mode for TREFT LTD: business details, bank account and identity checks done, Stripe Tax on, and the UK VAT registration date | Owner | Cloud launch after M20 (no milestone waits for it) | `STRIPE_SETUP_KEY` (a live restricted key on the owner's machine, for `cargo xtask stripe-setup --live --vat-from <date>`); `PM_STRIPE_SECRET_KEY` and `PM_STRIPE_WEBHOOK_SECRET` (Worker secrets on production) |
 | The Email Sending daily quota that the Cloudflare dashboard shows for the account shared with Pylota, less Pylota's own daily volume in that account ([Cloud sign-up § 10.3](design/cloud-signup.md#103-shared-domain-breaker)) | Owner | M24 (system-mail budgets and the shared-domain breaker), M20 | `PM_DAILY_SEND_QUOTA` (variable on staging and production); updated when Cloudflare raises the quota |
 | Optional: registration of the production deployment's Web Bot Auth key directory (`https://{PM_API_HOST}/.well-known/http-message-signatures-directory`) with Cloudflare's verified-bot programme (dashboard, "Bot Submission Form", verification method "Request Signature"; [Deploy › Signed HTTP requests](../self-hosting.md#signed-http-requests-web-bot-auth)) | Owner, after M25 ships with S13 passed and `PM_WEB_BOT_AUTH=on` | No milestone or test: signatures verify for any Web Bot Auth verifier without it, and S13 expects the unregistered `401` | None (a dashboard form; nothing to store) |
-| The GitHub repository `PILOTAAI/pylota-mail` (created 2026-10-09), with Actions enabled, the environments `staging` (the owner as its one required reviewer, with "Prevent self-review" left off, which is GitHub's default, so the owner approves the runs they start; `main` and `v*` tags only), `release` (`v*` tags only) and `ops` (`main` only; the heartbeat's keys), and branch protection on `main`. GitHub applies environment protection rules on Free, Pro and Team plans only to public repositories ([Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), read 2026-10-10), so the repository is public or on a plan that has them | Owner | M0 | Actions: `CARGO_REGISTRY_TOKEN` [`release`], for `cargo publish`; `HEARTBEAT_KEY` and `HEARTBEAT_MAIL_TEST_KEY` [`ops`], created on production after M20 ([Observability § 5.5](design/observability.md#55-alert-email-and-the-external-heartbeat)); every other secret above |
+| The GitHub repository `PILOTAAI/pylota-identity` (created 2026-10-09), with Actions enabled, the environments `staging` (the owner as its one required reviewer, with "Prevent self-review" left off, which is GitHub's default, so the owner approves the runs they start; `main` and `v*` tags only), `release` (`v*` tags only) and `ops` (`main` only; the heartbeat's keys), and branch protection on `main`. GitHub applies environment protection rules on Free, Pro and Team plans only to public repositories ([Managing environments for deployment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), read 2026-10-10), so the repository is public or on a plan that has them | Owner | M0 | Actions: `CARGO_REGISTRY_TOKEN` [`release`], for `cargo publish`; `HEARTBEAT_KEY` and `HEARTBEAT_MAIL_TEST_KEY` [`ops`], created on production after M20 ([Observability § 5.5](design/observability.md#55-alert-email-and-the-external-heartbeat)); every other secret above |
 
 A milestone whose prerequisite is missing stops and reports which row is missing. It never substitutes a
 fake for a spike's real provider.
@@ -303,7 +303,7 @@ shipped), plus a written result.
 | S6 Externs and jurisdiction | Vectorize `upsert`, `query` (namespace and metadata filter), `deleteByIds`, `getByIds` and `describe()` (the vector count); `AI.run` with the `gateway` option, including the `bge-m3` output shape, the reranker's score form and the agent model's chat-completions schema ([Search](design/search.md)); `AI.toMarkdown` (including whether PDF output marks page boundaries) — all through `wasm-bindgen` externs; DO IDs from `unique_id_with_jurisdiction("eu")` stored as strings and re-addressed with `id_from_string` | Every call works and each recorded shape matches the design, or the design is updated with the observed one. An EU object reports the EU jurisdiction (`ctx.id.jurisdiction`) | REST fallbacks (`/vectorize/v2/…`, `/ai/run`, `/ai/tomarkdown`) using `PM_CF_API_TOKEN`, which then becomes required ([Rust workspace §7](design/rust-workspace.md#7-wasm-bindgen-externs)); one page per document when `toMarkdown` does not mark pages. If an EU object does not report the EU jurisdiction, the build stops for an owner decision, because FR-PRV-1 depends on it |
 | S7 Outbound Message-ID | The relationship between the `messageId` that `send()` returns and the `Message-ID` header recipients see | Either a deterministic mapping (strategy A), or the header learned from a journal copy (strategy B) | Strategy B: a hidden journal BCC to `journal+{message ulid}.{identity ulid}@{PM_PLATFORM_DOMAIN}`; the email handler records the header and drops the copy ([Outbound](design/outbound.md#message-id-of-outbound-mail-spike-s7)). If a journal copy never arrives, that message matches replies by thread token and provider ID only |
 | S8 SES in wasm | SigV4 signing for SES v2 `SendEmail` with raw content, and SNS message signature verification (`SignatureVersion` 2; version 1 is refused), from Rust in wasm | A real send through SES in `eu-west-2`; a real SNS notification verified, and a tampered one rejected | SES leaves v1.0: an ADR moves `send_only`, `dns_records`, `smtp_relay` with `inbound: ses` and the SES failover to v1.1 |
-| S9 Event subscriptions and onboarding APIs | Create an Email Sending event subscription to `pm-delivery-events` through the API for one domain (source type `email.sending` with `zone_id` and `domain`; this source shape appears in Wrangler's source, not yet in the API reference), receive all six event types, delete it. Onboard a zone **apex** and a subdomain through `POST /zones/{zone_id}/email/sending/subdomains`, and enable routing on a subdomain through `POST /zones/{zone_id}/email/routing/dns` with `name`. A literal routing rule whose `worker` action value is the script name `pylota-mail` delivers to the Worker. **Subdomain enable and disable** in a zone whose apex already routes, and in one whose apex has a foreign MX: enabling a subdomain leaves the apex's MX records and catch-all unchanged; `PATCH /zones/{zone_id}/email/routing/dns` with the subdomain's `name` unlocks its records, deleting them by ID stops mail to that subdomain only, the apex and another subdomain keep receiving, and the zone's mail-domain count drops; `DELETE /zones/{zone_id}/email/routing/dns` disables the whole zone (recorded, never used for one name). Record the error codes Cloudflare returns for a zone deleted out of band, for a 31st mail domain in a zone, and for a zone that already exists on `POST /zones` | Payload fields match [Outbound › Delivery events](design/outbound.md#delivery-events); subscriptions can be created per domain at runtime with `PM_CF_API_TOKEN`; apex and subdomain onboarding both work through the API; a subdomain's routing can be removed without touching the zone's other mail domains | For `cloudflare_zone` and `nameservers`, the API creates the domain without a subscription, marks it `delivery_events: "manual"`, and returns its records with `details.action = "run pmail domains subscribe <domain>"`; delivery events start once that command has run ([Identities and domains › Kind `zone`](design/identity-domains.md#kind-zone), tests `it::domains::s9_manual_delivery_events` and, for `nameservers`, `it::domains::s9_manual_delivery_events_nameservers`). Any onboarding step the API cannot do is listed by `pmail domains add` as a dashboard step and checked by `pmail doctor`. If a subdomain's routing cannot be removed on its own, removal leaves it with no rules and `pmail doctor` lists it under `routing.leftover_subdomains` with the dashboard step ([Identities and domains › Domain removal](design/identity-domains.md#domain-removal)) |
+| S9 Event subscriptions and onboarding APIs | Create an Email Sending event subscription to `pm-delivery-events` through the API for one domain (source type `email.sending` with `zone_id` and `domain`; this source shape appears in Wrangler's source, not yet in the API reference), receive all six event types, delete it. Onboard a zone **apex** and a subdomain through `POST /zones/{zone_id}/email/sending/subdomains`, and enable routing on a subdomain through `POST /zones/{zone_id}/email/routing/dns` with `name`. A literal routing rule whose `worker` action value is the script name `pylota-identity` delivers to the Worker. **Subdomain enable and disable** in a zone whose apex already routes, and in one whose apex has a foreign MX: enabling a subdomain leaves the apex's MX records and catch-all unchanged; `PATCH /zones/{zone_id}/email/routing/dns` with the subdomain's `name` unlocks its records, deleting them by ID stops mail to that subdomain only, the apex and another subdomain keep receiving, and the zone's mail-domain count drops; `DELETE /zones/{zone_id}/email/routing/dns` disables the whole zone (recorded, never used for one name). Record the error codes Cloudflare returns for a zone deleted out of band, for a 31st mail domain in a zone, and for a zone that already exists on `POST /zones` | Payload fields match [Outbound › Delivery events](design/outbound.md#delivery-events); subscriptions can be created per domain at runtime with `PM_CF_API_TOKEN`; apex and subdomain onboarding both work through the API; a subdomain's routing can be removed without touching the zone's other mail domains | For `cloudflare_zone` and `nameservers`, the API creates the domain without a subscription, marks it `delivery_events: "manual"`, and returns its records with `details.action = "run idvy domains subscribe <domain>"`; delivery events start once that command has run ([Identities and domains › Kind `zone`](design/identity-domains.md#kind-zone), tests `it::domains::s9_manual_delivery_events` and, for `nameservers`, `it::domains::s9_manual_delivery_events_nameservers`). Any onboarding step the API cannot do is listed by `idvy domains add` as a dashboard step and checked by `idvy doctor`. If a subdomain's routing cannot be removed on its own, removal leaves it with no rules and `idvy doctor` lists it under `routing.leftover_subdomains` with the dashboard step ([Identities and domains › Domain removal](design/identity-domains.md#domain-removal)) |
 | S10 Child zones | On an Enterprise account, a subdomain-setup child zone accepts Email Routing catch-all to the Worker and Email Sending onboarding, and both work end to end. Optional: skipped when no Enterprise account is available ([Build plan › Human prerequisites](#human-prerequisites)) | Mail to any address at the child apex reaches `email()`; a send is DKIM-aligned | `delegated_subdomain` stays off; `dns_records` covers the case |
 | S11 SES receiving | Rule set, S3 action and topic as specified; the notification shape, including the `objectKey` form; S3 `GetObject` with SigV4 from a Worker; a 39 MB message ([N5](edge-cases.md)); `user+tag@` routing; the retired-address bounce; the backstop picks up a message whose push failed | All pass in `eu-west-2` | `dns_records` and `smtp_relay` with `inbound: ses` do not ship in v1.0; `send_only` still does |
 | S12 SMTP from a Worker | Ports 465 and 587 with `StartTls` against two real providers; the certificate host name is checked (a wrong-name certificate is refused); timeouts and the uncertain window behave as designed | All pass | `smtp_relay` does not ship in v1.0 |
@@ -354,7 +354,7 @@ FR-SRCH-3/4/8 (verifier), FR-TRI-2, FR-DOM-4/5 (the pure state machine).
 
 **Acceptance:**
 
-- `cargo test -p pylota-mail-api-types` generates `openapi.json` with `utoipa`, and a test compares it
+- `cargo test -p pylota-identity-api-types` generates `openapi.json` with `utoipa`, and a test compares it
   semantically (paths, methods, schemas, enums, required fields) with `docs/src/reference/openapi.yaml`.
   Any difference fails.
 - Every error code in [Errors](../reference/errors.md) exists in the `ErrorCode` enum with its HTTP
@@ -800,7 +800,7 @@ journal and `provider_objects_json`)}` (the two classes replace M5's stubs; thei
 `handlers/domains.rs` (full for `cloudflare_zone`, including `PATCH /v1/domains/{domain_id}` for the
 transport), `handlers/addresses.rs` (aliases on tenant domains, promote, retire and rollback),
 `crons/retire.rs`, `transport/ses.rs`, `consumers/ses_events.rs` (the `POST /hooks/ses` SNS endpoint), and
-CLI `pmail domains subscribe`. The other connection methods, `nameservers` included, are M23's.
+CLI `idvy domains subscribe`. The other connection methods, `nameservers` included, are M23's.
 
 **Implements:** FR-DOM-2–6, FR-DOM-13 and FR-DOM-14 for `cloudflare_zone`, FR-ADR-1–4.
 
@@ -862,8 +862,8 @@ CLI `pmail domains subscribe`. The other connection methods, `nameservers` inclu
 `domains/monitor.rs` (method health rows, probe and forwarding tokens), `domains/ses_control.rs` (the
 retired-address rule sync, its single writer); no
 migration (the `domains` method columns, `ses_ingest`, `addresses.ses_bounce_rule` and
-`addresses.forwarding` are already in `0001_init.sql`); CLI `pmail setup ses`, `pmail domains add --method`, `pmail domains update
---smtp-…`, `pmail domains probe` and `pmail addresses test-forwarding`.
+`addresses.forwarding` are already in `0001_init.sql`); CLI `idvy setup ses`, `idvy domains add --method`, `idvy domains update
+--smtp-…`, `idvy domains probe` and `idvy addresses test-forwarding`.
 
 **Implements:** FR-DOM-7–12, [Domains on any DNS host](design/domain-connections.md).
 
@@ -884,7 +884,7 @@ migration (the `domains` method columns, `ses_ingest`, `addresses.ses_bounce_rul
   part of H8
   (`it::domains::h8_zone_permission`: `zone_claims` written with the domain row, deleted by `delete_zone`
   and on `zone_expired`, and the refusal of a name under a deployment or another tenant's zone).
-- `pmail setup ses` is idempotent: it runs twice against a recorded AWS API fake with no duplicate
+- `idvy setup ses` is idempotent: it runs twice against a recorded AWS API fake with no duplicate
   resources, never deactivates an existing active rule set, and prints the IAM policy before applying it.
   It tags every taggable resource with the API host and refuses another deployment's resources (N31,
   `cli::setup::ses_foreign_resources`).
@@ -1010,10 +1010,10 @@ signing tools of M25 (`mail_sign_assertion`, `mail_sign_http_request`). M27 late
 - SDK integration tests run against the workerd harness for every endpoint, and
   `sdk::coverage::every_operation` proves the SDK has one method per `openapi.yaml` operation (FR-SDK-1,
   [Rust workspace §11](design/rust-workspace.md#11-the-rust-sdk-fr-sdk-1)).
-- `pmail setup` is idempotent: it runs twice against a recorded Cloudflare API fake with no
+- `idvy setup` is idempotent: it runs twice against a recorded Cloudflare API fake with no
   duplicate resources.
-- `pmail deploy` verifies checksums and refuses a tampered bundle.
-- `pmail doctor` reports every check with a fix.
+- `idvy deploy` verifies checksums and refuses a tampered bundle.
+- `idvy doctor` reports every check with a fix.
 - The landing-page CLI examples run as tests, and `sdk::doctest::published_examples` compiles the Rust
   examples of `quickstart.md` and checks that the landing page's example equals
   `crates/sdk/examples/confirm_booking.rs`.
@@ -1055,7 +1055,7 @@ M17 is accepted in two halves, without renumbering ([Dependency graph](#dependen
   the two master-key slots (`PM_MASTER_KEY`, `PM_MASTER_KEY_B`, `PM_MASTER_KEY_ACTIVE`), the
   every-minute re-seal sweep over the registry in `crates/core/src/sealed.rs`, the `master_key` block of
   `GET /v1/platform/status` (whose `remaining` count is built from the same registry) and
-  `pmail secrets rotate-master`:
+  `idvy secrets rotate-master`:
   `it::secrets::master_key_rotation` and `cli::secrets::rotate_master` for the columns registered so far.
   Each milestone that writes a sealed column registers it and extends the test
   ([Shared files](#dependency-graph)).
@@ -1125,12 +1125,12 @@ which is its one definition, and PRD release criterion 7.
   ([Security § 11](design/security.md#11-supply-chain)).
 - `xtask::release_version_matches_tag` and `xtask::release_gate_refuses` pass.
 - The first release candidate, `v1.0.0-rc.1`, is tagged once M16 has landed. Its `release.yml` run
-  produces a draft GitHub Release with `pylota-mail-worker-1.0.0-rc.1.tar.gz`, CLI binaries for macOS
+  produces a draft GitHub Release with `pylota-identity-worker-1.0.0-rc.1.tar.gz`, CLI binaries for macOS
   (arm64, x64), Linux (x64, arm64) and Windows (x64), the SBOMs, `SHA256SUMS` and an attestation for every
   file, and no signature. `cargo xtask release sign v1.0.0-rc.1` with the offline key adds
-  `SHA256SUMS.sig` with the trusted comment `pylota-mail v1.0.0-rc.1` and starts `release-publish.yml`,
+  `SHA256SUMS.sig` with the trusted comment `pylota-identity v1.0.0-rc.1` and starts `release-publish.yml`,
   whose `verify` job makes it a pre-release and whose `staging` job deploys it with
-  `pmail deploy --version 1.0.0-rc.1`. Its `live` job may fail before M20; a failed run is never
+  `idvy deploy --version 1.0.0-rc.1`. Its `live` job may fail before M20; a failed run is never
   promoted, and a pre-release never reaches crates.io.
 - `xtask::release_sign_refuses`: `cargo xtask release sign` refuses a file whose checksum does not match
   or whose attestation is missing or names another workflow or tag, and uploads nothing.
@@ -1138,7 +1138,7 @@ which is its one definition, and PRD release criterion 7.
   against the keys written in the workflow, and an attestation from another workflow or tag;
   `xtask::cloud_deploy_workflow_pins` and `xtask::release_crates_refuses` pass; immutable releases are on
   for the repository; no workflow holds the crates.io token (J35).
-- `cli::wrangler::installs_from_signed_lockfile`: the bundle carries Wrangler's lockfile and `pmail`
+- `cli::wrangler::installs_from_signed_lockfile`: the bundle carries Wrangler's lockfile and `idvy`
   installs and runs Wrangler only from it (J34).
 
 ---
@@ -1205,7 +1205,7 @@ console pages `plan.rs`, and the dispute check in outbound policy step 18 (`deta
   needs it listed and `tenant_id`) and the `PATCH /v1/tenants/{own}/billing` case of
   `it::partners::routes_and_audit` (`403 scope_denied` for a partner key).
 - `xtask::stripe_setup_idempotent`: `cargo xtask stripe-setup` creates the products, prices, the three
-  Portal configurations and the webhook endpoint once, and writes a catalog that `pmail deploy`
+  Portal configurations and the webhook endpoint once, and writes a catalog that `idvy deploy`
   accepts ([Billing › Stripe account setup](design/billing.md#stripe-account-setup)).
 - Every metered action is wired to a hold and a settlement, checked by a table test that lists each metering
   point. A new metered action without a row fails.
@@ -1239,7 +1239,7 @@ columns, `oauth_identities`, `oauth_states`, `pending_auth`, `waitlist`, `platfo
 `tenants.{require_two_factor, onboarding_dismissed_at, ramp_lifted_at}` and the `login_tokens` sign-up
 columns are in `0001_init.sql`), the pending step (`console/pending.rs`, [Cloud sign-up
 §5.1](design/cloud-signup.md#51-the-pending-step)), the host split for `PM_CONSOLE_HOST` in `router.rs`,
-CLI `pmail waitlist invite`, the new-workspace send ramp (`crons/signup_ramp.rs`, run once a day by the
+CLI `idvy waitlist invite`, the new-workspace send ramp (`crons/signup_ramp.rs`, run once a day by the
 `*/15` cron; the ramp check in outbound policy step 18; the `ramp_lifted_at` updates in
 `billing/webhook.rs`; `QuotaRequest::OutcomeRates`), the system-mail budgets and the form ticket
 (`console/sysmail.rs`, `QuotaRequest::SystemMail`), the shared-domain breaker (`crons/send_breaker.rs`
@@ -1288,8 +1288,8 @@ and recorded in the design before the OAuth code is written ([Cloud sign-up §4]
 RFC 9421 signature bases, pure), `handlers/{identity_keys.rs, assertions.rs, http_signatures.rs,
 well_known.rs}`, `db/identity_keys.rs`, `keyring.rs` (the `web_bot_auth` purpose: a 43-character
 thumbprint kid, `public_jwk`, the 7-day directory overlap), the use of the `RL_SIGN` binding (in the
-template since M5), `crates/sdk/src/assertions.rs` (`verify_assertion`), CLI `pmail identity-keys
-list|create|rotate|revoke`, `pmail assertions create|verify` and `pmail http-sign`; no migration
+template since M5), `crates/sdk/src/assertions.rs` (`verify_assertion`), CLI `idvy identity-keys
+list|create|rotate|revoke`, `idvy assertions create|verify` and `idvy http-sign`; no migration
 (`identity_keys`, `key_tombstones` and the `signing_keys` columns are in `0001_init.sql`). Route
 registrations go through Track 1 as usual.
 
@@ -1433,7 +1433,7 @@ owner:
 | `handlers/wait.rs` (M7) | The `403 policy_denied` (`account_not_approved`) check for `kind=verification`, and the entry re-check before a release |
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | The `service_accounts` rows of identity and tenant erasure; the global retention job's `service_accounts` step |
 | `mcp/tools.rs` (M15) | `mail_request_account` and `mail_list_accounts`, with their rows in M15's table test |
-| `crates/cli/src/commands/accounts.rs` (M16) | `pmail accounts request\|list\|get\|approve\|reject\|close\|delete` |
+| `crates/cli/src/commands/accounts.rs` (M16) | `idvy accounts request\|list\|get\|approve\|reject\|close\|delete` |
 | `console/pages/overview.rs` (M24) and the Notifier's needs-a-person counts (M26) | The pending sign-ups item of "Needs a person" |
 
 **Implements:** FR-IDN-10 and edge rows E9–E15, with E5's ledger part
@@ -1482,7 +1482,7 @@ that file's owner:
 | `webhooks/payloads.rs` (M8), `mailbox/outbox.rs` (M6) | `draft_summary`, `draft_event`; the audit rows of `draft.approved` and `draft.rejected` in the dispatch batch |
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | The draft rows of every scope, `drafts_deleted` in the receipt; draft purge and pending expiry in `Hygiene` |
 | `mcp/tools.rs` (M15) | The six draft tools, with their rows in M15's table test; one sentence in the three send tools' descriptions |
-| `crates/cli/src/commands/drafts.rs` (M16) | `pmail drafts …` |
+| `crates/cli/src/commands/drafts.rs` (M16) | `idvy drafts …` |
 | `console/pages/overview.rs` (M24) and the Notifier's needs-a-person counts (M26) | The two "Needs a person" items |
 | The every-minute cron (M5, M17 Foundation) | `crons/drafts_due.rs` |
 | `drafts/attachments.rs`, upload arm | Built by whichever of M29 and M33 (uploads) lands second, with `it::drafts::q6_upload_references` |
@@ -1531,7 +1531,7 @@ files, each reviewed by that file's owner:
 | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `EraseMessages` after each `EraseRows` batch, `EraseIdentity`, `CloseStreams` and `Erase` in tenant erasure, `Probe`, the receipt fields; `Purge` in the tenant retention job's `events` step |
 | `mailbox/erase.rs` (M14), `mailbox/expiry.rs` (M37) | `erased_ids.log_erased_at` and the `log_erase` alarm purpose, which sends `EraseMessages` for what every `EraseRows` deleted, tenant retention and per-identity expiry included (§11.3). If M37 lands first, M30 adds the purpose and runs `it::events::retention_and_expiry_reach_log` against expiry |
 | `mcp/tools.rs` (M15) | `mail_events`, with its rows in M15's table test |
-| `crates/cli` (M16) | `pmail events …` |
+| `crates/cli` (M16) | `idvy events …` |
 | `console/pages/webhooks.rs` (M21) | The event consumers and streams section |
 | `crons/` (M17 and M26's minting loop) | Minting `events_do_id` for rows at `''` |
 
@@ -1725,7 +1725,7 @@ handler code.
 
 **Goal:** an agent with no key creates a provisional Free workspace with one inbox and one key, which
 can email only the person it names until that person verifies; unverified workspaces are erased after 7
-days. Behind `PM_AGENT_SIGNUP` (off), on Pylota Mail Cloud only ([Agent self-sign-up](design/agent-signup.md)).
+days. Behind `PM_AGENT_SIGNUP` (off), on Pylota Identity Cloud only ([Agent self-sign-up](design/agent-signup.md)).
 
 **Files:** `crates/core/src/signup.rs` (pure: normalisation, the username and human-email rules, the base
 address, the permission and policy overlays, code and token encodings); `crates/worker/src/signup/{mod.rs,
@@ -1751,7 +1751,7 @@ tables, `tenants.provisional_until`, `pending_auth.agent_signup_id` and the `ops
 | `jobs/erasure.rs` (M14) | `agent_signups` in `delete_d1_rows` and in the step-8 probe; person deletion's `human_hash` scrub |
 | `handlers/uploads.rs` (M33) | `403 permission_denied` (`signup_unverified`) while provisional |
 | `mcp/tools.rs` (M15) | The four `mail_signup_*` tools and their rows in M15's table test |
-| `crates/cli/src/commands/agent_signup.rs` (M16) | `pmail agent-signup …`, `pmail agent-signups list` |
+| `crates/cli/src/commands/agent_signup.rs` (M16) | `idvy agent-signup …`, `idvy agent-signups list` |
 | `crons/alerts.rs` (M17) | `agent_signup_spike`, `agent_signup_cap_80`, `containment:agent_signup_off` |
 
 **Implements:** FR-ASU-1 to FR-ASU-16 and the amended FR-IDN-2; edge rows X1–X59 and X61–X63 (X60 is
@@ -1827,7 +1827,7 @@ verification or stream resume.
 **Files:** in this repository, `sdks/fixtures/**`, `sdks/typescript-tests.json`, `integrations/**`,
 `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `.cursor-plugin/marketplace.json`,
 `xtask/src/{gen_skills.rs, skills_check.rs}`, `crates/cli/src/{schema.rs, query.rs, commands/skills.rs,
-commands/mcp_stdio.rs}`, the new guides. In the SDK repository `PILOTAAI/pylota-mail-typescript`
+commands/mcp_stdio.rs}`, the new guides. In the SDK repository `PILOTAAI/pylota-identity-typescript`
 ([ADR 0018](adr/0018-typescript-sdk-in-its-own-repository.md)): the package, its generator, tests, compiled guide examples and
 release workflows ([SDKs, skills and agent tooling § 2.1](design/sdk-and-skills.md#21-package-and-layout)). Hooks in other
 milestones' files, each reviewed by that file's owner:
@@ -1841,7 +1841,7 @@ milestones' files, each reviewed by that file's owner:
 | `crates/cli/src/commands/mcp.rs` (M16) | `mcp config --client codex\|claude-desktop\|agent-sdk` |
 | `console/pages/keys.rs`, `console/pages/connect.rs` (M21) | The MCP tools fieldset; the new snippets |
 | `.github/workflows/ci.yml` (M19) | Job `skills` |
-| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-mail-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
+| `xtask` `release` (M19), `itest` (M5), `trace` (M0) | `openapi.json`, `sdk-fixtures-{version}.tar.gz` and `ts-tests-required.json` as release assets listed in `SHA256SUMS`; `release sign --repo PILOTAAI/pylota-identity-typescript` (`xtask::release_sign_sdk_repo`); `itest --serve`; `trace` reads `ts::` names from `sdks/typescript-tests.json` |
 
 **Tasks.**
 
@@ -1851,7 +1851,7 @@ milestones' files, each reviewed by that file's owner:
 2. Webhook verification and the handler (§2.10).
 3. `mcp_tools` end to end: column, minting rules, filter, `GET /v1/me`, console fieldset.
 4. Effect classes, `_meta` hints and description budgets in the MCP server.
-5. `pmail mcp stdio`, `mcp config` clients, `--schema`, `--query`, `skills generate`.
+5. `idvy mcp stdio`, `mcp config` clients, `--schema`, `--query`, `skills generate`.
 6. The skills, the rule registry, `gen-skills`, the checks and the three marketplaces.
 7. The SDK repository's release path: `npm pack` and the owner's signature in its `release.yml`, trusted
    publishing in its `release-publish.yml`, the contract and version checks, the npm trusted-publisher
@@ -1859,9 +1859,9 @@ milestones' files, each reviewed by that file's owner:
 8. After M30: the event helpers of §2.11. After M29 and M33: the draft and upload helpers of §2.12.
 9. The guides of §7.
 
-**Human prerequisites.** Create the public repository `PILOTAAI/pylota-mail-typescript` (FSL-1.1-ALv2).
+**Human prerequisites.** Create the public repository `PILOTAAI/pylota-identity-typescript` (FSL-1.1-ALv2).
 Confirm that TREFT LTD owns the npm organisation `pylotahq`; on npmjs.com, configure the trusted publisher
-for `@pylotahq/mail` (repository `PILOTAAI/pylota-mail-typescript`, workflow `release-publish.yml`,
+for `@pylotahq/identity` (repository `PILOTAAI/pylota-identity-typescript`, workflow `release-publish.yml`,
 environment `release`) and turn on "Require two-factor authentication and disallow tokens" after the first
 publish. Give the SDK repository a staging test key for `ts::live::round_trip`. Pin Deno and Bun
 versions for the SDK repository's CI.
@@ -1882,7 +1882,7 @@ versions for the SDK repository's CI.
   and the extended `it::security::mcp_tools_follow_key`; `it::mcp::inspector_replay` still replays green.
 - `cli::skills::generate_for_key` and `cli::mcp::y59_client_snippets`; the `skills` job green with
   `skills-ref validate` (and `claude plugin validate --strict` if it runs without signing in).
-- The SDK repository's first release candidate produces `pylotahq-mail-{version}.tgz` in its draft
+- The SDK repository's first release candidate produces `pylotahq-identity-{version}.tgz` in its draft
   release, listed in its owner-signed `SHA256SUMS`; a full release publishes it to npm with provenance, and
   `npm audit signatures` in a fresh project reports a verified attestation for it.
 - `ts::doctest::framework_guides` green; `eval::skills_safe_send` has a recorded first pass rate.
@@ -1968,7 +1968,7 @@ rows Z1–Z81.
 NFR-PERF-4, NFR-OPS-2 and NFR-COST-1 (step 13). M17 Completion is accepted here too: its checks run in the
 gate once every milestone it measures has landed.
 
-Deploy to staging with `pmail setup` and `pmail deploy` from the docs alone, as if you were a new
+Deploy to staging with `idvy setup` and `idvy deploy` from the docs alone, as if you were a new
 self-hoster, using the latest release candidate that M19's pipeline published (`v1.0.0-rc.N`); each fix
 found here ships as the next candidate. Then run `live::*`. Each step names its tests in [Testing §10](design/testing.md#10-live-end-to-end-suite-live);
 the ones marked manual there need a person in a browser and run with `cargo xtask live --manual`:
@@ -2015,7 +2015,7 @@ the ones marked manual there need a person in a browser and run with `cargo xtas
     (`live::ops::restore_drill`) and NFR-COST-1 (`live::ops::idle_cost_review` after a week of idling).
     NFR-REL-2 and NFR-REL-4 are read from the SLO dashboard over the live run.
 14. Agent keys: an assertion minted on staging, with a tenant key that the staging platform key minted
-    with `identities:sign` granted, verifies with `pmail assertions verify` against staging's
+    with `identities:sign` granted, verifies with `idvy assertions verify` against staging's
     JWKS, and stops verifying within 5 minutes of pausing the identity (`live::assertions::verify_then_pause`).
     With S13 passed and `PM_WEB_BOT_AUTH=on`, a signed request to
     `https://crawltest.com/cdn-cgi/web-bot-auth` returns `401` (the directory is not registered on
@@ -2064,4 +2064,4 @@ phases of §2.
   DMARC at `p=quarantine`. Waitlist invitations start.
 - Gate C: the [pre-release checklist](design/security.md#16-pre-release-checklist) complete; 30 days of
   phase B within the auto-pause thresholds; DMARC at `p=reject`; a second dry run and review on the
-  phase-C configuration. `PM_SIGNUP=open`: Pylota Mail Cloud is public.
+  phase-C configuration. `PM_SIGNUP=open`: Pylota Identity Cloud is public.

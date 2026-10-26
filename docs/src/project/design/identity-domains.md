@@ -48,7 +48,7 @@ send from `PM_SYSTEM_FROM`) goes out through one reserved identity, the **system
 normal outbound pipeline.
 
 - **Created by setup** ([CLI and setup §6.3](cli.md#63-steps), step 22) on the default tenant, at the
-  address of `PM_SYSTEM_FROM` (default `Pylota Mail <no-reply@{PM_PLATFORM_DOMAIN}>`): an `identities`
+  address of `PM_SYSTEM_FROM` (default `Pylota Identity <no-reply@{PM_PLATFORM_DOMAIN}>`): an `identities`
   row with `is_system = 1`, `username` = the address's local part, `display_name` = its display name,
   `owner_name = 'Operator'` and `owner_email` = setup's `--owner-email` (else
   `postmaster@{PM_PLATFORM_DOMAIN}`), `send_policy.daily_cap` = 50,000 and
@@ -252,7 +252,7 @@ tenant domains (`POST …/addresses`), are checked against the tenant set.
 stand alone on the platform domain (`billing@agents.example`), where they look like the operator's own mail
 to every user of the deployment, so `POST /v1/identities` there from a tenant, partner or identity key is
 `403 scope_denied` with `details.reason = "default_tenant"`, whatever its permissions. Setup creates the
-two identities the deployment needs (the system identity and `pmail-doctor`, [CLI and setup §10](cli.md#10-doctor));
+two identities the deployment needs (the system identity and `idvy-doctor`, [CLI and setup §10](cli.md#10-doctor));
 the operator creates any other with a platform key.
 
 **Role mail on a tenant domain.** Mail to `postmaster@` or `abuse@` a tenant domain that reaches the
@@ -340,7 +340,7 @@ primary (FR-ADR-2).
 | Domain `routing_mode` | Routable when |
 |---|---|
 | `catch_all` (platform domain, zone apex, `delegated`, and `inbound = ses`) | Immediately: the catch-all (or, for `inbound = ses`, the receipt rule `pm-deliver`, which has no recipient condition) sends every address to the Worker |
-| `literal` (zone subdomain) | A literal rule exists. Created synchronously in the request: `POST /zones/{zone_id}/email/routing/rules` with `{ "matchers": [{ "type": "literal", "field": "to", "value": "{address}" }], "actions": [{ "type": "worker", "value": ["pylota-mail"] }], "enabled": true, "name": "pylota-mail {adr_id}", "priority": 0 }`; the returned rule ID is stored in `routing_rule_id`. A matcher value is at most 90 characters, so a longer address is refused with `400 address_invalid`. At most 200 rules per domain; the 201st address is refused with `409 domain_in_use` and `details.reason = "routing_rule_limit"`. That the `worker` action's `value` is the Worker's script name is not stated in the reference; verify at build time (S9) |
+| `literal` (zone subdomain) | A literal rule exists. Created synchronously in the request: `POST /zones/{zone_id}/email/routing/rules` with `{ "matchers": [{ "type": "literal", "field": "to", "value": "{address}" }], "actions": [{ "type": "worker", "value": ["pylota-identity"] }], "enabled": true, "name": "pylota-identity {adr_id}", "priority": 0 }`; the returned rule ID is stored in `routing_rule_id`. A matcher value is at most 90 characters, so a longer address is refused with `400 address_invalid`. At most 200 rules per domain; the 201st address is refused with `409 domain_in_use` and `details.reason = "routing_rule_limit"`. That the `worker` action's `value` is the Worker's script name is not stated in the reference; verify at build time (S9) |
 | `forward` (`inbound = forward`) | Immediately (mail arrives at the identity's platform address, forwarded by the domain's own mail system) |
 
 ### Retirement
@@ -433,12 +433,12 @@ journal row. A journal row that no request completes is cleaned up within the ho
 ([Cleanup after a failed add](#cleanup-after-a-failed-add)).
 
 **Claim record and eviction (S18).** The uniform `409 domain_exists` body carries
-`details.claim = { "type": "TXT", "name": "_pylota-mail.{name}", "value": "pm-claim={token}" }`, where
+`details.claim = { "type": "TXT", "name": "_pylota-identity.{name}", "value": "pm-claim={token}" }`, where
 `token` is the first 26 characters of the lower-case base32 of
-`SHA-256("pylota-mail claim|" ‖ PM_API_HOST ‖ "|" ‖ tenant_id ‖ "|" ‖ name)`. The token binds the claim to
+`SHA-256("pylota-identity claim|" ‖ PM_API_HOST ‖ "|" ‖ tenant_id ‖ "|" ‖ name)`. The token binds the claim to
 the requesting tenant and deployment; it needs no key, because only someone who controls the name's DNS can
 publish it. A requester that controls the DNS publishes that TXT value and repeats the request with
-`"claim": true`. The Worker then queries `_pylota-mail.{name}` on both DoH resolvers:
+`"claim": true`. The Worker then queries `_pylota-identity.{name}` on both DoH resolvers:
 
 - Both show `pm-claim={token}`, and the holder is another tenant's domain that has never been verified
   (`ownership_verified_at IS NULL`, state `pending` or `verifying`): the holder is **evicted**. Its row
@@ -460,7 +460,7 @@ The request names a `method`. When it is absent, the old `kind` is mapped (`zone
 | `method` | Onboarding | The deployment needs (refusal without it) |
 |---|---|---|
 | `cloudflare_zone` | [Kind `zone`](#kind-zone) | `PM_CF_API_TOKEN` (`422 cf_token_required`) |
-| `nameservers` | [Creating a zone](#creating-a-zone), then [Kind `zone`](#kind-zone) at the apex | `PM_CF_API_TOKEN` (`422 cf_token_required`) that can create zones (when Cloudflare refuses the create for the token's scope: `422 transport_unavailable`, `details.reason = "zone_creation_not_allowed"`); for a tenant or partner key, also the policy `domains.allow_create_zone: true` (the same refusal). Pylota Mail Cloud keeps the policy off and scopes its token to named zones, so the method is not offered there ([ADR 0010](../adr/0010-cloud-in-the-existing-cloudflare-account.md)) |
+| `nameservers` | [Creating a zone](#creating-a-zone), then [Kind `zone`](#kind-zone) at the apex | `PM_CF_API_TOKEN` (`422 cf_token_required`) that can create zones (when Cloudflare refuses the create for the token's scope: `422 transport_unavailable`, `details.reason = "zone_creation_not_allowed"`); for a tenant or partner key, also the policy `domains.allow_create_zone: true` (the same refusal). Pylota Identity Cloud keeps the policy off and scopes its token to named zones, so the method is not offered there ([ADR 0010](../adr/0010-cloud-in-the-existing-cloudflare-account.md)) |
 | `delegated_subdomain` | [Domains on any DNS host §3.3](domain-connections.md#33-delegated_subdomain) | `PM_CF_API_TOKEN` (`422 cf_token_required`) and `PM_CF_SUBDOMAIN_SETUP=on` (`422 transport_unavailable`, `subdomain_setup_disabled`) |
 | `dns_records` | [§4.3](domain-connections.md#43-dns_records) | SES with receiving (`422 transport_unavailable`, `ses_not_configured` or `ses_receiving_not_configured`) |
 | `send_only` | [Kind `external`](#kind-external) and [§4.4](domain-connections.md#44-send_only) | SES (`422 transport_unavailable`, `ses_not_configured`) |
@@ -485,7 +485,7 @@ not documented (searched 2026-10-10); spike S9 records it.
 `nameservers` and `delegated_subdomain`; without it, creating such a domain returns
 `422 cf_token_required`. `dns_records`, `send_only` and `smtp_relay` make no Cloudflare call. The one
 exception is an apex `cloudflare_zone` domain (catch-all, no literal rules):
-`pmail domains add --local-token` can onboard it with the operator's local `CLOUDFLARE_API_TOKEN` and
+`idvy domains add --local-token` can onboard it with the operator's local `CLOUDFLARE_API_TOKEN` and
 insert the row itself
 ([CLI and setup §18.1](cli.md#181-domains-add-without-pm_cf_api_token)), and the Worker's cron completes
 the row as for [the platform domain](#the-platform-domain). A subdomain, `nameservers` and
@@ -556,7 +556,7 @@ The check runs in two places, both before anything is written, and refuses with 
    zone never reaches a more specific zone another tenant owns.
 
 Both refusals have the same body, whether or not a zone of that name exists in the account, so the
-answer does not reveal other tenants' zones. `pmail domains add --local-token` runs with the operator's
+answer does not reveal other tenants' zones. `idvy domains add --local-token` runs with the operator's
 own Cloudflare token and inserts the row itself; it is a platform operation and not checked.
 
 #### No adoption of provider objects
@@ -576,7 +576,7 @@ another deployment in the same account. Onboarding therefore never takes one ove
 
 An object counts as this request's own when the onboarding journal or the domain's
 `provider_objects_json` lists its provider ID, or, for an SES identity, when its tags are
-`pylota-mail:api-host = {PM_API_HOST}` and `pylota-mail:domain-id = {domain id}`: every SES identity this
+`pylota-identity:api-host = {PM_API_HOST}` and `pylota-identity:domain-id = {domain id}`: every SES identity this
 deployment creates carries both tags (`CreateEmailIdentity` accepts `Tags`; `GetEmailIdentity` returns
 them, SES v2 API reference read 2026-10-10). The refusals use the uniform `409 domain_exists` body of
 [Adding a domain](#adding-a-domain), so they reveal nothing about the operator's objects.
@@ -636,7 +636,7 @@ The `cloudflare_zone` method. Needs `PM_CF_API_TOKEN` (`422 cf_token_required` w
    ([SPF lookup count](#spf-lookup-count)). More than 10, or more than 2 void lookups: refuse with
    `400 spf_lookup_limit`, `details.lookups`, and a fix naming the includes to flatten.
 4. **Ownership record.** Generate `ownership_token` (16 random bytes, Crockford base32) and create TXT
-   `_pylota-mail.{domain}` = `pm-verify={token}` through the DNS records API; its record ID joins
+   `_pylota-identity.{domain}` = `pm-verify={token}` through the DNS records API; its record ID joins
    `dns_records` in the journal.
 5. **Receiving** (when `receiving`):
    - Read first: `GET /zones/{zone_id}/dns_records?name.exact={domain}&type=MX`. Routing MX records
@@ -652,7 +652,7 @@ The `cloudflare_zone` method. Needs `PM_CF_API_TOKEN` (`422 cf_token_required` w
    - Apex: read `GET /zones/{zone_id}/email/routing/rules/catch_all` first (an enabled catch-all with
      another action is refused or adopted as in [No adoption](#no-adoption-of-provider-objects)), then
      `PUT /zones/{zone_id}/email/routing/rules/catch_all` with
-     `{ "actions": [{ "type": "worker", "value": ["pylota-mail"] }], "matchers": [{ "type": "all" }], "enabled": true, "name": "pylota-mail" }`.
+     `{ "actions": [{ "type": "worker", "value": ["pylota-identity"] }], "matchers": [{ "type": "all" }], "enabled": true, "name": "pylota-identity" }`.
    - Subdomain: literal rules are created per address ([Routing an address](#routing-an-address)).
 6. **Sending** (when `sending`): read `GET /zones/{zone_id}/email/sending/subdomains` first; an entry for
    the name that the journal does not list is refused or adopted as in
@@ -683,13 +683,13 @@ The `cloudflare_zone` method. Needs `PM_CF_API_TOKEN` (`422 cf_token_required` w
    the domain is created without it and its monitor runs the step again in the background (a background
    caller, at most once an hour); when the region already holds 10,000 identities it is skipped. Until it
    has run, a `PATCH` to `ses` gets `422 transport_unavailable`. A domain added before SES was configured
-   has no SES identity, and neither has one inserted by `pmail domains add --local-token`, because the
+   has no SES identity, and neither has one inserted by `idvy domains add --local-token`, because the
    Worker has no Cloudflare token to publish the CNAMEs with.
 7. **Event subscription** (when `sending`): find the queue ID of `pm-delivery-events` by listing the
    account's queues, then `POST /accounts/{account_id}/event_subscriptions/subscriptions` with:
 
    ```json
-   { "name": "pylota-mail {domain}", "enabled": true,
+   { "name": "pylota-identity {domain}", "enabled": true,
      "source": { "type": "email.sending", "zone_id": "{zone_id}", "domain": "{domain}" },
      "destination": { "type": "queues.queue", "queue_id": "{queue_id}" },
      "events": ["message.delivered", "message.deferred", "message.bounced",
@@ -702,22 +702,22 @@ The `cloudflare_zone` method. Needs `PM_CF_API_TOKEN` (`422 cf_token_required` w
    **Spike S9 fallback: manual delivery events.** When the subscription cannot be created at runtime
    (the create call answers `401`, `403`, `404`, `405` or `501`: the API or the token cannot do it), the
    domain is still created. The row is inserted with `event_subscription_id = NULL`, and the domain
-   object reports `delivery_events: "manual"` and `details.action = "run pmail domains subscribe
+   object reports `delivery_events: "manual"` and `details.action = "run idvy domains subscribe
    {domain}"` in the `201` response and in every later read, next to its records. `429` and `5xx` answers
    are not this case: the create request fails with `502 upstream_error` as for any other onboarding
    call, and is safe to retry. Delivery events for the domain start only once
-   `pmail domains subscribe {domain}` has run ([CLI and setup §18.4](cli.md#184-domains-subscribe)): it
+   `idvy domains subscribe {domain}` has run ([CLI and setup §18.4](cli.md#184-domains-subscribe)): it
    creates the subscription with the operator's local `CLOUDFLARE_API_TOKEN` and records its ID. Until
    then the domain would send blind: no bounces, complaints, suppressions or abuse auto-pause, and no
    reconciliation of uncertain sends. So **while `delivery_events` is `manual`, sends from the domain go
    out from the identity's platform address**, as in [Fallback behaviour](#fallback-behaviour): the
    platform domain has its own subscription, so every event of those sends is seen
    ([H17](../edge-cases.md)). The operator alert `delivery_events_manual:{domain_id}` (ticket) fires
-   while it lasts ([Observability](observability.md#53-alert-list)), and `pmail doctor` fails
+   while it lasts ([Observability](observability.md#53-alert-list)), and `idvy doctor` fails
    `sending.event_subscriptions` with that command as the fix. Once the subscription ID is recorded, new
    threads send from the domain at once. The
    same applies to a `nameservers` domain, whose step 7 runs in the monitor once the zone is active. If
-   S9 also shows that the Worker cannot delete a subscription, domain removal keeps going and `pmail
+   S9 also shows that the Worker cannot delete a subscription, domain removal keeps going and `idvy
    doctor` lists the left-over subscription with the `wrangler queues subscription delete` command. Tests:
    `it::domains::s9_manual_delivery_events` (`cloudflare_zone`) and
    `it::domains::s9_manual_delivery_events_nameservers`.
@@ -806,7 +806,7 @@ The `send_only` method. `dns_records` and `smtp_relay` are `external` too; their
 `details.reason = "ses_not_configured"`.
 
 1. **Ownership record** as above; the user publishes it.
-2. **SES identity:** `POST /v2/email/identities` with `{ "EmailIdentity": "{domain}", "ConfigurationSetName": "pylota-mail", "Tags": [{ "Key": "pylota-mail:api-host", "Value": "{PM_API_HOST}" }, { "Key": "pylota-mail:domain-id", "Value": "{domain id}" }] }`
+2. **SES identity:** `POST /v2/email/identities` with `{ "EmailIdentity": "{domain}", "ConfigurationSetName": "pylota-identity", "Tags": [{ "Key": "pylota-identity:api-host", "Value": "{PM_API_HOST}" }, { "Key": "pylota-identity:domain-id", "Value": "{domain id}" }] }`
    (SigV4). `AlreadyExistsException` → `GET /v2/email/identities/{domain}`, reused only when its `Tags`
    name this deployment and this domain; otherwise `409 domain_exists`
    ([No adoption](#no-adoption-of-provider-objects)). The response's
@@ -834,7 +834,7 @@ pipeline treats the message as delivered to that address (`delivered_to` = the e
 
 #### The platform domain
 
-`pmail setup` onboards the platform domain with the operator's local token (steps 4–8 of kind `zone`,
+`idvy setup` onboards the platform domain with the operator's local token (steps 4–8 of kind `zone`,
 apex) and inserts its row (`kind = 'platform'`, `method = 'platform'`, `tenant_id = NULL`,
 `state = 'pending'`) through the D1 query API
 ([CLI and setup §6.6](cli.md#66-the-platform-domain-row)). Only the Worker can mint a `DomainMonitor`
@@ -851,7 +851,7 @@ UPDATE domains SET monitor_do_id = ?1, updated_at = ?2 WHERE id = ?3 AND monitor
 
 Only when the `UPDATE` changed the row does the cron send `DomainRequest::Init`, which starts
 verification, and emit `domain.created` for a row with a `tenant_id`. An overlapping run that lost the
-update discards its unused ID. The same hook completes the rows that `pmail domains add --local-token`
+update discards its unused ID. The same hook completes the rows that `idvy domains add --local-token`
 inserts ([CLI and setup §18.1](cli.md#181-domains-add-without-pm_cf_api_token)). Setup polls the
 platform row's `monitor_do_id` for up to 2 minutes and reports `monitor: started`, or a warning naming
 the cron.
@@ -913,7 +913,7 @@ record the result is `ok`, `missing`, `mismatch` or `unexpected`, and its issue 
 | Sending DKIM (`{dkim_selector}._domainkey.{domain}`, from the sending API) | `sending` with `transport = cloudflare` | TXT `p=` equals the API's | `dkim_missing`, `dkim_mismatch` (fail) |
 | SES DKIM (three CNAMEs) | `transport = ses` or `inbound = ses`; informational on a Cloudflare-transport domain with `ses_identity` (below) | Each CNAME points to `{token}.{SigningHostedZone}`, and SES `GetEmailIdentity` reports `DkimAttributes.Status = SUCCESS` (once a day) | `dkim_missing` (fail); `ses_dkim_failed` (`FAILED`, fail) |
 | DMARC (`_dmarc.{domain}`, else the organisational domain) | `sending` | Exactly one valid `v=DMARC1` record with `p=quarantine` or `p=reject`, and alignment possible ([H3](../edge-cases.md)) | `dmarc_missing` (degraded); `dmarc_policy_none` (degraded); `dmarc_multiple` (degraded); `dmarc_alignment_impossible` (fail) |
-| Ownership TXT (`_pylota-mail.{domain}`) | all except platform | Contains `pm-verify={ownership_token}` | `ownership_record_missing` (ownership) |
+| Ownership TXT (`_pylota-identity.{domain}`) | all except platform | Contains `pm-verify={ownership_token}` | `ownership_record_missing` (ownership) |
 | NS (weekly) | zone and platform | The NS set equals `expected_ns_json` | `nameservers_changed` (ownership) |
 | RDAP (weekly) | zone, delegated and external | Fingerprint equals `rdap_fingerprint` | `registration_changed` (ownership) |
 
@@ -1027,7 +1027,7 @@ and every fallback send, so its states are handled differently:
   `suspended`. An agreed ownership-level outcome (only NS applies to it: it has no ownership TXT and no
   RDAP check) counts as `fail`. It has no re-prove by TXT: `POST …/reprove` on it (platform key) re-reads its
   zone from the Cloudflare API and re-records `expected_ns_json` when the zone is active in the account
-  (without `PM_CF_API_TOKEN`: `422 cf_token_required`, and re-running `pmail setup`, whose upsert
+  (without `PM_CF_API_TOKEN`: `422 cf_token_required`, and re-running `idvy setup`, whose upsert
   writes `expected_ns_json`, does the same).
 - Entering `failing` raises the operator alert `platform_domain_failing` with severity **page**, not a
   ticket ([Observability](observability.md#53-alert-list)), and so do the issues `dns_unresolvable` and
@@ -1121,7 +1121,7 @@ cannot delete an object this deployment did not create for this tenant (FR-DOM-1
      for the zone and for every other name in it. That the unlock covers a subdomain's records, and that
      deleting them stops routing for that name only and frees its place among the zone's 30 mail domains,
      is not documented; spike S9 verifies it. If S9 shows the subdomain stays configured, its routing is
-     left with no rules (Cloudflare then refuses its mail at SMTP time) and `pmail doctor` lists it under
+     left with no rules (Cloudflare then refuses its mail at SMTP time) and `idvy doctor` lists it under
      `routing.leftover_subdomains` with the dashboard step (Email Routing › Settings › Subdomains).
    - A zone this deployment created (`zone.created`) skips this step: `delete_zone` removes everything.
 4. `disable_sending` (when `sending.created`): `DELETE /zones/{zone_id}/email/sending/subdomains/{tag}`
@@ -1188,7 +1188,7 @@ A request that fails after creating provider objects leaves its `domain_onboardi
 exactly the objects in its `objects_json` with the removal steps above (the SES calls as a background
 caller of the token bucket), then deletes the journal row and its pending claim in one D1 batch
 ([H16](../edge-cases.md)). A pending claim with no zone ID whose zone may exist (a lost `POST /zones`
-response) is not deleted by name: `pmail doctor` lists a zone of that name created after the claim under
+response) is not deleted by name: `idvy doctor` lists a zone of that name created after the claim under
 `domains.orphans`, with the dashboard step to delete it.
 
 ## Cloudflare API token permissions
@@ -1200,8 +1200,8 @@ Cloudflare's permissions reference calls Zone Write) and marks which token needs
 
 - The operator's own token, `CLOUDFLARE_API_TOKEN`, is used only by the CLI
   ([CLI reference › Commands that use your Cloudflare token](../../reference/cli.md#commands-that-use-your-cloudflare-token)):
-  `pmail setup` onboards the platform domain with it ([The platform domain](#the-platform-domain)), and
-  `pmail domains add --local-token` an apex `cloudflare_zone` domain
+  `idvy setup` onboards the platform domain with it ([The platform domain](#the-platform-domain)), and
+  `idvy domains add --local-token` an apex `cloudflare_zone` domain
   ([CLI and setup §18.1](cli.md#181-domains-add-without-pm_cf_api_token)).
 - The Worker's token, the secret `PM_CF_API_TOKEN`, is what this design calls during a domain's life. It
   is needed for `cloudflare_zone`, `nameservers` and `delegated_subdomain` domains
@@ -1216,7 +1216,7 @@ before listing it in a tenant's policy. Only a deployment that offers `nameserve
 `delegated_subdomain` needs **All zones** of the account for its zone permissions, because those methods
 create zones that no list can name in advance; Cloudflare does not state whether a zone-scoped grant can
 create a zone (verify at build time), and the Worker answers a refused create with
-`422 transport_unavailable` (`zone_creation_not_allowed`). On Pylota Mail Cloud, which runs in Pylota's
+`422 transport_unavailable` (`zone_creation_not_allowed`). On Pylota Identity Cloud, which runs in Pylota's
 existing Cloudflare account, `domains.allow_create_zone` is off and the token lists two zones only,
 `pylotamail.com` and `pylota.io` (for Pylota's `notify.` and `reminders.` subdomains)
 ([ADR 0010](../adr/0010-cloud-in-the-existing-cloudflare-account.md)).
@@ -1262,7 +1262,7 @@ forwarded).
 | `it::intents::j21_identity_event_retried` | With the `do.call` fault armed, an identity `PATCH`, a pause, a resume and a tenant suspension commit and answer as usual; cron runs then emit each `identity.updated`, `identity.paused` and `identity.resumed` exactly once, with the event ID derived from its intent, in `occurred_at` order per identity; a duplicate re-send leaves one outbox row; an intent for an erased mailbox is deleted ([J21](../edge-cases.md)) |
 | `it::identities::deleting_and_deleted_routes` | On a `deleting` and on a `deleted` identity: `GET` returns it with its status; `PATCH` gets `404 identity_not_found` and changes nothing; a second `DELETE` returns `200` with the same `era_` ID and starts no job; the hold routes still work on the `deleting` one (FR-IDN-4) |
 | `it::identities::a5_tombstone_blocks_reuse` | A deleted identity's address cannot be created by any tenant ([A5](../edge-cases.md)) |
-| `it::identities::a18_default_tenant_platform_only` | `POST /v1/identities` in the default tenant with a tenant key holding `identities:write`, with a partner key and with an identity key gets `403 scope_denied` (`default_tenant`) and creates nothing; a platform key creates one; an identity key of `pmail-doctor` runs `doctor --mail-test` to `pass` and gets `403` for any other identity's messages ([A18](../edge-cases.md)) |
+| `it::identities::a18_default_tenant_platform_only` | `POST /v1/identities` in the default tenant with a tenant key holding `identities:write`, with a partner key and with an identity key gets `403 scope_denied` (`default_tenant`) and creates nothing; a platform key creates one; an identity key of `idvy-doctor` runs `doctor --mail-test` to `pass` and gets `403` for any other identity's messages ([A18](../edge-cases.md)) |
 | `it::identities::a17_system_protected` | With a platform key: `DELETE` of the system identity, an erasure request of scope `identity` naming it and one of scope `tenant` naming the default tenant, and `PATCH` of the default tenant with `status: suspended` each get `409 system_protected` and change nothing (no erasure request, no event, no audit row); `PATCH status: paused` on the system identity works and is resumed; setup step 22 on a database holding a `deleted` system-identity row from an older version inserts a new one ([A17](../edge-cases.md)) |
 | `it::identities::a13_delete_then_reply_rejected` | After delete, mail to its addresses gets `550 5.1.1` ([A13](../edge-cases.md), FR-IDN-4) |
 | `it::addresses::a11_newer_pending_replaces` | A second pending address on a domain replaces the first ([A11](../edge-cases.md)) |
@@ -1293,13 +1293,13 @@ forwarded).
 | `it::domains::h14_unverified_claims` | Tenant A adds `victim.example` and never verifies; tenant B's add gets `409 domain_exists` whose body equals the one for a verified holder and for a missing zone except for B's claim token; with B's `pm-claim` TXT on both resolvers and `claim: true`, A's domain moves to `removing` (`evicted`), B gets `409 domain_claim_pending`, then `201` once removal finishes, and A receives `domain.removed` with `reason: evicted`; a verified holder is never evicted; an unverified domain is removed 14 days after creation (`unverified_expired`) with a reminder on day 12; a tenant key's 6th unverified domain gets `422 unverified_domain_limit` ([H14](../edge-cases.md), FR-DOM-14) |
 | `it::domains::h15_zone_domain_limit` | A zone fake with 30 mail domains: a `cloudflare_zone` add in it gets `422 zone_domain_limit` (`details.limit = 30`) before any create; a fake that refuses the sending create with an unknown error while the count is 30 also gives `422 zone_domain_limit`, not `502` ([H15](../edge-cases.md)) |
 | `it::domains::h16_failed_add_cleanup` | An add whose event-subscription step fails after the sending domain, the ownership TXT and the failover SES identity were created: no domain row; an hour later (fake clock) the cleanup run deletes exactly those three objects and the journal row; a `nameservers` add that failed after its pending claim deletes the claim; the SES identity count used by `ses_identities_90pct` included the journal's identity while it existed ([H16](../edge-cases.md)) |
-| `it::domains::h17_manual_events_fallback` | A `cloudflare_zone` domain created with `delivery_events: "manual"` (the S9 fallback): sends from it leave from the identity's platform address with `sent_via_fallback`, `delivery_events_manual` fires; once `pmail domains subscribe` records the subscription, the next new thread sends from the domain and the alert resolves ([H17](../edge-cases.md)) |
+| `it::domains::h17_manual_events_fallback` | A `cloudflare_zone` domain created with `delivery_events: "manual"` (the S9 fallback): sends from it leave from the identity's platform address with `sent_via_fallback`, `delivery_events_manual` fires; once `idvy domains subscribe` records the subscription, the next new thread sends from the domain and the alert resolves ([H17](../edge-cases.md)) |
 | `it::send::g7_domain_states` | Retiring, pending and failing domain behaviour at send time ([G7](../edge-cases.md)) |
 | `it::domains::onboarding_idempotent` | Adding a `cloudflare_zone` domain (apex and subdomain) succeeds, and re-running a failed add against the recorded Cloudflare API fake creates nothing twice (FR-DOM-2, FR-DOM-3, FR-OPS-1; build plan M13) |
 | `it::domains::onboarding_idempotent_created_zones` | The same for `nameservers` and `delegated_subdomain`: a failed add, and onboarding steps 2–8 run by the monitor once the zone is active, re-run without creating anything twice. In the monitor, a `503` from the sending create leaves the domain `pending` with `onboarding_failed` (`details.step`) and the next check finishes it; an SPF preflight refusal leaves it `pending` with `spf_lookup_limit` until the DNS fake's SPF is fixed; it reaches `verifying` only after every step (build plan M23) |
 | `it::domains::records_from_api` | Records in responses equal the fake provider's API answers, never templates (FR-DOM-3) |
-| `it::domains::s9_manual_delivery_events` | With the Cloudflare fake answering `403` to the subscription create, a `cloudflare_zone` domain is created with `event_subscription_id = NULL`, `delivery_events: "manual"` and `details.action = "run pmail domains subscribe {domain}"`; a `503` answer fails the create with `502 upstream_error`; once the subscription ID is recorded, `delivery_events` is `active` and a delivery event updates the recipient (spike S9 fallback, FR-DOM-3; build plan M13) |
+| `it::domains::s9_manual_delivery_events` | With the Cloudflare fake answering `403` to the subscription create, a `cloudflare_zone` domain is created with `event_subscription_id = NULL`, `delivery_events: "manual"` and `details.action = "run idvy domains subscribe {domain}"`; a `503` answer fails the create with `502 upstream_error`; once the subscription ID is recorded, `delivery_events` is `active` and a delivery event updates the recipient (spike S9 fallback, FR-DOM-3; build plan M13) |
 | `it::domains::s9_manual_delivery_events_nameservers` | The same fallback for a `nameservers` domain, whose step 7 runs in the monitor once the zone is active: the `403` leaves `delivery_events: "manual"` with the same `details.action` (build plan M23) |
-| `it::domains::cron_mints_missing_monitor` | A row with `monitor_do_id = ''` (platform, or inserted by `pmail domains add --local-token`) gets one `DomainMonitor`, `Init`, and `domain.created` when it has a `tenant_id`; two overlapping cron runs mint one ID |
+| `it::domains::cron_mints_missing_monitor` | A row with `monitor_do_id = ''` (platform, or inserted by `idvy domains add --local-token`) gets one `DomainMonitor`, `Init`, and `domain.created` when it has a `tenant_id`; two overlapping cron runs mint one ID |
 | `it::domains::cf_token_required_by_method` | Without `PM_CF_API_TOKEN`: adding a `cloudflare_zone` domain, and creating an address that needs a literal rule, → `422 cf_token_required` (build plan M13) |
 | `it::domains::cf_token_required_other_methods` | Without `PM_CF_API_TOKEN`: `nameservers` and `delegated_subdomain` → `422 cf_token_required`; `dns_records`, `send_only` and `smtp_relay` are unaffected (build plan M23) |

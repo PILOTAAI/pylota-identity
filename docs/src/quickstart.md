@@ -2,7 +2,7 @@
 
 In this quickstart you will:
 
-1. get an API key and log in with the `pmail` CLI;
+1. get an API key and log in with the `idvy` CLI;
 2. create an identity for a bookings agent;
 3. send an email with an idempotency key (with `curl`, the Rust SDK and the CLI) and see a retry
    return the original result;
@@ -17,10 +17,10 @@ It takes about ten minutes. To try everything without sending real mail, use a t
 
 You need:
 
-- a running Pylota Mail deployment. This page uses `https://mail.example.com` as its API host and
+- a running Pylota Identity deployment. This page uses `https://mail.example.com` as its API host and
   `agents.example` as its platform mail domain. To run your own, follow
   [Deploy to Cloudflare](self-hosting.md) first;
-- the `pmail` CLI, from the GitHub Releases page or with `cargo install pylota-mail-cli --locked`;
+- the `idvy` CLI, from the GitHub Releases page or with `cargo install pylota-identity-cli --locked`;
 - `curl`, for the REST examples.
 
 Conventions on this page:
@@ -47,19 +47,19 @@ needs these permissions: `identities:read`, `identities:write`, `messages:read`,
 `keys:manage`.
 
 **If you deployed it yourself**, you have a platform key from
-[`pmail keys create --level platform`](self-hosting.md#5-create-the-first-api-key), saved in your CLI's
+[`idvy keys create --level platform`](self-hosting.md#5-create-the-first-api-key), saved in your CLI's
 `default` profile. Use it to create the tenant and a tenant key, so day-to-day work does not use the
 platform key:
 
 ```bash
-pmail tenants create --slug acme --name "Acme Car Hire"
+idvy tenants create --slug acme --name "Acme Car Hire"
 
-pmail keys create --level tenant --tenant acme --name acme-quickstart \
+idvy keys create --level tenant --tenant acme --name acme-quickstart \
   --permissions identities:read,identities:write,messages:read,messages:send,messages:write,attachments:read,search:read,search:agentic,webhooks:manage,keys:manage
 ```
 
-If you keep the platform key somewhere else, set `PYLOTA_MAIL_URL` and `PYLOTA_MAIL_KEY` for these two
-commands, then unset `PYLOTA_MAIL_KEY`: a key in the environment outranks every profile.
+If you keep the platform key somewhere else, set `PYLOTA_IDENTITY_URL` and `PYLOTA_IDENTITY_KEY` for these two
+commands, then unset `PYLOTA_IDENTITY_KEY`: a key in the environment outranks every profile.
 
 The key's secret (`pmk_live_…`) is printed **once**. It is stored only as a keyed hash, so it
 cannot be shown again. If you lose it, create a new key and revoke the old one.
@@ -67,27 +67,27 @@ cannot be shown again. If you lose it, create a new key and revoke the old one.
 ## 2. Log in
 
 ```bash
-pmail login --profile acme
-pmail config set default_profile acme
+idvy login --profile acme
+idvy config set default_profile acme
 ```
 
-`pmail login` asks for the API URL (`https://mail.example.com`) and the tenant key, checks the key, and
-saves both as the profile `acme` in `~/.config/pylota-mail/config.toml`; `config set default_profile`
-makes `pmail` read that profile when you name none. Name the profile: without `--profile`, `login` writes
-the profile `default`, which holds your platform key if you deployed Pylota Mail yourself. The file is
-created with mode `0600`, and `pmail` refuses to read it if its group or other users have any access to
+`idvy login` asks for the API URL (`https://mail.example.com`) and the tenant key, checks the key, and
+saves both as the profile `acme` in `~/.config/pylota-identity/config.toml`; `config set default_profile`
+makes `idvy` read that profile when you name none. Name the profile: without `--profile`, `login` writes
+the profile `default`, which holds your platform key if you deployed Pylota Identity yourself. The file is
+created with mode `0600`, and `idvy` refuses to read it if its group or other users have any access to
 it.
 
-You can also skip the file and set `PYLOTA_MAIL_URL` and `PYLOTA_MAIL_KEY` in your environment. Flags
-come first, then the environment, then the profile, so a `PYLOTA_MAIL_KEY` in the environment is the key
-`pmail` uses. See [CLI › Configuration](reference/cli.md#configuration).
+You can also skip the file and set `PYLOTA_IDENTITY_URL` and `PYLOTA_IDENTITY_KEY` in your environment. Flags
+come first, then the environment, then the profile, so a `PYLOTA_IDENTITY_KEY` in the environment is the key
+`idvy` uses. See [CLI › Configuration](reference/cli.md#configuration).
 
 Check the key with the API. The `curl` examples on this page read the tenant key from
-`PYLOTA_MAIL_KEY`; with it exported, the CLI uses the same key:
+`PYLOTA_IDENTITY_KEY`; with it exported, the CLI uses the same key:
 
 ```bash
-export PYLOTA_MAIL_KEY=pmk_live_…            # the tenant key
-curl -s https://mail.example.com/v1/me -H "Authorization: Bearer $PYLOTA_MAIL_KEY"
+export PYLOTA_IDENTITY_KEY=pmk_live_…            # the tenant key
+curl -s https://mail.example.com/v1/me -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY"
 ```
 
 ```json
@@ -104,7 +104,7 @@ curl -s https://mail.example.com/v1/me -H "Authorization: Bearer $PYLOTA_MAIL_KE
 Create the bookings agent's identity:
 
 ```bash
-pmail identities create --username bookings --display-name "Acme Car Hire"
+idvy identities create --username bookings --display-name "Acme Car Hire"
 ```
 
 ```json
@@ -122,16 +122,16 @@ the agent sends ([FR-IDN-2](project/prd.md#62-identities-and-addresses)). Withou
 `409 identity_owner_required`. Set the owner:
 
 ```bash
-pmail identities update bookings.acme@agents.example \
+idvy identities update bookings.acme@agents.example \
   --owner-name "Sam Patel" --owner-email sam@acmecarhire.example
 ```
 
-You can also pass `--owner-name` and `--owner-email` to `pmail identities create` directly.
+You can also pass `--owner-name` and `--owner-email` to `idvy identities create` directly.
 
 Create a second identity for the compliance agent, which you will use in [step 7](#7-ask-a-question):
 
 ```bash
-pmail identities create --username compliance --display-name "Acme Car Hire Compliance" \
+idvy identities create --username compliance --display-name "Acme Car Hire Compliance" \
   --owner-name "Sam Patel" --owner-email sam@acmecarhire.example
 ```
 
@@ -153,7 +153,7 @@ same body, you get the original result back, never a second email.
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" \
   -H "Idempotency-Key: bk-2291-confirm" \
   -H "Content-Type: application/json" \
   -d '{"to":["renter@example.org"],"subject":"Your booking BK-2291","text":"Your car is ready at 9:00."}'
@@ -185,14 +185,14 @@ Add the SDK, pinned to the same version as your deployment (`GET /health` return
 
 ```toml
 [dependencies]
-pylota-mail = "=X.Y.Z"   # replace with your deployment's version
+pylota-identity = "=X.Y.Z"   # replace with your deployment's version
 ```
 
 ```rust,no_run
-use pylota_mail::{Client, IdempotencyKey};
-use pylota_mail::types::{Recipient, SendRequest};
+use pylota_identity::{Client, IdempotencyKey};
+use pylota_identity::types::{Recipient, SendRequest};
 
-async fn confirm_booking(key: String) -> Result<(), pylota_mail::Error> {
+async fn confirm_booking(key: String) -> Result<(), pylota_identity::Error> {
     let client = Client::builder()
         .base_url("https://mail.example.com")
         .api_key(key)
@@ -219,7 +219,7 @@ compiled in CI, so it matches the SDK.
 ### With the CLI
 
 ```bash
-pmail send --identity bookings@acme.example.com \
+idvy send --identity bookings@acme.example.com \
   --to renter@example.org --subject "Your booking BK-2291" \
   --text "Your car is ready at 9:00." \
   --idempotency-key bk-2291-confirm
@@ -237,7 +237,7 @@ pmail send --identity bookings@acme.example.com \
 `delivered`, or to another [outbound status](reference/api.md#outbound-status). Check it with:
 
 ```bash
-pmail messages get msg_01JA5C2H8R --identity bookings@acme.example.com
+idvy messages get msg_01JA5C2H8R --identity bookings@acme.example.com
 ```
 
 The per-recipient outcome is in `deliveries`. Webhooks report the same changes as `message.sent`,
@@ -245,14 +245,14 @@ The per-recipient outcome is in `deliveries`. Webhooks report the same changes a
 
 ## 5. Read a reply and answer it
 
-When the renter replies, the reply joins the same thread. Pylota Mail matches it by the thread
+When the renter replies, the reply joins the same thread. Pylota Identity matches it by the thread
 token in the `Reply-To` address it set on your message, or by the `In-Reply-To` and `References`
 headers. The subject alone never joins a thread.
 
 List the threads that need attention:
 
 ```bash
-pmail threads list --identity bookings@acme.example.com
+idvy threads list --identity bookings@acme.example.com
 ```
 
 ```json
@@ -271,7 +271,7 @@ pmail threads list --identity bookings@acme.example.com
 Read the thread:
 
 ```bash
-pmail threads get thr_01JA5C2H8Q --identity bookings@acme.example.com
+idvy threads get thr_01JA5C2H8Q --identity bookings@acme.example.com
 ```
 
 Each message carries:
@@ -288,7 +288,7 @@ model as data, never as instructions. See [Security](guides/security.md).
 Reply. A reply needs its own idempotency key:
 
 ```bash
-pmail reply msg_01JA6D3J9S --identity bookings@acme.example.com \
+idvy reply msg_01JA6D3J9S --identity bookings@acme.example.com \
   --text "Friday works. See you at 10." \
   --idempotency-key bk-2291-reply-1
 ```
@@ -297,7 +297,7 @@ The same with `curl`:
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/messages/msg_01JA6D3J9S/reply \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" \
   -H "Idempotency-Key: bk-2291-reply-1" \
   -H "Content-Type: application/json" \
   -d '{"text":"Friday works. See you at 10."}'
@@ -312,7 +312,7 @@ and `In-Reply-To` and `References` set. See
 Search one identity's mailbox:
 
 ```bash
-pmail search "from:@brightwell.example ref:AB12CDE has:attachment" --identity bookings@acme.example.com
+idvy search "from:@brightwell.example ref:AB12CDE has:attachment" --identity bookings@acme.example.com
 ```
 
 This finds mail from any address at that domain that mentions the plate AB12 CDE (with or without
@@ -340,7 +340,7 @@ lookups and `--mode semantic` for meaning. The operators and modes are in [Searc
 Agentic search plans the searches for you and answers with citations:
 
 ```bash
-pmail ask "Did the insurer accept the Golf claim?" --identity compliance@acme.example.com
+idvy ask "Did the insurer accept the Golf claim?" --identity compliance@acme.example.com
 ```
 
 The CLI streams progress (each search step and the evidence found), then prints the answer with
@@ -368,7 +368,7 @@ never a guess. Agentic search needs the `search:agentic` permission. See
 Webhooks tell your application what happened. Create an endpoint:
 
 ```bash
-pmail webhooks create --url https://api.example.com/webhooks/mail \
+idvy webhooks create --url https://api.example.com/webhooks/mail \
   --events message.received,message.bounced
 ```
 
@@ -376,7 +376,7 @@ The response includes the signing secret, `whsec_…`. **It is shown only once.*
 application's other secrets. Then send a test event:
 
 ```bash
-pmail webhooks test whk_01JA…
+idvy webhooks test whk_01JA…
 ```
 
 Your endpoint receives a `webhook.test` event. Verify the signature on every request and
@@ -389,27 +389,27 @@ The event types are in [Webhook events](reference/events.md).
 Give the agent its own identity key with only what it needs:
 
 ```bash
-pmail keys create --level identity --identity bookings@acme.example.com --name bookings-agent \
+idvy keys create --level identity --identity bookings@acme.example.com --name bookings-agent \
   --permissions messages:read,messages:send,search:read,attachments:read
 ```
 
-Add the server to your MCP client's configuration. `pmail mcp config` prints this for the current
+Add the server to your MCP client's configuration. `idvy mcp config` prints this for the current
 profile (`--client claude-code`, `cursor`, `codex`, `claude-desktop` or `agent-sdk` print each client's own
-form; a client that runs only local servers can use `pmail mcp stdio`, which reads the key from your
+form; a client that runs only local servers can use `idvy mcp stdio`, which reads the key from your
 profile):
 
 ```json
 {
   "mcpServers": {
-    "pylota-mail": {
+    "pylota-identity": {
       "url": "https://mail.example.com/mcp",
-      "headers": { "Authorization": "Bearer ${PYLOTA_MAIL_KEY}" }
+      "headers": { "Authorization": "Bearer ${PYLOTA_IDENTITY_KEY}" }
     }
   }
 }
 ```
 
-Set `PYLOTA_MAIL_KEY` to the identity key in the environment the client runs in. The client sees
+Set `PYLOTA_IDENTITY_KEY` to the identity key in the environment the client runs in. The client sees
 only the tools the key allows (for example `mail_search`, `mail_get_thread` and `mail_reply`). Send
 tools require an `idempotency_key` argument. The server also offers a `mail_search_strategy` prompt
 that teaches the model how to search. See [MCP server](reference/mcp.md) and
@@ -419,14 +419,14 @@ that teaches the model how to search. See [MCP server](reference/mcp.md) and
 
 A **test tenant** never sends mail outside the deployment
 ([FR-TEN-2](project/prd.md#61-tenancy-and-access)). Its keys start with `pmk_test_`, and its sends
-go to a simulator instead of the internet. Create one with a platform key. If `PYLOTA_MAIL_KEY` still
+go to a simulator instead of the internet. Create one with a platform key. If `PYLOTA_IDENTITY_KEY` still
 holds the tenant key, unset it first, because it would outrank the platform key in your `default`
 profile:
 
 ```bash
-unset PYLOTA_MAIL_KEY
-pmail --profile default tenants create --slug acme-test --name "Acme Car Hire (test)" --mode test
-pmail --profile default keys create --level tenant --tenant acme-test --name acme-test-key \
+unset PYLOTA_IDENTITY_KEY
+idvy --profile default tenants create --slug acme-test --name "Acme Car Hire (test)" --mode test
+idvy --profile default keys create --level tenant --tenant acme-test --name acme-test-key \
   --permissions identities:read,identities:write,messages:read,messages:send,messages:write,search:read
 ```
 
@@ -434,7 +434,7 @@ Create an identity in it (as in [step 3](#3-create-an-identity)), then send to t
 addresses:
 
 ```bash
-pmail send --identity bookings.acme-test@agents.example \
+idvy send --identity bookings.acme-test@agents.example \
   --to bounce@simulator.invalid --subject "Simulator test" --text "Hello" \
   --idempotency-key sim-bounce-1
 ```
@@ -462,7 +462,7 @@ The `timeout@` address is the best way to practise handling an uncertain send. S
 
 | You see | Why | What to do |
 |---|---|---|
-| `401 unauthenticated` | No key, a malformed key, or the wrong deployment | Check `PYLOTA_MAIL_URL` and `PYLOTA_MAIL_KEY`, or the profile in `~/.config/pylota-mail/config.toml` |
+| `401 unauthenticated` | No key, a malformed key, or the wrong deployment | Check `PYLOTA_IDENTITY_URL` and `PYLOTA_IDENTITY_KEY`, or the profile in `~/.config/pylota-identity/config.toml` |
 | `403 permission_denied` | The key lacks a permission | `error.details.required` names it. Create a key that has it |
 | `403 scope_denied` or a `404` with this service's error code | The resource is outside the key's tenant or identity | Use a key at the right level. A `404` deliberately does not say whether the resource exists |
 | `400 idempotency_key_required` | A send without `Idempotency-Key` | Add the header (or `--idempotency-key`) |
@@ -472,7 +472,7 @@ The `timeout@` address is the best way to practise handling an uncertain send. S
 | `403 test_mode_recipient` | A test tenant tried to send to a real address | Send to `*@simulator.invalid` or to an identity on this deployment |
 | `ref:` finds nothing | The reference pack for that kind is off, or the reference is in an attachment whose text is not extracted yet | Enable `uk_vehicle` for plates and PCNs. Check the attachment's `text_status` |
 | `ask` returns `insufficient_evidence` | The mailbox does not hold an answer | Check the `trace` to see what was searched |
-| No webhook arrives | The endpoint failed or is not HTTPS | `pmail webhooks deliveries whk_…` shows each attempt and its error |
+| No webhook arrives | The endpoint failed or is not HTTPS | `idvy webhooks deliveries whk_…` shows each attempt and its error |
 
 Every error has a `fix` field with one sentence on what to do and a `request_id` to quote in bug reports.
 With the documentation links of FR-API-3 (P1), it also carries a `docs` link to that error's entry. The full list is in [Errors](reference/errors.md).

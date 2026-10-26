@@ -14,7 +14,7 @@ named exception, the landing page's `site/public/assets/app.js`. [ADR 0001](0001
 rejected a mixed Rust and TypeScript codebase partly because it breaks that rule, and
 [ADR 0005](0005-state-machines.md) rejected a TypeScript sidecar for the same reason.
 
-[ADR 0017](0017-agentmail-parity.md) adds a TypeScript SDK, the npm package `@pylotahq/mail`
+[ADR 0017](0017-agentmail-parity.md) adds a TypeScript SDK, the npm package `@pylotahq/identity`
 (FR-SDK-2 – FR-SDK-9). The first draft of the SDK page put its TypeScript source, an npm lockfile, Biome,
 Vitest, a `ts-sdk` CI job, an `npm publish` step and compiled guide examples inside this repository.
 Neither ADR 0017 nor that page amended `AGENTS.md`, so a coding agent reading both would get two binding
@@ -26,7 +26,7 @@ Facts the decision rests on:
   version, so where the SDK's source lives does not change what Pylota installs.
 - The SDK is generated from the published contract (`openapi.yaml`, served as `/openapi.json`) and talks to
   the service only over HTTP. It needs no Rust code and no code of this repository at build time.
-- The repository `PILOTAAI/pylota-mail-typescript` did not exist on 2026-10-18 (`gh repo view` answered
+- The repository `PILOTAAI/pylota-identity-typescript` did not exist on 2026-10-18 (`gh repo view` answered
   "Could not resolve to a Repository"). The npm scope `pylotahq` exists with no public package
   ([SDKs, skills and agent tooling § 1](../design/sdk-and-skills.md#1-decisions)).
 
@@ -34,8 +34,8 @@ Facts the decision rests on:
 
 1. **The rule stands.** The Rust-only rule of `AGENTS.md` is not changed. This repository gains no TypeScript or JavaScript
    source file, no npm lockfile and no Node.js toolchain for the SDK.
-2. **The SDK has its own repository.** `@pylotahq/mail` is built, tested, released and published from the
-   public repository `PILOTAAI/pylota-mail-typescript`. The package name stays `@pylotahq/mail`. Its
+2. **The SDK has its own repository.** `@pylotahq/identity` is built, tested, released and published from the
+   public repository `PILOTAAI/pylota-identity-typescript`. The package name stays `@pylotahq/identity`. Its
    licence is FSL-1.1-ALv2, the same as this repository's (SPDX identifier `FSL-1.1-ALv2`, read on
    spdx.org on 2026-10-18), in `package.json` `license` and the repository's `LICENSE.md`.
 3. **The design stays here.** [SDKs, skills and agent tooling § 2](../design/sdk-and-skills.md#2-the-typescript-sdk),
@@ -71,16 +71,16 @@ Facts the decision rests on:
 ## Consequences
 
 - The Rust-only rule of `AGENTS.md` and "written entirely in Rust" stay true of this repository.
-- Nothing changes for Pylota: it installs `@pylotahq/mail` from npm at an exact version, and the package
-  still ships the contract it was built from as `@pylotahq/mail/openapi.json`.
+- Nothing changes for Pylota: it installs `@pylotahq/identity` from npm at an exact version, and the package
+  still ships the contract it was built from as `@pylotahq/identity/openapi.json`.
 - The SDK's version is no longer the product's. Its major version stays the API's path version, and each
   SDK release names the product release whose contract it was generated from (`package.json`
-  `pylotaMail.contract`). An SDK-only fix no longer needs a product release.
+  `pylotaIdentity.contract`). An SDK-only fix no longer needs a product release.
 - Harder: two repositories and two release processes for one owner ([ADR 0015](0015-solo-operator.md)).
   An operation reaches the SDK only after a product release publishes it. The SDK's coverage test fails
   when the contract it is generated from has an operation without a method, so a new contract cannot be
   adopted half way.
-- Human prerequisites, before M36: create `PILOTAAI/pylota-mail-typescript`; configure npm trusted
+- Human prerequisites, before M36: create `PILOTAAI/pylota-identity-typescript`; configure npm trusted
   publishing for that repository's release workflow; give that repository a staging test key for
   `ts::live::round_trip`.
 - Follow-up outside this record: the browser suite's Playwright specs (Testing § 2) are TypeScript inside

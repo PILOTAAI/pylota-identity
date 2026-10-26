@@ -396,27 +396,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "pylota-mail"
+name = "pylota-identity"
 version = "0.1.0"
 
 [[package]]
-name = "pylota-mail-api-types"
+name = "pylota-identity-api-types"
 version = "0.1.0"
 
 [[package]]
-name = "pylota-mail-cli"
+name = "pylota-identity-cli"
 version = "0.1.0"
 
 [[package]]
-name = "pylota-mail-conformance"
+name = "pylota-identity-conformance"
 version = "0.1.0"
 
 [[package]]
-name = "pylota-mail-core"
+name = "pylota-identity-core"
 version = "0.1.0"
 
 [[package]]
-name = "pylota-mail-platform"
+name = "pylota-identity-platform"
 version = "0.1.0"
 dependencies = [
  "js-sys",
@@ -426,10 +426,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "pylota-mail-worker"
+name = "pylota-identity-worker"
 version = "0.1.0"
 dependencies = [
- "pylota-mail-platform",
+ "pylota-identity-platform",
 ]
 
 [[package]]
@@ -612,9 +612,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.54.0"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0c168a474b95bfecfe908a65d4bdffc523144b649a74c09c286afb35d53e0bc"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "pin-project-lite",
 ]

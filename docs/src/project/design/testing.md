@@ -45,12 +45,12 @@ pipeline; this page adds what they must contain.
 | Property | `core::` | same modules, `proptest` | `cargo test --workspace` | Section 4 |
 | Worker logic | `worker::`, `platform::` | `#[cfg(test)]` modules in `crates/worker` and `crates/platform` | `cargo test --workspace` | Handlers, Durable Object logic modules (`mailbox::Mailbox<P>` and the others) over `platform::fakes` with `rusqlite` standing in for Durable Object SQLite ([Rust workspace](rust-workspace.md#63-durable-object-classes)) |
 | Conformance | `conf::` | `crates/conformance` | `cargo test --workspace` | The MIME corpus (section 5) |
-| CLI | `cli::` | `#[cfg(test)]` modules and `tests/` in `crates/cli` | `cargo test --workspace` | Configuration, output, `setup` (including `pmail setup ses`) and `deploy` against recorded Cloudflare and AWS API fakes ([CLI and setup](cli.md)) |
+| CLI | `cli::` | `#[cfg(test)]` modules and `tests/` in `crates/cli` | `cargo test --workspace` | Configuration, output, `setup` (including `idvy setup ses`) and `deploy` against recorded Cloudflare and AWS API fakes ([CLI and setup](cli.md)) |
 | Fuzz | target name | `fuzz/` | `cargo xtask fuzz` | Section 8 |
 | Integration | `it::` | `crates/worker/tests/it/` | `cargo xtask itest` | Section 6 |
 | Attack suite | `it::security::` | `crates/worker/tests/it/security/` | `cargo xtask itest` | Section 7 |
 | Browser | `browser::` | `crates/worker/tests/browser/`: Playwright specs in TypeScript, with `@playwright/test` and `@axe-core/playwright` at exact versions in its `package.json` and lockfile (pinned at build time) | `cargo xtask itest`, after the `it::` tests and against the same running Worker; `cargo xtask itest --suite browser` alone | Console pages with JavaScript disabled and the axe accessibility scan (FR-CON-1; build plan M21, M24, M26). Section 6.8 |
-| TypeScript SDK | `ts::`, `ts::it::` | The SDK repository `PILOTAAI/pylota-mail-typescript`, `test/`: Vitest tests with a fake `fetch`, a fake WebSocket and the shared fixtures that this repository's releases ship from `sdks/fixtures/` | In the SDK repository's CI: `ts::` on Node.js 22, 24 and 26, then `ts::runtime::` on the packed tarball; `ts::it::` against this repository's harness, started at the contract's tag with `cargo xtask itest --serve`. Their names reach `trace` through `sdks/typescript-tests.json` | The TypeScript SDK and its packaging (FR-SDK-2–9; [SDKs, skills and agent tooling](sdk-and-skills.md#tests)) |
+| TypeScript SDK | `ts::`, `ts::it::` | The SDK repository `PILOTAAI/pylota-identity-typescript`, `test/`: Vitest tests with a fake `fetch`, a fake WebSocket and the shared fixtures that this repository's releases ship from `sdks/fixtures/` | In the SDK repository's CI: `ts::` on Node.js 22, 24 and 26, then `ts::runtime::` on the packed tarball; `ts::it::` against this repository's harness, started at the contract's tag with `cargo xtask itest --serve`. Their names reach `trace` through `sdks/typescript-tests.json` | The TypeScript SDK and its packaging (FR-SDK-2–9; [SDKs, skills and agent tooling](sdk-and-skills.md#tests)) |
 | Evaluation | – | `crates/conformance/golden/`, `crates/conformance/screening/`, `xtask` | `cargo xtask eval-search`, `eval-agentic`, `eval-triage`, `eval-screening` | Section 9 |
 | Live | `live::` | `crates/worker/tests/live/` | `cargo xtask live` | Section 10 |
 
@@ -148,7 +148,7 @@ so signatures are reproducible.
 
 ### 5.3 Runners
 
-- **Native** (`cargo test -p pylota-mail-conformance`): parse each case with `core`, compare with
+- **Native** (`cargo test -p pylota-identity-conformance`): parse each case with `core`, compare with
   `[expect]`. Test names are `conf::<dir>::<id>`, generated from the files, so the register's wildcards
   (`conf::mime::b2_*`) match every case with that prefix.
 - **Through workerd** (`it::conformance::corpus_via_workerd`): inject every case through the local email
@@ -177,7 +177,7 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    are served by fakes). Tests inject provider events through the production `Q_DELIVERY` producer
    binding, which exists for dead-letter redrive.
 3. Apply D1 migrations with the Wrangler that `cargo xtask itest` installs from `deploy/wrangler/package-lock.json`
-   (`npm ci --ignore-scripts`, run by path; [CLI §5.1](cli.md#51-wrangler)): `wrangler d1 migrations apply pylota-mail --local
+   (`npm ci --ignore-scripts`, run by path; [CLI §5.1](cli.md#51-wrangler)): `wrangler d1 migrations apply pylota-identity --local
    --persist-to target/itest/state --config deploy/wrangler.itest.toml` (a fresh directory per run). The
    rendered file sets `migrations_dir = "../migrations/d1"`, because Wrangler resolves it against the
    file's own directory, `deploy/`. Until v1.0 there is one file, `0001_init.sql`.
@@ -191,7 +191,7 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    PID to `target/itest/wrangler.pid`, and capture stdout and stderr to `target/itest/worker.log`. Wait
    for `GET https://localhost:8799/health`. The console needs HTTPS locally because its cookies are
    `__Host-` and `Secure` and its `Origin` must be `https://…` ([Console › CSRF](console.md#csrf)).
-5. Seed exactly what `pmail setup` writes in steps 19–22 ([CLI and setup §6.3](cli.md#63-steps)), in the
+5. Seed exactly what `idvy setup` writes in steps 19–22 ([CLI and setup §6.3](cli.md#63-steps)), in the
    same way:
    - one platform key (step 19, the bootstrap key) with `wrangler d1 execute --local`; the harness knows
      `PM_KEY_PEPPER` because it generated it. The bootstrap key expires after 24 hours, which tests that
@@ -211,7 +211,7 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
      one every-minute cron run, after which its mailbox exists.
 
    Every other fixture (tenants, identities, domains, keys) is created through the public API.
-6. Run `cargo test -p pylota-mail-worker --features itest-hooks --test it -- --test-threads=1` with
+6. Run `cargo test -p pylota-identity-worker --features itest-hooks --test it -- --test-threads=1` with
    `PM_ITEST_URL=https://localhost:8799` and `PM_ITEST_CA=target/itest/tls/cert.pem`. The test client
    (`reqwest`) trusts that certificate as its only extra root and pins `localhost` and
    `console.localhost` to `127.0.0.1` (`ClientBuilder::resolve`), so console requests go to
@@ -600,7 +600,7 @@ deltas in the pull request description.
 ## 10. Live end-to-end suite (`live::`)
 
 PRD release criterion 3. `cargo xtask live` runs
-`cargo test -p pylota-mail-worker --features live --test live -- --test-threads=1` against the staging
+`cargo test -p pylota-identity-worker --features live --test live -- --test-threads=1` against the staging
 deployment (its own zone, platform domain, D1, R2, Vectorize and queues, [Architecture](../architecture.md)).
 
 | Test | Does |
@@ -625,7 +625,7 @@ deployment (its own zone, platform domain, D1, R2, Vectorize and queues, [Archit
 | `live::console::magic_link_invite_release` | M20 step 9. Reads the sign-in email from the Gmail test mailbox through its API and posts the console forms with an HTTP client (the console needs no JavaScript); invites the Outlook test mailbox, which accepts; releases a message quarantined as `otp_unsolicited`; the audit log shows `member.invite`, `member.join` and `quarantine.release` |
 | `live::signup::google_to_checkout` | **Manual.** M20 step 10, with `PM_SIGNUP=open`: a person signs up with a dedicated Google test account at `/console/sign-up?plan=developer` and pays on the Checkout page with Stripe's test card; the harness then checks through the API that the account and workspace exist, the Overview shows the first-run checklist, and the plan is `developer` once the webhook arrives |
 | `live::billing::upgrade_spend_topup_retry` | **Manual** for the two Checkout pages, scripted otherwise. M20 step 11 with the staging catalog: a person upgrades Free to Developer and later buys a sends top-up in Stripe Checkout; the harness sends until `402 billing_limit` (Developer's 20 sends), and after the top-up retries the refused send with the same `Idempotency-Key` and gets one `202` and one email |
-| `live::assertions::verify_then_pause` | M20 step 14. An assertion minted on staging verifies with `pmail assertions verify` against staging's JWKS; after the identity is paused, verification fails within 5 minutes (the JWKS cache) |
+| `live::assertions::verify_then_pause` | M20 step 14. An assertion minted on staging verifies with `idvy assertions verify` against staging's JWKS; after the identity is paused, verification fails within 5 minutes (the JWKS cache) |
 | `live::http_signatures::crawltest_unregistered_401` | M20 step 14, only with S13 passed and `PM_WEB_BOT_AUTH=on` (skipped otherwise, and the skip is reported): a signed request to `https://crawltest.com/cdn-cgi/web-bot-auth` returns `401`, because staging's directory is not registered |
 | `live::notify::usage_alert_once` | M20 step 15, with the staging catalog: Free sends crossing 80% (8 of 10) bring exactly one `usage` email to the owner's Gmail test mailbox, and crossing it again after a release brings none |
 | `live::notify::new_mail_no_content` | M20 step 15: a person following an inbox with `instant` gets one `new_mail` email in the Gmail test mailbox, and it contains none of the canaries planted in the source message's subject, sender, body and attachment name |
@@ -783,7 +783,7 @@ It prints the traceability matrix as Markdown into the CI summary, with the mile
 ### 11.4 Coverage
 
 - `cargo llvm-cov` (cargo-llvm-cov, pin at build time) runs on `cargo test --workspace` in CI.
-- `pylota-mail-core` must keep line coverage at or above 85%; the job fails below it. Other crates are
+- `pylota-identity-core` must keep line coverage at or above 85%; the job fails below it. Other crates are
   reported, not gated.
 - Coverage never replaces the traceability check: a covered line without a named test for its rule is
   not "tested".
@@ -797,11 +797,11 @@ adds the security and traceability jobs:
 |---|---|---|
 | `ci.yml` | `fmt`, `clippy`, `test` (with coverage), `layering`, `wasm`, `itest` (`cargo xtask itest --suite it`; includes the attack suite and the deterministic keyword recall), `browser` (`cargo xtask itest --suite browser`: the console without JavaScript and the axe scan, section 6.8), `fuzz-smoke`, `deny`, `audit` (`cargo audit`), `openapi`, `docs` (`mdbook build docs`, then `cargo xtask docs-check`), `trace` (`cargo xtask trace`), `skills` (`gen-skills` check, the four `xtask::skills_*` checks, `skills-ref validate`, `claude plugin validate --strict` when it runs unsigned) | Every pull request and push to `main` |
 | `codeql.yml` | CodeQL for Rust | Every pull request, weekly |
-| `heartbeat.yml` | `pmail doctor --json --check health --check alerts` against production, and once a day `--mail-test`, with the keys of the `ops` environment ([Observability § 5.5](observability.md#55-alert-email-and-the-external-heartbeat)) | Every 15 minutes, and by hand |
+| `heartbeat.yml` | `idvy doctor --json --check health --check alerts` against production, and once a day `--mail-test`, with the keys of the `ops` environment ([Observability § 5.5](observability.md#55-alert-email-and-the-external-heartbeat)) | Every 15 minutes, and by hand |
 | `nightly.yml` | All fuzz targets for 10 minutes each; property tests at 65,536 cases; `eval-search`, `eval-agentic`, `eval-triage`, `eval-screening`, `eval::skills_safe_send` (report-only); the large benchmarks (`it::bench::*`, section 6.9); `live::` suite; `cargo audit` on `main` | Nightly |
-| `release.yml` | Builds a release, exactly as defined in [Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline): version check; the full `ci.yml` gate and the three evaluations; CLI binaries; `cargo xtask release` (bundle, `openapi.json` and the SDK fixtures tarball for the TypeScript SDK's repository, unsigned `SHA256SUMS`, SBOMs, provenance) into a draft GitHub Release, then stops for the owner's offline signature (`cargo xtask release sign`, [Security § 11](security.md#11-supply-chain)). It never deploys Pylota Mail Cloud | Tag `v*` |
-| `release-publish.yml` | Verifies `SHA256SUMS.sig` against the public keys compiled into `pmail` and marks the draft a pre-release; a staging deploy of that release and the `live::` suite; then `cargo xtask release-gate` and, for a version without a pre-release part, promotion to a full release and `cargo publish`. The npm package is published by the TypeScript SDK's own repository | Manual (`workflow_dispatch` on the tag, started by `cargo xtask release sign`) |
-| `cloud-deploy.yml` | Rolls a published release out to Pylota Mail Cloud: `pmail deploy --version <v> --gradual` (10% → 50% → 100%, [Architecture](../architecture.md)) with the `production` environment's secrets; refuses a pre-release | Manual (`workflow_dispatch`, input `version`) |
+| `release.yml` | Builds a release, exactly as defined in [Rust workspace › CI pipeline](rust-workspace.md#10-ci-pipeline): version check; the full `ci.yml` gate and the three evaluations; CLI binaries; `cargo xtask release` (bundle, `openapi.json` and the SDK fixtures tarball for the TypeScript SDK's repository, unsigned `SHA256SUMS`, SBOMs, provenance) into a draft GitHub Release, then stops for the owner's offline signature (`cargo xtask release sign`, [Security § 11](security.md#11-supply-chain)). It never deploys Pylota Identity Cloud | Tag `v*` |
+| `release-publish.yml` | Verifies `SHA256SUMS.sig` against the public keys compiled into `idvy` and marks the draft a pre-release; a staging deploy of that release and the `live::` suite; then `cargo xtask release-gate` and, for a version without a pre-release part, promotion to a full release and `cargo publish`. The npm package is published by the TypeScript SDK's own repository | Manual (`workflow_dispatch` on the tag, started by `cargo xtask release sign`) |
+| `cloud-deploy.yml` | Rolls a published release out to Pylota Identity Cloud: `idvy deploy --version <v> --gradual` (10% → 50% → 100%, [Architecture](../architecture.md)) with the `production` environment's secrets; refuses a pre-release | Manual (`workflow_dispatch`, input `version`) |
 
 **Required checks to merge into `main`:** `fmt`, `clippy`, `test`, `layering`, `wasm`, `itest`,
 `browser`, `fuzz-smoke`, `deny`, `audit`, `openapi`, `docs`, `trace`, `skills`, `codeql`. The milestone gate's

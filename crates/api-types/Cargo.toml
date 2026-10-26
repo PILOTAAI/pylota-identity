@@ -1,6 +1,6 @@
 [package]
-name = "pylota-mail-api-types"
-description = "Pylota Mail API request, response, object and event types"
+name = "pylota-identity-api-types"
+description = "Pylota Identity API request, response, object and event types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

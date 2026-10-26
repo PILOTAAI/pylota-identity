@@ -271,7 +271,7 @@ including `never` ([Q110](../edge-cases.md)). `approval_needed` takes the two fa
 stricter value at any time; a looser value only where API keys may take decisions reserved for people
 (`key_may_decide`, the existing rule keyed on `quarantine.key_release`); otherwise `403 permission_denied`
 with `details.reason = "person_required"` and `details.field` ([Q18](../edge-cases.md)). A console owner or
-admin, a platform key and the tenant's partner key may set any value. Pylota Mail Cloud keeps the built-in
+admin, a platform key and the tenant's partner key may set any value. Pylota Identity Cloud keeps the built-in
 default `never` in `PM_DEFAULT_POLICY`: the right level depends on how much the workspace trusts its agents,
 and an operator that gives an agent `drafts:write` without `messages:send` gets approval for every send of
 that agent whatever the level ([§3.5](#35-the-two-approval-patterns)).
@@ -900,7 +900,7 @@ draft is checked the same way. Outside the window: `400 invalid_request`, `detai
 draft's own expiry under the shorter of them ([§13.1](#131-retention)), otherwise `400 invalid_request`
 with `details.reason = "beyond_retention"` ([Parity additions § 7.10](parity-additions.md#710-interactions),
 [Z61](../edge-cases.md), [Q48](../edge-cases.md)), so a scheduled draft never outlives the mail retention
-in force when it was scheduled. Both bounds are Pylota Mail choices:
+in force when it was scheduled. Both bounds are Pylota Identity choices:
 
 - **60 seconds.** Anything sooner is a send. A minute gives the writer and the approver a window in which
   `DELETE` or reject reliably wins, and keeps every scheduled send well above the alarm's retry interval
@@ -1027,7 +1027,7 @@ jitter), counted in `failure.attempts` without failing it. The **late limit** en
 attempted successfully by `send_at` + 1 hour becomes `failed` with `send_window_missed` and the last
 transient code in `failure.detail` ([Q38](../edge-cases.md)).
 
-The late limit is a Pylota Mail choice. Scheduled mail is usually tied to a time ("your pick-up is at
+The late limit is a Pylota Identity choice. Scheduled mail is usually tied to a time ("your pick-up is at
 10:00"), and an hour-late send is the most an unattended schedule should risk; a person can still send it
 explicitly. The same limit covers a fire delayed by an outage, a restore freeze or a missed alarm. It does
 not apply to an approval: a person approving after `send_at` decides with the time shown.
@@ -1366,7 +1366,7 @@ the next D1 migration, which only adds it.
   partner (its own tenants) and tenant keys. The ten routes join `it::security::cross_tenant_matrix`: a
   draft of another tenant, or of a tenant another partner created, answers `404 draft_not_found` exactly
   as a missing one ([Q53](../edge-cases.md)).
-- **Approval is a decision reserved for people** on Pylota Mail Cloud (`PM_QUARANTINE_KEY_RELEASE=off`),
+- **Approval is a decision reserved for people** on Pylota Identity Cloud (`PM_QUARANTINE_KEY_RELEASE=off`),
   unless the tenant's `drafts.key_approval` is `true`, which only a platform key or the tenant's own
   partner key can set (class *platform or own partner*, like `quarantine.key_release`; a workspace writer
   gets `403 scope_denied` with `details.reason = "not_writable"`) ([Q17](../edge-cases.md)).
@@ -1390,7 +1390,7 @@ the next D1 migration, which only adds it.
 
 Drafts are working copies of mail. They are kept only as long as they are useful, then deleted by the
 mailbox's daily maintenance (the `Hygiene` operation of the tenant retention job, [Privacy §5.2](privacy.md#52-steps-of-a-tenant-retention-job)
-step 5, which passes the tenant's `retention.message_days`). Pylota Mail choices:
+step 5, which passes the tenant's `retention.message_days`). Pylota Identity choices:
 
 | Status | Rule | Why |
 |---|---|---|
@@ -1448,19 +1448,19 @@ records no idempotency row, so after an upgrade an explicit resend with the same
 
 | Limit | Value | Source |
 |---|---|---|
-| Drafts per identity, not counting `sent` and `canceled` records | 1,000; then `422 draft_limit_reached` | Pylota Mail |
-| `send_at` | At least 60 seconds and at most 90 days after the request | Pylota Mail (§6.1) |
-| Late limit of a scheduled send | 1 hour after `send_at`; then `failed` with `send_window_missed` | Pylota Mail (§6.4) |
-| Attempts after an interrupted send | 3; then `failed` with `send_interrupted` | Pylota Mail |
-| Scheduled sends per alarm run of one mailbox | 10, then the alarm re-arms at once | Pylota Mail |
-| Pending approval | 7 days after it was requested, or `send_at` + 1 hour when later | Pylota Mail |
-| Draft retention | 30 days after the last change (or `retention.message_days` when shorter); `sent` and `canceled` records 30 days | Pylota Mail |
-| `text`, `html` | 524,288 and 1,048,576 bytes | Pylota Mail ([Inbound › Storage caps](inbound.md#storage-caps)) |
-| Attachments | 32 per draft; inline bytes within the 7 MiB request body; 26,214,400 decoded bytes in total, as for a send | Pylota Mail |
+| Drafts per identity, not counting `sent` and `canceled` records | 1,000; then `422 draft_limit_reached` | Pylota Identity |
+| `send_at` | At least 60 seconds and at most 90 days after the request | Pylota Identity (§6.1) |
+| Late limit of a scheduled send | 1 hour after `send_at`; then `failed` with `send_window_missed` | Pylota Identity (§6.4) |
+| Attempts after an interrupted send | 3; then `failed` with `send_interrupted` | Pylota Identity |
+| Scheduled sends per alarm run of one mailbox | 10, then the alarm re-arms at once | Pylota Identity |
+| Pending approval | 7 days after it was requested, or `send_at` + 1 hour when later | Pylota Identity |
+| Draft retention | 30 days after the last change (or `retention.message_days` when shorter); `sent` and `canceled` records 30 days | Pylota Identity |
+| `text`, `html` | 524,288 and 1,048,576 bytes | Pylota Identity ([Inbound › Storage caps](inbound.md#storage-caps)) |
+| Attachments | 32 per draft; inline bytes within the 7 MiB request body; 26,214,400 decoded bytes in total, as for a send | Pylota Identity |
 | Recipients, subject, headers, labels, metadata | As for sends | [Limits › Mail](../../reference/limits.md#mail) |
-| `note`, `reason` | 500 characters | Pylota Mail |
-| `on_behalf_of` | 1–128 printable ASCII characters, no `@` | Pylota Mail |
-| `client_id` | 1–255 printable ASCII characters without `@`, unique per identity | Pylota Mail |
+| `note`, `reason` | 500 characters | Pylota Identity |
+| `on_behalf_of` | 1–128 printable ASCII characters, no `@` | Pylota Identity |
+| `client_id` | 1–255 printable ASCII characters without `@`, unique per identity | Pylota Identity |
 | Durable Object alarm | One per object; at-least-once; 6 retries from 2 seconds | [Alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), read 2026-10-17 |
 | Alarm handler wall time | 15 minutes | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-10-17 |
 
@@ -1590,24 +1590,24 @@ The `mail_send`, `mail_reply` and `mail_forward` descriptions gain one sentence:
 ### 17.2 CLI
 
 ```text
-pmail drafts create --identity <identity> [--to <addr>]… [--cc <addr>]… [--bcc <addr>]… [--subject <s>]
+idvy drafts create --identity <identity> [--to <addr>]… [--cc <addr>]… [--bcc <addr>]… [--subject <s>]
                     [--text <s> | --text-file <path>] [--html-file <path>] [--attach <path>]… [--upload <upload_id>]…
                     [--in-reply-to <msg_id> [--reply-all] | --forward-of <msg_id>] [--label <l>]…
                     [--send-at <rfc3339>] [--request-approval] [--client-id <id>]
-pmail drafts list (--identity <identity> | --tenant <tenant>) [--status <s>[,<s>…]] [--label <l>]
+idvy drafts list (--identity <identity> | --tenant <tenant>) [--status <s>[,<s>…]] [--label <l>]
                   [--thread <thr_id>] [--scheduled-after <t>] [--scheduled-before <t>] [--limit <n>] [--all]
-pmail drafts get <draft_id> --identity <identity> [--attachment <att_id> --out <path>]
-pmail drafts update <draft_id> --identity <identity> [--if-match <etag>] [the create options]
+idvy drafts get <draft_id> --identity <identity> [--attachment <att_id> --out <path>]
+idvy drafts update <draft_id> --identity <identity> [--if-match <etag>] [the create options]
                     [--remove-attachment <att_id>]… [--unschedule] [--request-approval]
-pmail drafts send <draft_id> --identity <identity> [--send-at <rfc3339> | --now] [--dry-run]
+idvy drafts send <draft_id> --identity <identity> [--send-at <rfc3339> | --now] [--dry-run]
                   [--idempotency-key <key>]
-pmail drafts approve <draft_id> --identity <identity> --revision <n> [--digest <hex>]
+idvy drafts approve <draft_id> --identity <identity> --revision <n> [--digest <hex>]
                      (--send | --no-send) [--note <text>] [--on-behalf-of <id>]
-pmail drafts reject <draft_id> --identity <identity> --reason <text> [--revision <n>]
-pmail drafts delete <draft_id> --identity <identity> [--yes]
+idvy drafts reject <draft_id> --identity <identity> --reason <text> [--revision <n>]
+idvy drafts delete <draft_id> --identity <identity> [--yes]
 ```
 
-`pmail drafts send` without `--idempotency-key` reads the draft and derives a key from its ID, revision and
+`idvy drafts send` without `--idempotency-key` reads the draft and derives a key from its ID, revision and
 approval state (`cli:{draft_id}:{revision}:{approval.state}`), so re-running the same command never sends
 twice, and re-running it after a person approved the revision sends it: a run answered `pending_approval`
 recorded its key under the state `none` or `requested`, and the approval changes the state to `approved`.
@@ -1665,7 +1665,7 @@ kind and three permissions:
 "new_recipients"`. Platform, marketing and auth tenants keep `never`: their identities are backend senders.
 
 **Mapping onto Pylota's approval gate.** The gate (tool-risk registry; enforcement is the feature-flag row)
-stays Pylota's decision point; Pylota Mail is the server-side backstop that holds even if the gate's flag is
+stays Pylota's decision point; Pylota Identity is the server-side backstop that holds even if the gate's flag is
 off or a bug skips it:
 
 1. A gated mail tool, or a K3 send answered `approval_required`, creates the draft through Pylota's
@@ -1939,7 +1939,7 @@ To be added to [Edge cases](../edge-cases.md) as section "Q · Drafts, approval 
 | `it::console::drafts_page` | The three screens for each role; approve needs re-authentication and posts `revision` and `digest`; a stale page is refused and shown again; the Overview items; escaping (Q54) | Q54, Q55, §16 |
 | `browser::console::no_js`, `browser::console::axe_scan` | The drafts screens join both | Q55 |
 | `it::mcp::drafts_tools` | Q60; each tool maps to its route and returns the same errors | Q60, §17.1 |
-| `cli::drafts::send_key_derivation` | `pmail drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | §17.2 |
+| `cli::drafts::send_key_derivation` | `idvy drafts send` derives `cli:{draft_id}:{revision}:{approval.state}`; re-running it replays, and re-running it after an approval-only decision sends once | §17.2 |
 | `sdk::coverage::every_operation` | Still passes with the ten new operations | FR-SDK-1 |
 | `live::drafts::scheduled_send` | On staging, a draft scheduled 2 minutes ahead to a real mailbox arrives once, within a minute of `send_at`, with its labels on the stored message | FR-DRF-7 |
 
@@ -1971,7 +1971,7 @@ To be added to [Build plan](../build-plan.md) after M28:
 > | `webhooks/payloads.rs` (M8), `mailbox/outbox.rs` (M6) | `draft_summary`, `draft_event`; the audit rows of `draft.approved` and `draft.rejected` in the dispatch batch |
 > | `jobs/erasure.rs`, `jobs/retention.rs` (M14) | The draft rows of every scope, `drafts_deleted` in the receipt; draft purge and pending expiry in `Hygiene` |
 > | `mcp/tools.rs` (M15) | The six draft tools, with their rows in M15's table test; one sentence in the three send tools' descriptions |
-> | `crates/cli/src/commands/drafts.rs` (M16) | `pmail drafts …` |
+> | `crates/cli/src/commands/drafts.rs` (M16) | `idvy drafts …` |
 > | `console/pages/overview.rs` (M24) and the Notifier's needs-a-person counts (M26) | The two "Needs a person" items |
 > | The every-minute cron (M5, M17 Foundation) | `crons/drafts_due.rs` |
 > | `drafts/attachments.rs`, upload arm | Built by whichever of M29 and M33 (uploads) lands second, with `it::drafts::q6_upload_references` |
@@ -2010,7 +2010,7 @@ M8, M9, M14, M15, M16, M21, M22, M24, M26 ─▶ M29 drafts, approvals and sched
 
 From the inventories of AgentMail's public docs and OpenAPI document read on 2026-10-17 (untrusted data).
 
-| AgentMail | Pylota Mail | |
+| AgentMail | Pylota Identity | |
 |---|---|---|
 | Drafts with CRUD at inbox scope; read at org and pod scope | CRUD per identity; the tenant's queue of pending, scheduled and failed drafts from a content-free index | Match; different for the org-wide list (content stays in the mailbox, [§1](#1-why-the-mailbox-and-a-content-free-index-in-d1)) |
 | `send_at` schedules a draft (label `scheduled`, `send_status`) | `status: scheduled`, driven by the mailbox alarm, with a 60 s–90 day window | Match; exceed: a watchdog for missed alarms and a defined late limit |

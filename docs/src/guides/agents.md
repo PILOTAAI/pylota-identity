@@ -1,6 +1,6 @@
 # Using it from an agent
 
-This guide is for developers connecting LLM agents to Pylota Mail, and for agents reading the docs.
+This guide is for developers connecting LLM agents to Pylota Identity, and for agents reading the docs.
 It covers which interface to use, how to scope keys per agent, what to tell an agent about mail, how
 to handle events without repeating work, where people should stay in the loop, how an agent proves who
 it is to other services and websites, and a checklist of the behaviours the integrating application
@@ -12,15 +12,15 @@ owns.
 |---|---|---|
 | **MCP** (`/mcp`, Streamable HTTP) | An agent that talks to tools directly: Claude Code, an MCP-capable runtime | Authenticated with an API key as a bearer token in v1.0. The agent sees only the tools its key allows. See [MCP server](../reference/mcp.md) |
 | **REST API** behind your own tool layer | A product that already has its own tools, approvals and audit | You decide exactly which operations the model can trigger, and you can add approval steps. See [REST API](../reference/api.md) |
-| **Rust SDK** (`pylota-mail`) | Services written in Rust: webhook consumers, job workers | Typed client for the whole REST API |
-| **CLI** (`pmail`) | People, scripts and coding agents doing operations | `--json` output on every command, `--query` to filter it, `--schema` to describe a command. See [CLI](../reference/cli.md) |
-| **TypeScript SDK** (`@pylotahq/mail`) | Services in TypeScript: Node.js 22+, Workers, Deno, Bun | Required keys on sends, safe retries, typed `uncertain`, webhook verification, event stream with resume |
-| **Agent skills** | Coding agents in Claude Code, Codex and Cursor | Teach safe sending, untrusted mail, verification codes, drafts, search and events; install from the plugin marketplaces or `pmail skills generate` |
-| **`pmail mcp stdio`** | Clients that run only local MCP servers, such as Claude Desktop without request headers | Key from your profile, never in the client's config |
+| **Rust SDK** (`pylota-identity`) | Services written in Rust: webhook consumers, job workers | Typed client for the whole REST API |
+| **CLI** (`idvy`) | People, scripts and coding agents doing operations | `--json` output on every command, `--query` to filter it, `--schema` to describe a command. See [CLI](../reference/cli.md) |
+| **TypeScript SDK** (`@pylotahq/identity`) | Services in TypeScript: Node.js 22+, Workers, Deno, Bun | Required keys on sends, safe retries, typed `uncertain`, webhook verification, event stream with resume |
+| **Agent skills** | Coding agents in Claude Code, Codex and Cursor | Teach safe sending, untrusted mail, verification codes, drafts, search and events; install from the plugin marketplaces or `idvy skills generate` |
+| **`idvy mcp stdio`** | Clients that run only local MCP servers, such as Claude Desktop without request headers | Key from your profile, never in the client's config |
 
-The TypeScript SDK, the agent skills, `pmail mcp stdio` and the CLI's `--query` and `--schema` are P1: they
+The TypeScript SDK, the agent skills, `idvy mcp stdio` and the CLI's `--query` and `--schema` are P1: they
 ship in v1.0 unless they threaten the release ([PRD § 5](../project/prd.md#5-scope-and-priorities)). The
-TypeScript SDK is built in its own repository, `PILOTAAI/pylota-mail-typescript`, and installed from npm.
+TypeScript SDK is built in its own repository, `PILOTAAI/pylota-identity-typescript`, and installed from npm.
 
 A common setup: specialist agents use MCP with narrow identity keys, while the integrating
 application consumes webhooks and runs sends that need approval through the REST API.
@@ -79,7 +79,7 @@ Rules:
 - **Ask before signing up anywhere.** An agent that creates an account at a third-party service with its
   address requests it first (`POST /v1/identities/{identity_id}/accounts`, MCP `mail_request_account`,
   permission `accounts:request`), waits until a person approves it, then signs up and uses `wait` with
-  `kind: "verification"` for the code. Where the workspace requires approval (always on Pylota Mail
+  `kind: "verification"` for the code. Where the workspace requires approval (always on Pylota Identity
   Cloud), codes from a service without an approved entry are held for review
   ([Service sign-up ledger](../project/design/service-accounts.md)).
 - **Give `identities:sign` only to an agent that signs, on its own identity key.** It lets a key speak
@@ -93,7 +93,7 @@ Rules:
 Create an identity key:
 
 ```bash
-pmail keys create --level identity --identity bookings@acme.example.com --name bookings-agent \
+idvy keys create --level identity --identity bookings@acme.example.com --name bookings-agent \
   --permissions messages:read,messages:send,search:read,attachments:read
 ```
 
@@ -103,7 +103,7 @@ Add guidance like this to the agent's system prompt. Adapt it to your tools, but
 themes: search strategy, untrusted content, citations and idempotency.
 
 ```text
-You have a mailbox through the pylota-mail tools.
+You have a mailbox through the pylota-identity tools.
 
 How to search
 - If the task names a reference (a plate such as AB12 CDE, a PCN, a booking such as BK-2291, an
@@ -188,14 +188,14 @@ job(event)
   (`/v1/event-consumers`) and the live stream (`GET /v1/events/stream`, a WebSocket) all read the same
   per-tenant log, and every channel uses the same `evt_` ID, so one `processed_events` table deduplicates
   them all ([Event feed](../project/design/event-feed.md)). A consumer that missed webhooks reads the feed
-  from its saved cursor; `pmail events tail --cursor-file …` does it from a shell, and the SDKs' streams
+  from its saved cursor; `idvy events tail --cursor-file …` does it from a shell, and the SDKs' streams
   resume on their own. The feed needs `events:read`.
 
 The receiving guide has the signature code: [Set up a webhook endpoint](receiving.md#set-up-a-webhook-endpoint).
 
 ## Keep people in the loop
 
-Pylota Mail makes sends safe to retry. Whether a send should happen at all is your application's
+Pylota Identity makes sends safe to retry. Whether a send should happen at all is your application's
 decision. Useful patterns:
 
 | Pattern | How |
@@ -212,7 +212,7 @@ decision. Useful patterns:
 An agent that signs up to a service needs the code it emails back. Use `wait` (MCP `mail_wait`)
 ([E4](../project/edge-cases.md)):
 
-0. Where the workspace requires approval of sign-ups (`accounts.require_approval`, always on Pylota Mail
+0. Where the workspace requires approval of sign-ups (`accounts.require_approval`, always on Pylota Identity
    Cloud), request the account first and wait until it is `approved`; until then the next step fails with
    `403 policy_denied` (`account_not_approved`) and the service's codes are held for review.
 1. Start `wait` with `from=@service.example`, `kind=verification` and a timeout (at most 60
@@ -238,11 +238,11 @@ The key needs `identities:sign` (tenant or identity key):
 |---|---|
 | REST | `POST /v1/identities/{identity_id}/assertions` |
 | MCP | `mail_sign_assertion`, with the same fields ([MCP server](../reference/mcp.md)) |
-| CLI | `pmail assertions create` ([CLI](../reference/cli.md)) |
+| CLI | `idvy assertions create` ([CLI](../reference/cli.md)) |
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/assertions \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"audience":"https://portal.supplier.example","expires_in":300,"nonce":"b3f1c2…",
        "ext":{"booking_ref":"BK-2291"}}'
 ```
@@ -275,7 +275,7 @@ set: statements your workspace made, which the deployment does not check), `ai_a
 **The identity's key** is created on its first signing request (or with
 `POST /v1/identities/{identity_id}/keys`), sealed, and never leaves the Worker. Rotate it with
 `POST …/keys/rotate`, and revoke it at once with `POST …/keys/{kid}/revoke` if you suspect a leak
-(`identities:write`; CLI `pmail identity-keys`). A paused identity cannot sign (`409 identity_paused`)
+(`identities:write`; CLI `idvy identity-keys`). A paused identity cannot sign (`409 identity_paused`)
 and its key set is withdrawn, so a service that refetches the key set stops accepting its assertions
 within 5 minutes ([Security › Identity signing keys](security.md#identity-signing-keys)). Assertions and signed HTTP
 requests together are limited to 600 a minute per identity (`429 rate_limited`), and are not counted
@@ -301,7 +301,7 @@ If you run the service on the other side, check every assertion in these seven s
 7. Keep `jti` until `exp` and reject a repeat. Do not grant access on anything under `unverified`.
 
 The Rust SDK follows these steps in `verify_assertion`, and
-`pmail assertions verify <token> --audience <audience>` runs them on your machine with no API key
+`idvy assertions verify <token> --audience <audience>` runs them on your machine with no API key
 (`--issuer` defaults to your profile's URL).
 Replay protection is yours whichever you use: keep the `jti` cache, send a `nonce` challenge when you
 can, and accept only short expiries.
@@ -309,7 +309,7 @@ can, and accept only short expiries.
 ## Signed HTTP requests
 
 When your agent fetches web pages or calls web APIs, a site may want to know that the request comes
-from a declared, accountable bot. Pylota Mail can sign the request with
+from a declared, accountable bot. Pylota Identity can sign the request with
 [Web Bot Auth](https://developers.cloudflare.com/bots/reference/bot-verification/web-bot-auth/)
 (RFC 9421 HTTP Message Signatures), using a key of the deployment, with the identity's address in a
 signed `From` header ([Agent signing keys §5](../project/design/agent-keys.md#5-signed-http-requests-web-bot-auth)).
@@ -327,11 +327,11 @@ Signed HTTP requests are a P1 feature. The operator can turn them on only once t
 check (spike S13) has passed; until then they stay off, and agent assertions work regardless.
 
 Ask for the headers with `identities:sign` (`POST /v1/identities/{identity_id}/http-signatures`, MCP
-`mail_sign_http_request`, or `pmail http-sign`, which prints the four headers):
+`mail_sign_http_request`, or `idvy http-sign`, which prints the four headers):
 
 ```bash
 curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/http-signatures \
-  -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
   -d '{"url":"https://www.brightwell.example/fleet/availability?from=2026-10-12","method":"GET","expires_in":60}'
 ```
 
@@ -367,14 +367,14 @@ The Worker never makes the request itself, and nothing is stored.
 ## Integrator checklist
 
 These [edge-case register](../project/edge-cases.md) rows are owned by the integrating application
-(**I**) or shared with it (**S+I**). Pylota Mail provides what each needs; your application must use
+(**I**) or shared with it (**S+I**). Pylota Identity provides what each needs; your application must use
 it.
 
 | Row | Owner | What your application does |
 |---|---|---|
 | [A7](../project/edge-cases.md) | S+I | Handle `409 identity_paused`, and show the operator why the identity is paused |
 | [A9](../project/edge-cases.md) | S+I | Act only on the copy with `is_primary_recipient: true` |
-| [A10](../project/edge-cases.md) | S+I | Never reveal that an identity was BCC'd. Pylota Mail's `reply-all` already excludes BCC |
+| [A10](../project/edge-cases.md) | S+I | Never reveal that an identity was BCC'd. Pylota Identity's `reply-all` already excludes BCC |
 | [B8](../project/edge-cases.md) | S+I | Never accept calendar invitations automatically; answer verified ones with `calendar-reply` only when the operator wants it. Never send read receipts |
 | [C4](../project/edge-cases.md) | S+I | Retry `409 thread_busy` after `details.retry_after` |
 | [C5](../project/edge-cases.md) | I | Mark a pending draft stale when new mail arrives in its thread, and re-validate it |

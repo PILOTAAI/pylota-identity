@@ -9,7 +9,7 @@
 
 ## Context
 
-Pylota Mail Cloud (`pylotamail.com`) is run by one person, who also runs Pylota. Pylota's Cloudflare
+Pylota Identity Cloud (`pylotamail.com`) is run by one person, who also runs Pylota. Pylota's Cloudflare
 account already holds `pylota.io`, its website, its own mail and its Workers. The question was whether
 Cloud production gets a Cloudflare account of its own, or runs in that existing account.
 
@@ -50,7 +50,7 @@ Facts the decision rests on, read 2026-10-10:
    `pylota.io` for Pylota's `notify.` and `reminders.` subdomains (listed in Pylota's tenant policy
    `domains.cloudflare_zones`, which grants names strictly under the zone, never its apex). A zone is added
    to the token before it is listed in any tenant's policy.
-4. Every deploy token **must** use per-Worker roles: *Editor* on the one Worker it deploys (`pylota-mail`,
+4. Every deploy token **must** use per-Worker roles: *Editor* on the one Worker it deploys (`pylota-identity`,
    or `pylota-mail-site` for the site), *Admin* on that Worker only for `destroy`. Creating a Worker and
    attaching its Custom Domains is a one-time step with a short-lived token holding *Admin* at the Workers
    product scope and *Workers Routes · Edit* on the hosts' zones, deleted afterwards. No token holds
@@ -70,11 +70,11 @@ Facts the decision rests on, read 2026-10-10:
   `pylotamail.com` and `pylota.io`, and the token's account-wide *Queues · Edit* and *Email Sending · Edit*
   reach Pylota's queues and sending settings in the same account. The design limits what its own code does
   there: the zone-permission checks (H8), a listed zone's apex staying platform-only, and the
-  provider-ID rule (H10, H11). Detection is the domain health checks and `pmail doctor`.
+  provider-ID rule (H10, H11). Detection is the domain health checks and `idvy doctor`.
 - **Shared quota.** Cloud and Pylota share the account's daily Email Sending quota. `PM_DAILY_SEND_QUOTA`
   and the `provider_quota` alerts watch it ([G3](../edge-cases.md)); Pylota's own sends count against the
   same figure.
-- The first `pmail setup`, and any later change of the API or console host, needs the short-lived
+- The first `idvy setup`, and any later change of the API or console host, needs the short-lived
   product-scope token; every other command runs with per-Worker roles.
 - Adding a zone for a new Cloud customer subdomain needs a token change first, an owner step.
 

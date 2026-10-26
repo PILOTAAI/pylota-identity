@@ -5,7 +5,7 @@ This page is the map. The [design documents](design/index.md) hold the detail fo
 
 ## 1. Shape of the system
 
-Pylota Mail is **one Cloudflare Worker written in Rust** (compiled to WebAssembly with `workers-rs`).
+Pylota Identity is **one Cloudflare Worker written in Rust** (compiled to WebAssembly with `workers-rs`).
 It has five entry points and seven Durable Object classes. It stores data in D1, Durable Object SQLite,
 R2 and Vectorize, and moves work through Queues.
 
@@ -153,7 +153,7 @@ inbound-staging/ses/{key}                                              SES objec
 R2 has no versioning, point-in-time recovery or replication (R2 S3 API compatibility page, last updated
 2026-07-31, read 2026-10-09). Its durability protects blobs against infrastructure loss, not against a
 bug that deletes them. For that, an optional nightly job copies new `t/` objects to a second bucket
-(`PM_BACKUP_BUCKET`, off by default, on for Pylota Mail Cloud); retention and erasure delete from both
+(`PM_BACKUP_BUCKET`, off by default, on for Pylota Identity Cloud); retention and erasure delete from both
 ([Privacy › R2 backup copy](design/privacy.md#54-optional-r2-backup-copy)).
 
 The full schema is in [Data model](design/data-model.md).
@@ -367,9 +367,9 @@ crates/worker       handlers, router, auth, console, Durable Object classes, sta
                     endpoint, agentic loop, inbound sources (routing, ses), transports (cloudflare,
                     ses, smtp, simulator)
 crates/sdk          Rust client (reqwest), used by the CLI
-crates/cli          `pmail` (clap): setup, deploy, doctor, admin, mail
+crates/cli          `idvy` (clap): setup, deploy, doctor, admin, mail
 crates/conformance  MIME corpus + RFC conformance runner (native and against workerd)
-sdks/fixtures       recorded HTTP exchanges shared by the Rust SDK and the TypeScript SDK `@pylotahq/mail`,
+sdks/fixtures       recorded HTTP exchanges shared by the Rust SDK and the TypeScript SDK `@pylotahq/identity`,
                     which is built in its own repository from each release's openapi.json (ADR 0018)
 integrations/       agent skills and plugins, checked against the contract of the same commit
 xtask               build-worker, size budget, itest, fuzz, release bundling
@@ -379,9 +379,9 @@ See [Rust workspace and platform](design/rust-workspace.md).
 
 ## 7. Deployment topology
 
-- **Self-hosted (default):** one Worker named `pylota-mail` and one assets-only Worker for the site and
+- **Self-hosted (default):** one Worker named `pylota-identity` and one assets-only Worker for the site and
   docs (optional). The API is served on a custom domain, for example `mail.example.com`, and so is the
-  console unless `PM_CONSOLE_HOST` names a second host (Pylota Mail Cloud uses separate console and API
+  console unless `PM_CONSOLE_HOST` names a second host (Pylota Identity Cloud uses separate console and API
   hosts). Mail is
   received on a platform domain that **must be a zone apex**, because catch-all routing only works on an
   apex. Examples: `agents.example` or `examplemail.com`.

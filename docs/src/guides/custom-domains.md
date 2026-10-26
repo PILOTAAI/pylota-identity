@@ -19,8 +19,8 @@ and how mail reaches and leaves your agents.
 
 | Your situation | Method | What you change |
 |---|---|---|
-| The domain is already on Cloudflare, in the same account as the deployment | `cloudflare_zone` | Nothing: Pylota Mail writes the records |
-| You have a new domain just for agents, such as `brightwell-agents.example` | `nameservers`, where the deployment offers it (Pylota Mail Cloud does not: use `dns_records`) | Two NS records at your registrar |
+| The domain is already on Cloudflare, in the same account as the deployment | `cloudflare_zone` | Nothing: Pylota Identity writes the records |
+| You have a new domain just for agents, such as `brightwell-agents.example` | `nameservers`, where the deployment offers it (Pylota Identity Cloud does not: use `dns_records`) | Two NS records at your registrar |
 | You want agents on a subdomain of your main domain, such as `agents.brightwell.example`. The main domain stays at its DNS host and keeps its mail | `dns_records` | One MX, three DKIM CNAMEs, two MAIL FROM records and an ownership TXT, at your DNS host |
 | You want agents to answer as your existing addresses (`bookings@brightwell.example`), and Google Workspace or Microsoft 365 stays your mail system | `send_only` (your mailbox forwards to the agent), or `smtp_relay` (the agent sends through your provider) | `send_only`: three DKIM CNAMEs, two MAIL FROM records and an ownership TXT, plus a forwarding rule per address. `smtp_relay`: an ownership TXT, plus SMTP credentials |
 | Your deployment runs on a Cloudflare Enterprise account and you want the simplest set-up for a subdomain | `delegated_subdomain` | NS records for the subdomain, at your DNS host |
@@ -40,7 +40,7 @@ How the methods compare:
 Not every deployment offers every method. The methods that use Amazon SES need the operator to have
 connected SES ([Deploy to Cloudflare › Connect Amazon SES](../self-hosting.md#connect-amazon-ses-optional)).
 `delegated_subdomain` needs a Cloudflare Enterprise account and the operator's opt-in, and a tenant key
-may use `nameservers` only when the operator allows it. Pylota Mail Cloud offers neither `nameservers`
+may use `nameservers` only when the operator allows it. Pylota Identity Cloud offers neither `nameservers`
 nor `delegated_subdomain`: use `dns_records` for a new domain there. When a method is not available,
 adding a domain with it fails with `422 transport_unavailable`, and `details.reason` says why. In v1.0, `dns_records`,
 `smtp_relay` and `delegated_subdomain` depend on build-time spikes (S11, S12 and S10).
@@ -56,7 +56,7 @@ the 31st is refused with `422 zone_domain_limit`.
   deployment needs `PM_CF_API_TOKEN`, with the permissions in
   [Deploy to Cloudflare › Create a Cloudflare API token](../self-hosting.md#2-create-a-cloudflare-api-token).
   Without it, the request fails with `422 cf_token_required`. The one exception: an operator can add a
-  `cloudflare_zone` **apex** with `pmail domains add --local-token`, which then uses their local
+  `cloudflare_zone` **apex** with `idvy domains add --local-token`, which then uses their local
   `CLOUDFLARE_API_TOKEN` ([CLI › Commands that use your Cloudflare token](../reference/cli.md#commands-that-use-your-cloudflare-token)).
   Subdomains, `nameservers` and `delegated_subdomain` always need the token on the deployment.
   `dns_records`, `send_only` and `smtp_relay` need no Cloudflare token.
@@ -91,14 +91,14 @@ Every method follows the same four steps: add, publish, verify, move identities.
 1. **Add the domain.**
 
    ```bash
-   pmail domains add agents.brightwell.example --method dns_records --tenant brightwell
+   idvy domains add agents.brightwell.example --method dns_records --tenant brightwell
    ```
 
    or with the API:
 
    ```bash
    curl -X POST https://mail.example.com/v1/tenants/ten_01J9…/domains \
-     -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
      -d '{"name":"agents.brightwell.example","method":"dns_records"}'
    ```
 
@@ -108,13 +108,13 @@ Every method follows the same four steps: add, publish, verify, move identities.
 2. **Publish the records**, if the method needs any:
 
    ```bash
-   pmail domains records dom_01JA…
+   idvy domains records dom_01JA…
    ```
 
    ```json
    {
      "data": [
-       { "type": "TXT", "name": "_pylota-mail.agents.brightwell.example", "host": "_pylota-mail.agents",
+       { "type": "TXT", "name": "_pylota-identity.agents.brightwell.example", "host": "_pylota-identity.agents",
          "value": "pm-verify=8f2k…", "purpose": "ownership", "required": true, "status": "ok",
          "observed": ["pm-verify=8f2k…"] },
        { "type": "MX", "name": "agents.brightwell.example", "host": "agents",
@@ -132,7 +132,7 @@ Every method follows the same four steps: add, publish, verify, move identities.
 3. **Verify.**
 
    ```bash
-   pmail domains verify dom_01JA…
+   idvy domains verify dom_01JA…
    ```
 
    This runs a check now (at most once a minute per domain). Checks use two independent DNS resolvers,
@@ -154,12 +154,12 @@ record for you:
 
 ```json
 { "error": { "code": "domain_exists", "retryable": false,
-  "details": { "claim": { "type": "TXT", "name": "_pylota-mail.agents.brightwell.example",
+  "details": { "claim": { "type": "TXT", "name": "_pylota-identity.agents.brightwell.example",
                           "value": "pm-claim=4fq2…" } } } }
 ```
 
 Publish that record at your DNS host and repeat the request with `"claim": true`
-(`pmail domains add … --claim`). If the other holder never verified the domain, it is removed, you get
+(`idvy domains add … --claim`). If the other holder never verified the domain, it is removed, you get
 `409 domain_claim_pending` with `Retry-After` while that happens, and then the same request succeeds. A
 domain that another workspace has verified is not taken this way: ask the operator. The same `409` is
 returned when the deployment's Cloudflare or AWS account already holds a zone, sending domain or SES
@@ -168,15 +168,15 @@ identity for the name that was not created for your workspace; such objects are 
 ## A domain already on Cloudflare: `cloudflare_zone`
 
 ```bash
-pmail domains add brightwell.example --method cloudflare_zone --tenant brightwell
+idvy domains add brightwell.example --method cloudflare_zone --tenant brightwell
 ```
 
-Pylota Mail writes the mail records into the zone itself, so there is usually nothing to publish.
+Pylota Identity writes the mail records into the zone itself, so there is usually nothing to publish.
 
 - **On an apex** (`brightwell.example`), every address reaches the Worker through one catch-all rule, and
   there is no limit on addresses. If the apex already has MX records, the request is refused with
   `409 existing_mx`, because enabling routing would stop that mail. If you really mean to move the
-  domain's mail to Pylota Mail, repeat the request with `"replace_mx": true` (`--replace-mx`)
+  domain's mail to Pylota Identity, repeat the request with `"replace_mx": true` (`--replace-mx`)
   ([H5](../project/edge-cases.md)).
 - **On a subdomain** (`mail.brightwell.example`), the apex's own MX records and mailboxes are not touched.
   Each address needs its own routing rule, so a subdomain holds at most 200 addresses
@@ -187,14 +187,14 @@ Pylota Mail writes the mail records into the zone itself, so there is usually no
 ## A new domain just for mail: `nameservers`
 
 ```bash
-pmail domains add brightwell-agents.example --method nameservers --tenant brightwell
+idvy domains add brightwell-agents.example --method nameservers --tenant brightwell
 ```
 
-Pylota Mail creates a Cloudflare zone for the domain, and you point the domain's nameservers at it.
+Pylota Identity creates a Cloudflare zone for the domain, and you point the domain's nameservers at it.
 **This hands the whole domain to the deployment**, which manages only mail records. Use it for a domain
 that has no website and no other mail.
 
-- Before creating the zone, Pylota Mail looks for a website (an A or AAAA record at the name, or a CNAME,
+- Before creating the zone, Pylota Identity looks for a website (an A or AAAA record at the name, or a CNAME,
   A or AAAA record at `www`) and for mail (MX records). If it finds any, the request is refused with
   `409 domain_not_dedicated`, and `details.records` lists what it found. Moving the nameservers would
   stop that website or mail. If you are sure, repeat the request with `"confirm_dedicated": true`
@@ -206,7 +206,7 @@ that has no website and no other mail.
   again.
 - A tenant key may use this method only if the operator allows it (tenant policy
   `domains.allow_create_zone`) and the deployment's Cloudflare token can create zones; otherwise the
-  request fails with `422 transport_unavailable`. Pylota Mail Cloud does not offer it.
+  request fails with `422 transport_unavailable`. Pylota Identity Cloud does not offer it.
 - A domain that is already a zone in the deployment's Cloudflare account is never taken over: the request
   fails with `409 domain_exists`.
 - If your registrar still publishes a DS record for the domain (DNSSEC was on), Cloudflare cannot answer
@@ -220,25 +220,25 @@ Once the zone is active, the domain works like a `cloudflare_zone` apex: every a
 ## A subdomain at any DNS host: `dns_records`
 
 ```bash
-pmail domains add agents.brightwell.example --method dns_records --tenant brightwell
+idvy domains add agents.brightwell.example --method dns_records --tenant brightwell
 ```
 
 Mail to and from the subdomain goes through Amazon SES. Your main domain, its website and its mailboxes
 stay where they are. Every address on the subdomain works as soon as the domain is healthy; you do not
 change DNS when you add an agent.
 
-Publish these records at your DNS host (the values come from `pmail domains records`):
+Publish these records at your DNS host (the values come from `idvy domains records`):
 
 | Record | Purpose |
 |---|---|
-| TXT `_pylota-mail.agents.brightwell.example` | Proves you control the domain |
+| TXT `_pylota-identity.agents.brightwell.example` | Proves you control the domain |
 | MX `agents.brightwell.example`, priority 10 | Sends mail for the subdomain to Amazon SES |
 | Three CNAMEs at `…._domainkey.agents.brightwell.example` | DKIM signing keys |
 | MX and TXT at `pm-bounce.agents.brightwell.example` | The MAIL FROM (bounce) domain, so SPF aligns |
 | TXT `_dmarc.agents.brightwell.example` (suggested) | Only suggested when no DMARC record exists for the domain yet |
 
 Use a name that receives no mail today. If it already has MX records, the request is refused with
-`409 existing_mx`. Pylota Mail cannot change your DNS, so `"replace_mx": true` (`--replace-mx`) here
+`409 existing_mx`. Pylota Identity cannot change your DNS, so `"replace_mx": true` (`--replace-mx`) here
 means "I will replace these". Until the old MX records are gone, the domain is `degraded` with
 `mx_unexpected`, because mail is split between two systems.
 
@@ -248,11 +248,11 @@ The local part prefix `pm-bounce` is reserved on these domains. See also
 ## Keep your mailbox, forward to the agent: `send_only`
 
 ```bash
-pmail domains add brightwell.example --method send_only --tenant brightwell
+idvy domains add brightwell.example --method send_only --tenant brightwell
 ```
 
 Your agents answer as your existing addresses, such as `bookings@brightwell.example`, while your current
-mail system (Google Workspace, Microsoft 365 or any other) keeps receiving the mail. Pylota Mail sends
+mail system (Google Workspace, Microsoft 365 or any other) keeps receiving the mail. Pylota Identity sends
 through Amazon SES, signed for your domain.
 
 1. **Publish the records**: the ownership TXT, three DKIM CNAMEs, and the MX and TXT at
@@ -264,18 +264,18 @@ through Amazon SES, signed for your domain.
 3. **Test the forwarding** once the address exists on the identity:
 
    ```bash
-   pmail addresses test-forwarding bookings@brightwell.example
+   idvy addresses test-forwarding bookings@brightwell.example
    ```
 
-   or `POST /v1/identities/{identity_id}/addresses/{address_id}/test-forwarding`. Pylota Mail sends a
-   short message, from `mailer-daemon@agents.example` with the subject "Pylota Mail forwarding check",
+   or `POST /v1/identities/{identity_id}/addresses/{address_id}/test-forwarding`. Pylota Identity sends a
+   short message, from `mailer-daemon@agents.example` with the subject "Pylota Identity forwarding check",
    to `bookings@brightwell.example`. If it comes back through your forwarding rule within 10 minutes,
    the address's `forwarding` becomes `ok`; otherwise `failed`. The test is not stored as a message and
    does not count as a send. Until a test or a real forwarded message arrives, `forwarding` is
    `unverified`.
 
 **The main drawback: forwarders that change the message.** Forwarding breaks SPF for the original
-sender, so Pylota Mail decides trust from the sender's DKIM signature and from ARC. A forwarder that
+sender, so Pylota Identity decides trust from the sender's DKIM signature and from ARC. A forwarder that
 rewrites the body (adds a footer, a disclaimer or a banner) breaks that signature. Such messages fail
 authentication and are quarantined by default (`quarantine_reason: auth_failed`), so the agent does not see them until a person
 releases them ([Receiving › Quarantine](receiving.md#quarantine)). Prefer a mail system that forwards
@@ -287,7 +287,7 @@ by loop detection.
 ## Keep your mailbox, send through your provider: `smtp_relay`
 
 ```bash
-pmail domains add brightwell.example --method smtp_relay --tenant brightwell --inbound forward \
+idvy domains add brightwell.example --method smtp_relay --tenant brightwell --inbound forward \
   --smtp-host smtp.provider.example --smtp-port 587 --smtp-username agents@brightwell.example \
   --smtp-password-stdin --probe-from agents@brightwell.example
 ```
@@ -309,47 +309,47 @@ What to set up with your provider:
 
 - **An account that can send by SMTP**, with its user name and password. Port `465` (TLS from the start)
   or `587` (STARTTLS) only; port `25` is refused with `400 smtp_port_not_allowed`. The relay must offer
-  TLS: Pylota Mail never sends the credentials without it (`422 smtp_tls_required`). Wrong credentials
-  give `422 smtp_auth_failed`. Pylota Mail tries the login once before it stores anything, and keeps the
+  TLS: Pylota Identity never sends the credentials without it (`422 smtp_tls_required`). Wrong credentials
+  give `422 smtp_auth_failed`. Pylota Identity tries the login once before it stores anything, and keeps the
   credentials encrypted. They are never shown again.
 - **Permission to send as the agent addresses.** If your provider limits which `From` addresses an
   account may use, allow the agent addresses and `probe_from`.
 - **DKIM for your domain.** Your provider must sign with your own domain (or send with a MAIL FROM on
   your domain), so that DMARC passes.
 
-**The alignment probe.** Pylota Mail cannot see from DNS how your provider signs, so before the first
+**The alignment probe.** Pylota Identity cannot see from DNS how your provider signs, so before the first
 send, and then every day, it sends a probe message through your relay to the platform domain. The probe
 passes when the `From` address arrives unchanged and DMARC passes for your domain. If your provider
 re-signs with its own domain the issue is `smtp_unaligned`; if it changes the `From` address,
 `smtp_from_rewritten`. After a failed probe, another runs 20 minutes later. Two failed probes in a row
 make the domain `failing` (about 40 minutes from the first failure at most), and sends fall back to the
-platform address. Run a probe now with `pmail domains probe brightwell.example`
+platform address. Run a probe now with `idvy domains probe brightwell.example`
 (`POST /v1/domains/{domain_id}/probe`, at most once a minute); the result appears in
-`pmail domains health` within 15 minutes.
+`idvy domains health` within 15 minutes.
 
 **Inbound.** With `--inbound forward`, your mailbox forwards to the agents exactly as for
 [`send_only`](#keep-your-mailbox-forward-to-the-agent-send_only), with the same forwarding test and the same
 drawback. With `--inbound ses`, you also publish the Amazon SES MX and DKIM records, as for
 [`dns_records`](#a-subdomain-at-any-dns-host-dns_records); the MX then sends all of the domain's mail to
-Pylota Mail, so use it only on a name that has no other mailboxes.
+Pylota Identity, so use it only on a name that has no other mailboxes.
 
 **Delivery statuses.** Your provider does not report deliveries back. A message is `submitted` once
 your relay accepts it, and stays `submitted` unless a bounce arrives
 ([Sending › Delivery status](sending.md#delivery-status-and-events)).
 
-**Changing the password or the relay**: `pmail domains update brightwell.example --smtp-password-stdin`
+**Changing the password or the relay**: `idvy domains update brightwell.example --smtp-password-stdin`
 (or `PATCH /v1/domains/{domain_id}` with `smtp`). The new values are used only after a probe with them
 passes; until then sends keep using the old ones.
 
 ## A delegated subdomain: `delegated_subdomain`
 
 ```bash
-pmail domains add agents.brightwell.example --method delegated_subdomain --tenant brightwell
+idvy domains add agents.brightwell.example --method delegated_subdomain --tenant brightwell
 ```
 
 The deployment gets its own Cloudflare zone for the subdomain, and you delegate the subdomain to it with
 `NS` records at your DNS host. The parent domain stays where it is. After that, the subdomain works like
-a `cloudflare_zone` apex: every address works and Pylota Mail writes the mail records.
+a `cloudflare_zone` apex: every address works and Pylota Identity writes the mail records.
 
 - Available only when the deployment's Cloudflare account is on Enterprise and the operator has set
   `PM_CF_SUBDOMAIN_SETUP = "on"`. Otherwise the request fails with `422 transport_unavailable`. Without
@@ -375,7 +375,7 @@ addresses your agents use.
 
 ## What happens when a domain fails
 
-Whatever the method, Pylota Mail never sends as a domain whose authentication is broken. When a domain
+Whatever the method, Pylota Identity never sends as a domain whose authentication is broken. When a domain
 is `failing` (or `suspended`), sends go out from the identity's platform address instead, for example
 `bookings.brightwell@agents.example`, with the same display name, and replies still come back into the
 same thread ([Fix a failing domain](#fix-a-failing-domain)). The platform address always sends through
@@ -397,11 +397,11 @@ retires the old one as usual.
 
    ```bash
    curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/addresses \
-     -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
      -d '{"local_part":"bookings","domain_id":"dom_01JA…"}'
    ```
 
-   CLI: `pmail addresses add`. The new address is an `alias` with status `pending`. It becomes `active`
+   CLI: `idvy addresses add`. The new address is an `alias` with status `pending`. It becomes `active`
    when its domain is healthy, and `identity.address_activated` is sent. It already receives mail
    once it is active. On a `send_only` domain (or `smtp_relay` with `inbound: forward`), add the
    forwarding rule and run the forwarding test now.
@@ -410,11 +410,11 @@ retires the old one as usual.
 
    ```bash
    curl -X POST https://mail.example.com/v1/identities/idn_01J9Z3K8V4/addresses/adr_01JA…/promote \
-     -H "Authorization: Bearer $PYLOTA_MAIL_KEY" -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $PYLOTA_IDENTITY_KEY" -H "Content-Type: application/json" \
      -d '{"retire_previous_after_days":90}'
    ```
 
-   CLI: `pmail addresses promote`. The address becomes the primary. The previous primary becomes an
+   CLI: `idvy addresses promote`. The address becomes the primary. The previous primary becomes an
    alias with status `retiring`, and its `retire_at` is set (default 90 days, range 0–365); if the
    previous primary is the platform address, it becomes an `active` alias instead and is never retired.
    Promotion needs the domain to be `healthy` or `degraded`, otherwise `409 domain_not_ready`.
@@ -435,7 +435,7 @@ retirement is cancelled and it is the primary once more
 ([FR-ADR-4](../project/prd.md#62-identities-and-addresses)).
 
 **To retire an alias early**, use `POST …/addresses/{address_id}/retire` with `{"after_days": 0}`
-(CLI `pmail addresses retire`). The primary cannot be retired (`409 address_is_primary`), and the
+(CLI `idvy addresses retire`). The primary cannot be retired (`409 address_is_primary`), and the
 platform address can never be retired or deleted (`409 address_in_use`). Only a `pending` address that
 never received mail can be deleted; any other gets `409 address_in_use`.
 
@@ -464,7 +464,7 @@ operator is told ([H1](../project/edge-cases.md)).
 See the current state and the history of checks:
 
 ```bash
-pmail domains health dom_01JA…
+idvy domains health dom_01JA…
 ```
 
 ```json
@@ -487,17 +487,17 @@ Issues you may meet with the methods that keep DNS at your host:
 | `mail_from_failed` (degraded) | `dns_records`, `send_only` | The `pm-bounce` MX or TXT is missing. DKIM still aligns, so sending continues | Publish both `pm-bounce` records |
 | `smtp_unaligned`, `smtp_from_rewritten` (degraded the first time, then fail) | `smtp_relay` | Your provider signs with its own domain, or changes the `From` address | Turn on DKIM for your domain at your provider; allow the agent addresses as senders |
 | `smtp_probe_timeout` (fail before the first pass; after it, degraded the first time, fail from the second in a row) | `smtp_relay` | No probe arrived within 15 minutes. With `p=reject`, an unaligned probe is rejected on arrival, so it looks like a timeout | Check that the relay accepts and sends mail from `probe_from`, and that it signs with DKIM for your domain |
-| `smtp_auth_failed`, `smtp_tls_required` (fail) | `smtp_relay` | The relay refused the login, or offered no TLS | Update the credentials with `pmail domains update` |
+| `smtp_auth_failed`, `smtp_tls_required` (fail) | `smtp_relay` | The relay refused the login, or offered no TLS | Update the credentials with `idvy domains update` |
 
 The full list, per method, is in
 [Domains on any DNS host › Health checks per method](../project/design/domain-connections.md#6-health-checks-per-method).
 
 ## Fix a failing domain
 
-1. Read the issues: `pmail domains health dom_01JA…` (or the `issues` in the `domain.failing` event).
+1. Read the issues: `idvy domains health dom_01JA…` (or the `issues` in the `domain.failing` event).
 2. Apply each `fix` at your DNS host (or, for `smtp_relay`, at your mail provider), exactly as given.
-   Run `pmail domains records dom_01JA…` to confirm each record is `ok`.
-3. Run `pmail domains verify dom_01JA…` (for `smtp_relay`, `pmail domains probe` too). After two
+   Run `idvy domains records dom_01JA…` to confirm each record is `ok`.
+3. Run `idvy domains verify dom_01JA…` (for `smtp_relay`, `idvy domains probe` too). After two
    consecutive passing checks the domain returns to `healthy` and `domain.recovered` is sent.
 
 While the domain is failing, nothing is sent as it. Sends go out from the identity's platform address
@@ -514,14 +514,14 @@ nameservers moved, the ownership TXT record disappeared, or its registration cha
 through RDAP) ([H4](../project/edge-cases.md)). `domain.suspended` gives the reason:
 `failing_14_days`, `nameservers_changed`, `ownership_record_missing` or `registration_changed`.
 
-Pylota Mail never sends as a domain whose ownership may have changed hands. To restore it:
+Pylota Identity never sends as a domain whose ownership may have changed hands. To restore it:
 
 ```bash
-pmail domains reprove dom_01JA…
+idvy domains reprove dom_01JA…
 ```
 
-This issues a **new** ownership TXT value for `_pylota-mail.<domain>`. Publish it, fix any other
-issues, then run `pmail domains verify`.
+This issues a **new** ownership TXT value for `_pylota-identity.<domain>`. Publish it, fix any other
+issues, then run `idvy domains verify`.
 
 ## Change domains again
 
@@ -535,17 +535,17 @@ first address is still pending, the newer request replaces the older pending add
 ## Remove a domain
 
 ```bash
-pmail domains remove dom_01JA…
+idvy domains remove dom_01JA…
 ```
 
 Removal fails with `409 domain_in_use` while any address on the domain is `active` or `retiring`.
-Retire them first. Once removal starts (`202`), what Pylota Mail set up for the domain is deleted (the
+Retire them first. Once removal starts (`202`), what Pylota Identity set up for the domain is deleted (the
 routing rules and this domain's own routing records, the Email Sending onboarding and the event
-subscription, or the SES identity), and `domain.removed` is sent. Nothing Pylota Mail did not create for
+subscription, or the SES identity), and `domain.removed` is sent. Nothing Pylota Identity did not create for
 the domain is touched, and other mail domains in the same Cloudflare zone keep receiving. Records you
 published at your own DNS host, and forwarding rules in your mailbox, stay until you remove them. If the
 removal keeps failing (for example a Cloudflare outage), the domain stays `removing` and the removal is
-retried once a day; running `pmail domains remove` again retries it at once.
+retried once a day; running `idvy domains remove` again retries it at once.
 
 ## DMARC alignment
 
@@ -589,7 +589,7 @@ It applies only to a `cloudflare_zone` subdomain. Cloudflare allows catch-all ro
 apex, so each address on such a subdomain needs its own routing rule, and Cloudflare allows 200 rules per
 domain. A zone apex, a `dns_records` subdomain and a delegated subdomain have no such limit.
 
-**Does Pylota Mail ever send as a broken domain?**
+**Does Pylota Identity ever send as a broken domain?**
 No. A `failing` domain falls back to the platform address. A `suspended` domain sends nothing as
 itself until ownership is proved again.
 
@@ -600,7 +600,7 @@ Otherwise use `dns_records`.
 **Do I need `PM_CF_API_TOKEN`?**
 For `cloudflare_zone`, `nameservers` and `delegated_subdomain` added through the API, yes; its
 permissions are in [Deploy to Cloudflare](../self-hosting.md#2-create-a-cloudflare-api-token). Without it,
-an operator can still add a zone apex with `pmail domains add --local-token` and their local token; subdomains,
+an operator can still add a zone apex with `idvy domains add --local-token` and their local token; subdomains,
 `nameservers` and `delegated_subdomain` need the token on the deployment. `dns_records`, `send_only` and
 `smtp_relay` do not use it.
 

@@ -1,6 +1,6 @@
 # Calendar invitations
 
-Binding for implementation. Pylota Mail transports and verifies iCalendar; it does not keep a calendar
+Binding for implementation. Pylota Identity transports and verifies iCalendar; it does not keep a calendar
 (parity decision of 2026-10-17). Inbound, it finds every calendar part of a message, parses it under
 bounds, checks that the authenticated sender is entitled to send that iTIP method, and exposes a bounded,
 structured `calendar` object on the message and a thin `calendar.received` event. Outbound, it sends
@@ -58,7 +58,7 @@ Terms used on this page:
   `calendar` field; the other `VEVENT`s with the same `UID` are **overrides** ([§2.4](#24-primary-component-and-overrides)).
 - **Authenticated sender**: the `From` address when its domain is authenticated ([§3.1](#31-the-authenticated-sender)).
 
-What Pylota Mail never does: answer, accept or decline an invitation on its own (the service still never
+What Pylota Identity never does: answer, accept or decline an invitation on its own (the service still never
 auto-answers, [B8](../edge-cases.md)); expand a recurrence; keep events, an agenda or reminders; resolve
 SEQUENCE conflicts between two messages for the consumer; fetch a `TZURL`, an `ATTACH` URI or any other URL
 in an object ([Security § 8.4](security.md#84-no-remote-fetch)).
@@ -72,7 +72,7 @@ Edge rows: V1–V16.
 `core::calendar::select_parts(parsed: &ParsedMessage, attachments: &[AttachmentMeta]) -> Vec<PartRef>`
 walks the **outer** message's leaves in MIME order (depth first, the order of
 [Inbound › Parsing](inbound.md#parsing)), then the files that `core::mime::tnef::extract` took out of a TNEF
-part, and keeps every calendar part, at most 10 per message (a Pylota Mail choice; later parts stay
+part, and keeps every calendar part, at most 10 per message (a Pylota Identity choice; later parts stay
 ordinary attachments and the warning `parts_skipped` is recorded):
 
 1. A part inside a nested `message/rfc822` (a forwarded message, or the returned copy inside a DSN) is never
@@ -109,7 +109,7 @@ The system identity's mailbox stores the object like any other but never emits `
 
 ### 2.2 The bounded reader
 
-`core::ical` is Pylota Mail's own reader and writer for the subset of RFC 5545 that this page uses. The
+`core::ical` is Pylota Identity's own reader and writer for the subset of RFC 5545 that this page uses. The
 obvious crate, `calcard` 0.3.14 (published 2026-09-15, crates.io metadata read 2026-10-17), was refused:
 it depends on `chrono` and `ahash` with default features, which are `clock`, `std`, `oldtime` and
 `wasmbind` for `chrono` 0.4.45 and `std` and `runtime-rng` (`getrandom`) for `ahash` 0.8.12 (crates.io
@@ -127,7 +127,7 @@ before any other character is kept as the character. Names are case-insensitive.
 replaced with U+FFFD and recorded as the warning `invalid_utf8`.
 
 **Bounds.** Every bound is checked while reading, before anything is allocated for the next item, so the
-work per object is linear in its size. All are Pylota Mail choices, sized from the objects real senders
+work per object is linear in its size. All are Pylota Identity choices, sized from the objects real senders
 produce (a few kilobytes) and from Kairos's own bounds, so anything this reader accepts Kairos can also
 read: Kairos refuses iCalendar input over 2,000,000 bytes or with more than 2,000 `VEVENT`s, 1,000
 exceptions per series or 100 attendees (`packages/kairos/src/sync.ts`, read 2026-10-17).
@@ -295,7 +295,7 @@ value inside its range; `BYSECOND`, `BYMINUTE` and `BYHOUR` absent when `DTSTART
 not with `WEEKLY`; `BYYEARDAY` not with `DAILY`, `WEEKLY` or `MONTHLY`; `BYWEEKNO` only with `YEARLY`;
 a numeric `BYDAY` value (`1MO`, `-1FR`) only with `MONTHLY` or `YEARLY`, and not with `YEARLY` when
 `BYWEEKNO` is present (read 2026-10-18); `BYSETPOS` only with another `BY…` part; no unknown part names.
-As Pylota Mail choices, `INTERVAL` must be 1–1,000, `COUNT` 1–100,000 and each `BY…` list at most 366
+As Pylota Identity choices, `INTERVAL` must be 1–1,000, `COUNT` 1–100,000 and each `BY…` list at most 366
 values, so that a consumer that expands a valid rule is not handed a rule designed to exhaust it. `FREQ=SECONDLY`, `MINUTELY` and `HOURLY` are valid but add
 the warning `rrule_high_frequency`. A second `RRULE` (which RFC 5545 §3.6.1 says should not occur) is
 ignored with the warning `multiple_rrule`. An invalid rule changes nothing else: the object stays `parsed`
@@ -420,7 +420,7 @@ Edge rows: V17–V23.
 
 iMIP leaves authentication to S/MIME: "Authentication MUST be performed using S/MIME" and unsigned messages
 "may not be trusted" (RFC 6047 §2.2.2, read 2026-10-17). Almost no invitation is signed, and v1 never
-verifies S/MIME ([Inbound › Parsing](inbound.md#parsing), B9). Pylota Mail therefore verifies with what it
+verifies S/MIME ([Inbound › Parsing](inbound.md#parsing), B9). Pylota Identity therefore verifies with what it
 does check, the domain authentication of every message, and says exactly what it proved. RFC 6047 §2.2.1
 says implementations should verify the creator before acting, and that only the organizer may modify or
 cancel what she organizes; RFC 5546 §6.1.1 and §6.1.2 name spoofing the organizer and spoofing an attendee
@@ -446,7 +446,7 @@ because a domain that signs its mail but publishes no DMARC record has still pro
 
 **What this proves.** DMARC and alignment prove the `From` domain, not the mailbox: a domain whose own mail
 system lets one user send as another could forge its own users. This is the same limit every
-authentication decision in Pylota Mail has, and it is why `verified_by` and `authenticated_sender` are
+authentication decision in Pylota Identity has, and it is why `verified_by` and `authenticated_sender` are
 returned. On the shared platform domain the service itself guarantees the mailbox: only an identity can
 send as its own address, so an invitation from another workspace's identity is verified like any other
 (V22).
@@ -534,7 +534,7 @@ CREATE INDEX IF NOT EXISTS messages_calendar_uid ON messages(calendar_uid_hash)
 (the limit is 100). No new store exists: the object lives in the message's row, the raw bytes in the
 message's attachment, and both go wherever the message goes.
 
-**Cap and shrink order** (a Pylota Mail choice). `calendar_json` is at most 262,144 bytes (256 KiB) of
+**Cap and shrink order** (a Pylota Identity choice). `calendar_json` is at most 262,144 bytes (256 KiB) of
 UTF-8 JSON. The bounds of [§2.2](#22-the-bounded-reader) keep ordinary objects far below it (a Google or
 Outlook invitation gives 2–6 KiB of JSON), but 100 attendees with 256-character names and five delegation
 addresses each can pass it. When it would, `core::calendar::shrink` removes, in order and only as far as
@@ -785,10 +785,10 @@ check.
    | Every `VEVENT` has exactly one `ORGANIZER` with a `mailto:` address, the same in every component | `organizer_missing`, `organizer_inconsistent` |
    | `publish`: no `ATTENDEE` (RFC 5546 §3.2.1) | `attendee_not_allowed` |
    | `request`: at least one `ATTENDEE`, a `DTSTART` and a `SUMMARY` (which may be empty) in each component (RFC 5546 §3.2.2) | `attendee_missing`, `dtstart_missing`, `summary_missing` |
-   | `add`: `SEQUENCE` greater than 0, a `DTSTART`, a `SUMMARY` (which may be empty), at least one `ATTENDEE`, and no `RECURRENCE-ID`, `RRULE`, `RDATE` or `EXDATE` (§3.2.4). RFC 5546 allows an `ADD` without `ATTENDEE`; the recipient rule of step 13a admits only attendees, so Pylota Mail requires one | `sequence_invalid`, `dtstart_missing`, `summary_missing`, `attendee_missing`, `property_not_allowed` |
+   | `add`: `SEQUENCE` greater than 0, a `DTSTART`, a `SUMMARY` (which may be empty), at least one `ATTENDEE`, and no `RECURRENCE-ID`, `RRULE`, `RDATE` or `EXDATE` (§3.2.4). RFC 5546 allows an `ADD` without `ATTENDEE`; the recipient rule of step 13a admits only attendees, so Pylota Identity requires one | `sequence_invalid`, `dtstart_missing`, `summary_missing`, `attendee_missing`, `property_not_allowed` |
    | `cancel`: `SEQUENCE` present and at least one `ATTENDEE`, the attendees removed or, for the whole event, some or all of them (§3.2.5) | `sequence_invalid`, `attendee_missing` |
    | `declinecounter`: `SEQUENCE` present and at least one `ATTENDEE` (§3.2.8) | `sequence_invalid`, `attendee_missing` |
-   | `reply`, `refresh`: exactly one `ATTENDEE` (§3.2.3, §3.2.6). `counter`: at least one, a Pylota Mail rule: RFC 5546 §3.2.7 allows none, but the attendee who proposes is named only by its `ATTENDEE`, which step 13a binds to the `From` | `attendee_count` |
+   | `reply`, `refresh`: exactly one `ATTENDEE` (§3.2.3, §3.2.6). `counter`: at least one, a Pylota Identity rule: RFC 5546 §3.2.7 allows none, but the attendee who proposes is named only by its `ATTENDEE`, which step 13a binds to the `From` | `attendee_count` |
    | `refresh`: none of the properties RFC 5546 §3.2.6 marks 0, among them `SEQUENCE`, `DTSTART`, `DTEND`, `DURATION`, `SUMMARY`, `DESCRIPTION`, `LOCATION`, `STATUS`, `RRULE`, `RDATE`, `EXDATE` and `ATTACH` | `property_not_allowed` (`details.property`) |
    | No `VALARM` in `cancel`, `refresh`, `declinecounter` or `reply` (RFC 5546 tables: 0 for these methods) | `property_not_allowed` (`details.property = "VALARM"`) |
    | `RRULE` valid ([§2.6](#26-recurrence)), at most one per component | `rrule_invalid` |
@@ -949,7 +949,7 @@ that thread and counterparty erasure finds every address an outbound invitation 
 
 ### 5.9 The stale-sequence guard
 
-Pylota Mail does not order a calendar's versions; the consumer does (for Pylota, Kairos). It does refuse
+Pylota Identity does not order a calendar's versions; the consumer does (for Pylota, Kairos). It does refuse
 one thing it can see, an identity contradicting its own earlier send (V37): for organizer methods, a send
 whose primary `SEQUENCE` is lower than the highest `SEQUENCE` this identity has already sent with the same
 `UID` in an organizer method gets `409 calendar_sequence_stale` with `details.sequence`,
@@ -1103,7 +1103,7 @@ organizer makes the delivery `suppressed`, and the call still answers `202`.
 
 ```text
 BEGIN:VCALENDAR
-PRODID:-//Pylota Mail//Calendar reply 1//EN
+PRODID:-//Pylota Identity//Calendar reply 1//EN
 VERSION:2.0
 METHOD:REPLY
 BEGIN:VEVENT
@@ -1244,7 +1244,7 @@ that is not suppressed, `402 billing_limit` is safe to retry with the same key, 
 ([FR-BILL-4](../prd.md), [FR-BILL-5](../prd.md), V53). Reading, verifying and storing inbound invitations
 costs nothing and is never refused for a plan (FR-BILL-8). No plan has a calendar allowance.
 
-**Limits** (Pylota Mail choices unless a source is named):
+**Limits** (Pylota Identity choices unless a source is named):
 
 | Limit | Value | Why |
 |---|---|---|
@@ -1301,13 +1301,13 @@ Annotations of `mail_calendar_reply`: `readOnlyHint: false`, `destructiveHint: f
 **CLI** ([CLI reference › Sending](../../reference/cli.md#sending)):
 
 ```text
-pmail calendar-reply <message-id> --identity <identity> --partstat accepted|declined|tentative
+idvy calendar-reply <message-id> --identity <identity> --partstat accepted|declined|tentative
                      [--comment <text>] [--recurrence-id <time-or-date>] [--idempotency-key <key>] [--dry-run]
-pmail send … [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-copy]
-pmail reply … [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-copy]
+idvy send … [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-copy]
+idvy reply … [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-copy]
 ```
 
-`pmail messages get` prints the calendar object; `--json` returns it unchanged.
+`idvy messages get` prints the calendar object; `--json` returns it unchanged.
 
 ## 14. Observability
 
@@ -1337,12 +1337,12 @@ pmail reply … [--calendar-file <file.ics>] [--calendar-copy | --no-calendar-co
 
 ## 15. Pylota agentic OS
 
-Pylota reaches Pylota Mail Cloud as a partner ([FR-KEY-4](../prd.md)); each operator is a tenant with four
+Pylota reaches Pylota Identity Cloud as a partner ([FR-KEY-4](../prd.md)); each operator is a tenant with four
 identities (`bookings`, `inquiry`, `maintenance`, `compliance`) and their identity keys K3; Pylota's servers
 hold the partner key K1 and the tenant keys K2 (Pylota's integration spec §4 and §6, read 2026-10-17).
 Kairos (`packages/kairos`) is Pylota's calendar for vehicles and appointments; it owns every calendar
 fact, including `SEQUENCE` ordering and conflicts, which PostgreSQL arbitrates
-(`packages/kairos/SPEC.md`, read 2026-10-17). Pylota Mail is its mail transport and verifier.
+(`packages/kairos/SPEC.md`, read 2026-10-17). Pylota Identity is its mail transport and verifier.
 
 **Who uses it, with which keys.**
 
@@ -1377,7 +1377,7 @@ processes it in the `mail-webhook-event` job:
      inputs, not scheduling authority" (`SPEC.md`, External calendars).
    - `counter`: a pending decision for the operator, through the approval gate.
    - `refresh` with `organized_here: true`: Kairos re-sends its latest `REQUEST` for that `UID` to that
-     attendee through Pylota Mail (only to an attendee of the event: RFC 5546 §6.1.6).
+     attendee through Pylota Identity (only to an attendee of the event: RFC 5546 §6.1.6).
    - `publish`, `declinecounter`, `none`: mail only in v1.
 3. Instance-only objects (a `CANCEL` of one occurrence has no master component) are mapped from Pylota
    Mail's structured object (`recurrence_id`, `overrides`), because Kairos's `parseTrustedICalendarEvents`
@@ -1399,13 +1399,13 @@ Idempotency-Key: pm:v1:kairos-itip:{tenantRef}:{externalRef}:{revision}:{method}
 
 - Kairos's `organizer.email` must be the `bookings` identity's primary address, read from
   `mail_identities.address`, or the send gets `400 calendar_organizer_mismatch` (the error names the
-  address Pylota Mail will use).
-- **What Pylota Mail requires of the caller's `UID`s.** Kairos's `emitITipCalendar` writes the `UID` its
+  address Pylota Identity will use).
+- **What Pylota Identity requires of the caller's `UID`s.** Kairos's `emitITipCalendar` writes the `UID` its
   caller gives it (`packages/kairos/src/sync.ts`, `input.uid`, read 2026-10-18), and an example such as
   `handover-BK-42@bookings.acme.example.com` can be guessed by anyone who knows the booking reference. Each
   Kairos event sent as an invitation must have a random UUID as its `UID` (version 4, hex), as RFC 7986
   §5.3 recommends; that section also says a `UID` must not carry data that identifies a user, host or
-  domain (read 2026-10-18). Pylota Mail does not rely on the secrecy of a `UID`: its matches need the same
+  domain (read 2026-10-18). Pylota Identity does not rely on the secrecy of a `UID`: its matches need the same
   `ORGANIZER` and, for an answer, an attendee the invitation names ([§4.2](#42-ingest),
   [§4.3](#43-threading-by-uid), [§6.2](#62-rules-in-order)), and Kairos must match the same way, by
   `(organizer, UID)`, never by `UID` alone. A random `UID` keeps a stranger from aiming a message at an event
@@ -1414,7 +1414,7 @@ Idempotency-Key: pm:v1:kairos-itip:{tenantRef}:{externalRef}:{revision}:{method}
   (the key rules of integration spec §7.3), so a redrive of the same revision never sends
   twice and a new revision is a new message. Kairos's revision should be the iCalendar `SEQUENCE`, so the
   stale-sequence guard of [§5.9](#59-the-stale-sequence-guard) never refuses a legitimate update.
-- Kairos writes `TZID=Europe/London` without a `VTIMEZONE`; Pylota Mail adds the definition
+- Kairos writes `TZID=Europe/London` without a `VTIMEZONE`; Pylota Identity adds the definition
   ([§5.3](#53-normalisation)). It also removes Kairos's `X-` properties except `X-WR-TIMEZONE`.
 - The `bookings` identity keeps `require_known_recipient: true`, so the first invitation to a renter is
   `suppressed` (`unknown_recipient`) unless the renter is known. The sender must first add a send-allow
@@ -1432,7 +1432,7 @@ The tool-risk registry classes it as a send that needs the operator's approval u
 counterparty on file; the agent sees `calendar_not_verified`, `calendar_cancelled`, `calendar_superseded`,
 `calendar_event_past` and `calendar_not_attendee` as tool results it can explain to the operator.
 
-**What Pylota stores.** Nothing new in Pylota Mail. In Pylota: `calendar.received` rows in
+**What Pylota stores.** Nothing new in Pylota Identity. In Pylota: `calendar.received` rows in
 `mail_webhook_events` (thin payload, nulled when processed), the Kairos events and participation statuses
 (Kairos's own tables, forced RLS), the outbound invitations in `mail_outbound_messages` with sender kind
 `kairos_itip`, and a link table from `(identity, message_id)` to the Kairos event identity, erased with the
@@ -1453,13 +1453,13 @@ Kairos.
    matched by `(organizer, UID)`, never by `UID` alone; only the verified `UID`'s components parsed;
    `reply` only for `organized_here`, and only for an attendee already on the event; external
    `request`/`add`/`cancel` as untrusted busy time or an operator decision; instance-only objects from
-   Pylota Mail's object; all-day time zone from the resource.
+   Pylota Identity's object; all-day time zone from the resource.
 3. The Kairos invitation sender: row in §7.3 (sender `kairos-itip`, identity `bookings`, kind
    `transactional`, key `pm:v1:kairos-itip:{tenantRef}:{externalRef}:{revision}:{method}`), the organizer
    address rule, a random UUID `UID` for every event it sends, the send-allow entry from the booking record
    (§7.7, reason `booking_on_file`), and the transport rule above.
 4. That Kairos is the owner of `SEQUENCE` ordering and conflicts: its revision is the `SEQUENCE`, it
-   applies RFC 5546 §2.1.5 to replies, and it never relies on Pylota Mail to order versions.
+   applies RFC 5546 §2.1.5 to replies, and it never relies on Pylota Identity to order versions.
 5. The `calendar_reply` capability route and its tool-risk registry entry, with the idempotency key above,
    for the operator coordinator and the mapped specialists only; not for the public-webchat coordinator.
 6. The operator inbox's "not verified" badge, and the booking screen's invitation status.
@@ -1517,7 +1517,7 @@ To add to [PRD § 6](../prd.md#6-functional-requirements) as a new subsection, "
 - **FR-CAL-12** A verified calendar message without thread headers **must** join the thread that holds a
   calendar message with the same `UID` and `ORGANIZER` (for an attendee's answer, an invitation this
   identity sent that names that attendee); an unverified one **must never** join by `UID`.
-- **FR-CAL-13** Pylota Mail **must not** keep calendar state beyond the message's own row and attachment.
+- **FR-CAL-13** Pylota Identity **must not** keep calendar state beyond the message's own row and attachment.
   Calendar data **must** be retained, erased (including by counterparty erasure of any address the object
   names), held and exported with its message.
 - **FR-CAL-14** The calendar object **must** be readable, and the reply route usable, through the REST API,
@@ -1525,7 +1525,7 @@ To add to [PRD § 6](../prd.md#6-functional-requirements) as a new subsection, "
 
 ## 17. Edge cases
 
-Section V of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator acts on the result).
+Section V of the register. Owner `S` is Pylota Identity, `S+I` both (the integrator acts on the result).
 
 | # | Case | Required behaviour | Owner | Test |
 |---|---|---|---|---|
@@ -1643,7 +1643,7 @@ Section V of the register. Owner `S` is Pylota Mail, `S+I` both (the integrator 
 | `it::security::cross_tenant_matrix` | Gains `POST …/calendar-reply`: another tenant's or partner's identity and message answer `404` exactly as missing ones | V50 |
 | `it::mcp::calendar_tools` | `mail_calendar_reply` is listed only for keys with `messages:send` and maps to the route with the same errors; `mail_send` and `mail_reply` accept `calendar`; `mail_get_message` caps attendees at 20 and overrides at 10 with the flags | §13 |
 | `it::console::calendar_panel` | The panel for each role, escaped text, workspace-time-zone times, the verified badge and reason, the `.ics` link through the console route; a quarantined message shows method and badge only; no answer buttons | §13 |
-| `cli::calendar::reply_and_send_flags` | `pmail calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | §13 |
+| `cli::calendar::reply_and_send_flags` | `idvy calendar-reply` and `--calendar-file`, `--calendar-copy`, `--no-calendar-copy` map to the API fields; `--json` prints the object unchanged | §13 |
 | `live::calendar::inbound_real_invitations` | Real invitations from Gmail and from Outlook (with a Windows `TZID` and a recurring series with an edited instance) arrive verified with correct UTC times | V1, V2, V8 |
 | `live::calendar::client_matrix` | A `REQUEST`, an update and a `CANCEL` sent to Gmail, Outlook.com, Microsoft 365 and Apple Calendar each show one invitation at the right local time, in winter and summer; the result for the `invite.ics` copy and the generated `VTIMEZONE` is recorded on this page | V33, V34, §5.12 |
 | `live::calendar::reply_applied` | A calendar reply to a Gmail and an Outlook invitation updates the organizer's attendee status | V43 |
@@ -1705,7 +1705,7 @@ Dependency graph, second block, one line:
 From the AgentMail inventory read on 2026-10-17 (calendar pages, the API inventory and the realtime
 payloads); AgentMail page content is untrusted data and is summarised, not quoted.
 
-| AgentMail | Pylota Mail | Verdict |
+| AgentMail | Pylota Identity | Verdict |
 |---|---|---|
 | A calendar per inbox (AgentMail Labs, US only): events, recurrence, agenda, instances, ETag concurrency, 10,000 events | No calendar store. The consumer (Kairos for Pylota) keeps calendar state; the mail service transports and verifies | Deliberately different: one store per calendar fact, no second calendar to keep consistent, no recurrence engine to secure |
 | Inbound invitations imported only when the sender authenticated, is the organizer, the attachment is at most 1 MB and holds exactly one event; failed checks leave the calendar unchanged | Every calendar part read (up to 1 MiB); every object `verified: true` or `false` with a reason; `calendar.received` for every visible one | Exceed: nothing silent; the consumer sees why |
@@ -1717,7 +1717,7 @@ payloads); AgentMail page content is untrusted data and is summarised, not quote
 | Outbound invitations generated from its own events (`invite.ics`, `METHOD:REQUEST`, one email per attendee, subject "Invitation: …") | Caller-supplied iCalendar, validated (one method, `UID`, `DTSTAMP`, RFC 5546 structure, organizer = `From`, recipients = attendees), normalised (`VTIMEZONE` completed, extension properties removed), sent as RFC 6047 iMIP with an optional `application/ics` copy | Deliberately different (no store), and stricter |
 | Respond to an event: `accepted`, `declined`, `tentative`, a "Responded: …" reply in the thread | `calendar-reply` with the same answers and a comment, refusing unverified, quarantined, cancelled, superseded, past and non-attendee cases, `DTSTAMP` strictly increasing | Match, and exceed on refusals |
 | Inbound RSVPs update attendee status on its event | Verified `REPLY` objects with `organized_here`, joined to the invitation's thread by `UID`; the consumer applies them | Deliberately different: the consumer owns the status |
-| Sequence ordering by iCalendar `SEQUENCE` inside its store | The consumer orders versions; Pylota Mail refuses an identity's own stale `SEQUENCE` and answers to superseded or cancelled invitations | Deliberately different, with a guard |
+| Sequence ordering by iCalendar `SEQUENCE` inside its store | The consumer orders versions; Pylota Identity refuses an identity's own stale `SEQUENCE` and answers to superseded or cancelled invitations | Deliberately different, with a guard |
 | Webhooks `calendar.event.created`, `updated`, `deleted`, `responded`, `starting`, `ending` (needs `calendar_event_read`) | One thin `calendar.received` (needs `messages:read`); starting and ending reminders are the consumer's | Deliberately different: no store, so no store events |
 | Invites, updates, cancellations and replies count against send limits per recipient | Calendar sends and replies take the `sends` hold per recipient that is not suppressed | Match |
 | Calendar permissions (`calendar_read` … `calendar_event_delete`) | No new permission: `messages:read`, `messages:send`, `attachments:read` | Deliberately different: calendar mail is mail |

@@ -1,16 +1,16 @@
 # Deploy to Cloudflare
 
-This guide deploys Pylota Mail to your own Cloudflare account. You will:
+This guide deploys Pylota Identity to your own Cloudflare account. You will:
 
-1. install the `pmail` CLI;
+1. install the `idvy` CLI;
 2. create a Cloudflare API token;
-3. run `pmail setup`, which creates every Cloudflare resource and deploys a prebuilt, checksum-verified
+3. run `idvy setup`, which creates every Cloudflare resource and deploys a prebuilt, checksum-verified
    Worker;
 4. check that the Worker answers;
 5. create the first API key;
-6. run `pmail doctor --mail-test` to prove mail flows both ways.
+6. run `idvy doctor --mail-test` to prove mail flows both ways.
 
-Optionally, connect Amazon SES with `pmail setup ses`, so that tenants can connect domains whose DNS
+Optionally, connect Amazon SES with `idvy setup ses`, so that tenants can connect domains whose DNS
 stays at another host ([Tenant domains](#tenant-domains)).
 
 Hands-on time is about 15 minutes ([NFR-OPS-1](project/prd.md#7-non-functional-requirements)). DNS
@@ -28,12 +28,12 @@ and deploying the docs site.
 | A Cloudflare account on the **Workers Paid** plan | Email Sending to arbitrary recipients needs Workers Paid. Email Sending is in public beta |
 | A **platform mail domain**: a zone apex on Cloudflare DNS in that account, that does not receive mail anywhere else. Examples use `agents.example` | Every identity gets an address on it, such as `bookings.acme@agents.example`. Only this domain must be on Cloudflare: tenants' own domains can be on any DNS host ([Custom domains](guides/custom-domains.md)) |
 | An **API host**: any hostname on a zone in the account, with no existing CNAME record. Examples use `mail.example.com` | The Worker serves there, as a Worker Custom Domain: the REST API (`/v1/*`, including signed links `/v1/links/*`), the MCP server (`/mcp`), `/openapi.json`, `/health`, `/.well-known/*`, the provider hooks (`/hooks/*`) and `/billing/stripe/webhook`; and the console, unless you give it its own host with `--console-host` |
-| Node.js 22 or later, with `npm` | `pmail setup` and `pmail deploy` run Cloudflare's `wrangler` CLI (version `4.139.0`), which `pmail` installs with `npm ci --ignore-scripts` from the lockfile inside the signed release, never by name |
-| The `pmail` binary | It runs setup, deploy, the doctor and every admin and mail command |
+| Node.js 22 or later, with `npm` | `idvy setup` and `idvy deploy` run Cloudflare's `wrangler` CLI (version `4.139.0`), which `idvy` installs with `npm ci --ignore-scripts` from the lockfile inside the signed release, never by name |
+| The `idvy` binary | It runs setup, deploy, the doctor and every admin and mail command |
 
 ### Why the mail domain must be a dedicated zone apex
 
-- **Catch-all routing works only on a zone apex.** Pylota Mail routes every address on the platform
+- **Catch-all routing works only on a zone apex.** Pylota Identity routes every address on the platform
   domain to the Worker with one catch-all rule and looks the recipient up in its own directory. That
   is what lets identities be created without touching DNS. On a subdomain, Cloudflare needs one
   routing rule per address, with a limit of 200 ([Limits](reference/limits.md#domains-and-addresses)).
@@ -52,28 +52,28 @@ CNAME record, so pick a free hostname.
 ## 1. Install the CLI
 
 Download the binary for your platform from the
-[GitHub Releases page](https://github.com/PILOTAAI/pylota-mail/releases) and check it against the
+[GitHub Releases page](https://github.com/PILOTAAI/pylota-identity/releases) and check it against the
 signed `SHA256SUMS` file in the same release. Builds exist for macOS (arm64, x64), Linux (x64, arm64)
 and Windows (x64).
 
-Or build it with Cargo, once `pylota-mail-cli` is published to crates.io (until then, build it from a
+Or build it with Cargo, once `pylota-identity-cli` is published to crates.io (until then, build it from a
 checkout of the repository with `cargo install --path crates/cli --locked`):
 
 ```bash
-cargo install pylota-mail-cli --locked
+cargo install pylota-identity-cli --locked
 ```
 
 ```bash
-pmail --version
+idvy --version
 node --version     # must be v22 or later (wrangler 4.139.0 declares node >=22.0.0)
 ```
 
-The CLI's version decides which Worker release `pmail setup` and `pmail deploy` install, so keep the
+The CLI's version decides which Worker release `idvy setup` and `idvy deploy` install, so keep the
 CLI and the deployment on the same version.
 
 ## 2. Create a Cloudflare API token
 
-`pmail` uses a Cloudflare API token from the `CLOUDFLARE_API_TOKEN` environment variable for the commands
+`idvy` uses a Cloudflare API token from the `CLOUDFLARE_API_TOKEN` environment variable for the commands
 listed in [CLI › Commands that use your Cloudflare token](reference/cli.md#commands-that-use-your-cloudflare-token):
 `setup`, `deploy` and `doctor` among them. It is never written to the CLI's config file. The Worker can
 hold a second token, the secret `PM_CF_API_TOKEN`, so that tenants can add domains on Cloudflare through
@@ -95,21 +95,21 @@ granted for a Worker that does not exist yet: creating one needs *Admin* at the 
 Custom Domains do not support per-Worker roles yet, and adding one needs *Workers Routes · Edit* on each
 affected zone; once it exists, deploys that do not change it need only *Editor* on the Worker (Cloudflare
 [Workers roles and permissions](https://developers.cloudflare.com/workers/authorization/workers/), read
-2026-10-10). Pylota Mail therefore uses two tokens of your own:
+2026-10-10). Pylota Identity therefore uses two tokens of your own:
 
-- a **first-run token**, used once for the first `pmail setup` (and again only if you change the API or
-  console host): it creates the Worker `pylota-mail` and its Custom Domains. Delete it afterwards;
+- a **first-run token**, used once for the first `idvy setup` (and again only if you change the API or
+  console host): it creates the Worker `pylota-identity` and its Custom Domains. Delete it afterwards;
 - your **deploy token**, `CLOUDFLARE_API_TOKEN` for every later command, with *Editor* on the Worker
-  `pylota-mail` only.
+  `pylota-identity` only.
 
 | Scope | Permission | First-run token | Deploy token (`CLOUDFLARE_API_TOKEN`) | Worker token (`PM_CF_API_TOKEN`) | Used for |
 |---|---|---|---|---|---|
-| Workers product | Workers · Admin | Yes | – | – | Creating the Worker `pylota-mail` (setup step 13) |
-| The Worker `pylota-mail` | Workers · Editor | (covered by Admin) | Yes | – | Uploading new versions, its secrets, cron triggers and Durable Object migrations; reading secret names (`doctor`) |
-| The Worker `pylota-mail` | Workers · Admin | – | Only for `destroy` | – | Deleting the Worker (`destroy`) |
+| Workers product | Workers · Admin | Yes | – | – | Creating the Worker `pylota-identity` (setup step 13) |
+| The Worker `pylota-identity` | Workers · Editor | (covered by Admin) | Yes | – | Uploading new versions, its secrets, cron triggers and Durable Object migrations; reading secret names (`doctor`) |
+| The Worker `pylota-identity` | Workers · Admin | – | Only for `destroy` | – | Deleting the Worker (`destroy`) |
 | Workers product | Workers · Metadata Read-Only | Yes | Yes | – | Reading other Workers' rate-limit namespace IDs, so setup picks unused ones (setup step 10) |
-| Account | D1 · Edit | Yes | Yes | – | Creating the `pylota-mail` database, applying migrations, the CLI's D1 queries (setup, `doctor`, `domains add --local-token`, `domains subscribe`), and the export, Time Travel restore and replay of `pmail ops restore d1` |
-| Account | Workers R2 Storage · Edit | Yes | Yes | – | Creating the `pylota-mail-blobs` bucket (and the backup bucket) and its lifecycle rule |
+| Account | D1 · Edit | Yes | Yes | – | Creating the `pylota-identity` database, applying migrations, the CLI's D1 queries (setup, `doctor`, `domains add --local-token`, `domains subscribe`), and the export, Time Travel restore and replay of `idvy ops restore d1` |
+| Account | Workers R2 Storage · Edit | Yes | Yes | – | Creating the `pylota-identity-blobs` bucket (and the backup bucket) and its lifecycle rule |
 | Account | Queues · Edit | Yes | Yes | Yes | Creating the six work queues and their dead-letter queues (your tokens); listing queues and creating each domain's Email Sending event subscription to `pm-delivery-events` (all) |
 | Account | Vectorize · Edit | Yes | Yes | Only if spike S6 fails | Creating the `pm-mail-chunks` index, its metadata indexes and later index generations; the Worker's REST fallback |
 | Account | Workers AI · Read and Workers AI · Edit | Yes | Yes | Only if spike S6 fails | Checking that the configured models exist, and the embedding probe when you change `PM_EMBED_MODEL`; the Worker's REST fallback. Cloudflare's Workers AI REST page asks a custom token for both to run a model (read 2026-10-09) |
@@ -117,7 +117,7 @@ affected zone; once it exists, deploys that do not change it need only *Editor* 
 | Account | Account Settings · Read | Yes | Yes | – | Used by `wrangler` to read the account |
 | Account | Account Analytics · Read | – | Yes | – | The doctor's `quota` check (Workers Analytics Engine SQL API). Without it that check warns instead of reading the quota errors |
 | Zone (specific zones) | Zone · Read | Yes | Yes | Yes | Finding zones, checking the mail domain is an apex, reading zone status, counting zones (`doctor`) |
-| Zone (All zones) | Zone · Edit | – | Only for `destroy` when `nameservers` or `delegated_subdomain` domains still exist | Only for `nameservers` and `delegated_subdomain` | Creating a zone for a domain used only for mail, and deleting it when the domain is removed (by the Worker, or by `pmail destroy --skip-erasure`, which deletes the zones this deployment created) |
+| Zone (All zones) | Zone · Edit | – | Only for `destroy` when `nameservers` or `delegated_subdomain` domains still exist | Only for `nameservers` and `delegated_subdomain` | Creating a zone for a domain used only for mail, and deleting it when the domain is removed (by the Worker, or by `idvy destroy --skip-erasure`, which deletes the zones this deployment created) |
 | Zone (specific zones) | DNS · Edit | Yes | Yes | Yes | Mail DNS records: the ownership TXT, removing MX records with `--replace-mx`, the platform domain's SES DKIM records (`setup ses`), a removed subdomain's routing records |
 | Zone (specific zones) | Zone Settings · Edit | Yes | Yes | Yes | Enabling Email Routing and sub-addressing, reading and unlocking the routing DNS records, and turning routing off when a domain is removed (`POST /zones/{zone_id}/email/routing/dns` accepts Zone Settings Write, [API reference](https://developers.cloudflare.com/api/resources/email_routing/subresources/dns/methods/create/), read 2026-10-10) |
 | Zone (specific zones) | Email Routing Rules · Edit | Yes | Yes | Yes | The catch-all rule to the Worker, and the per-address rules on subdomains |
@@ -127,7 +127,7 @@ affected zone; once it exists, deploys that do not change it need only *Editor* 
 **Which zones.** Give every token **specific zones**, never All zones, unless a row above says so:
 
 - the first-run and deploy tokens: the mail domain's zone, the API host's zone, the console host's zone,
-  and each tenant zone you will add with `pmail domains add --local-token` (add a zone to the token before
+  and each tenant zone you will add with `idvy domains add --local-token` (add a zone to the token before
   you add its domain);
 - the Worker token: the mail domain's zone and every zone that you list in a tenant's policy
   `domains.cloudflare_zones` (add the zone to the token first). A tenant or partner key can use a zone
@@ -139,7 +139,7 @@ Only a deployment that offers `nameservers` or `delegated_subdomain` gives the W
 for its zone permissions, because those methods create zones that no list can name in advance (whether a
 zone-scoped grant can create a zone is not stated by Cloudflare and is verified at build time). Then run
 the deployment in a Cloudflare account of its own: that token can change every zone in the account.
-Pylota Mail Cloud does not offer these methods: it runs in Pylota's existing account with a Worker token
+Pylota Identity Cloud does not offer these methods: it runs in Pylota's existing account with a Worker token
 limited to two zones ([ADR 0010](project/adr/0010-cloud-in-the-existing-cloudflare-account.md)).
 
 Notes:
@@ -147,7 +147,7 @@ Notes:
 - Cloudflare's documentation names the permission for sending (**Email Sending: Edit**, which is not on
   the permissions page; its scope is verified at build time) and for enabling Email Routing
   (**Zone Settings Write**), but not the one for creating Queues event subscriptions. `Queues · Edit` is
-  assumed to cover it. `pmail doctor` checks that the event subscription and the catch-all rule exist
+  assumed to cover it. `idvy doctor` checks that the event subscription and the catch-all rule exist
   and tells you if either is missing
   (spike [S9](project/build-plan.md#m1--spikes-each-one-gates-design-choices)).
 - *Queues · Edit*, *Email Sending · Edit* and the D1, R2 and Vectorize permissions are account-wide in this
@@ -158,7 +158,7 @@ Notes:
 - Neither token needs permission to manage tokens, billing, members or Email Routing destination
   addresses (setup registers none). Do not add them.
 
-Export the first-run token for the first `pmail setup`, and the account ID if you prefer it to the
+Export the first-run token for the first `idvy setup`, and the account ID if you prefer it to the
 `--account-id` flag. After setup has finished, delete the first-run token in the dashboard and export the
 deploy token instead. Setup also stores the account ID (not the token) in your CLI profile, so later
 commands find it:
@@ -171,7 +171,7 @@ export CLOUDFLARE_ACCOUNT_ID=…        # optional; same as --account-id
 ## 3. Run setup
 
 ```bash
-pmail setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example \
+idvy setup --account-id <account-id> --domain mail.example.com --mail-domain agents.example \
   --jurisdiction eu --owner-email sam@acmecarhire.example
 ```
 
@@ -189,7 +189,7 @@ pmail setup --account-id <account-id> --domain mail.example.com --mail-domain ag
 Every flag is in the [CLI reference](reference/cli.md#setup).
 
 Setup also deploys the Worker. It downloads the release for the CLI's version
-(`pylota-mail-worker-<version>.tar.gz`) and the release's signed `SHA256SUMS` from GitHub Releases,
+(`pylota-identity-worker-<version>.tar.gz`) and the release's signed `SHA256SUMS` from GitHub Releases,
 refuses to continue if the checksum does not match, renders `deploy/wrangler.toml`, applies the D1
 migrations and runs `wrangler deploy`. `--version <v>` picks another release, and
 `--from-source` builds the Worker locally from a checkout of the repository (`--source-dir <path>`,
@@ -206,22 +206,22 @@ and run the same command again. It finds what already exists and creates only wh
 | Resource | Name | Notes |
 |---|---|---|
 | Release bundle | `deploy/.bundle/<version>/` | The verified Worker release that setup deploys |
-| D1 database | `pylota-mail` | In the chosen jurisdiction. Migrations applied. Holds the control plane: tenants, identities, the address directory, domains, hashed API keys, webhooks, suppressions, jobs, audit log |
-| R2 bucket | `pylota-mail-blobs` | Same jurisdiction. Lifecycle rules delete `inbound-staging/` after 15 days and abort incomplete multipart uploads after one day |
+| D1 database | `pylota-identity` | In the chosen jurisdiction. Migrations applied. Holds the control plane: tenants, identities, the address directory, domains, hashed API keys, webhooks, suppressions, jobs, audit log |
+| R2 bucket | `pylota-identity-blobs` | Same jurisdiction. Lifecycle rules delete `inbound-staging/` after 15 days and abort incomplete multipart uploads after one day |
 | Queues | `pm-inbound`, `pm-outbound`, `pm-delivery-events`, `pm-webhooks`, `pm-index`, `pm-screen` | Each with a dead-letter queue (`pm-inbound-dlq` and so on) |
 | Vectorize index | `pm-mail-chunks` | 1,024 dimensions, cosine, eight metadata indexes. Holds no message text |
 | Email Routing | On the platform domain | Enabled, with a catch-all rule that sends every address to the Worker |
-| Ownership record | TXT `_pylota-mail.agents.example` | `pm-verify=…`, the proof that this deployment controls the domain |
+| Ownership record | TXT `_pylota-identity.agents.example` | `pm-verify=…`, the proof that this deployment controls the domain |
 | Email Sending | On the platform domain | Onboarded. Cloudflare adds MX and SPF records on `cf-bounce.agents.example`, DKIM at `cf-bounce._domainkey.agents.example` and DMARC at `_dmarc.agents.example` |
 | Event subscription | Platform domain → `pm-delivery-events` | Delivery, bounce, complaint and other Email Sending events |
 | Rate-limit namespaces | `RL_API`, `RL_SEARCH`, `RL_AGENTIC`, `RL_SEND`, `RL_SIGNIN`, `RL_SIGN`, `RL_PARTNER` | Seven bindings, with namespace IDs from 1001 that no other Worker in the account uses |
 | Worker secrets | `PM_MASTER_KEY`, `PM_KEY_PEPPER`, `PM_HASH_KEY` | 32 random bytes each, one purpose each. The keys that sign thread tokens, links, search cursors and Web Bot Auth requests, and each identity's signing keys, are generated later by the Worker itself and kept sealed in D1. See [Configuration › Secrets](reference/configuration.md#secrets) |
-| Worker | `pylota-mail` | Its seven Durable Object classes (`IdentityMailbox`, `DomainMonitor`, `JobRunner`, `TenantQuota`, `SesControl`, `Notifier`, `TenantEvents`), its cron triggers and the API host's Custom Domain (two, with `--console-host`) |
+| Worker | `pylota-identity` | Its seven Durable Object classes (`IdentityMailbox`, `DomainMonitor`, `JobRunner`, `TenantQuota`, `SesControl`, `Notifier`, `TenantEvents`), its cron triggers and the API host's Custom Domain (two, with `--console-host`) |
 | Temporary platform key | `setup-bootstrap`, in your CLI profile | Expires after 24 hours. Replace it in [step 5](#5-create-the-first-api-key) |
 | Platform domain record | `dom_…` with `tenant_id: null` | Visible to every key. Its health is monitored like any other domain, from the Worker's first cron run |
 | Default tenant | – | The one tenant whose address suffix is empty, so its identities get `name@agents.example`. Its console owner is the `--owner-email` person |
 | System identity | `PM_SYSTEM_FROM` on the platform domain | Sends sign-in links, invitations and notification emails |
-| `deploy/wrangler.toml` | – | Bindings, variables, cron triggers and Durable Object migrations for `pmail deploy`. It holds no secrets |
+| `deploy/wrangler.toml` | – | Bindings, variables, cron triggers and Durable Object migrations for `idvy deploy`. It holds no secrets |
 
 The bindings and variables are listed in [Configuration](reference/configuration.md#bindings).
 
@@ -241,14 +241,14 @@ Mail sent to the platform domain while setup runs is refused at SMTP time, so it
 not delivered. Setup turns on the catch-all rule only once the Worker can store mail, so accepted mail is
 never lost.
 
-`pmail deploy` is for later: after you change a variable in `deploy/wrangler.toml` (as in step 6), or to
+`idvy deploy` is for later: after you change a variable in `deploy/wrangler.toml` (as in step 6), or to
 deploy another release with `--version <v>`. It verifies the release the same way. Run straight after
 setup, it finds nothing to change and exits without deploying.
 
 ## 5. Create the first API key
 
 ```bash
-pmail keys create --level platform --name first-key --permissions \
+idvy keys create --level platform --name first-key --permissions \
 tenants:manage,tenants:erase,partners:manage,platform:ops,keys:manage,identities:read,identities:write,\
 domains:read,\
 domains:write,messages:read,messages:send,messages:write,attachments:read,search:read,search:agentic,\
@@ -257,12 +257,12 @@ audit:read,members:read,members:manage
 ```
 
 A platform key must list its permissions; there is no implicit full set. This one holds every permission
-a platform key may hold, so it can create every other key and run `pmail doctor --mail-test`. Setup's
+a platform key may hold, so it can create every other key and run `idvy doctor --mail-test`. Setup's
 summary prints this command for you. (`identities:sign` is not in it: platform keys cannot sign as an
 identity. A platform key can still grant `identities:sign` to the tenant and identity keys it creates,
 so agents can sign on a deployment without the console.)
 
-This call authenticates with the short-lived **bootstrap key** that `pmail setup` stored in your CLI
+This call authenticates with the short-lived **bootstrap key** that `idvy setup` stored in your CLI
 profile. Setup is the only moment the CLI knows `PM_KEY_PEPPER` (it generated it), so it mints that one
 key itself, valid for 24 hours ([CLI and setup › The bootstrap key](project/design/cli.md#65-the-bootstrap-key)).
 
@@ -270,31 +270,31 @@ The secret (`pmk_live_…`) is printed **once**. Store it in a password manager.
 it reaches every tenant, so use it for administration only, and create tenant and identity keys for
 applications and agents ([Security](guides/security.md#keys-and-permissions)).
 
-Because the call used the bootstrap profile, `pmail` then asks whether to save the new key in that
+Because the call used the bootstrap profile, `idvy` then asks whether to save the new key in that
 profile and revoke the bootstrap key. Answer yes. In a non-interactive run, add `--save-profile default`
 to the command instead: the new key is stored in the profile, and the bootstrap key expires on its own
-within 24 hours (or revoke it at once with `pmail keys revoke <key-id>`).
+within 24 hours (or revoke it at once with `idvy keys revoke <key-id>`).
 
 ## 6. Run the doctor with a mail test
 
 ```bash
-pmail doctor --mail-test
+idvy doctor --mail-test
 ```
 
-`pmail doctor` checks DNS, routing, sending, event subscriptions, bindings, secrets and quota, and
+`idvy doctor` checks DNS, routing, sending, event subscriptions, bindings, secrets and quota, and
 prints a fix for every failure ([FR-OPS-3](project/prd.md#613-operations)). With `--mail-test` it
 also sends a message out through the deployment and receives it back through Email Routing, then
 prints the `Authentication-Results` authserv-id that Cloudflare's MX stamped on it.
 
-`pmail setup` already ran this test as its last step and set that value as `PM_TRUSTED_AUTHSERV_ID`
+`idvy setup` already ran this test as its last step and set that value as `PM_TRUSTED_AUTHSERV_ID`
 (see [Configuration › Variables](reference/configuration.md#variables)). If setup's mail test failed,
-the doctor says so; fix the cause and run `pmail setup` again, which sets it. Until it is set, SPF
+the doctor says so; fix the cause and run `idvy setup` again, which sets it. Until it is set, SPF
 cannot be checked: mail from a sender whose DMARC policy is `quarantine` or `reject` and whose DKIM does
 not align is quarantined as `auth_unverified`. Headers from any
 other authserv-id are always ignored, because senders can forge them
 ([D9](project/edge-cases.md)).
 
-Run `pmail doctor` again whenever something looks wrong. It is safe to run at any time.
+Run `idvy doctor` again whenever something looks wrong. It is safe to run at any time.
 
 You now have a working deployment. Continue with the [Quickstart](quickstart.md) to create a tenant,
 an identity and send your first message.
@@ -308,14 +308,14 @@ something from the deployment:
 | Methods | The deployment needs |
 |---|---|
 | `cloudflare_zone`, `nameservers`, `delegated_subdomain` (the domain's DNS is on Cloudflare, in this account) | The Worker secret `PM_CF_API_TOKEN`, below. `delegated_subdomain` also needs a Cloudflare Enterprise account and `PM_CF_SUBDOMAIN_SETUP = "on"` |
-| `dns_records`, `send_only`, and `smtp_relay` with `inbound: ses` (the domain's DNS stays at any host) | Amazon SES, connected with `pmail setup ses`, below |
+| `dns_records`, `send_only`, and `smtp_relay` with `inbound: ses` (the domain's DNS stays at any host) | Amazon SES, connected with `idvy setup ses`, below |
 | `smtp_relay` with `inbound: forward` | Nothing: the tenant brings their own SMTP relay |
 
 ### Domains on Cloudflare
 
 Without `PM_CF_API_TOKEN`, adding a `cloudflare_zone`, `nameservers` or `delegated_subdomain` domain
 fails with `422 cf_token_required`. You can still add a zone **apex** yourself with
-`pmail domains add <domain> --method cloudflare_zone --tenant <tenant> --local-token`, which uses your
+`idvy domains add <domain> --method cloudflare_zone --tenant <tenant> --local-token`, which uses your
 local `CLOUDFLARE_API_TOKEN` (its zone permissions must cover that zone, [step 2](#2-create-a-cloudflare-api-token)).
 A zone subdomain, `nameservers` and `delegated_subdomain` need the token on the Worker, because the Worker
 keeps calling Cloudflare over the domain's life (a routing rule per address, onboarding once a new zone is
@@ -325,7 +325,7 @@ mail domain's zone and every zone you will list in a tenant's `domains.cloudflar
 a Worker secret:
 
 ```bash
-pmail wrangler secret put PM_CF_API_TOKEN --name pylota-mail
+idvy wrangler secret put PM_CF_API_TOKEN --name pylota-identity
 ```
 
 What the Worker does with it is in
@@ -333,11 +333,11 @@ What the Worker does with it is in
 
 ### Connect Amazon SES (optional)
 
-`pmail setup ses` connects the deployment to Amazon SES once. It runs after `pmail setup`, from the same
+`idvy setup ses` connects the deployment to Amazon SES once. It runs after `idvy setup`, from the same
 directory.
 
 ```bash
-pmail setup ses --region eu-west-2
+idvy setup ses --region eu-west-2
 ```
 
 Before you run it:
@@ -353,31 +353,31 @@ Before you run it:
 
 What it creates in the region. `{dep}` is the deployment label, 8 hex characters derived from your API
 host, which the command prints. Every resource that accepts tags is tagged
-`pylota-mail:api-host = {your API host}`:
+`pylota-identity:api-host = {your API host}`:
 
 | Resource | Name | Notes |
 |---|---|---|
-| S3 bucket | `{prefix}-inbound` (default prefix `pylota-mail-{aws-account-id}-{dep}`, or `--prefix`) | Raw inbound mail waits here until the Worker has stored it, normally seconds and never more than 14 days. No public access, encrypted at rest. Only SES may write to it, and only for the rule below |
-| SNS topic | `pylota-mail-inbound` | Signature version 2. Pushes each inbound notification to `https://{api host}/hooks/ses/inbound` |
-| SQS queue | `pylota-mail-inbound` | Subscribed to the same topic. Keeps every notification for 14 days, so mail is not lost if a push fails |
-| Receipt rule set and rule | `pylota-mail` (or your account's existing active rule set), rule `pm-deliver` | Stores mail for every verified domain in the bucket and notifies the topic, with spam and virus scanning on. An existing active rule set is kept; the rule is added to it |
-| Configuration set and delivery-events topic | `pylota-mail` | Delivery, bounce and complaint events go to `https://{api host}/hooks/ses` |
+| S3 bucket | `{prefix}-inbound` (default prefix `pylota-identity-{aws-account-id}-{dep}`, or `--prefix`) | Raw inbound mail waits here until the Worker has stored it, normally seconds and never more than 14 days. No public access, encrypted at rest. Only SES may write to it, and only for the rule below |
+| SNS topic | `pylota-identity-inbound` | Signature version 2. Pushes each inbound notification to `https://{api host}/hooks/ses/inbound` |
+| SQS queue | `pylota-identity-inbound` | Subscribed to the same topic. Keeps every notification for 14 days, so mail is not lost if a push fails |
+| Receipt rule set and rule | `pylota-identity` (or your account's existing active rule set), rule `pm-deliver` | Stores mail for every verified domain in the bucket and notifies the topic, with spam and virus scanning on. An existing active rule set is kept; the rule is added to it |
+| Configuration set and delivery-events topic | `pylota-identity` | Delivery, bounce and complaint events go to `https://{api host}/hooks/ses` |
 | Platform identity | The platform domain | Verified in SES through its Cloudflare zone, so that SES can bounce mail to retired addresses from `mailer-daemon@` the platform domain |
-| IAM user | `pylota-mail-worker-{dep}` | One policy, with only the SES (including the receipt-rule actions for retired addresses), S3 and SQS actions the Worker needs. **The policy JSON is printed for you to review before it is applied**; interactive runs ask, and `--yes` accepts it without asking. The user's access key goes straight into the Worker secrets `PM_SES_ACCESS_KEY_ID` and `PM_SES_SECRET_ACCESS_KEY`, and is never written to disk or printed |
+| IAM user | `pylota-identity-worker-{dep}` | One policy, with only the SES (including the receipt-rule actions for retired addresses), S3 and SQS actions the Worker needs. **The policy JSON is printed for you to review before it is applied**; interactive runs ask, and `--yes` accepts it without asking. The user's access key goes straight into the Worker secrets `PM_SES_ACCESS_KEY_ID` and `PM_SES_SECRET_ACCESS_KEY`, and is never written to disk or printed |
 
 Before it creates anything, it checks that the account and region hold no other deployment's resources:
 an active receipt rule set whose `pm-deliver` rule writes to another deployment's bucket, or a resource of
 one of these names tagged for another API host (or not tagged), stops the command with exit 14 and names
 it. It never reuses or changes another deployment's resources.
 
-It then writes the `PM_SES_*` variables into `deploy/wrangler.toml`, runs `pmail deploy` so the Worker
+It then writes the `PM_SES_*` variables into `deploy/wrangler.toml`, runs `idvy deploy` so the Worker
 reads them, subscribes the Worker's two SNS endpoints and waits up to 5 minutes for them to be
-confirmed. Like setup, it is idempotent: if it stops, fix the cause and run it again. `pmail doctor`
+confirmed. Like setup, it is idempotent: if it stops, fix the cause and run it again. `idvy doctor`
 then checks SES as well. The details are in
 [Domains on any DNS host › Deployment set-up for SES](project/design/domain-connections.md#42-deployment-set-up-for-ses).
 
 Tenants can now add `dns_records` and `send_only` domains. SES allows 10,000 verified domains per region
-([SES quotas](https://docs.aws.amazon.com/ses/latest/dg/quotas.html), read 2026-10-09); `pmail doctor`
+([SES quotas](https://docs.aws.amazon.com/ses/latest/dg/quotas.html), read 2026-10-09); `idvy doctor`
 warns at 9,000.
 
 ## DNS authentication and the DMARC ramp
@@ -391,7 +391,7 @@ it as `v=DMARC1; p=reject;`. Check what your zone has:
 
 ```bash
 dig +short TXT _dmarc.agents.example
-pmail domains records dom_…      # the platform domain's ID, from pmail domains list
+idvy domains records dom_…      # the platform domain's ID, from idvy domains list
 ```
 
 If you want aggregate reports before enforcing, ramp the policy over four to six weeks:
@@ -404,7 +404,7 @@ If you want aggregate reports before enforcing, ramp the policy over four to six
 
 - Send `rua` reports to a mailbox someone reads, or to a DMARC reporting service. If that mailbox is
   on a different domain, that domain must publish an authorisation record (RFC 7489 §7.1).
-- A platform domain used only by Pylota Mail can also stay on `p=reject` from the start. The ramp
+- A platform domain used only by Pylota Identity can also stay on `p=reject` from the start. The ramp
   gives you reports first, which helps when you are unsure what else sends as the domain.
 - Enrol the domain with the large mailbox providers' postmaster tools to watch reputation.
 
@@ -437,13 +437,13 @@ names are allowed, except `postmaster` and `abuse`, whose mail goes to the tenan
   counts, usage alerts (only with `PM_BILLING=stripe`; with billing off no allowance has a limit) and the
   daily "needs a person" email, as each person chooses in the console
   ([Notifications](project/design/notifications.md)). `PM_NOTIFICATIONS = "on"` is the default; set it
-  to `"off"` in `deploy/wrangler.toml` and run `pmail deploy` to send only `account` notifications
+  to `"off"` in `deploy/wrangler.toml` and run `idvy deploy` to send only `account` notifications
   (security and billing events, which cannot be turned off).
 
 ## Signed HTTP requests (Web Bot Auth)
 
 Identities can sign the HTTP requests their agents make, so that a website can tell which agent made a
-request and that it came through your deployment: `pmail http-sign` and the MCP tool
+request and that it came through your deployment: `idvy http-sign` and the MCP tool
 `mail_sign_http_request` return `Signature-Agent`, `From`, `Signature-Input` and `Signature` headers,
 signed with a key that belongs to the deployment ([Web Bot Auth](https://developers.cloudflare.com/bots/reference/bot-verification/web-bot-auth/),
 read 2026-10-09). Agent assertions are separate and need nothing from you
@@ -458,26 +458,26 @@ requests stay off in this release and the setting cannot be turned on.
 
 To turn it on:
 
-1. Set `PM_WEB_BOT_AUTH = "on"` under `[vars]` in `deploy/wrangler.toml` and run `pmail deploy`. The
+1. Set `PM_WEB_BOT_AUTH = "on"` under `[vars]` in `deploy/wrangler.toml` and run `idvy deploy`. The
    Worker creates the deployment's signing key the first time it is needed and publishes the key
    directory at `https://mail.example.com/.well-known/http-message-signatures-directory` (your API
    host). The directory is signed once per listed key and lists at most three keys.
-2. Run `pmail doctor --check web_bot_auth`, which fetches the directory and checks its signatures.
+2. Run `idvy doctor --check web_bot_auth`, which fetches the directory and checks its signatures.
 3. Let each tenant that wants it opt in. Tenant policy `web_bot_auth.allowed` is `false` by default, and
    until it is `true` that tenant's identities get `403 policy_denied`. With a platform key that holds
    `tenants:manage`:
 
    ```bash
-   pmail tenants update brightwell --policy '{"web_bot_auth":{"allowed":true}}'
+   idvy tenants update brightwell --policy '{"web_bot_auth":{"allowed":true}}'
    ```
 
 Agents then sign with a tenant or identity key that holds `identities:sign`. Signing shares the
 `RL_SIGN` limit with assertions (600 calls a minute per identity) and uses no plan allowance.
 
-**Rotating the key.** `pmail keys rotate web_bot_auth` makes a new key active; the previous one stays
+**Rotating the key.** `idvy keys rotate web_bot_auth` makes a new key active; the previous one stays
 listed in the directory for 7 days. After a suspected leak, add
 `--revoke-previous` to remove the old key from the directory at once, then run
-`pmail secrets rotate-master` ([CLI reference](reference/cli.md#keys-rotate-threadlinkcursorweb_bot_auth)).
+`idvy secrets rotate-master` ([CLI reference](reference/cli.md#keys-rotate-threadlinkcursorweb_bot_auth)).
 Verifiers may cache the directory for up to 24 hours.
 
 **Cloudflare's verified bots (optional).** Sites behind Cloudflare can treat your agents as a verified
@@ -494,29 +494,29 @@ Run staging as a completely separate deployment: its own platform mail domain, A
 Vectorize index and queues. Nothing is shared
 ([Architecture §7](project/architecture.md#7-deployment-topology)).
 
-Use a **separate Cloudflare account**, because setup uses fixed resource names (`pylota-mail`,
-`pylota-mail-blobs`, `pm-*`) and production's tokens should list only production's zones. If you connect
+Use a **separate Cloudflare account**, because setup uses fixed resource names (`pylota-identity`,
+`pylota-identity-blobs`, `pm-*`) and production's tokens should list only production's zones. If you connect
 Amazon SES, use a **separate AWS account** for staging too: `pm-deliver` receives mail for every verified
-domain in its region, so `pmail setup ses` refuses a second deployment in the same account and region.
+domain in its region, so `idvy setup ses` refuses a second deployment in the same account and region.
 Give staging its own deployment directory and its own CLI profile, so it never touches production's
 `deploy/wrangler.toml` or production's key:
 
 ```bash
 export CLOUDFLARE_API_TOKEN=…        # a token for the staging account (step 2)
-pmail setup --account-id <staging-account-id> --domain mail-staging.example.com \
+idvy setup --account-id <staging-account-id> --domain mail-staging.example.com \
   --mail-domain agents-staging.example --jurisdiction eu \
   --dir ./deploy-staging --profile staging
 ```
 
 Pass `--profile staging` to every command for staging, and `--dir ./deploy-staging` to the commands that
 read the deployment directory (`setup ses`, `deploy`, `upgrade`, `doctor`, `destroy` and
-`secrets rotate-master`). Without them `pmail` uses `./deploy` and the `default` profile, which belong to
+`secrets rotate-master`). Without them `idvy` uses `./deploy` and the `default` profile, which belong to
 production:
 
 ```bash
-pmail keys create --level platform --name first-key --permissions … --profile staging
-pmail doctor --dir ./deploy-staging --profile staging
-pmail upgrade --dir ./deploy-staging --profile staging
+idvy keys create --level platform --name first-key --permissions … --profile staging
+idvy doctor --dir ./deploy-staging --profile staging
+idvy upgrade --dir ./deploy-staging --profile staging
 ```
 
 (`…` is the list from [step 5](#5-create-the-first-api-key).)
@@ -525,20 +525,20 @@ The profile holds staging's URL, its account ID and its key, so commands that us
 find the right account. After both setups, the config file looks like this:
 
 ```toml
-# ~/.config/pylota-mail/config.toml
-[profiles.default]                    # production, written by pmail setup
+# ~/.config/pylota-identity/config.toml
+[profiles.default]                    # production, written by idvy setup
 url = "https://mail.example.com"
 account_id = "<production-account-id>"
 key = "pmk_live_…"
 
-[profiles.staging]                    # written by pmail setup --profile staging
+[profiles.staging]                    # written by idvy setup --profile staging
 url = "https://mail-staging.example.com"
 account_id = "<staging-account-id>"
 key = "pmk_live_…"
 ```
 
 To keep a key out of the file, store an environment variable's name instead:
-`pmail login --profile staging --key-env PYLOTA_MAIL_STAGING_KEY`.
+`idvy login --profile staging --key-env PYLOTA_IDENTITY_STAGING_KEY`.
 
 Before an upgrade reaches production, try it on staging: inbound from a real mailbox, outbound and a
 reply, a bounce, and a domain change.
@@ -550,13 +550,13 @@ reply, a bounce, and a domain change.
 3. Upgrade staging, then production:
 
    ```bash
-   pmail upgrade --dir ./deploy-staging --profile staging
-   pmail upgrade
+   idvy upgrade --dir ./deploy-staging --profile staging
+   idvy upgrade
    ```
 
-   `pmail upgrade` deploys the new, checksum-verified release as a gradual deployment
+   `idvy upgrade` deploys the new, checksum-verified release as a gradual deployment
    (10% → 50% → 100% of traffic). See the [CLI reference](reference/cli.md#upgrade) for its options.
-4. Run `pmail doctor` (for staging, with `--dir ./deploy-staging --profile staging`).
+4. Run `idvy doctor` (for staging, with `--dir ./deploy-staging --profile staging`).
 
 What to expect during an upgrade:
 
@@ -570,7 +570,7 @@ What to expect during an upgrade:
 To roll back, deploy the previous version:
 
 ```bash
-pmail deploy --version <previous-version>
+idvy deploy --version <previous-version>
 ```
 
 A rollback changes the code that runs. **It does not revert data.** Mail received, messages sent and
@@ -581,15 +581,15 @@ rolling back one release is safe; do not jump back across several releases.
 
 | Store | What protects it | Notes |
 |---|---|---|
-| D1 (control plane) | D1 Time Travel: restore to any point in the last 30 days | One restore rewinds the whole database. `pmail ops restore d1` exports it first and re-applies every later change you do not exclude |
-| Durable Object SQLite (mailboxes) | Point-in-time recovery for the last 30 days, per object | Exposed by Cloudflare as an API inside the object; `pmail ops restore mailbox` calls it, and `pmail ops restore reconcile` re-queues later mail and re-applies erasures |
+| D1 (control plane) | D1 Time Travel: restore to any point in the last 30 days | One restore rewinds the whole database. `idvy ops restore d1` exports it first and re-applies every later change you do not exclude |
+| Durable Object SQLite (mailboxes) | Point-in-time recovery for the last 30 days, per object | Exposed by Cloudflare as an API inside the object; `idvy ops restore mailbox` calls it, and `idvy ops restore reconcile` re-queues later mail and re-applies erasures |
 | R2 (raw mail, attachments, exports) | Raw `.eml` is the source of truth. Any message can be re-parsed from it ([J3](project/edge-cases.md)) | If you copy the bucket elsewhere, erasure must reach the copy too ([I6](project/edge-cases.md)) |
 | Vectorize | Rebuilt from the mailboxes by a re-embed job | Holds no text |
 
 The recovery objectives are RPO ≤ 1 minute for indexes and ≤ 15 minutes for blobs, and RTO ≤ 4 hours
 ([NFR-OPS-2](project/prd.md#7-non-functional-requirements)).
 
-Before any restore, freeze the deployment (`pmail ops freeze`), and follow the restore runbook
+Before any restore, freeze the deployment (`idvy ops freeze`), and follow the restore runbook
 step by step ([Observability › Restore from PITR](project/design/observability.md#restore-from-pitr)).
 
 Point-in-time recovery is also **residual retention**: for 30 days after an erasure, a restore could
@@ -601,14 +601,14 @@ your own evidence. See [Privacy](guides/privacy.md#backups-and-residual-retentio
 
 Set `PM_ALERT_EMAIL` to your address: page alerts are emailed at once, and ticket alerts once a day
 ([Observability › Alert email](project/design/observability.md#55-alert-email-and-the-external-heartbeat)).
-Then add the heartbeat workflow, which runs `pmail doctor` from GitHub Actions every 15 minutes and
+Then add the heartbeat workflow, which runs `idvy doctor` from GitHub Actions every 15 minutes and
 fails, so GitHub emails you, when the deployment stops answering or a page alert fires; set
-`PM_HEARTBEAT_KEY_ID` so the Worker alerts you in turn if the heartbeat stops. `pmail doctor` fails its
+`PM_HEARTBEAT_KEY_ID` so the Worker alerts you in turn if the heartbeat stops. `idvy doctor` fails its
 `alerts` check while no alert address is set.
 
 ## What it costs
 
-Pylota Mail is source available, and self-hosting it has no licence fee. You pay Cloudflare for what
+Pylota Identity is source available, and self-hosting it has no licence fee. You pay Cloudflare for what
 the deployment uses in your account, and AWS if you connect Amazon SES. An idle
 deployment costs approximately nothing beyond the Workers Paid subscription, because nothing runs
 unless mail arrives, a request is made or a cron fires
@@ -627,26 +627,26 @@ What is billed (see Cloudflare's pricing pages for current prices):
 | Queues | Operations on the six queues |
 | Vectorize | Stored and queried vector dimensions |
 | Workers AI | Embeddings, reranking, triage, screening, attachment text extraction and the agentic planner, measured in neurons |
-| Amazon SES, S3, SNS and SQS (only with `pmail setup ses`) | Mail sent and received on SES domains, billed by AWS. Prefer the à la carte plan ([Connect Amazon SES](#connect-amazon-ses-optional)) |
+| Amazon SES, S3, SNS and SQS (only with `idvy setup ses`) | Mail sent and received on SES domains, billed by AWS. Prefer the à la carte plan ([Connect Amazon SES](#connect-amazon-ses-optional)) |
 
 The biggest levers are inbound volume (each message is parsed, embedded and triaged), agentic search
 (each question runs the planner model several times), attachment text extraction and how long you
-keep raw mail (`retention.raw_days`). Watch usage per tenant with `pmail usage daily` or
+keep raw mail (`retention.raw_days`). Watch usage per tenant with `idvy usage daily` or
 `GET /v1/usage/daily`, which report inbound, outbound, search, agentic, `ai_neurons` and storage per day.
 
 ## Uninstall
 
 ```bash
-pmail destroy
+idvy destroy
 ```
 
-`pmail destroy` removes the Worker and the Cloudflare resources setup created. **This deletes all mail,
+`idvy destroy` removes the Worker and the Cloudflare resources setup created. **This deletes all mail,
 keys and configuration permanently.** Point-in-time recovery cannot bring back a deleted database or
-bucket. It prints the plan first; `pmail destroy --dry-run` prints only the plan.
+bucket. It prints the plan first; `idvy destroy --dry-run` prints only the plan.
 
 Before you run it:
 
-1. Export anything you must keep (`pmail export create`, see
+1. Export anything you must keep (`idvy export create`, see
    [Privacy](guides/privacy.md#subject-access-export)).
 2. Tell integrators: their webhooks will stop and their keys will stop working.
 3. If you connected Amazon SES, decide what happens to its AWS resources. By default `destroy` leaves
@@ -655,7 +655,7 @@ Before you run it:
    reverse order of `setup ses`:
 
    ```bash
-   pmail destroy --include-ses
+   idvy destroy --include-ses
    ```
 
 Threads under a legal hold stop `destroy` before it deletes anything else; release the holds (export
@@ -671,21 +671,21 @@ leftover mail DNS records, and delete the Cloudflare API tokens if you no longer
 | Setup refuses the mail domain because it has MX records | The domain already receives mail elsewhere | Use a dedicated domain. Replacing the MX records would stop that mail |
 | Setup stops with a Cloudflare permission error | The token lacks a permission, or a zone, from step 2 | Add it and re-run setup. It continues where it stopped |
 | The first setup cannot create the Worker or its Custom Domain | You used the deploy token, whose per-Worker role cannot cover a Worker that does not exist yet | Run that first setup with the first-run token of step 2 (Workers Admin at product scope, Workers Routes Edit on the hosts' zones), then delete it |
-| `pmail setup ses` stops with exit 14 naming a rule or resource of another deployment | The AWS account and region already serve another deployment, for example production | Use a separate AWS account for this deployment |
-| `pmail doctor` warns on `quota` that it cannot read the quota errors | The token lacks Account Analytics · Read | Add it ([step 2](#2-create-a-cloudflare-api-token)) |
-| `pmail setup` or `pmail deploy` fails before uploading | Node.js older than 22, or no network access to GitHub Releases | Install Node.js 22+. Behind a proxy, set `HTTPS_PROXY`, which `pmail` honours. `--from-source --source-dir <checkout>` avoids the GitHub Releases download only: it still needs crates.io (or vendored crates) and npm for Wrangler |
-| `pmail setup` or `pmail deploy` refuses the bundle | The checksum did not match | Do not override it. Download again, or report it ([SECURITY.md](https://github.com/PILOTAAI/pylota-mail/blob/main/SECURITY.md)) |
+| `idvy setup ses` stops with exit 14 naming a rule or resource of another deployment | The AWS account and region already serve another deployment, for example production | Use a separate AWS account for this deployment |
+| `idvy doctor` warns on `quota` that it cannot read the quota errors | The token lacks Account Analytics · Read | Add it ([step 2](#2-create-a-cloudflare-api-token)) |
+| `idvy setup` or `idvy deploy` fails before uploading | Node.js older than 22, or no network access to GitHub Releases | Install Node.js 22+. Behind a proxy, set `HTTPS_PROXY`, which `idvy` honours. `--from-source --source-dir <checkout>` avoids the GitHub Releases download only: it still needs crates.io (or vendored crates) and npm for Wrangler |
+| `idvy setup` or `idvy deploy` refuses the bundle | The checksum did not match | Do not override it. Download again, or report it ([SECURITY.md](https://github.com/PILOTAAI/pylota-identity/blob/main/SECURITY.md)) |
 | The Custom Domain cannot be created | The API host already has a CNAME record | Delete the record or choose another hostname |
-| `/health` does not answer | The Custom Domain or its certificate is still being created | Wait a few minutes, then run `pmail doctor` |
-| Inbound mail bounces with `550 5.1.1` | The address does not exist (or was erased) | Check it with `pmail identities lookup <address>` |
-| Inbound mail does not arrive at all | MX records are not Cloudflare's, or the catch-all does not point to the Worker | `pmail doctor` checks both and prints the fix |
-| Sends stay `queued` | Email Sending onboarding is incomplete, or the daily quota is used up | `pmail doctor`. Quota waits retry for up to 24 hours ([G3](project/edge-cases.md)). Cloudflare does not tell the Worker your quota: copy it into `PM_DAILY_SEND_QUOTA` to be alerted at 80% |
+| `/health` does not answer | The Custom Domain or its certificate is still being created | Wait a few minutes, then run `idvy doctor` |
+| Inbound mail bounces with `550 5.1.1` | The address does not exist (or was erased) | Check it with `idvy identities lookup <address>` |
+| Inbound mail does not arrive at all | MX records are not Cloudflare's, or the catch-all does not point to the Worker | `idvy doctor` checks both and prints the fix |
+| Sends stay `queued` | Email Sending onboarding is incomplete, or the daily quota is used up | `idvy doctor`. Quota waits retry for up to 24 hours ([G3](project/edge-cases.md)). Cloudflare does not tell the Worker your quota: copy it into `PM_DAILY_SEND_QUOTA` to be alerted at 80% |
 | Sends end `rejected` with `sender_domain_unavailable` | The sending domain is not onboarded for Email Sending | Re-run setup, or fix the domain (see [Custom domains](guides/custom-domains.md)) |
-| Delivery statuses never change after `submitted` | The Email Sending event subscription is missing | `pmail doctor` checks it. Re-run setup to create it |
-| Every verdict ignores Cloudflare's header | `PM_TRUSTED_AUTHSERV_ID` is not set | Run `pmail doctor --mail-test` and set the value it prints |
-| An alert says a dead-letter queue is not empty | A queue message failed every retry | `pmail dlq list` (`GET /v1/platform/dlq`), fix the cause, then `pmail dlq redrive` ([J8](project/edge-cases.md)) |
-| `401 unauthenticated` from every command | Wrong profile, URL or key; a `PYLOTA_MAIL_KEY` in the environment overrides the profile's key | `pmail config show` shows where each setting came from |
-| `pmail http-sign` fails with `422 web_bot_auth_disabled` or `403 policy_denied` | Signed HTTP requests are off, or the tenant has not opted in | [Signed HTTP requests](#signed-http-requests-web-bot-auth) |
+| Delivery statuses never change after `submitted` | The Email Sending event subscription is missing | `idvy doctor` checks it. Re-run setup to create it |
+| Every verdict ignores Cloudflare's header | `PM_TRUSTED_AUTHSERV_ID` is not set | Run `idvy doctor --mail-test` and set the value it prints |
+| An alert says a dead-letter queue is not empty | A queue message failed every retry | `idvy dlq list` (`GET /v1/platform/dlq`), fix the cause, then `idvy dlq redrive` ([J8](project/edge-cases.md)) |
+| `401 unauthenticated` from every command | Wrong profile, URL or key; a `PYLOTA_IDENTITY_KEY` in the environment overrides the profile's key | `idvy config show` shows where each setting came from |
+| `idvy http-sign` fails with `422 web_bot_auth_disabled` or `403 policy_denied` | Signed HTTP requests are off, or the tenant has not opted in | [Signed HTTP requests](#signed-http-requests-web-bot-auth) |
 
 ## Deploy the landing site and docs
 

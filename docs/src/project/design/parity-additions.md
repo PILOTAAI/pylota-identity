@@ -1,6 +1,6 @@
 # Parity additions
 
-Binding for implementation. This page specifies nine smaller additions found when Pylota Mail was
+Binding for implementation. This page specifies nine smaller additions found when Pylota Identity was
 compared with AgentMail on 2026-10-17. Each one extends a design that already exists, so each section
 names the section it extends and gives its rules, API, storage, errors, events, limits and privacy; the
 shared pages carry the result ([§18](#18-integration)). None of them adds a Durable Object class, a queue or a binding: they reuse the
@@ -218,11 +218,11 @@ pub struct BatchIdem { pub key_hash: String, pub fingerprint: String }   // §2.
 
 | Limit | Value | Source |
 |---|---|---|
-| IDs per batch | 100 | Pylota Mail (AgentMail allows 50 per `batch_update`) |
-| `extracted_text_bytes` | 0–16,384, default 2,048 | Pylota Mail |
-| `batch-get` response | 1,048,576 bytes, then `remaining` | Pylota Mail |
-| Labels per request | 64 in `labels_add`, 64 in `labels_remove`, 10 in `require_absent` | Pylota Mail |
-| Rate limit | One request against the key, tenant and partner buckets (`RL_API`), whatever the batch size | Pylota Mail |
+| IDs per batch | 100 | Pylota Identity (AgentMail allows 50 per `batch_update`) |
+| `extracted_text_bytes` | 0–16,384, default 2,048 | Pylota Identity |
+| `batch-get` response | 1,048,576 bytes, then `remaining` | Pylota Identity |
+| Labels per request | 64 in `labels_add`, 64 in `labels_remove`, 10 in `require_absent` | Pylota Identity |
+| Rate limit | One request against the key, tenant and partner buckets (`RL_API`), whatever the batch size | Pylota Identity |
 
 ### 2.7 Interfaces and privacy
 
@@ -231,10 +231,10 @@ pub struct BatchIdem { pub key_hash: String, pub fingerprint: String }   // §2.
   plain object, [MCP § 4.3](mcp.md#43-definitions)), and `require_absent` only with `message_ids`. With
   `message_ids` it calls `batch-update` and returns its response object. There is no batch-get tool: a
   model reads one or two messages at a time, and 100 messages would exceed the tool's 96 KB result budget.
-- **CLI.** `pmail messages label <message-id>… --identity <identity> [--add <label>]… [--remove <label>]…
+- **CLI.** `idvy messages label <message-id>… --identity <identity> [--add <label>]… [--remove <label>]…
   [--read | --unread] [--archive | --unarchive] [--require-absent <label>]…` calls `batch-update` when given
   more than one ID, in requests of 100 (atomic per request, not across requests; it says so when it splits);
-  `pmail messages get <message-id>…` calls `batch-get` for more than one ID.
+  `idvy messages get <message-id>…` calls `batch-get` for more than one ID.
 - **Console.** No change.
 - **Privacy.** No new store. A `batch-get` response carries the same mail as the single `GET`; an
   idempotency record of `batch-update` (in the mailbox, deleted with it) holds IDs and counts only.
@@ -401,7 +401,7 @@ today, [G4](../edge-cases.md)).
 ### 3.6 Reply lists: not added
 
 AgentMail has a third direction, `reply`, whose lists alone are checked for replies, because its
-receive-allow list, once it has an entry, blocks every other sender, replies included. Pylota Mail does not
+receive-allow list, once it has an entry, blocks every other sender, replies included. Pylota Identity does not
 add a `reply` direction, because its existing rules already cover replies:
 
 - a receive-allow entry is an **exemption** (rules 4a and 6, the unsolicited caps), never an allow-only mode,
@@ -417,8 +417,8 @@ add a `reply` direction, because its existing rules already cover replies:
 
 | Limit | Value | Source |
 |---|---|---|
-| Entries per scope (the tenant scope, and each identity) | 10,000 | Pylota Mail |
-| Entries per tenant, every scope together | 50,000 | Pylota Mail. At about 200 bytes a row, 10 MB of the 10 GB D1 database; the D1 size alerts ([Limits › Storage](../../reference/limits.md#storage)) still apply |
+| Entries per scope (the tenant scope, and each identity) | 10,000 | Pylota Identity |
+| Entries per tenant, every scope together | 50,000 | Pylota Identity. At about 200 bytes a row, 10 MB of the 10 GB D1 database; the D1 size alerts ([Limits › Storage](../../reference/limits.md#storage)) still apply |
 
 The limits also apply to tenant-scope entries, which had none before; `422 list_limit_reached` is new.
 
@@ -434,7 +434,7 @@ The limits also apply to tenant-scope entries, which had none before; `422 list_
 - **Console.** The inbox page (`/console/inboxes/{idn}`) lists the identity's entries read-only, with the
   scope, so a person can see why mail is hidden or a recipient suppressed. Entries are managed through the
   API and the CLI, as tenant entries are.
-- **CLI.** `pmail lists list|add|remove <direction> <kind> [<entry>] --identity <identity>`; `--tenant`
+- **CLI.** `idvy lists list|add|remove <direction> <kind> [<entry>] --identity <identity>`; `--tenant`
   keeps the tenant scope.
 - **MCP.** None: agents never hold `suppressions:manage`.
 
@@ -709,7 +709,7 @@ Conditions 1–6 run in step 7. Condition 7 needs the identity's addresses: when
 `SELECT a.address, d.tenant_id IS NOT NULL AS own_domain FROM addresses a JOIN domains d ON d.id = a.domain_id
 WHERE a.identity_id = ?1 AND a.status IN ('active','retiring')` to its facts batch
 (only for such candidates, so ordinary mail reads nothing more), and the verdict is finished before
-`MailboxRequest::Ingest`. 72 hours and 15 minutes are Pylota Mail choices: a forward normally arrives within
+`MailboxRequest::Ingest`. 72 hours and 15 minutes are Pylota Identity choices: a forward normally arrives within
 minutes, and a message older than three days that needs rescuing can still be released by a person.
 
 ### 6.4 What a rescue proves, and what it does not
@@ -737,7 +737,7 @@ unknown enum values, [REST API › Basics](../../reference/api.md#basics)).
 | Rule | `arc_rescued` counts as | Why |
 |---|---|---|
 | Quarantine rules 3 and 3a | not `fail` or `unverified`: not quarantined for authentication | The purpose of the feature. Rules 4–6 apply as to any message |
-| Spam score | +0.05 (Pylota Mail choice; `pass` adds nothing, `none` adds 0.10) | Authenticated by a third party, not at our boundary |
+| Spam score | +0.05 (Pylota Identity choice; `pass` adds nothing, `none` adds 0.10) | Authenticated by a third party, not at our boundary |
 | `known_sender` | not through the own-domain rule (that rule needs `pass`); the `contacts` and receive-allow rules apply as usual | The own-domain rule trusts every address of a domain at once; it stays tied to a pass at our boundary |
 | Inbound volume caps | authenticated: the per-sender key is the `From` address, not `unauth:`, and the message is outside the unauthenticated bucket | The `From` address is proven |
 | Known recipient, rule 3 (answering the authenticated sender) | `pass` | The `From` address is proven, so answering it is not writing to a new address; this keeps `send_only` replies working |
@@ -793,7 +793,7 @@ The identity gains `retention`:
 ```
 
 - `message_hours`: `null` (the default: the tenant's `retention` policy alone applies) or an integer from 1 to
-  8,760 (one hour to 365 days; Pylota Mail choice). Set at creation (`POST …/identities`) or with
+  8,760 (one hour to 365 days; Pylota Identity choice). Set at creation (`POST …/identities`) or with
   `PATCH /v1/identities/{identity_id}`; returned on the [Identity object](../../reference/api.md#identity-object).
 - **Effective lifetime.** When the tenant's `retention.message_days` is also set, the shorter of the two
   applies: the tenant job keeps running and deletes what it reaches first.
@@ -920,7 +920,7 @@ Step 3 deletes the drafts' attachment objects with the messages' keys, and step 
 ### 7.5 Timing
 
 A message is erased at most 15 minutes after it is due while R2, Vectorize and the mailbox answer, normally
-within 60 seconds (Pylota Mail target). `retention_expiry_lag_ms` (due time to commit) measures it; the
+within 60 seconds (Pylota Identity target). `retention_expiry_lag_ms` (due time to commit) measures it; the
 `retention_expiry_overdue:{identity_id}` alert fires when the oldest due row of a mailbox is more than 1 hour
 overdue (ticket) or 24 hours (page) ([§11](#11-observability)).
 
@@ -1009,7 +1009,7 @@ receipt covers what was left, and the pending day's counts are lost with the mai
   Owners and admins change it with a re-authenticated `POST`, and a value that deletes mail sooner needs the
   second, confirmed `POST` the policy page uses for such changes
   ([Workspace policy § 6](workspace-policy.md#6-the-console-page)).
-- **CLI.** `pmail identities create|update <identity> --message-hours <n>`, and `--keep-messages` for `null`.
+- **CLI.** `idvy identities create|update <identity> --message-hours <n>`, and `--keep-messages` for `null`.
 - **MCP.** None: an agent never changes retention.
 
 ### 7.13 Late delivery events
@@ -1175,9 +1175,9 @@ replay, log, export, audit row or idempotency record ever holds one.
 
 | Limit | Value | Source |
 |---|---|---|
-| Headers per endpoint | 10 | Pylota Mail (as AgentMail's limit is not documented, the number is ours) |
-| Name | 1–64 characters | Pylota Mail |
-| Value | 1–1,024 bytes; 4,096 bytes for all values together | Pylota Mail |
+| Headers per endpoint | 10 | Pylota Identity (as AgentMail's limit is not documented, the number is ours) |
+| Name | 1–64 characters | Pylota Identity |
+| Value | 1–1,024 bytes; 4,096 bytes for all values together | Pylota Identity |
 
 ### 8.5 Privacy and interfaces
 
@@ -1185,8 +1185,8 @@ replay, log, export, audit row or idempotency record ever holds one.
   by `DELETE /v1/webhooks/{id}`, partner deletion and tenant erasure, which already delete the rows.
 - **Console.** The webhooks page shows the names; owners and admins add a header (a write-only input) or
   remove one with a `POST`.
-- **CLI.** `pmail webhooks create … --header 'Name: value'`, repeatable, and
-  `pmail webhooks headers <webhook-id> [--set 'Name: value']… [--remove <name>]…`; a value can be read from
+- **CLI.** `idvy webhooks create … --header 'Name: value'`, repeatable, and
+  `idvy webhooks headers <webhook-id> [--set 'Name: value']… [--remove <name>]…`; a value can be read from
   standard input (`--set-stdin <name>`) so it stays out of the shell history.
 
 ## 9. Zone-file export (FR-DOM-15)
@@ -1210,12 +1210,12 @@ Content-Disposition: attachment; filename="mail.acmecarhire.example.zone"
 ```
 
 ```text
-; Pylota Mail DNS records for mail.acmecarhire.example (dom_01JA9G6M2WW7X2M5N6P8R0T1YR), method dns_records.
+; Pylota Identity DNS records for mail.acmecarhire.example (dom_01JA9G6M2WW7X2M5N6P8R0T1YR), method dns_records.
 ; Read from the provider APIs at 2026-10-17T10:05:00Z. Add these records to the zone of acmecarhire.example.
 ; Each line ends with the record's purpose, whether it is required, and the last DNS check.
 $ORIGIN acmecarhire.example.
 $TTL 3600
-_pylota-mail.mail                  IN TXT   "pm-verify=8f2k3m9q" ; ownership, required, ok
+_pylota-identity.mail                  IN TXT   "pm-verify=8f2k3m9q" ; ownership, required, ok
 mail                               IN MX    10 inbound-smtp.eu-west-2.amazonaws.com. ; mx, required, missing
 x7k2…._domainkey.mail              IN CNAME x7k2….dkim.eu-west-2.amazonses.com. ; dkim, required, ok
 pm-bounce.mail                     IN MX    10 feedback-smtp.eu-west-2.amazonses.com. ; return_path, required, ok
@@ -1233,7 +1233,7 @@ pm-bounce.mail                     IN TXT   "v=spf1 include:amazonses.com ~all" 
    `host` is the registrable domain itself. RFC 1035 § 5 appends the origin to a name without a trailing dot
    ([RFC 1035](https://www.rfc-editor.org/rfc/rfc1035), read 2026-10-17).
 2. **TTL.** `$TTL 3600` (RFC 2308 § 4 defines the directive for records without their own TTL,
-   [RFC 2308](https://www.rfc-editor.org/rfc/rfc2308), read 2026-10-17). One hour is a Pylota Mail choice; the
+   [RFC 2308](https://www.rfc-editor.org/rfc/rfc2308), read 2026-10-17). One hour is a Pylota Identity choice; the
    records carry no TTL of their own, and a DNS host may override it.
 3. **Class and targets.** Every record is written with `IN`. MX, CNAME and NS targets are absolute, with a
    trailing dot; MX keeps its preference.
@@ -1253,7 +1253,7 @@ pm-bounce.mail                     IN TXT   "v=spf1 include:amazonses.com ~all" 
 
 ### 9.3 Interfaces
 
-- **CLI.** `pmail domains records <domain> --format bind > mail.acmecarhire.example.zone`.
+- **CLI.** `idvy domains records <domain> --format bind > mail.acmecarhire.example.zone`.
 - **Console.** The domain page gains "Download zone file", a link to
   `/console/domains/{dom}/records.zone`, which calls the same service with the session's permissions.
 - **MCP.** None.
@@ -1289,7 +1289,7 @@ error output ([CLI › Output](../../reference/cli.md#output)) and
 - **`PM_DOCS_URL`**: the base URL of the published docs, default `https://pylotamail.com/docs`, where the
   landing-page Worker serves the mdBook output (`docs/book.toml`: `site-url = "/docs/"`;
   `site/wrangler.jsonc` routes `pylotamail.com`). It must be `https`, at most 200 bytes, without query or
-  fragment; a trailing `/` is removed. `pmail setup` and `pmail deploy` refuse an invalid value; the Worker, which
+  fragment; a trailing `/` is removed. `idvy setup` and `idvy deploy` refuse an invalid value; the Worker, which
   validates it at isolate start, uses the default instead and logs `docs_url_invalid` once per isolate. A
   self-hoster who publishes the docs elsewhere sets it.
 - **The path** is `reference/errors`, the extensionless form in which Workers static assets serve
@@ -1344,7 +1344,7 @@ header value, or an ARC header; they carry the IDs, the `arc.rescue.reason` and 
 
 ## 12. Pylota agentic OS
 
-Pylota reaches Pylota Mail Cloud as a partner (FR-KEY-4) with its partner key K1, a tenant key K2 per operator
+Pylota reaches Pylota Identity Cloud as a partner (FR-KEY-4) with its partner key K1, a tenant key K2 per operator
 and identity keys K3 per purpose, as its integration spec (§ 6) defines. What each addition gives it:
 
 | Addition | Pylota agents and services | Key and permissions | What Pylota stores | How failures surface |
@@ -1353,7 +1353,7 @@ and identity keys K3 per purpose, as its integration spec (§ 6) defines. What e
 | Identity-scope lists | `fleet-acquisition` sends seller outreach from the operator's `bookings` identity (spec § 20.2, row 42 of § 7.7) | K2 with `suppressions:manage`, through `allowRecipient` | `mail_send_allow_entries` gains the identity ID | `422 list_limit_reached` pages ops (an operator with 10,000 approved recipients on one identity) |
 | Ephemeral retention | The browser agent's sign-up identity (W14), which receives one-time codes from third-party services and nothing else | K1 or K2 (they hold `erasure:manage`) sets `retention.message_hours` | Nothing new: the code is used within the agent's turn | `410 message_expired` on a retried send from that identity is final; a `wait` that times out after expiry makes the agent ask the service for a new code |
 | Trusted ARC | Operators on `send_only` whose Google Workspace or Microsoft 365 mailbox forwards to their identities | No key change; the platform default list applies | `trust.verdict` and `arc_sealer` on `mail_inbound_messages` | Fewer `auth_failed` items in the Held list; a forward that is still refused shows `auth_json.arc.rescue.reason` in admin |
-| Webhook headers | The partner endpoint `{PYLOTA_MAIL_WEBHOOK_BASE_URL}/webhooks/pylota-mail` (spec § 8.1) | K1, `webhooks:manage` | The token sealed in `mail_platform_secrets` (row `webhook_ingress_token`) | A rejected token at the WAF shows as failing deliveries in `mail-webhook-health` |
+| Webhook headers | The partner endpoint `{PYLOTA_IDENTITY_WEBHOOK_BASE_URL}/webhooks/pylota-identity` (spec § 8.1) | K1, `webhooks:manage` | The token sealed in `mail_platform_secrets` (row `webhook_ingress_token`) | A rejected token at the WAF shows as failing deliveries in `mail-webhook-health` |
 | Batch get, zone export, docs links | The inbound job (fetching several truncated messages at once, spec § 8.7), the reconcile script (§ 8.5), the operator's domain screen, and the error mapper | K3 for reads, K1 or K2 for records | Nothing new | `docs` is logged with every mapped error |
 
 **What Pylota's integration spec must add** (for the spec's owner):
@@ -1445,7 +1445,7 @@ service (`S`) except where marked.
 | Z9 | `batch-get` by a platform or partner key; the audit write fails | One `mail.read` row for the request (`target_type: "identity"`, `details.messages`); a failed write gives `503 unavailable` and no mail. Tenant and identity keys write no row | S | `it::audit::z9_batch_mail_read_row` |
 | Z10 | A batch on a `deleting` identity, the system identity (non-platform key), a tenant being erased, a suspended partner, the `read_only` switch, a frozen deployment | As the single-message routes: `404 identity_not_found` for the first three, `403 partner_suspended`; under `read_only`, `503 unavailable` (`details.reason = "read_only"`) for both routes from non-platform keys, because both are `POST` (as search is); `503 unavailable` for both while frozen | S | `it::messages::z10_batch_states` |
 | Z11 | MCP `mail_update_labels` with `message_ids`: also with `message_id` or `thread_id`; with `require_absent` and no `message_ids`; with 101 IDs | Two or none of the three → `invalid_request` naming the path; `require_absent` alone → `invalid_request`; 101 → `invalid_request`; a valid call returns the `batch-update` response object | S | `it::mcp::z11_update_labels_batch` |
-| Z12 | `pmail messages label` with 250 IDs | Three requests of 100, 100 and 50, and a notice that the change is atomic per request only; exit code 0 only when all three succeed | S | `cli::messages::z12_label_many_chunks` |
+| Z12 | `idvy messages label` with 250 IDs | Three requests of 100, 100 and 50, and a notice that the change is atomic per request only; exit code 0 only when all three succeed | S | `cli::messages::z12_label_many_chunks` |
 | Z13 | Identity receive-block and tenant receive-allow for the same sender (and the reverse) | Identity block: the identity's copy is stored `hidden` (`blocked_sender`) while another identity of the tenant receives it. Identity allow over a tenant block: the identity's copy is not hidden, skips rules 4a and 6, and is still quarantined when authentication fails (rule 3) | S | `core::lists::z13_precedence`, `it::lists::z13_receive_scope` |
 | Z14 | One scope holds an allow for `jo@example.net` and a block for `@example.net`; the tenant blocks `jo@example.net` while the identity allows `@example.net`; the identity allows `jo@example.net` while the tenant blocks `@example.net` | Block wins inside the scope, for both directions. The tenant's address block is not overridden by the identity's domain allow: Jo's mail to the identity is `hidden` (`blocked_sender`) and its sends to Jo are `suppressed` (`policy: send_block`). The identity's address allow overrides the tenant's domain block for Jo only | S | `core::lists::z13_precedence` |
 | Z15 | An identity-scope send-allow entry for an address the identity has never written to; another identity of the tenant sends to it too | The first identity's send is delivered (the address is known to it); the second's delivery is `suppressed` with `policy: unknown_recipient` | S+I | `it::lists::z15_send_allow_per_identity` |
@@ -1510,9 +1510,9 @@ service (`S`) except where marked.
 | Z74 | Suggested records; an `unexpected` record (a second SPF record); the `ns` records of a `nameservers` domain and of a `delegated_subdomain` domain; a `cloudflare_zone` domain | Suggested records commented out; the `unexpected` record as a comment under "Remove these records", never as a record; `nameservers` NS as comments under the registrar heading; `delegated_subdomain` NS as records; a first comment saying a Cloudflare zone already holds the records | S | `core::zonefile::z74_methods` |
 | Z75 | `format=xml`; the provider API failing; another tenant's domain; the platform domain | `400 invalid_request` (path `format`); the same answer as the JSON form gives; `404 domain_not_found`; readable by every key with `domains:read`, with rule 6's first comment (its records are in the deployment's own zone) | S | `it::domains::z75_records_bind_route` |
 | Z76 | The bind output of each method parsed by an independent zone-file parser | Every record parses to the type, owner and data of the JSON form | S | `conf::zonefile::z72_parses` |
-| Z77 | Any error from REST, from an MCP tool and from `pmail --json`; `404 route_not_found`; the empty `405` of `/mcp` | Each envelope carries `docs` = `{PM_DOCS_URL}/reference/errors#code-{code}`; `route_not_found` too; the `/mcp` `405` has no body and no `docs` | S | `it::errors::z77_docs_in_every_envelope` |
+| Z77 | Any error from REST, from an MCP tool and from `idvy --json`; `404 route_not_found`; the empty `405` of `/mcp` | Each envelope carries `docs` = `{PM_DOCS_URL}/reference/errors#code-{code}`; `route_not_found` too; the `/mcp` `405` has no body and no `docs` | S | `it::errors::z77_docs_in_every_envelope` |
 | Z78 | An `ErrorCode` without an anchor in `errors.md`; an anchor for no code; the built page | `cargo xtask docs-check` fails for the first two; every anchor is an element `id` in the built `errors.html` | S | `core::errors::z78_every_code_has_anchor`, `live::docs::z78_anchor_resolves` |
-| Z79 | `PM_DOCS_URL` set to `http://…`, to a URL with a query, or with a trailing slash | `pmail setup` and `pmail deploy` refuse the first two; the Worker uses the default and logs `docs_url_invalid` once per isolate; a trailing slash is removed | S | `cli::setup::z79_docs_url_validated`, `it::errors::z77_docs_in_every_envelope` |
+| Z79 | `PM_DOCS_URL` set to `http://…`, to a URL with a query, or with a trailing slash | `idvy setup` and `idvy deploy` refuse the first two; the Worker uses the default and logs `docs_url_invalid` once per isolate; a trailing slash is removed | S | `cli::setup::z79_docs_url_validated`, `it::errors::z77_docs_in_every_envelope` |
 | Z80 | A message erased (any scope) or expired while a `message.labels_changed` outbox row lists it with two other messages; and while a row lists only it | The first row keeps the two other entries and is delivered without the erased one; the second row is deleted and counted in `events_deleted`; nothing of the erased message is delivered afterwards | S | `it::label_events::z80_erasure_trims_events` |
 | Z81 | A complaint arrives 2 hours after a send from an identity with `message_hours: 1`, after the message expired, and 2 days after a send from a tenant with `retention.message_days: 1`, after tenant retention removed it; a hard bounce the same way; the same event again; an outbound message that expired without a provider message ID; an event 31 days after the send; a counterparty erasure of the recipient | `ApplyDeliveryEvent` answers from the delivery stub: the address is suppressed (`complaint`, `hard_bounce`), `RecordOutcome` counts the outcome (not for a first reply) and `metric_counts` counts it, with no `message.*` event; the repeat is `Duplicate`; with no provider ID, or after 30 days, there is no stub and the event is orphaned as before; the erasure deletes the stub | S | `it::retention::z81_late_delivery_events` |
 
@@ -1596,7 +1596,7 @@ service (`S`) except where marked.
 | `it::errors::z77_docs_in_every_envelope` | `docs` in REST, MCP and CLI envelopes, the URL form, the fallback for an invalid `PM_DOCS_URL` | §10.1, Z77, Z79 |
 | `core::errors::z78_every_code_has_anchor` | Every `ErrorCode` has exactly one `code-…` anchor in `docs/src/reference/errors.md`, and every anchor names a code (the `cargo xtask docs-check` source check) | §10.2, Z78 |
 | `live::docs::z78_anchor_resolves` | On staging, a `docs` URL from a real error loads and the page has the element | §10.2, Z78 |
-| `cli::setup::z79_docs_url_validated` | `pmail setup` and `pmail deploy` refuse an invalid `PM_DOCS_URL` | §10.1, Z79 |
+| `cli::setup::z79_docs_url_validated` | `idvy setup` and `idvy deploy` refuse an invalid `PM_DOCS_URL` | §10.1, Z79 |
 
 ## 16. Milestone
 
@@ -1675,7 +1675,7 @@ rows Z1–Z81.
 
 ## 17. Compared with AgentMail (read 2026-10-17)
 
-| AgentMail | Pylota Mail | |
+| AgentMail | Pylota Identity | |
 |---|---|---|
 | `batch_update`: one label change to up to 50 messages, atomic for found messages; unknown or invisible IDs skipped | `batch-update` of up to 100, atomic, labels, read state and thread archive in one request, IDs the key cannot see reported with missing ones; plus `require_absent`, an atomic claim AgentMail's docs say labels cannot give ("label-based dedupe not atomic") | Exceed |
 | `batch-get` returning metadata and a preview | `batch-get` of up to 100 with `extracted_text` capped per message and a 1 MiB budget | Match |

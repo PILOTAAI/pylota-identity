@@ -23,10 +23,11 @@ ADR supersedes it (AGENTS.md).
 | [0012](0012-service-sign-up-ledger.md) | Service sign-up ledger | Accepted | 2026-10-10 |
 | [0013](0013-partner-keys.md) | Partner keys as a fourth key level | Accepted | 2026-10-10 |
 | [0014](0014-marketing-needs-ses.md) | Marketing mail only through SES or SMTP | Accepted | 2026-10-10 |
-| [0015](0015-solo-operator.md) | One person builds and operates Pylota Mail Cloud | Accepted | 2026-10-10 |
+| [0015](0015-solo-operator.md) | One person builds and operates Pylota Identity Cloud | Accepted | 2026-10-10 |
 | [0016](0016-plan-items-changed-for-v1.md) | Plan items that v1.0 defers or does differently | Accepted | 2026-10-10 |
 | [0017](0017-agentmail-parity.md) | What v1.0 adds, defers and refuses to match AgentMail | Proposed | 2026-10-17 |
 | [0018](0018-typescript-sdk-in-its-own-repository.md) | The TypeScript SDK in its own repository | Proposed | 2026-10-18 |
+| [0019](0019-pylota-identity.md) | Pylota Mail becomes Pylota Identity | Accepted | 2026-10-24 |
 
 ## When to write one
 
