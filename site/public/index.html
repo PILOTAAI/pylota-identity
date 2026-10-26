@@ -689,10 +689,10 @@
 <pre tabindex="0"><code><span class="t-c"># a London number that takes SMS and calls</span>
 idvy phone search --country GB --city London --sms --voice
 
-<span class="t-c"># ask to buy it for the bookings agent; a person approves</span>
-idvy phone buy +442079460321 \
+<span class="t-c"># request it for the bookings agent; a person approves the purchase</span>
+idvy phone request number +442079460321 \
     --identity bookings@acme.example.com
-{ <span class="t-k">"status"</span>: <span class="t-s">"awaiting_approval"</span> }</code></pre>
+{ <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span> }</code></pre>
             </div>
         </div>
       </div>
@@ -747,7 +747,7 @@ idvy vault grant acme-portal \
     --identity bookings@acme.example.com \
     --site portal.acme-fleet.example \
     --task <span class="t-s">"Download the October invoices"</span>
-{ <span class="t-k">"status"</span>: <span class="t-s">"awaiting_approval"</span> }
+{ <span class="t-k">"status"</span>: <span class="t-s">"pending_approval"</span> }
 
 <span class="t-c"># once a person approves, the browser fills the form</span>
 { <span class="t-k">"filled"</span>: [<span class="t-s">"username"</span>, <span class="t-s">"password"</span>], <span class="t-k">"revealed"</span>: <span class="t-n">false</span> }</code></pre>
