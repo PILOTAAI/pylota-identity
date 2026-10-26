@@ -252,8 +252,8 @@ Each item is re-checked by a named contract test ([§35](#35-tests)) before code
 
 `idvy setup phone` (a new CLI command, run once by the operator with a Telnyx key read from stdin) checks the
 account level (a Verified-only operation answered with 10038 means not Verified), reads the webhook public key
-from the operator's input (the portal shows it), uploads `PM_TELNYX_API_KEY` and `PM_TELNYX_PUBLIC_KEY` with
-`wrangler secret put`, creates the account's notification profile, a webhook channel to
+from the operator's input (the portal shows it), uploads `PM_TELNYX_API_KEY` with `wrangler secret put`, writes
+`PM_TELNYX_PUBLIC_KEY` (a public key, not a secret) into `deploy/wrangler.toml` as a variable, creates the account's notification profile, a webhook channel to
 `https://{PM_API_HOST}/hooks/telnyx` and notification settings for number orders, requirement groups,
 porting orders and port-outs (the number-order events need them: Telnyx number orders guide, read
 2026-10-24), and prints what remains manual (data locality,

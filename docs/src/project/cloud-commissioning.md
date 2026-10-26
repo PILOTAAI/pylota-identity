@@ -167,7 +167,7 @@ owner's private operations repository, never in `PILOTAAI/pylota-identity`.
 | `PM_STRIPE_SECRET_KEY` | A live restricted key (`rk_live_…`) with exactly the permissions of [Billing › Stripe integration](design/billing.md#stripe-integration) |
 | `PM_STRIPE_WEBHOOK_SECRET` | The signing secret of the live webhook endpoint ([§6](#6-stripe-live-mode)) |
 | `PM_OAUTH_GOOGLE_CLIENT_SECRET`, `PM_OAUTH_GITHUB_CLIENT_SECRET` | The production OAuth clients |
-| `PM_TELNYX_API_KEY`, `PM_TELNYX_PUBLIC_KEY` | Uploaded by `idvy setup phone` ([§11](#11-phone-numbers-the-telnyx-account) step 5): a Telnyx API key made for Pylota Identity Cloud alone, and the account's webhook public key. Set only when gate P is being prepared; absent, every phone request fails `not_configured` |
+| `PM_TELNYX_API_KEY`, `PM_TELNYX_PUBLIC_KEY` | Set by `idvy setup phone` ([§11](#11-phone-numbers-the-telnyx-account) step 5): a Telnyx API key made for Pylota Identity Cloud alone (a Worker secret), and the account's webhook public key (a variable in `deploy/wrangler.toml`: it is public). Set only when gate P is being prepared; absent, every phone request fails `not_configured` |
 
 `idvy setup` for production:
 

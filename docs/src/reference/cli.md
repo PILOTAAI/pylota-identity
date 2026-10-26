@@ -341,7 +341,8 @@ idvy setup ses --region eu-west-2
 Connects the deployment to its Telnyx account once. Reads the Telnyx API key from stdin, checks the account
 level (a Verified-only read answered with 10038 means not Verified) and records it through
 `POST /v1/platform/phone/probe`, reads the webhook public key you paste from the Telnyx portal, uploads
-`PM_TELNYX_API_KEY` and `PM_TELNYX_PUBLIC_KEY` as Worker secrets, creates the account's notification profile
+`PM_TELNYX_API_KEY` as a Worker secret, writes `PM_TELNYX_PUBLIC_KEY` (public, not secret) into
+`deploy/wrangler.toml` as a variable, creates the account's notification profile
 and a webhook channel to `https://{PM_API_HOST}/hooks/telnyx` for number orders, requirement groups, porting
 orders and port-outs, and prints what remains manual (data locality, the reseller annex, the account level).
 It writes nothing else to the account: tenant resources are created per tenant. `idvy doctor` re-checks every
@@ -2836,7 +2837,9 @@ idvy vault items rotate vit_01JAD4… --password-stdin --overlap-hours 24 < new-
 ### `vault grants list`, `request`, `approve`, `deny`, `revoke`
 
 ```bash
-idvy vault grants request --identity … --item vit_01JAD4… --operation fill --purpose "Check PCN status each morning."
+idvy vault grants request --identity … --item vit_01JAD4… --operation fill --origin https://tfl.gov.uk \
+    --max-uses 100 --purpose "Check PCN status each morning."
+# --operation and --origin repeat; --origin defaults to every origin of the item
 idvy vault grants approve vgr_01JAD5… --expires-in 7d --on-behalf-of usr_8812
 ```
 
