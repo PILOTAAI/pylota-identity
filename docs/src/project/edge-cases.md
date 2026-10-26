@@ -1,7 +1,7 @@
 # Edge-case register
 
-Every row is a required behaviour. The register has 1041 rows in 24 sections (A–L, N, O and W, then Q, R,
-T, V, X, Y and Z, then P and U). The 1033 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
+Every row is a required behaviour. The register has 1044 rows in 24 sections (A–L, N, O and W, then Q, R,
+T, V, X, Y and Z, then P and U). The 1036 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
 integrator-owned rows (C5, E6, E7, K1, K2, K4, X60 and P107) are tested in the integrator's own suites. Section
 W was section M; it was renamed so that its rows (W1–W49) can never be mistaken for build-plan milestones
 (M0–M49). Sections Q to Z were added with [ADR 0017](adr/0017-agentmail-parity.md) and follow section W.
@@ -9,7 +9,7 @@ They skip U, which would collide with the PRD's selling points U1–U10 (as M wo
 priorities and S with spikes), so calendar rows are section V and uploads rows are Q65–Q108 in section Q.
 Sections P (phone numbers, [ADR 0020](adr/0020-phone-numbers.md)) and U (the vault,
 [ADR 0021](adr/0021-agent-vault.md)) follow Z, because every other letter was taken or avoided. Section P holds
-phone-number rows: its IDs are always written with the section letter and a number from 1 to 128 (P1–P128), so
+phone-number rows: its IDs are always written with the section letter and a number from 1 to 131 (P1–P131), so
 they cannot be mistaken for the priorities P0, P1 and P2, which are never used as row IDs; in prose a row is
 always called 'row P1' and a priority 'priority P1'. Section U holds vault rows, always written with the section
 letter and a number from 1 to 90 (U1–U90), and the PRD's selling points are always called 'selling point U1' in
@@ -1124,6 +1124,9 @@ on staging ([Phone numbers § 35](design/phone-numbers.md#35-tests)).
 | P126 | A legacy-group number of a sole-trader tenant: before the decision, at its deadline, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
 | P127 | The provider account not at the Verified level | US rows `eligible: false` (`platform_prerequisite`) in the catalogue and the setup status; a US purchase blocked on `platform_prerequisite` | S | `it::phone::account_level_probe` |
 | P128 | A send while the ops switch `phone` is at `paused_purchases` (set by hand or by low provider balance); the same send at `paused` | Sent at `paused_purchases`; `503 unavailable` (`phone_paused`) at `paused`; a purchase at `paused_purchases` is refused | S | `it::phone::sms_under_paused_purchases` |
+| P129 | A Worker dies after the spend intent and before the order's outcome is stored; the lease lapses | The next claim takes the `executing` request, reconciles the attempt by `customer_reference` first, adopts a found order or proves absence, and never orders twice | S | `it::phone::stale_executing_reclaimed` |
+| P130 | A purchase on a row with `pre_approval: false` (Italy) with a complete but unapproved group, then the group approved or declined | Ordered with the group; the number stays `under_review` with no facet configured; activated after approval; `failed` (`regulatory_rejected`) when declined | S | `it::phone::order_first_review` |
+| P131 | Approved requests of each kind while the ops switch is at `paused_purchases` and at `paused` | `outbound_call` and `release_number` run at `paused_purchases`; only `release_number` at `paused`; every other kind waits and runs once the switch is `on` | S | `it::phone::switch_by_kind` |
 
 ## U · Vault
 

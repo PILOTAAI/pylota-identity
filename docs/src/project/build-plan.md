@@ -2056,7 +2056,7 @@ requirement groups, tenants, provider events and charges.
 **Implements:** FR-PHN-1 to FR-PHN-20, FR-PHN-22 (order events), FR-PHN-39 (number charges and caps), FR-PHN-40,
 FR-PHN-41 (its tools), FR-PHN-43, FR-PHN-44, FR-PHN-45 (the facets that need no registration), FR-PHN-46,
 FR-PHN-47, FR-PHN-49 (GB onboarding and the status route), FR-PHN-50, FR-PHN-51, FR-PHN-53, and edge rows P1–P41,
-P73–P76, P98, P99, P101, P103, P104, P108–P114, P117, P118, P120–P123, P127.
+P73–P76, P98, P99, P101, P103, P104, P108–P114, P117, P118, P120–P123, P127, P129–P131.
 
 **Order.** The first pull request is `live::phone::order_contract` and `live::phone::webhook_signature` with the
 pure mapping tables, so the status tables rest on the real API before any state machine is built.

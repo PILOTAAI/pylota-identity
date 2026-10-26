@@ -5,7 +5,7 @@
 | Status | Proposed |
 | Date | 2026-10-25; amended 2026-10-26 (decisions 4, 12 to 15) |
 | Deciders | The owner (TREFT LTD) |
-| Related | [Phone numbers](../design/phone-numbers.md), FR-PHN-1 to FR-PHN-54, edge rows P1–P128, milestones M38–M41, [ADR 0015](0015-solo-operator.md), [ADR 0019](0019-pylota-identity.md), the [vault design](../design/vault.md) (ADR 0021, written in parallel) |
+| Related | [Phone numbers](../design/phone-numbers.md), FR-PHN-1 to FR-PHN-54, edge rows P1–P131, milestones M38–M41, [ADR 0015](0015-solo-operator.md), [ADR 0019](0019-pylota-identity.md), the [vault design](../design/vault.md) (ADR 0021, written in parallel) |
 
 ## Context
 
