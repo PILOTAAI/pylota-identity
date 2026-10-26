@@ -62,6 +62,14 @@ has no entry. The parity fields have their entries too: `drafts.require_approval
 | Guard | `send_allowlist_only`, `quarantine.on_auth_fail`, `quarantine.spam_threshold`, `quarantine.unsolicited_otp`, `drafts.require_approval`, `screening.mode`, `screening.on_unavailable`, `screening.deadline_seconds` | Any value as a person; a key may only tighten, unless keys may take decisions reserved for people ([§3](#3-decisions-reserved-for-people), [J25](../edge-cases.md)) |
 | Free | Every other field | Any valid value |
 
+**Phone and vault fields.** Guard fields: `phone.auto_approve` (an object; tightening any field is allowed to `phone:manage`),
+`phone.calls.outbound`, `phone.recording`, `phone.disclosure.calls`, `phone.disclosure.first_sms`,
+`phone.verification.redact`. Platform or own-partner: `phone.allowed` (to turn on), `phone.key_approval`.
+Lower-only: every other numeric and list field of `phone.*`, including `phone.spend.registration_cap_pence`. ([Phone numbers § 19](phone-numbers.md#19-policy)). `vault.allowed` is platform-only; `vault.key_approval` is platform-or-own-partner; `vault.max_items`,
+`vault.session_max_ttl_days` and `vault.approval_deadline_seconds` are lower-only; `vault.min_approval` (order
+`grant` < `per_run` < `per_use`) and `vault.codes_into_fills_only` (`true` stricter) are guard fields
+([Configuration › Who may change a field](../../reference/configuration.md#who-may-change-a-field)).
+
 While a tenant is a provisional agent sign-up, its effective policy also takes a fixed overlay, applied
 after every class and ceiling, which only tightens ([Agent self-sign-up §4.2](agent-signup.md#42-policy-overlay)).
 
@@ -100,7 +108,7 @@ the tenant lower sets the field, which sets the value and the ceiling together.
 ## 3. Decisions reserved for people
 
 FR-CON-6 makes releasing quarantined mail a person's decision on Pylota Identity Cloud, because an agent's
-key can be steered by the mail it reads. Three more decisions have the same effect, letting mail or codes
+key can be steered by the mail it reads. More decisions have the same effect, letting mail or codes
 that nobody reviewed reach agents, or mail that nobody approved leave them, so they follow the same rule,
 implemented once in `auth::people::key_may_decide(decision, scope, tenant_policy) -> bool`:
 
@@ -110,6 +118,11 @@ implemented once in `auth::people::key_may_decide(decision, scope, tenant_policy
 | Loosen a guard field of the policy | `PATCH …/policy`, from a tenant key (this section) |
 | Approve a service account | `POST …/accounts/{account_id}/approve` ([Service sign-up ledger §4](service-accounts.md#4-approval)) |
 | Approve a draft | `POST …/drafts/{draft_id}/approve` ([Drafts §4.6](drafts.md#46-approve)) |
+| Approve a phone request (purchase outside the budget, port-in, release, compliance submission, US registration, toll-free verification, emergency address, voice route, outbound call) | `POST …/phone-requests/{request_id}/approve` ([Phone numbers § 5.4](phone-numbers.md#54-approval)) |
+| Decide a port-out | `POST …/port-outs/{port_out_id}/authorize`, `…/reject` ([Phone numbers § 16](phone-numbers.md#16-the-port-out-guard)) |
+| Set or loosen the standing purchase budget | `PUT /v1/tenants/{tenant_id}/phone-budget` ([Phone numbers § 5.7](phone-numbers.md#57-the-standing-purchase-budget)) |
+| Approve a vault grant or use, or loosen a vault item's approval level | `POST /v1/vault/grants/{grant_id}/approve`, `POST /v1/vault/uses/{use_id}/approve`, `PATCH /v1/vault/items/{item_id}` ([Vault § 5](vault.md#5-grants), [§ 6.4](vault.md#64-approving-denying-and-cancelling)) |
+| Activate or resume a vault consumer | `POST /v1/vault/consumers/{consumer_id}/activate` and `…/resume` ([Vault § 8.2](vault.md#82-registration-activation-and-suspension)) |
 
 An API key may take these decisions only when `PM_QUARANTINE_KEY_RELEASE` is `on`, or `PM_CONSOLE` is `off`
 (no person could take them), or the tenant's policy has `quarantine.key_release: true` (a platform key or the
@@ -129,6 +142,15 @@ admits only a platform key or the tenant's own partner key, never a tenant key, 
 content it wrote. Loosening `drafts.require_approval` is a guard-field decision and uses
 `quarantine.key_release` like the other guard fields. Releasing mail held by screening is a quarantine
 release and follows the release rule above unchanged ([Screening hold §10](screening.md#10-release)).
+
+
+
+For vault approvals the tenant's opt-in is `vault.key_approval`: `key_may_decide(Decision::ApproveVault, …)` reads
+that field and admits only a platform key or the tenant's own partner key, which must name the person with
+`on_behalf_of`. `quarantine.key_release` and `drafts.key_approval` do not open it. `Decision::ActivateConsumer`
+has no tenant opt-in at all: a platform key decides, or a signed-in owner or admin for a tenant-level self-hosted
+consumer, or any `vault:admin` key with `PM_CONSOLE=off`. Identity keys can never hold `vault:approve` or
+`vault:admin`, so none of these reaches an agent.
 
 **Guard fields.** A write by a tenant key **tightens** a guard field when the new value is at least as
 strict as the tenant's current effective value: `true` for `send_allowlist_only`,

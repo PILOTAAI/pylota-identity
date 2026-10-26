@@ -328,6 +328,46 @@ GROUP BY domain_id
 | `retention_expiry_errors_total` | counter | step (`vectors`, `objects`, `commit`) | mailbox |
 | `webhook_header_updates_total` | counter | result | `fetch` |
 | `zone_exports_total` | counter | method | `fetch` |
+| `phone_webhook_total` | counter | type, result | `POST /hooks/telnyx` |
+| `phone_webhook_ack_ms` | observation | – | `POST /hooks/telnyx` |
+| `phone_event_mismatch_total` | counter | – | `pm-phone` consumer (a provider fact names another tenant's resource) |
+| `phone_request_total` | counter | kind, status | Phone request routes and the executor |
+| `phone_order_attempt_total` | counter | outcome | The order executor |
+| `phone_order_uncertain_total` | counter | – | The order executor |
+| `phone_numbers_live` | observation | status | The nightly reconciler |
+| `phone_facet_failures_total` | counter | facet | The configure step |
+| `phone_buy_total` | counter | result: `created`, `pending`, `blocked`, `refused` | `POST …/phone-numbers` |
+| `phone_buy_inline_ms` | observation | – | `POST …/phone-numbers` |
+| `phone_budget_covered_total` | counter | result: `covered`, `outside` | `POST …/phone-numbers`, `POST …/phone-requests` |
+| `phone_setup_status` | observation | country, status (tenant counts) | The nightly reconciler |
+| `phone_capability_wait_seconds` | observation | capability (purchase to `enabled`) | The configure step and the A2P mover |
+| `phone_expiring_release_total` | counter | result | The every-minute phone cron |
+| `sms_send_total` | counter | result | The SMS send pipeline |
+| `sms_dispatch_ms` | observation | – | `send_sms` on `pm-phone` |
+| `sms_receipt_total` | counter | status | Delivery receipts |
+| `sms_sender_substituted_total` | counter | – | Delivery receipts |
+| `sms_inbound_total` | counter | status | `IngestSms` |
+| `sms_wait_total` | counter | result | `GET …/sms/wait` |
+| `sms_vault_code_total` | counter | result | `VaultTakeSmsCode` |
+| `call_total` | counter | direction, route, outcome | Call events |
+| `phone_spend_pence_total` | counter | kind | `phone_charges` writes |
+| `phone_spend_cap_denied_total` | counter | scope | `PhoneSpendHold` |
+| `phone_charge_drift_pence` | observation | – | The nightly reconciler (provider cost against charges) |
+| `phone_provider_balance_usd` | observation | – | The hourly balance check |
+| `phone_provider_errors_total` | counter | code | The Telnyx client |
+| `phone_reconcile_drift_total` | counter | step | The nightly reconciler |
+| `phone_webhook_missed_total` | counter | – | The nightly reconciler (`GET /webhook_deliveries`) |
+| `phone_port_out_open` | observation | – | The port-out guard |
+| `vault_uses_total` | counter | operation, outcome: `approved_at_once`, `approval_requested`, `refused` | Vault use routes |
+| `vault_redemptions_total` | counter | phase, result: `ok`, `refused`, `expired`, `spent`, `unauthenticated` | Consumer redeem route |
+| `vault_redeem_ms` | observation | phase | Consumer redeem route (excluding the code long poll) |
+| `vault_consumer_reports_total` | counter | outcome | Consumer report route |
+| `vault_value_exposed_total` | counter | source: `report`, `unscannable` | Consumer report route |
+| `vault_placeholder_misplaced_total` | counter | – | Consumer report route |
+| `vault_unlock_failures_total` | counter | – | Unwrapping routes |
+| `vault_audit_append_failures_total` | counter | – | Every vault write |
+| `vault_decrypt_failed_total` | counter | where: `dek`, `field`, `ticket` | Mint, redeem, reveal, sign |
+| `vault_consumer_auth_failures_total` | counter | – | `auth::consumer::verify` |
 
 ## 4. Service-level objectives
 
@@ -473,6 +513,33 @@ the window (the Custom Alert "minimum event count").
 | `agent_signup_cap_80` | B | Today's (UTC) `sysmail:signup:deployment` counter reaches 80% of `PM_AGENT_SIGNUP_DAILY_CAP` | ticket | [Agent sign-up abuse](#agent-sign-up-abuse) (decide whether to raise the variable) |
 | `retention_expiry_overdue:{identity_id}` | B | The oldest due message of a mailbox with `retention.message_hours` is more than 1 hour past due, reported by its expiry run or its daily maintenance ([Parity additions § 11](parity-additions.md#11-observability)) | ticket; page at 24 hours | [Erasure failure](#erasure-failure) (read `retention_expiry_errors_total{step}`; an R2 or Vectorize outage clears itself) |
 | `arc_rescue_refused_spike` | A | `arc_rescue_total{result=no_binding\|stale}` > 50 in 1 hour: someone may be replaying sealed mail | ticket | [Abusive identity](#abusive-identity) |
+| `phone_port_out_pending` | B | A port-out request is open for a number of any tenant ([Phone numbers § 16](phone-numbers.md#16-the-port-out-guard)) | page | [Phone provider](#phone-provider) |
+| `phone_port_out_deadline` | B | An open port-out has used 75% or 90% of the time before the provider authorises it by default | page | [Phone provider](#phone-provider) |
+| `phone_provider_balance_low` | B | The provider balance covers fewer than 7 days of the last 7 days' average spend (below 2 days the `phone` switch moves to `paused_purchases`) | page | [Phone provider](#phone-provider) |
+| `phone_provider_auth` | B | A `401` or `403` from the provider on a configured resource | page | [Phone provider](#phone-provider) |
+| `phone_unplaced_outbound_call` | B | A call record shows an outbound call the service did not place | page | [Phone provider](#phone-provider) |
+| `phone_event_mismatch` | B | `phone_event_mismatch_total` > 0: a provider fact names another tenant's resource | page | [Phone provider](#phone-provider) |
+| `phone_order_uncertain_stuck` | B | An order attempt `uncertain` for more than 24 hours | ticket | [Phone provider](#phone-provider) |
+| `phone_reconcile_drift` | B | The nightly reconciler finds numbers, orders or charges that differ from the provider | ticket | [Phone provider](#phone-provider) |
+| `phone_orphan_number` | B | A provider number carries no ownership stamp the directory knows | ticket | [Phone provider](#phone-provider) |
+| `phone_status_unknown` | B | A provider status value has no mapping | ticket | [Phone provider](#phone-provider) |
+| `phone_requirement_unmapped` | B | A provider requirement type maps to no profile field or document kind | ticket | [Phone provider](#phone-provider) |
+| `phone_review_long` | B | A number or group under provider review for more than 7 days | ticket | [Phone provider](#phone-provider) |
+| `phone_webhook_signature_failures` | A | More than 10 failed webhook signatures in an hour | ticket | [Phone provider](#phone-provider) |
+| `phone_fx_drift` | B | The ECB reference rate moved more than 5% from the rate card's `fx` | ticket | [Phone provider](#phone-provider) |
+| `phone_provider_limit_hit` | B | A provider refusal for a spend limit (40333): the caps and the provider backstops are out of step | ticket | [Phone provider](#phone-provider) |
+| `phone_pin_missing` | B | A number's port-out PIN has no vault copy an hour after configuration | ticket | [Phone provider](#phone-provider) |
+| `phone_recording_undeclared` | B | A call was recorded on a route whose policy has `phone.recording = off` | ticket | [Phone provider](#phone-provider) |
+| `phone_release_unattributable` | B | A release found a live number without this number's ownership stamp | ticket | [Phone provider](#phone-provider) |
+| `phone_order_duplicate` | B | Two live orders for one `customer_reference` | ticket | [Phone provider](#phone-provider) |
+| `phone_registration_slow` | B | A US registration in review for more than 21 days | ticket | [Phone provider](#phone-provider) |
+| `phone_expiring_release_stuck` | B | A scheduled release not done 24 hours after `release_at` | ticket | [Phone provider](#phone-provider) |
+| `vault_value_exposed` | B | `vault_value_exposed_total` > 0 for a tenant outside test tenants | page | [Vault incident](#vault-incident) |
+| `vault_audit_append_failed` | B | `vault_audit_append_failures_total` > 0 | page | [Vault incident](#vault-incident) |
+| `vault_decrypt_failed` | B | `vault_decrypt_failed_total` > 0 (a moved or corrupted ciphertext, or a wrong key) | page | [Vault incident](#vault-incident) |
+| `vault_placeholder_misplaced` | B | The first `placeholder_misplaced` report per tenant and UTC day | ticket | [Vault incident](#vault-incident) |
+| `vault_unlock_failures` | A | `vault_unlock_failures_total` > 20 in 15 minutes | ticket | [Vault incident](#vault-incident) |
+| `vault_consumer_auth_spike` | A | Anomaly on `vault_consumer_auth_failures_total`, 15-minute window, minimum 50 | ticket | [Vault incident](#vault-incident) |
 | SLO burn rules | A | Section 5.2 | page / ticket | The runbook of the failing path |
 
 ### 5.4 The state alert evaluator
@@ -637,6 +704,7 @@ alert evaluator for D1 conditions, the delivery-event consumer for outcome rates
 | `free_sending_off` | Only with `PM_BILLING=stripe` or partners with ramped tenants: in the last hour, 5 or more distinct workspaces on the Free plan or still in the new-workspace send ramp had an identity auto-paused for abuse. Pauses come only from counted outcomes, so strangers who write in cannot cause them ([G13](../edge-cases.md)); someone with five Free workspaces of their own can, and that stops Free and ramped sending until the operator lifts it. That is accepted: Free sending is best effort, the page names the five workspaces, and a partner with `ramp_exempt = 1` is never affected | The `ops_switches` row `free_sending` becomes `off`: every send from a workspace on the Free plan or still ramped is refused at submit with `403 policy_denied` (`details.reason = "free_sending_off"`), and queued ones are re-enqueued with the `Paused` back-off. Paid workspaces and partner tenants that are not ramped are unaffected | `PUT /v1/platform/switches` `{"name": "free_sending", "state": "on"}` |
 | `agent_signup_off` | Over the last 24 hours of agent sign-up mail outcomes ([Agent self-sign-up § 13.2](agent-signup.md#132-the-automatic-switch)): bounced > 5% with ≥ 50 outcomes; or complained > 0.5% with ≥ 200 outcomes; or 5 or more complaints, whatever the count. Evaluated in the delivery consumer, where the outcomes are | The `ops_switches` row `agent_signup` becomes `off` (`set_by = 'auto'`): new sign-ups, resends and replacements get `403 signup_closed` (`paused`), and every send of a provisional tenant gets `403 policy_denied` (`signup_paused`). Verification by code, link and claim, refusals, abandonment and expiry continue. Audit `ops.switch` | `PUT /v1/platform/switches` `{"name": "agent_signup", "state": "on"}` |
 | `emergency_prune` | `capacity` for `d1` at 90% or more | The `ops_switches` row `emergency_prune` becomes `on`: the next tenant retention runs use a 7-day cutoff for `event_index` and `webhook_deliveries` whatever `retention.events_days` says, so webhook replay reaches back 7 days at most meanwhile ([J30](../edge-cases.md)) | `PUT /v1/platform/switches` `{"name": "emergency_prune", "state": "off"}` |
+| `vault_redeem` | A `vault_decrypt_failed` alert, or three `vault_value_exposed` from one consumer within an hour | The ops switch `vault_redeem` moves to `off`: redemption, write-back and minting refuse; reads and approvals continue. The operator turns it back on after the runbook | A platform key (`idvy ops switch vault_redeem on`) after the runbook |
 
 `ops_switches` ([Data model](data-model.md#1-d1-control-plane)) holds one row per switch: `read_only`,
 `free_sending`, `emergency_prune` and `agent_signup`. Readers cache a row for 60 seconds per isolate, so a
@@ -776,6 +844,8 @@ failure (FR-OPS-3). Output format and exit codes are defined in [CLI and setup](
 | `cloudflare.zones` | Never fails. Prints the account's zone count, and `warn`s above 1,000, because the zone limit of a non-Enterprise account is not documented ([Domains on any DNS host §3.2](domain-connections.md#32-nameservers)) | Ask Cloudflare to confirm the account's zone limit |
 | `security_txt` | `PM_SECURITY_CONTACT` unset (`warn`), or `Expires` within 30 days | Set the variable; upgrade |
 | `mail_test` (`--mail-test`) | A message from the platform domain to a platform address does not arrive within 120 s with `verdict: pass` | Prints the observed authserv-id for `PM_TRUSTED_AUTHSERV_ID` |
+| `phone` (when `PM_PHONE` is not `off`; otherwise `skip`) | The account level probe (`platform_state.phone_account`) is missing; the webhook channel, a test event's signature or the notification settings are wrong; the balance covers fewer than 7 days; a US catalogue row is on while the level is not Verified | `idvy setup phone`; [Phone provider](#phone-provider) |
+| `vault` (when `PM_VAULT = "on"`; otherwise `skip`) | `vault_keys` rows are not all in the sealed-column registry's count; the `vault_redeem` switch is `off`; an active consumer's keys are older than 90 days (a `warn`) | [Vault incident](#vault-incident) |
 
 ## 8. Dead-letter queues
 
@@ -848,6 +918,8 @@ wraps it as `idvy dlq list` and `idvy dlq redrive` ([CLI and setup](cli.md)).
 | [Screening unavailable](#screening-unavailable) | `screening_unavailable`, `screening_model_failing`, `screening_model_cap`, `screening_stuck`, `screening_deadline_lag`, `screening_queue_wait`, `screening_suspect_spike` |
 | [Agent sign-up abuse](#agent-sign-up-abuse) | `agent_signup_spike`, `agent_signup_cap_80`, `containment:agent_signup_off` |
 | [Restore from PITR](#restore-from-pitr) | Data corruption, a bad migration, `inbound_lost` |
+| [Phone provider](#phone-provider) | `phone_*` alerts |
+| [Vault incident](#vault-incident) | `vault_*` alerts, `containment:vault_redeem` |
 
 The runbooks are written for one operator working alone: every step is a command or an API call, the
 automatic rules of section 5.6 have already made the deployment safe where they can, and nothing waits
@@ -1348,6 +1420,39 @@ blobs. Against a bug that deletes objects, nothing protects blobs by default; wi
 set (as on Cloud), the nightly copy limits the loss to objects created since the last run (RPO 24
 hours). The 4-hour RTO, including the two exports of a full-size database, is rehearsed in the staging
 drill.
+
+### Phone provider
+
+([Phone numbers § 22](phone-numbers.md#22-failure-handling), [§ 17](phone-numbers.md#17-reconciliation))
+
+- **Balance low**: top up the Telnyx account; purchases resume when the hourly check sees 7 days of cover
+  (`paused_purchases` lifts by `idvy ops switch phone on` after the top-up).
+- **Provider auth**: rotate `PM_TELNYX_API_KEY` in the portal and with `idvy setup phone`; the switch was moved to
+  `paused_purchases` automatically.
+- **Event mismatch**: a tenant-isolation incident. Stop with `idvy ops switch phone paused`, read the
+  `ignored_mismatch` rows, and find which tenant resource is misconfigured before resuming.
+- **Port-out pending**: make sure a person of the tenant has seen it; never reject on the tenant's behalf.
+- **Uncertain stuck**: check the order in the Telnyx portal by `customer_reference`, then
+  `POST /v1/platform/phone-requests/{id}/resolve`.
+
+### Vault incident
+
+([Vault § 15](vault.md#15-kill-switches-and-incident-response))
+
+1. **Contain.** For a suspected consumer leak, suspend the consumer (`idvy vault consumers suspend`). For a
+   tenant-wide suspicion, `idvy vault revoke-all --tenant T --shred-sessions`. For a platform-wide one,
+   `idvy ops switch vault_redeem off`; `PM_VAULT=off` only as a last resort (it stops every vault route).
+2. **Scope.** Read the tenant's audit from the suspected time (`idvy vault audit --tenant T --verify`): which
+   `ticket.redeemed` rows, by which consumer, for which items. A chain that fails verification is itself the
+   incident: stop and preserve D1 (Time Travel bookmark) before anything else.
+3. **Rotate.** Every item redeemed by a suspected consumer, or reported `value_exposed`, is rotated at its
+   service first, then in the vault. Sessions: shred, and ask the person to sign out other sessions at the site.
+4. **Keys.** A leaked consumer key: rotate the consumer's keys. A leaked orchestrator key: revoke it. Master key
+   and D1 together: rotate the master key and treat every operator-custody value as exposed.
+5. **Notify.** Tell the tenant's owners within 24 hours with the items and times concerned; counsel decides on
+   regulator notification ([Vault § 23](vault.md#23-questions-for-counsel)).
+6. **Reopen** by turning the switch back on, then watch `vault_redemptions_total{result=refused}` and the
+   consumer reports for a day.
 
 ## 10. Tests
 

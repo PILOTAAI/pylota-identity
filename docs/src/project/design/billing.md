@@ -245,6 +245,12 @@ UPDATE allowances SET held = held + ?2 WHERE feature = ?1;
   one. A failed insert never changes the `402`. `first_in_period` is informational.
 - Requests to one Durable Object are processed one at a time, and the transaction contains no `.await`.
   When two sends race for the last unit, exactly one hold succeeds and the other is denied ([W1]).
+- **`phone_spend`** holds are in pence, not units of an allowance: every billable phone action holds its
+  estimated price against the tenant's and the identity's monthly caps (or the registration cap, for one-off
+  registration fees), and a purchase covered by the standing budget also takes the month's budget slot
+  (`phone_budget:t:{YYYY-MM}`) in the same transaction. A hold settles at the provider's charge and is released
+  on refusal; recurring monthly charges are never refused
+  ([Phone numbers § 18.3](phone-numbers.md#183-spend-caps)).
 
 ### Usage thresholds
 
@@ -380,6 +386,17 @@ search is bounded by the per-key rate limit and the tenant's daily `agentic_dail
 The default tenant's own mail (sign-in codes, invitations) is not metered. `idvy setup` creates the
 default tenant with billing `disabled` ([CLI and setup](cli.md)), and it must stay `disabled` or `exempt`.
 
+**Phone numbers** are priced outside plan allowances, from a GBP rate card built from the provider's USD list
+prices ([Phone numbers § 18.1](phone-numbers.md#181-prices-currency-and-the-rate-card)): each number's setup and
+monthly price fixed in its quote, SMS per segment, voice per minute, and regulatory pass-through fees at cost.
+Charges are rows of `phone_charges`, unique by source, so a repeated provider event charges once. Phone needs a
+paid plan, or a partner that pays for its tenants.
+
+**The vault** is not metered in v1. It is available on paid plans, and to `exempt` tenants of a partner; on a
+deployment with `PM_BILLING=stripe` a Free-plan workspace gets `403 policy_denied` (`plan_required`) on every
+vault route. Its rows and objects do not count toward `storage_gb`; the item limits bound them. No `QuotaRequest`
+variant is added.
+
 ## Ordering relative to idempotency
 
 FR-BILL-6 requires the `402` to come before any idempotency record, so a denied request leaves nothing
@@ -478,6 +495,11 @@ subscription carries `metadata.tenant_id` and `metadata.kind` (`plan` or `topup:
 
 A paid top-up keeps counting while its subscription is active, even if the plan no longer allows buying
 top-ups (for example after a downgrade to Free); the console's plan page then suggests cancelling it.
+
+**Phone charges.** On the 1st of each month the phone invoicing job creates one invoice item per tenant and category (numbers,
+SMS, voice, registration fees, emergency) in GBP pence on the tenant's Stripe customer, with the idempotency key
+`pi-phone-{tenant_id}-{YYYY-MM}-{category}`; partner tenants appear on the partner's monthly statement instead.
+The restricted Stripe key gains invoice-item write. ([Phone numbers § 18.5](phone-numbers.md#185-invoicing))
 
 ### Checkout
 

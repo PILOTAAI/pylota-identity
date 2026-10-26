@@ -1,12 +1,19 @@
 # Edge-case register
 
-Every row is a required behaviour. The register has 802 rows in 22 sections (A–L, N, O and W, then Q, R,
-T, V, X, Y and Z). The 795 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 7
-integrator-owned rows (C5, E6, E7, K1, K2, K4 and X60) are tested in the integrator's own suites. Section
+Every row is a required behaviour. The register has 1045 rows in 24 sections (A–L, N, O and W, then Q, R,
+T, V, X, Y and Z, then P and U). The 1037 rows that Pylota Identity owns (`S` or `S+I`) each name a test; the 8
+integrator-owned rows (C5, E6, E7, K1, K2, K4, X60 and P107) are tested in the integrator's own suites. Section
 W was section M; it was renamed so that its rows (W1–W49) can never be mistaken for build-plan milestones
-(M0–M37). Sections Q to Z were added with [ADR 0017](adr/0017-agentmail-parity.md) and follow section W.
+(M0–M49). Sections Q to Z were added with [ADR 0017](adr/0017-agentmail-parity.md) and follow section W.
 They skip U, which would collide with the PRD's selling points U1–U10 (as M would with milestones, P with
 priorities and S with spikes), so calendar rows are section V and uploads rows are Q65–Q108 in section Q.
+Sections P (phone numbers, [ADR 0020](adr/0020-phone-numbers.md)) and U (the vault,
+[ADR 0021](adr/0021-agent-vault.md)) follow Z, because every other letter was taken or avoided. Section P holds
+phone-number rows: its IDs are always written with the section letter and a number from 1 to 131 (P1–P131), so
+they cannot be mistaken for the priorities P0, P1 and P2, which are never used as row IDs; in prose a row is
+always called 'row P1' and a priority 'priority P1'. Section U holds vault rows, always written with the section
+letter and a number from 1 to 91 (U1–U91), and the PRD's selling points are always called 'selling point U1' in
+prose; a vault row is 'row U1'.
 The **Owner** column says where the behaviour is enforced:
 
 - **S**: Pylota Identity;
@@ -17,7 +24,8 @@ The **Owner** column says where the behaviour is enforced:
 Each **Test** cell names the planned test:
 
 - `core::` tests are native unit tests in `crates/core`;
-- `conf::` tests are corpus cases in `crates/conformance`;
+- `conf::` tests are corpus cases in `crates/conformance`, and the vault consumer fixtures in
+  `crates/conformance/vault`, run by `idvy vault conformance` against a fixture server;
 - `cli::` tests are native tests in `crates/cli`, against recorded provider API fakes;
 - `it::` tests are integration tests against a local workerd (`cargo xtask itest`);
 - `live::` tests run against staging with real mailboxes;
@@ -25,6 +33,13 @@ Each **Test** cell names the planned test:
   `PILOTAAI/pylota-identity-typescript`, with the shared fixtures of `sdks/fixtures/`; `ts::it::` tests run
   there against this repository's local workerd (`cargo xtask itest --serve`), and `trace` checks their
   names against `sdks/typescript-tests.json`;
+- `py::` and `go::` tests are tests of the Python and Go SDKs, defined here and run in their own repositories,
+  `PILOTAAI/pylota-identity-python` and `PILOTAAI/pylota-identity-go` ([ADR 0022](adr/0022-sdk-languages.md)),
+  with the shared fixtures and conformance suite of `sdks/fixtures/`; `py::it::` and `go::it::` tests run
+  there against this repository's local workerd (`cargo xtask itest --serve`), and `trace` checks their names
+  against `sdks/python-tests.json` and `sdks/go-tests.json`;
+- `sdk::conformance::` tests run the shared conformance suite against `crates/sdk`, the Rust SDK; its expected
+  values are generated from `crates/core`;
 - `browser::` tests are Playwright tests of the console against a local workerd;
 - `platform::` and `sdk::` tests are native tests in `crates/platform` and `crates/sdk`;
 - `xtask::` tests are checks that `cargo xtask` runs over the workspace, the docs or the built bundle.
@@ -813,7 +828,7 @@ O28 in Agent signing keys again, built in M25.
 
 | # | Case | Required behaviour | Owner | Test |
 |---|---|---|---|---|
-| Y20 | An SDK send times out on the client after the server accepted it | The SDK retries with the same key and the same body bytes; the server returns the original `202` with `deduplicated: true`; one email | S | `ts::retry::y20_timeout_retries_same_key_and_bytes`, `ts::it::send::y20_lost_response_one_email` |
+| Y20 | An SDK send times out on the client after the server accepted it | The SDK retries with the same key and the same body bytes; the server returns the original `202` with `deduplicated: true`; one email | S | `ts::retry::y20_timeout_retries_same_key_and_bytes`, `ts::it::send::y20_lost_response_one_email`, `py::it::send::lost_response_one_email`, `go::it::send::lost_response_one_email` |
 | Y21 | An operation marked `x-idempotency: required` (send, reply, reply-all, forward, calendar reply, draft send) without a caller key, or with an empty, non-printable or 256-character key, including from plain JavaScript and with retries off | `ConfigError` before any request; the SDK never generates a key for these operations, including one a later contract marks `required`. Persisting the key before the first attempt is the integrator's | S+I | `ts::idempotency::y21_send_key_required` |
 | Y22 | Retries end on transport failures for a call that may have reached the server | `OutcomeUnknownError` with `idempotencyKey`, `operationId`, `attempts` and `mayHaveSucceeded: true`; its `fix` says to retry with the same key within 30 days; never presented as a failure that allows a new key | S+I | `ts::errors::y22_outcome_unknown_carries_key` |
 | Y23 | `409 request_in_progress`, including two processes sending with one key at once | Waits `Retry-After` or 1 s, at most 5 times, with the same key, then throws the `ApiError` (`retryable: true`); the second process receives the first's result as a replay; one email | S | `ts::retry::y23_request_in_progress_budget` |
@@ -865,6 +880,27 @@ O28 in Agent signing keys again, built in M25.
 | Y69 | A `pmk_test_` key with the SDK or the bridge | Same behaviour as a live key; `mode` is `test`; simulator outcomes drive the uncertain and bounce tests | S | `ts::it::testmode::y69_test_key` |
 | Y70 | `403 tenant_suspended`, `403 partner_suspended` or `409 identity_paused` | Not retried; surfaced with `details`; a stream stops on the two `403` codes and keeps running for a paused identity, whose mail still arrives | S+I | `ts::retry::y70_suspension_not_retried` |
 | Y71 | A client built with `requireExplicitIdempotencyKeys: true` calls an optional-key `POST` without a key | `ConfigError` before any request; with a key, the key is sent unchanged | S | `ts::idempotency::y71_explicit_mode` |
+| Y72 | A Python call is cancelled (`asyncio.CancelledError`, `KeyboardInterrupt`) during a keyed send, before or after the request left | The exception propagates unwrapped; no retry and no new key; the caller's later retry with the same key returns the first result if the server stored one | S+I | `py::cancel::y72_cancellation_propagates` |
+| Y73 | A Go call's `ctx` is cancelled or its deadline passes during a keyed send | The call ends at once with an error wrapping `ctx.Err()` and, for a keyed request that may have been sent, `*OutcomeUnknownError` with the key; no retry after `ctx` is done | S+I | `go::cancel::y73_context_done` |
+| Y74 | A Go SDK older than the deployment decodes new fields and enum values | Decoding never fails; unknown enum values are kept and `IsKnown()` is false; `WithRawResponse` returns the exact bytes | S | `go::compat::y74_unknown_values_tolerated` |
+| Y75 | A Python SDK older than the deployment decodes new fields and enum values | Unknown keys stay in the returned dictionary; an unknown enum value is a plain `str`; nothing raises | S | `py::compat::y75_unknown_values_tolerated` |
+| Y76 | An SDK repository adopts a contract whose conformance cases it does not all pass, or the vectors are stale | The SDK's release refuses; in this repository `cargo xtask gen-sdk-vectors` changing a file fails CI | S | `sdk::conformance::all`, `xtask::sdk_vectors_current`, `ts::conformance::all`, `py::conformance::all`, `go::conformance::all` |
+| Y77 | A consumer canonicalises `HTTPS://TFL.GOV.UK.:443/`, an `xn--` label, a Unicode host, `http://`, userinfo, an IP literal in any notation, port 80 or `localhost` | Every SDK returns the same canonical origin or the same refusal reason as `core::vault::origin::canonicalise` | S | `sdk::conformance::vault_consumer_origins`, `ts::conformance::all`, `py::conformance::all`, `go::conformance::all` |
+| Y78 | A consumer signs a request with a clock 5 minutes off, retries it, or sends a body re-serialised after signing | `created` comes from the server clock learnt from `Date`; a retry signs again with a new nonce and the same bytes; `Content-Digest` is over the bytes sent; the service accepts each | S | `sdk::conformance::vault_consumer_signatures`, `ts::it::vault::y78_consumer_signature_accepted` |
+| Y79 | A packet is opened with the wrong encryption key, for another use, phase or origin (`aad`), or with one byte changed | Opening fails with no partial plaintext; the opened packet's `use_id`, `phase` and `origin` must equal the request's; closing a packet overwrites its fields | S | `sdk::conformance::vault_consumer_packets`, `py::vault_consumer::y79_packet_close_overwrites`, `go::vaultconsumer::y79_packet_close_overwrites` |
+| Y80 | An agent process imports the SDK's default entry point | The vault consumer helpers and the packet code are not loaded; they need their own import (and, in Python, the `vault-consumer` extra; in Rust, the feature) | S | `py::package::y80_consumer_not_in_default_import`, `ts::package::y80_consumer_entry_point_separate`, `go::package::y80_consumer_package_separate` |
+| Y81 | A redemption's response is lost after the request was sent | No retry: the call ends in `OutcomeUnknownError` and the orchestrator creates a new use; a `503 unavailable` envelope with `retryable: true` is retried with the same ticket | S+I | `sdk::conformance::vault_consumer_redeem`, `py::conformance::all` |
+| Y82 | The one-call phone purchase is retried after a timeout, meets a taken number, or needs a person | The retry carries the same key and returns the first purchase; one number; `pending` and `taken` are typed results with the request or the alternatives; no purchase of an alternative without the caller | S+I | `sdk::conformance::phone_buy`, `ts::it::phone::y82_buy_retry_one_number` |
+| Y83 | `wait_for_sms` is retried after a network error, or the client clock runs ahead | One `since`, fixed from the server clock before the first attempt, on every attempt; an SMS that arrived during the retry is returned | S | `sdk::conformance::phone_sms_wait` |
+| Y84 | An SMS becomes `uncertain`, or has a status the SDK does not know | `classify` returns `uncertain` or `unknown_status`; no SDK code path sends it again | S+I | `sdk::conformance::phone_sms_outcomes` |
+| Y85 | An approval of a phone request, vault grant or vault use is sent with a stale digest | `409` surfaced with `details.current_digest`; the SDK never re-reads the object and approves the newer digest; an approval without a digest is refused before any request | S | `sdk::conformance::approvals_need_digest` |
+| Y86 | The PyPI token store or the Go repository's tags are compromised, or the proxy serves different module content | PyPI accepts uploads only from trusted publishing in environment `release`, of files in the signed `SHA256SUMS`; the Go tag is pushed after signing and the proxy's `h1:` must equal the signed one, else the owner is paged and the version is retracted | S | `py::release::y86_pypi_files_in_signed_sums`, `go::release::y86_module_hash_matches_signed` |
+| Y87 | A Python application resolves `httpx`, `websockets` or `cryptography` to the oldest version the metadata allows | The suite passes at every floor; the metadata excludes the next minor | S | `py::compat::dependency_floors` |
+| Y88 | The Go module is imported as `github.com/pilotaai/pylota-identity-go`, or a doc or example spells it so | The proxy refuses the other case; every example, doc and the site use `PILOTAAI` exactly | S | `go::module::path_case` |
+| Y89 | A Python or Go webhook handler is given a parsed body (`dict`, a decoded struct) | Python raises `TypeError`; Go's `Verify` takes only `[]byte`; the vectors show a re-serialised body fails | S | `py::webhooks::y89_raw_body_only`, `sdk::conformance::webhooks` |
+| Y90 | The Python or Go event stream meets every close code, `410 cursor_expired` and a revoked key | The rules of Y34–Y37 hold in each language | S | `py::conformance::all`, `go::conformance::all` |
+| Y91 | A key, stream token or vault ticket could leak through `repr`, `str`, `pickle`, logging, `fmt` verbs, `slog` or an error | It never appears: shown as prefix and lookup only; pickling a Python client raises `TypeError` | S | `py::secrets::y91_key_never_serialised`, `go::secrets::y91_key_never_formatted` |
+| Y92 | The Python SDK runs under Pyodide (`sys.platform == "emscripten"`), or the Go SDK is built for `GOOS=js` | Construction is refused with `ConfigError` `browser_not_supported` | S | `py::secrets::y92_browser_refused`, `go::secrets::y92_browser_refused` |
 
 ## Z · Parity additions
 
@@ -951,3 +987,244 @@ O28 in Agent signing keys again, built in M25.
 | Z79 | `PM_DOCS_URL` set to `http://…`, to a URL with a query, or with a trailing slash | `idvy setup` and `idvy deploy` refuse the first two; the Worker uses the default and logs `docs_url_invalid` once per isolate; a trailing slash is removed | S | `cli::setup::z79_docs_url_validated`, `it::errors::z77_docs_in_every_envelope` |
 | Z80 | A message erased (any scope) or expired while a `message.labels_changed` outbox row lists it with two other messages; and while a row lists only it | The first row keeps the two other entries and is delivered without the erased one; the second row is deleted and counted in `events_deleted`; nothing of the erased message is delivered afterwards | S | `it::label_events::z80_erasure_trims_events` |
 | Z81 | A complaint arrives 2 hours after a send from an identity with `message_hours: 1`, after the message expired, and 2 days after a send from a tenant with `retention.message_days: 1`, after tenant retention removed it; a hard bounce the same way; the same event again; an outbound message that expired without a provider message ID; an event 31 days after the send; a counterparty erasure of the recipient | `ApplyDeliveryEvent` answers from the delivery stub: the address is suppressed (`complaint`, `hard_bounce`), `RecordOutcome` counts the outcome (not for a first reply) and `metric_counts` counts it, with no `message.*` event; the repeat is `Duplicate`; with no provider ID, or after 30 days, there is no stub and the event is orphaned as before; the erasure deletes the stub | S | `it::retention::z81_late_delivery_events` |
+
+## P · Phone numbers
+
+Rows of [Phone numbers](design/phone-numbers.md) ([ADR 0020](adr/0020-phone-numbers.md)). P107 is
+integrator-owned and tested in Pylota's own suites. Tests named `live::phone::*` run against the real provider
+on staging ([Phone numbers § 35](design/phone-numbers.md#35-tests)).
+
+| # | Case | Required behaviour | Owner | Test |
+|---|---|---|---|---|
+| P1 | Search on an offered row | Candidates carry every capability of the row (a GB mobile without `sms` is never returned), a GBP quote and a 30-minute quote token; only the requested number type | S | `core::phone::catalogue::rows_valid`, `it::phone::search_quotes_and_features` |
+| P2 | A candidate whose provider cost exceeds the row's ceiling (vanity, premium) | Dropped from results; never orderable | S | `it::phone::search_drops_premium` |
+| P3 | Search or request for a `not_offered` row, or a `requires_local_presence` row without the presence | `422 country_not_offered`; `422 local_presence_required` with `details.local_presence`; nothing stored | S | `core::phone::catalogue::eligibility`, `it::phone::catalogue_refusals` |
+| P4 | `phone.allowed` false; a Free-plan tenant on a Stripe deployment; `PM_PHONE` off | `403 policy_denied` (`phone_not_allowed`, `plan_required`); with the flag off every phone route `404 route_not_found` | S | `it::phone::gates` |
+| P5 | A purchase for a row needing an approved profile, without one; a port-in without one | The purchase is created with `blocked_by: ["compliance"]` and never executed while blocked; the port-in gets `409 compliance_not_approved`; no provider call | S | `it::phone::compliance_required` |
+| P6 | A profile with an individual or a sole-trader entity type | `422 compliance_incomplete`, `details.reason = "entity_type"` | S | `core::phone::requests::profile_validate` |
+| P7 | Document: wrong content type, over 20,971,520 bytes, checksum mismatch, executable or macro sniffed | `400 invalid_request`, `400 upload_size_mismatch`, `400 upload_checksum_mismatch`, `422 attachment_risky`; nothing stored | S | `it::phone::document_upload_rules` |
+| P8 | Reading a document | Metadata only on every route; no route returns bytes; the R2 object is ciphertext under a per-document sealed key | S | `it::phone::documents_write_only` |
+| P9 | Deleting a document a live provider group needs | `409 phone_document_in_use`; deletion of an unused one shreds the key, then deletes the object | S | `it::phone::document_delete` |
+| P10 | A submission run that cannot link documents within 20 minutes of the first upload | Uploaded provider documents deleted once unlinked; the request `failed` (`upstream_error`); no document left unlinked at the provider | S | `it::phone::submission_link_window` |
+| P11 | A provider requirement type with no mapping | `422 compliance_incomplete` with `details.missing[]`; `phone_requirement_unmapped` raised | S | `core::phone::catalogue::map_requirements`, `it::phone::requirement_unmapped` |
+| P12 | Provider address validation fails | Request `failed` (`compliance_address_invalid`) with `details.suggested`; no address stored unvalidated for a number that can call | S | `it::phone::address_validation` |
+| P13 | A requirement group declined | Profile row `rejected` with the comments as escaped untrusted text; owners notified; a new request resubmits | S | `it::phone::group_declined` |
+| P14 | A group `expired`, `no-longer-eligible`, or an unknown status | `expired`; an unknown value keeps the status and raises `phone_status_unknown` | S | `core::phone::telnyx::group_status_table` |
+| P15 | Request without `Idempotency-Key`; repeated with the same key and body; same key, other body | `400 idempotency_key_required`; the stored response with `Idempotent-Replayed: true`; `409 idempotency_conflict` | S | `it::phone::request_idempotency` |
+| P16 | A tenant key approves where people decide; a partner key under `phone.key_approval`; a tenant key with `phone.key_approval` | `403 permission_denied` (`person_required`); allowed; still `person_required` | S | `it::phone::approval_who` |
+| P17 | A key approves a request it created | `403 permission_denied` (`self_approval`) | S | `it::phone::approval_who` |
+| P18 | Approval naming a stale digest; approval of a request not `pending_approval` | `409 phone_request_digest_mismatch` with `details.current_digest`; `409 phone_request_not_pending` | S | `it::phone::approval_binding` |
+| P19 | A pending request past 7 days | `rejected` (`expired`) by the cron with its event; a late approval gets `409 phone_request_not_pending` | S | `it::phone::request_expiry` |
+| P20 | A higher price at execution than quoted; a lower one | Back to `pending_approval` with a new quote and digest (`reason: "quote_changed"`), approval void; the lower price is charged | S | `it::phone::quote_changed` |
+| P21 | Two approvals racing, a redelivered `execute`, a cron sweep, and a run whose lease lapsed | One run at a time; the stale run's guarded writes change nothing and it stops | S | `core::phone::requests::claim_rules`, `it::phone::claim_and_fencing` |
+| P22 | The 21st pending request of a tenant, or the 11th running | `422 phone_request_limit_reached` | S | `it::phone::request_limits` |
+| P23 | Two tenants order the same number at once | The second fails at the directory's unique live index before any provider call; no spend | S | `it::phone::same_number_two_tenants` |
+| P24 | The number is taken between search and order (85001) | Listing proves no order; spend intent cleared; hold released; with `selection.mode = "any"` the run orders the next candidate (up to 5), else the number `failed` (`no_numbers_available`) and the request `failed` | S | `it::phone::number_taken` |
+| P25 | A definitive refusal whose reference listing is incomplete or fails | The attempt is `uncertain`; nothing cleared by guess | S | `core::phone::orders::absence_proved`, `it::phone::refusal_needs_listing` |
+| P26 | The order call times out and the order exists | `uncertain`; the reconciler finds it by reference and adopts it; exactly one order | S | `it::phone::uncertain_found` |
+| P27 | The order call times out and no order exists; or nothing can be proved for 24 hours | Two complete empty listings (≥ 5 min, then ≥ 10 min) prove absence; the next attempt uses a new reference (at most 3); otherwise `carrier_order_uncertain`, `phone_order_uncertain_stuck`, and only the platform resolve ends it | S | `core::phone::orders::absence_proved`, `it::phone::uncertain_absent_and_stuck` |
+| P28 | Requirements pending on an order | `requirements_pending`, `phone_number.action_needed`, notifications; reminders at 72 and 24 hours before `deadline_at` | S | `it::phone::requirements_pending` |
+| P29 | The deadline passes and the provider cancels | Number `failed` (`regulatory_rejected`, `deadline_passed`) after a complete listing shows no live number; spend intent cleared; the next request orders | S | `it::phone::deadline_cancel_not_stranded` |
+| P30 | A review lasting 7 days | Checks at 1 h, 6 h, then daily; `phone_review_long` at 7 days; no loop and no `provision_in_progress` | S | `it::phone::long_review_backoff` |
+| P31 | Provider `402` or code 20100 on an order | `carrier_billing`; page alert; nothing ordered | S | `it::phone::provider_billing` |
+| P32 | Provider `401` or `403` | `not_configured`; `phone_provider_auth`; the ops switch moves to `paused_purchases` | S | `it::phone::provider_auth` |
+| P33 | `PM_TELNYX_API_KEY` missing | `not_configured` before any provider call; not retried | S | `it::phone::not_configured` |
+| P34 | Carrier active but the messaging read-back differs | Retried; then `sms_status = failed` (`sms_configuration`); the number stays `configuring`; voice unaffected | S | `it::phone::facets_independent` |
+| P35 | Deleting an identity that holds a live number | `409 identity_has_phone_numbers` | S | `it::phone::identity_delete_refused` |
+| P36 | A paused identity | Inbound SMS stored and evented; sends `409 identity_paused`; requests execute | S | `it::phone::identity_paused` |
+| P37 | The tenant is suspended during a run | The run's next guarded write fails and it stops; sends `403 tenant_suspended` | S | `it::phone::tenant_suspended_mid_run` |
+| P38 | Release of a live number without the ownership stamp; a truncated listing; a pending order; a `404` | Refused with `phone_release_unattributable`; never read as absent; waits; success. The voice route is removed before the number | S | `it::phone::release_safety` |
+| P39 | A number released by tenant A offered to tenant B within 90 days | Excluded from B's search and refused at execution; A may buy it back | S | `it::phone::release_quarantine` |
+| P40 | Moving a number to another identity of the tenant, and to an identity of another tenant | Moved, history kept with the old identity; `404 identity_not_found` | S | `it::phone::move_number` |
+| P41 | A crash after creating the tenant's messaging profile and before recording it | The next run finds it by name and tag and adopts it; no second profile | S | `it::phone::tenant_resources_adopted` |
+| P42 | A webhook with a bad or missing signature, or a timestamp outside 5 minutes, in a test tenant or staging | `403 invalid_signature`; nothing staged | S | `core::phone::telnyx::verify_signature`, `it::phone::hook_signature` |
+| P43 | `PM_TELNYX_PUBLIC_KEY` unset | `503 unavailable` (`not_configured`); nothing processed | S | `it::phone::hook_signature` |
+| P44 | R2 or the queue fails in the hook; D1 is down | `503` (the provider retries); with D1 down the hook still answers `200` | S | `it::phone::hook_staging_failures` |
+| P45 | The same event delivered twice | One effect | S | `it::phone::hook_dedup` |
+| P46 | An event whose second fact disagrees (profile or connection of another tenant) | No effect; `ignored_mismatch`; `phone_event_mismatch` | S | `it::phone::event_cross_check` |
+| P47 | A late `message.sent` after `delivered` | Ignored by `occurred_at` | S | `it::phone::event_ordering` |
+| P48 | SMS to an unknown, released, ported-out or failed number | `ignored_unrouted`; nothing stored | S | `it::phone::sms_unrouted` |
+| P49 | An inbound SMS | Stored with `sender_unverified`; text untrusted; never refused for plan or spend | S | `it::phone::sms_inbound_stored` |
+| P50 | STOP, START or HELP from a blocked or throttled sender | The consent effect applies anyway; no confirmation from Pylota Identity | S | `it::phone::keywords_always_apply` |
+| P51 | Screening in `hold`: decisive scan; undecided; short or keyword message; classifier unavailable with `on_unavailable = quarantine` | `quarantined` (`steering_suspected`); `screening` then a verdict; skips the model; `quarantined` | S | `it::phone::sms_screening` |
+| P52 | A sender over 30 an hour, or an identity over 600 | `throttled`; not evented | S | `it::phone::sms_inbound_caps` |
+| P53 | Counterparty erasure of an E.164 | Its SMS, media and calls deleted in every identity of the tenant; the opt-out kept as a hash; the next send refused | S | `it::phone::counterparty_erasure` |
+| P54 | MMS with more than 10 items, an item over 5 MB, a host not on the list, a risky item | Items beyond the limit `unavailable`; foreign hosts never fetched; a risky item quarantines the SMS (`risky_attachment`) | S | `it::phone::mms_media` |
+| P55 | A STOP to tenant A's number | Tenant B's sends to the same person are unaffected at both layers | S | `it::phone::stop_isolated` |
+| P56 | SMS in a test tenant | Simulator only; no provider call; simulated IDs stay in the test tenant | S | `it::phone::test_tenant_simulator` |
+| P57 | A solicited code from an approved entry's listed sender | Released by `sms/wait`; repeat within 1 hour returns the same value; then purged | S | `it::phone::sms_wait_release` |
+| P58 | A code with `accounts.require_approval` and no matching entry; `sms/wait` without `account_id` | `quarantined` (`account_unapproved`); `403 policy_denied` (`account_not_approved`) | S | `it::phone::sms_ledger_gate` |
+| P59 | A code SMS on a number named by an active vault login item's phone channel | `hidden` (`vault_code`); no events; withheld from keys' reads; taken once by `SmsCodeSource::take`; deleted after 24 hours | S | `it::phone::vault_code_withheld`, `it::vault::sms_otp_phase` |
+| P60 | `vault.codes_into_fills_only` true | Every code SMS withheld except receive-allowed senders; `sms/wait` `kind=verification` gets `403 policy_denied` (`codes_into_fills_only`) | S | `it::phone::vault_strict_mode` |
+| P61 | Reads, events and logs of a code-bearing SMS | Text shows `[code]`; the canary code appears in no log line | S | `it::phone::code_redaction` |
+| P62 | An unsolicited code with `quarantine.unsolicited_otp`; a link in an SMS | `quarantined` (`otp_unsolicited`); a link is never a verification object | S | `core::phone::verify::find_code`, `it::phone::sms_unsolicited` |
+| P63 | Unknown outcome on `POST /messages` | Repeats with the same provider key (only once the contract test passed) send one SMS; then `uncertain`, never resent | S | `live::phone::send_idempotency`, `it::phone::sms_unknown_outcome` |
+| P64 | Send repeated with the same key and body; other body; in progress | Stored response; `409 idempotency_conflict`; `409 request_in_progress` | S | `it::phone::sms_idempotency` |
+| P65 | `from` of another identity, a platform number, a released number; a number still configuring | `404 phone_number_not_found`; `409 phone_number_not_ready` | S | `it::phone::sms_sender_binding` |
+| P66 | A receipt before the provider ID is stored | Held `pending_target` up to 15 minutes, then applied | S | `it::phone::receipt_race` |
+| P67 | An opted-out recipient; marketing without opt-in; provider 40300 | `403 recipient_opted_out`; `403 consent_required`; ledger entry `provider_sync` | S | `it::phone::sms_consent` |
+| P68 | A US sender with a campaign `ACTIVE` but `TCR_PENDING`, through REST and the MCP tool | `403 a2p_not_registered` on both | S | `core::phone::a2p::readiness`, `it::phone::a2p_gate_all_paths` |
+| P69 | Marketing to France at 23:00 Paris time; transactional at the same time | `409 quiet_hours` with `next_allowed_at`; sent | S | `core::phone::catalogue::quiet_hours`, `it::phone::quiet_hours` |
+| P70 | Segment caps reached; `TenantQuota` unreachable | `429 daily_cap_reached` with the cap; `503 unavailable`, never a pass | S | `it::phone::sms_caps_fail_closed` |
+| P71 | A destination country not allowed; a premium-rate or short-code destination | `403 policy_denied` (`destination_country`); `403 destination_blocked` | S | `it::phone::sms_destinations` |
+| P72 | `message.sent` from a different sender than requested | `sender_used` recorded, `sender_substituted: true`, metric | S | `it::phone::sender_substitution` |
+| P73 | A spend cap reached; the cap raised; the same key retried | `402 spend_cap_reached` with nothing stored; then accepted | S | `it::phone::spend_cap` |
+| P74 | Monthly charges that exceed the cap | Charged; `phone_spend.warning` at 100%; numbers kept | S | `it::phone::recurring_over_cap` |
+| P75 | A cost-bearing event delivered twice | One charge | S | `it::phone::charge_unique_source` |
+| P76 | A quote read by a tenant key and by a partner key | GBP only; GBP and `quote.provider` | S | `it::phone::quote_visibility` |
+| P77 | The invoicing job runs twice for a month | One Stripe invoice item per tenant and category (Stripe idempotency key) | S | `it::phone::invoicing_idempotent` |
+| P78 | A partner statement | Only that partner's tenants | S | `it::phone::partner_statement_scope` |
+| P79 | Provider balance under 7 days of spend; under 2 days | Page alert; `paused_purchases` automatically, SMS and calls continue | S | `it::phone::balance_low` |
+| P80 | The provider's daily spend limit hit (40333) | `failed` (`provider_spend_limit`); `phone_provider_limit_hit` | S | `it::phone::provider_limit` |
+| P81 | Brand `VETTED_VERIFIED`; an unknown status | Approved; unchanged with `phone_status_unknown` | S | `core::phone::telnyx::a2p_status_table` |
+| P82 | Brand creation repeated after a crash | The existing brand adopted by tag or EIN; no second fee; campaigns by `referenceId` | S | `it::phone::a2p_no_double_fee` |
+| P83 | `10dlc.campaign.update` reaches `/hooks/telnyx`; `MNO_PROVISIONED` | Mapped; numbers assigned and ready | S | `it::phone::a2p_events` |
+| P84 | A simulated ID written for a live tenant | Refused by the table `CHECK` | S | `it::phone::a2p_no_sim_ids` |
+| P85 | A `vapi` route | Vapi credential once per connector; number adopted or created; PATCH then GET must match, else `voice_configuration`; no Telnyx key sent to Vapi | S | `it::phone::vapi_route`, `live::phone::vapi_route` |
+| P86 | Vapi answers `401` | Route `failed`; tenant notified | S | `it::phone::vapi_revoked` |
+| P87 | An outbound call under `approval` | An `outbound_call` request; on approval placed once with the disclosure first; an unknown outcome `uncertain` and reconciled from Vapi's call list | S | `it::phone::outbound_call_flow` |
+| P88 | A call to an emergency or premium number; policy `off`; a non-`vapi` route | `403 destination_blocked`; `403 policy_denied` (`calls_off`); `409 voice_route_unsupported` | S | `it::phone::outbound_call_refusals` |
+| P89 | A `forward` route to the tenant's own number, or to a disallowed country | Refused at request creation (`400 invalid_request`) | S | `it::phone::forward_rules` |
+| P90 | Call events and call records; an outbound call the service did not place | `calls` rows and `call.*` events; usage counts as caps count; `phone_unplaced_outbound_call` and a notification | S | `it::phone::call_records`, `it::phone::unplaced_call` |
+| P91 | A US number without an emergency address | Its routes place no calls; an approved `enable_emergency` request registers one | S | `it::phone::us_emergency` |
+| P92 | A port-in the provider splits; an exception; a cancel within 48 hours of FOC | One `pti_` and number row per draft; `action_needed`; `409 port_in_not_cancelable` | S | `it::phone::port_in` |
+| P93 | A port-out request | `port_out_pending`, page alert, urgent emails, first in "Needs a person", `respond_by` 24 hours, escalations at 50%, 75%, 90% | S | `it::phone::port_out_notice` |
+| P94 | Nobody decides a port-out | Never rejected automatically; the provider's authorisation completes it; `ported_out`, route removed, PIN deleted, history kept | S | `it::phone::port_out_auto_authorised` |
+| P95 | A port-out rejected (code 1001 without text; with text) | `400 invalid_request`; back to `active` and the PIN rotated | S | `it::phone::port_out_reject` |
+| P96 | Nightly: a tagged provider number with no row; a live row missing at the provider; configuration drift | `phone_orphan_number`, never deleted; `suspended` (`missing_at_provider`); repaired with read-back | S | `it::phone::nightly_reconcile` |
+| P97 | A webhook delivery that failed at the provider | Found in `webhook_deliveries`; the resource re-read; counted | S | `it::phone::missed_webhooks` |
+| P98 | Tenant erasure with numbers, open requests, documents and campaigns | `phone_release` cancels, releases, deactivates, deletes resources and connectors, shreds documents except retained ones, listed in the receipt | S | `it::phone::tenant_erasure` |
+| P99 | KYC after the last number; a platform export | Deleted after `PM_PHONE_KYC_RETENTION_DAYS`; export behind a single-use link with an audit row | S | `it::phone::kyc_retention_and_export` |
+| P100 | Adopting a number already in the directory or stamped for another tenant; a legacy-group number | Refused; adopted with `legacy_group`, a `legacy_deadline` and notifications at 60, 30 and 7 days | S | `it::phone::adopt` |
+| P101 | The ops switch at `paused_purchases` and `paused`; `PM_PHONE` turned off and on | Refusals as § 30; no number released; on re-enable the reconciler runs first | S | `it::phone::switch_and_rollback` |
+| P102 | `put_managed` fails at activation | The number stays `configuring`; retried; `phone_pin_missing` after an hour | S | `it::phone::pin_vault_unavailable` |
+| P103 | Every phone route with keys of another tenant, another identity and another partner | The same `404` body as a missing resource | S | `it::phone::scope_matrix` |
+| P104 | A provisional agent sign-up | `phone:*` not effective: `403 permission_denied` (`signup_unverified`) | S | `it::phone::provisional_signup` |
+| P105 | An opt-in recorded by an identity key; an opt-out by an identity key with `phone:send` | `403 permission_denied`; recorded | S | `it::phone::consent_permissions` |
+| P106 | A dry-run send | `would_send`, segments and price; no hold and no row | S | `it::phone::sms_dry_run` |
+| P107 | Pylota moves from its own Telnyx integration | Its handler takes Pylota Identity's signed events keyed on `evt_`; it sends no STOP confirmation; its old Telnyx key and `TELNYX_*` environment are retired | I | Pylota's `phone-identity-cutover` suite |
+| P108 | A purchase covered by the standing budget; the same purchase with the budget off | Created `approved` with `approved_by = "standing_budget"` and `budget_version`, executed at once, audited; with the budget off, `pending_approval` with `details.outside_budget = "disabled"` | S | `core::phone::budget::covers`, `it::phone::buy_within_budget` |
+| P109 | Each budget rule exceeded in turn (country, type, numbers per identity, month count, setup ceiling, monthly ceiling, `expiring_only`) | `pending_approval` with `details.outside_budget` naming the first failed rule | S | `core::phone::budget::covers` |
+| P110 | Two covered purchases race for the month's last slot | One is covered; the other is `pending_approval` (`month_count`); no slot is counted twice | S | `it::phone::budget_last_slot` |
+| P111 | An identity key or a tenant key loosens the budget; a tenant key tightens it; a partner key under `phone.key_approval` loosens it with `on_behalf_of` | `403 permission_denied` (`person_required`); allowed; allowed and audited | S | `it::phone::budget_who` |
+| P112 | `POST …/phone-numbers` with `country: "GB"` inside the budget | `201` with the number (type mobile) once the order is accepted; configuration continues in the queue; a replay with the same key returns the same `201` | S | `it::phone::buy_one_call` |
+| P113 | The one-call purchase whose inline run exceeds 15 seconds; outside the budget; blocked on onboarding | `202` with the request, the run continuing in the queue; `202` `pending_approval` with the quote and `follow_on`; `202` with `blocked_by` and `next_step` | S | `it::phone::buy_one_call_202` |
+| P114 | An exact number taken (85001); `any` with the first three candidates taken; `area_code` on GB | `409 phone_number_taken` with up to 5 alternatives and quote tokens; the fourth candidate ordered; `400 invalid_request` (`location_not_supported`) | S | `it::phone::buy_taken_alternatives` |
+| P115 | A US number before the tenant's campaign is `MNO_PROVISIONED`, then after | `outbound_sms: registration_required` (or `activating` once submitted), `setup_state: registration_pending`; then `enabled`, `ready`, `phone_number.capability_changed` and `phone_number_ready` | S | `core::phone::capabilities::of`, `it::phone::capability_facets` |
+| P116 | A facet says `enabled` while the send gate would refuse | Impossible: both read `core::phone::capabilities::of`; a property test over every combination of facets, registrations and rows | S | `core::phone::capabilities::agrees_with_gates` |
+| P117 | A US purchase quote for a tenant without 10DLC, with it, and for a GB-registered tenant | `follow_on` lists `register_us_a2p` with fee and wait; omits it; lists `not_available` (`brand_country_not_supported`); the digest changes with `follow_on` | S | `it::phone::quote_follow_on` |
+| P118 | A blocked purchase whose group is approved later; one never unblocked | Unblocked in the group's batch and executed if approved; expires at 30 days | S | `it::phone::blocked_purchase` |
+| P119 | `register_us_a2p` on a tenant at its monthly cap; above the registration cap | Accepted against the registration cap; `402 spend_cap_reached` with `details.scope = "registration"` | S | `it::phone::registration_cap` |
+| P120 | The setup status for GB ready, US not started, US unavailable at the platform | Statuses and steps as specified; `next_step` names the person and the console page; `unavailable` with `platform_prerequisite` | S | `core::phone::onboarding::status`, `it::phone::setup_status` |
+| P121 | An agent drafts registration text with a tax ID field, a link in the description, and a valid draft | `400 invalid_request`; stored as escaped text, never a link; stored; a person submits it and the request is approved in the same step; the draft deleted | S | `it::phone::onboarding_draft` |
+| P122 | A purchase with `expires_at`; an agent extends it; an agent shortens it; release at the time with a pending port-out | Release request created `approved_by = "purchase"` at `release_at`; `403 permission_denied`; allowed; the release waits and retries, never skipping a rule | S | `it::phone::expiring_number` |
+| P123 | A US-registered profile without `company_registry.region`; a requirement unmapped for the registration country | `422 compliance_incomplete` (`company_registry`); `422 compliance_incomplete` with `details.missing[]`, `phone_requirement_unmapped` | S | `core::phone::catalogue::document_for`, `it::phone::registry_mapping` |
+| P124 | A GB-registered tenant's US number; its `register_us_a2p`; its call with no US address | `outbound_sms: not_available` (`brand_country_not_supported`), buy needs `acknowledge_not_available`; `422 compliance_incomplete` (`brand_country_not_supported`); `outbound_calls: not_available` (`no_us_emergency_address`) | S | `it::phone::non_us_tenant_us_number` |
+| P125 | SMS from a US number to a GB handset; from a GB number to a US handset before the cross-border test | `403 policy_denied` (`destination_not_supported`); `403 policy_denied` (`destination_untested`) | S | `it::phone::cross_border_destinations`, `live::phone::cross_border_sms` |
+| P126 | A legacy-group number of a sole-trader tenant: before its deadline (never before 2027-01-24), at it, after a port-out | Works, reminders only; `suspended` (`legacy_unpapered`), inbound kept, outbound `409 phone_number_not_ready`, never released; `ported_out` | S | `it::phone::legacy_exit_path` |
+| P127 | The provider account not at the Verified level | US rows `eligible: false` (`platform_prerequisite`) in the catalogue and the setup status; a US purchase blocked on `platform_prerequisite` | S | `it::phone::account_level_probe` |
+| P128 | A send while the ops switch `phone` is at `paused_purchases` (set by hand or by low provider balance); the same send at `paused` | Sent at `paused_purchases`; `503 unavailable` (`phone_paused`) at `paused`; a purchase at `paused_purchases` is refused | S | `it::phone::sms_under_paused_purchases` |
+| P129 | A Worker dies after the spend intent and before the order's outcome is stored; the lease lapses | The next claim takes the `executing` request, reconciles the attempt by `customer_reference` first, adopts a found order or proves absence, and never orders twice | S | `it::phone::stale_executing_reclaimed` |
+| P130 | A purchase on a row with `pre_approval: false` (Italy) with a complete but unapproved group, then the group approved or declined | Ordered with the group; the number stays `under_review` with no facet configured; activated after approval; `failed` (`regulatory_rejected`) when declined | S | `it::phone::order_first_review` |
+| P131 | Approved requests of each kind while the ops switch is at `paused_purchases` and at `paused` | `outbound_call` and `release_number` run at `paused_purchases`; only `release_number` at `paused`; every other kind waits and runs once the switch is `on` | S | `it::phone::switch_by_kind` |
+
+## U · Vault
+
+Rows of [Agent credential vault](design/vault.md) ([ADR 0021](adr/0021-agent-vault.md)). Every row is owned by
+the service (`S`) or by the service and the integrator's consumer (`S+I`, tested by the consumer conformance
+fixtures in `crates/conformance/vault`, `conf::vault::*`, and in the integrator's own suites). Tests named
+`live::vault::*` run on staging ([Vault § 24](design/vault.md#24-tests)).
+
+| # | Case | Required behaviour | Owner | Test |
+|---|---|---|---|---|
+| U1 | `PM_VAULT` off; the ops switch `vault_redeem` off | Every vault and consumer route `422 vault_disabled`; with the switch off, redemption, write-back and ticket minting refuse while reads and approvals continue | S | `it::vault::kill_switches` |
+| U2 | `vault.allowed` false; set to true by a tenant or partner key; a Free-plan tenant on a Stripe deployment | `422 vault_disabled`; `403 permission_denied` (`platform_only_field`); `403 policy_denied` (`plan_required`) | S | `it::vault::gates` |
+| U3 | Every response, idempotency record, event, audit row, log line and export after creating, rotating, importing and using items of each kind | No value, ticket, packet, unlock key or TOTP seed anywhere; the item shows `has` flags only | S | `it::vault::items_write_only` |
+| U4 | A type holding a value that derives or implements `Debug` or `Serialize` | The build fails | S | `xtask::vault_types_have_no_debug` |
+| U5 | A subject-access export of an identity with vault items | Item metadata only (kind, title, origins, health, dates); no value and no ciphertext | S | `it::vault::export_excludes_values` |
+| U6 | Origins with `http`, userinfo, a path, a query, a fragment, a wildcard, upper case, a port below 1024, port 443 | Refused with `400 invalid_request` and the path, except case and port 443, which are canonicalised (lower case, port dropped) | S | `core::vault::origin::canonical_forms` |
+| U7 | Origins that are IP literals in any notation, `localhost`, `.internal`, `.test`, the deployment's own hosts or the platform domain | `400 invalid_request` | S | `core::vault::origin::canonical_forms` |
+| U8 | An `xn--` origin whose Unicode form skeleton-matches the ledger entry's service domain | `422 vault_kind_refused`, `details.reason = "confusable_origin"` | S | `core::vault::origin::canonical_forms` |
+| U9 | A card number stored as a password, with spaces or dashes, 13–19 digits passing Luhn | `422 vault_kind_refused`, `details.reason = "payment_card_detected"`, on create and on rotation | S | `core::vault::refuse::cards_and_kinds` |
+| U10 | Kinds `card`, `credit_card`, `bank_account`, `passkey`; a WebAuthn private key in any field | `422 vault_kind_refused` with the reason; no field accepts a WebAuthn key | S | `core::vault::refuse::cards_and_kinds` |
+| U11 | A session state carrying `cf_clearance` and a name from `PM_VAULT_CLEARANCE_COOKIES`, on create, import and write-back | Dropped and counted in `clearance_cookies_dropped`; never refused | S | `core::vault::refuse::cards_and_kinds`, `it::vault::sessions` |
+| U12 | An identity-scoped item without an approved ledger entry; an entry of another identity | `422 invalid_request` (`ledger_entry_not_approved`); `404 account_not_found` | S | `it::vault::ledger_binding` |
+| U13 | An origin whose registrable domain is neither the entry's `service_domain` nor one of its `login_domains` | `422 invalid_request` (`origin_not_in_ledger`) at create; the same check at grant approval, use creation and redemption | S | `it::vault::ledger_binding` |
+| U14 | The ledger entry is closed while a grant is active and a use is `in_use` | In the closure's batch: item archived, grants revoked, uses closed (`ledger_closed`); the next redemption `410 vault_ticket_expired` | S | `it::vault::ledger_binding` |
+| U15 | An origin on `account.gov.uk`, or on a domain in `PM_VAULT_REFUSED_DOMAINS` | `422 vault_kind_refused` (`refused_domain`) at create and at every later check | S | `it::vault::ledger_binding` |
+| U16 | A field ciphertext copied to another purpose, version, item or tenant; a DEK seal copied to another item | Opening fails (AAD mismatch); the redemption fails closed with `503 unavailable` and `vault_decrypt_failed` raised; nothing is returned | S | `core::crypto::pv1::aad_binding`, `core::crypto::hpke::rfc9180_vectors` |
+| U17 | Two first writes of one tenant race to create its vault key | One key; the loser zeroises its secret and uses the winner's | S | `it::vault::tenant_key_race` |
+| U18 | The tenant key is rotated with 450 versions sealed to it | New versions seal to the new key at once; the cron re-wraps 200 a run; the retiring key is deleted when none is left; `retiring_versions` reports progress | S | `it::vault::tenant_key_rotation` |
+| U19 | A partner enrols custody with two slots; the request is replayed with its idempotency key; a tenant key asks | Two unlock keys shown once; the replay answers without them (`secret_replayed: false`); the tenant key `403 scope_denied` | S | `it::vault::custody` |
+| U20 | The unlock header on a non-unwrapping route, from a tenant key, missing on a mint, wrong | `400 invalid_request` (`unlock_not_accepted`); the same; `403 vault_unlock_required`; `403 vault_unlock_invalid`, counted and rate-limited | S | `it::vault::custody` |
+| U21 | A partner releases custody with a valid key; a partner loses both unlock keys | Back to operator custody; with both lost, every value is unrecoverable and the vault says so; no support path opens them | S | `it::vault::custody` |
+| U22 | A tenant key approves a grant where people decide; a partner key under `vault.key_approval` without `on_behalf_of`; with it | `403 permission_denied` (`person_required`); `400 invalid_request` (path `on_behalf_of`); approved | S | `it::vault::grant_decisions` |
+| U23 | The key that requested a grant (or created a use) approves it | `403 permission_denied` (`self_approval`) | S | `it::vault::grant_decisions` |
+| U24 | A grant at its `expires_at` second; a pending grant at 7 days; the expiry job late | Uses refuse at the second (`grant_expired`); the pending one `expired` on read; the job only records | S | `it::vault::grant_decisions` |
+| U25 | A use created by an identity key; without `Idempotency-Key`; replayed | `403 permission_denied` (the key cannot hold `vault:use`); `400 idempotency_key_required`; the use with `ticket: null`, `ticket_replayed: false` | S | `it::vault::use_lifecycle` |
+| U26 | Item `per_run`, tenant floor `per_use`; a second use in the same run 30 and 61 minutes after an approval; `rotate_fill` on a `grant` item | Effective level is the strictest; within 60 minutes `approved_by = "run"`, after it a person; `rotate_fill` always `per_use` | S | `core::vault::policy::approval_needed`, `it::vault::use_lifecycle` |
+| U27 | Approval with a digest that is not the use's | `400 invalid_request` (path `digest`); the use stays pending | S | `core::vault::digest::stable`, `it::vault::use_lifecycle` |
+| U28 | A pending use past `deadline_at`; then an approval | `expired` by the cron or on read; `409 vault_not_pending` | S | `it::vault::use_lifecycle` |
+| U29 | A ticket first redeemed 61 seconds after minting | `410 vault_ticket_expired` (`not_redeemed`); the use expires | S | `it::vault::use_lifecycle` |
+| U30 | A spent phase redeemed again; a lost redemption response | `409 vault_phase_spent`; the orchestrator creates a new use, covered by a `per_run` approval | S | `it::vault::use_lifecycle` |
+| U31 | A ticket minted twice; the first presented | The first stops matching at once: `404 vault_ticket_not_found` | S | `it::vault::use_lifecycle` |
+| U32 | Each cause of §7.4 while a use is `in_use` | The use closes in the cause's batch with its `close_reason`; ticket hash and sealed DEK cleared; switches read live before the batch | S | `it::vault::use_lifecycle` |
+| U33 | Consumer requests with no signature, two signatures, a wrong tag, wrong components, `created` 31 seconds off, `expires` past, a body that does not match `Content-Digest`, a wrong key, an `Authorization` header | One byte-identical `401 consumer_unauthenticated` body (but `request_id`), counted in the failed-authentication bucket | S | `it::vault::consumer_signatures` |
+| U34 | A nonce reused within its window | `401 consumer_unauthenticated` | S | `it::vault::consumer_signatures` |
+| U35 | A consumer `pending_activation`, `suspended`, `revoked`; its partner suspended | `403 consumer_not_active`; the partner's suspension leaves the consumer's status unchanged | S | `it::vault::consumer_reach` |
+| U36 | A consumer rotates keys with a 3,600-second overlap; signs with the old key at 3,599 and 3,601 seconds; redeems | Accepted, then `401`; the packet is sealed to the new encryption key named in `enc_kid` | S | `it::vault::consumer_signatures` |
+| U37 | Redemption context with another `run_id`, top-level origin, frame origin, trigger or form kind | `403 vault_refused` with the reason; the use closes (`refused`) | S | `it::vault::redemption_binding` |
+| U38 | Context with recording, logging or CAPTCHA solving on, extensions present, another hosting or provider, an undeclared mode | `403 vault_refused` with the reason; the use closes | S | `it::vault::redemption_binding` |
+| U39 | The item rotated between minting and redemption | `410 vault_ticket_expired` (`item_rotated`) | S | `it::vault::redemption_binding` |
+| U40 | Registration with a JWK carrying `d`, a `contract` other than `vault-consumer/1`, an eleventh platform-level consumer | `400 invalid_request` (`private_key_supplied`, `contract_unsupported`); `422 vault_consumer_limit_reached` | S | `it::vault::consumer_reach` |
+| U41 | Two uses of one login redeem `totp` in the same time step | The second `409 vault_totp_step_used` with `details.retry_after`; the phase stays open | S | `it::vault::totp_step_once` |
+| U42 | A `totp` redemption with 5 seconds left in the step | The next step's code with `not_before`; the consumer waits at most 7 seconds | S+I | `core::vault::totp::rfc6238_vectors`, `conf::vault::totp_not_before` |
+| U43 | A verification email for a vault login's channel; read by an agent key, by a key with `quarantine:review`, in the console | Hidden from every agent surface and event; the key sees the row with `content_withheld: "vault_code"`; `raw` is `404`; a signed-in person sees it | S | `it::vault::email_codes_rule_4b` |
+| U44 | A code that arrives with no open `email_otp` phase; then a phase opens 2 minutes later | It stays hidden and is delivered to the phase if it arrived after `use.created_at − 60 s`; otherwise it expires unused after 24 hours | S | `it::vault::email_codes_rule_4b` |
+| U45 | `vault.codes_into_fills_only` on; `wait` with `kind=verification`; a code from a receive-allowed sender | `403 policy_denied` (`codes_into_fills_only`); the allowed sender's code is released as today | S | `it::vault::email_codes_rule_4b` |
+| U46 | A ledger entry without a vault item, strict mode off | Its codes reach `wait` as today; nothing is withheld | S | `it::vault::email_codes_rule_4b` |
+| U47 | An SMS code from a sender not in `otp_channel.senders`; for a use created 11 minutes earlier; unsolicited | Not taken; the phase times out | S | `it::vault::sms_otp_phase` |
+| U48 | A use naming `sms_otp` before the phone milestone ships | `400 invalid_request` (`sms_not_available`) | S | `it::vault::sms_otp_phase` |
+| U49 | A session over 1,048,576 bytes, 500 cookies or 10 origins after filtering | `422 vault_session_too_large` with `details.limit` | S | `it::vault::sessions` |
+| U50 | An import with `source = "pylota_sealed_session"`, repeated with its idempotency key; carrying third-party cookies | Filtered, counted, audited with `source_ref`; the replay returns the same item; no second item | S | `it::vault::session_import` |
+| U51 | A second `session_load` while one is `in_use` | `403 vault_refused` (`session_in_use`) | S | `it::vault::sessions` |
+| U52 | A write-back; then a version past `expires_at` | Version `n + 1` current, `n`'s row and object deleted, other uses closed; the expired version deleted and the item `needs_auth` | S | `it::vault::sessions` |
+| U53 | A login rotated with a 24-hour overlap; a use with `version: "previous"` at 23 and 25 hours | Uses close at rotation; the previous version works until the overlap ends, then is deleted | S | `it::vault::rotation_versions` |
+| U54 | `rotate_fill` reported `password_changed` with write-back; `password_change_failed`; no confirmation by `closes_at` | New version current; pending deleted; pending kept 24 hours with `rotation_unconfirmed` for a person to settle | S | `it::vault::rotation_versions` |
+| U55 | An executor writes back a rotated API key on an item with `rotate_after_use`; a second write-back | New current version, previous kept for its overlap; `409 vault_phase_spent` | S | `it::vault::rotation_versions` |
+| U56 | `sign` with HMAC-SHA256 and SigV4 against published vectors; a SigV4 `url` off the item's origins; a `timestamp` 6 minutes old | Signatures match the vectors; `400 invalid_request` for the other two | S | `it::vault::signing` |
+| U57 | A console reveal without re-authentication, the eleventh in a day, of a TOTP seed, of a session | Re-authentication asked; refused with the daily limit; only the current code; not offered | S | `browser::vault::reveal_rules` |
+| U58 | Any API, MCP or CLI attempt to reveal, from any key level | No such route or tool exists; `404 route_not_found` for guessed paths | S | `it::vault::mcp_tools`, `cli::vault::commands` |
+| U59 | An API key writes, grants or uses a `managed_secret` item | `422 invalid_request` (`managed_item`); listing shows metadata and `managed_by` | S | `it::vault::managed_secrets` |
+| U60 | "Show a new value" for a port-out PIN in partner custody | The owning service sets a new PIN at the provider, the vault seals it and shows it once with `no-store`; audit `item.revealed` with `rotated: true` | S | `it::vault::custody` |
+| U61 | 50 concurrent writers to one tenant's vault | No gap and no duplicate `seq`; every change commits with its row or not at all; three conflicts answer `503 unavailable` | S | `it::vault::audit_chain_and_age_only`, `live::vault::d1_audit_contention` |
+| U62 | A refusal whose audit batch fails | The refusal is still answered; `vault_audit_append_failures_total` counts and pages | S | `it::vault::audit_chain_and_age_only` |
+| U63 | Retention deletes a tenant's oldest audit rows; a reader verifies from the anchor; a row edited in D1 | The chain verifies from the anchor; the edited row fails verification at its `seq` | S | `core::vault::audit::row_hash_chain`, `it::vault::audit_chain_and_age_only` |
+| U64 | `vault.allowed` set false with uses `in_use` | Every open use closes (`kill_switch`); redemptions refuse at once, before the batch completes | S | `it::vault::kill_switches` |
+| U65 | `revoke-all` with `shred_sessions` and `archive_items` over 2,500 rows | Every grant revoked, use closed, session version deleted and item archived, in batches of 1,000; one `vault.revoke_all` row | S | `it::vault::kill_switches` |
+| U66 | Deleting an item; its R2 delete fails | Rows shredded in one batch with the receipt; the daily sweep deletes the object | S | `it::vault::erasure_scopes` |
+| U67 | Identity erasure with identity-scoped items and grants on tenant-scoped items | Its items shredded; its uses and then its grants deleted; audit rows unchanged and their `vault_audit_runs` rows deleted, so `idvy vault audit --verify` still passes; receipt counts | S | `it::vault::erasure_scopes`, `it::vault::erasure_keeps_chain` |
+| U68 | Tenant erasure in partner custody | Custody slots and tenant keys deleted first, then the rest; the probe finds no row and an empty `t/{tenant_id}/vault/` prefix | S | `it::vault::erasure_scopes` |
+| U69 | A sentence in `docs/` or `site/` claiming the vault is zero-knowledge or end-to-end encrypted without a negation in the sentence; "we cannot see your passwords" outside double quotes; the trust statement, which denies both | The build fails on the first two; the trust statement passes | S | `xtask::docs_forbidden_claims` |
+| U70 | `PM_VAULT` turned off while `vault_code` mail and SMS are hidden | They stay hidden and expire; nothing is released | S | `it::vault::email_codes_rule_4b` |
+| U71 | MCP `tools/list` with each vault permission; each tool's result | Tools listed only by permission; no value, ticket, packet or placeholder in any result; no approving tool | S | `it::vault::mcp_tools` |
+| U72 | `idvy vault items create` with a value as an argument; any command's output | Values only from standard input or a file; never printed; an unlock key shown once | S | `cli::vault::commands` |
+| U73 | The browser types a use's placeholder into a second form on the ticket's origin (a comment box) and submits | The proxy drops the request and reports `placeholder_misplaced`; nothing substituted; the use closes | S+I | `conf::vault::proxy_second_form` |
+| U74 | A request carrying a placeholder to `http://` on the ticket's host | Dropped and reported; no value on the wire | S+I | `conf::vault::proxy_http` |
+| U75 | A placeholder in a header, in the URL, in a compressed body, in a body whose path differs from the recorded form `action` | Dropped and reported `placeholder_misplaced` | S+I | `conf::vault::proxy_header_url_websocket`, `conf::vault::proxy_second_form` |
+| U76 | The upstream echoes the value gzip-compressed, split across two chunks, base64url-encoded, or in `Location` | Redacted before the browser sees it and `value_exposed` reported, or the response dropped with `value_exposed_unscannable`; the item `needs_rotation` | S+I | `conf::vault::echo_gzip`, `conf::vault::echo_split_chunk`, `conf::vault::echo_location` |
+| U77 | A placeholder in a WebSocket text, fragmented or compressed frame, in either direction | The socket closes; `placeholder_misplaced`; never substituted | S+I | `conf::vault::proxy_header_url_websocket` |
+| U78 | An item gains an origin while a grant on it is active | The grant's origins are unchanged; a use at the new origin `403 vault_not_granted` (`origin_not_granted`) until a new grant | S | `it::vault::grant_decisions` |
+| U79 | A key of any level mints an identity key listing `vault:use`, `vault:approve` or `vault:admin` | `400 invalid_request` (`permission_not_allowed_for_level`); no identity key can ever approve or start a use | S | `it::vault::identity_key_levels` |
+| U80 | An executor's request carrying a secret receives a `307` to another host | Not followed; reported as a failure; the secret is not re-sent | S+I | `conf::vault::proxy_redirect_307` |
+| U81 | A consumer fixture or a platform fetch resolves to `64:ff9b::a9fe:a9fe`, `2002:a9fe:a9fe::1` or `169.254.169.254` | Refused by the embedded IPv4 rule of [Security § 9.1](design/security.md#91-url-rules-at-create-update-and-every-attempt) | S | `it::security::ssrf_embedded_ipv4` |
+| U82 | A grant is revoked while the egress proxy holds an open tunnel and a WebSocket carrying its secret | The status route answers `closed` at once; within 30 seconds both connections close and the secret is discarded | S+I | `it::vault::use_status_closure`, `conf::vault::closure_mid_run` |
+| U83 | A tenant generates 100,000 refusals in an hour | Rate limited at `RL_VAULT`; no audit row is deleted by count; only rows past 400 days ever go | S | `it::vault::audit_chain_and_age_only` |
+| U84 | A grant's or use's `purpose` holds a URL, Markdown link syntax and HTML | Shown as escaped text on every approval surface and in notification email; never a link, image or markup | S | `browser::vault::approval_no_links`, `it::vault::grant_decisions` |
+| U85 | Redemption context with `top_level_origin` `HTTPS://TFL.GOV.UK.:443` for a use at `https://tfl.gov.uk`; a consumer comparing its own way | Canonicalised to the same origin and accepted; consumers use `canonicalise_origin` from the SDK | S+I | `core::vault::origin::canonical_forms`, `conf::vault::canonical_origin` |
+| U86 | A consumer reports after `final: true`, after `window_elapsed` (within 10 minutes and after), and writes a session back after `final: true`; a use closed by revocation then writes back | Reports accepted until `ticket_valid_until`; the session write-back after `final` accepted until `closes_at`; the revoked use's write-back `410 vault_ticket_expired` (`grant_revoked`); `dek_ticket_sealed` cleared at closure in every case | S | `it::vault::reports_after_close` |
+| U87 | A `session_capture` use created with `phases: []`, minted, written back inside and after `run_window_seconds`; one created with a phase | `in_use` at minting with `closes_at` = mint + window; the write-back inside is accepted, the one after `410`; a phase is `400 invalid_request` | S | `it::vault::session_capture_window` |
+| U88 | `credentials` redeemed on a `password_change` form for a `rotate_fill` use and for a `fill` use | Accepted for `rotate_fill`; `403 vault_refused` (`form_kind_not_allowed`) for `fill` | S | `core::vault::redeem::form_kind_table` |
+| U89 | A `fill` use with `version: "previous"` inside the overlap, after it, and with no previous version | The previous DEK sealed at minting and redemption accepted inside the overlap; `403 vault_refused` (`previous_version_unavailable`) otherwise; a redemption after the overlap ends is `410` (`item_rotated`) | S | `it::vault::previous_version_use` |
+| U90 | Deleting an item with closed and open uses; identity erasure with uses of tenant-scoped items | One batch deletes uses before grants and the item, with no foreign-key failure; receipt counts `uses_deleted` | S | `it::vault::delete_with_uses` |
+| U91 | A `value_exposed` report arrives after rotation closed the use: once for the version now `previous` inside its overlap, once for a version already deleted; a `credentials_rejected` report for an old version | The current version's health is unchanged in every case; the previous version is deleted at once in the first case; audit only in the others (`stale_version: true`) | S | `it::vault::late_report_old_version` |

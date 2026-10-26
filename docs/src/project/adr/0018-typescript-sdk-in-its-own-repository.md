@@ -35,9 +35,10 @@ Facts the decision rests on:
 1. **The rule stands.** The Rust-only rule of `AGENTS.md` is not changed. This repository gains no TypeScript or JavaScript
    source file, no npm lockfile and no Node.js toolchain for the SDK.
 2. **The SDK has its own repository.** `@pylotahq/identity` is built, tested, released and published from the
-   public repository `PILOTAAI/pylota-identity-typescript`. The package name stays `@pylotahq/identity`. Its
-   licence is FSL-1.1-ALv2, the same as this repository's (SPDX identifier `FSL-1.1-ALv2`, read on
-   spdx.org on 2026-10-18), in `package.json` `license` and the repository's `LICENSE.md`.
+   public repository `PILOTAAI/pylota-identity-typescript`. The package name stays `@pylotahq/identity`.
+   **Amended 2026-10-26 by [ADR 0022](0022-sdk-languages.md) decision 9:** its licence is Apache-2.0 (SPDX
+   `Apache-2.0`), in `package.json` `license` and the repository's `LICENSE` and `NOTICE`. It was
+   FSL-1.1-ALv2, the same as this repository's, until that decision.
 3. **The design stays here.** [SDKs, skills and agent tooling § 2](../design/sdk-and-skills.md#2-the-typescript-sdk),
    FR-SDK-2 – FR-SDK-9, the SDK's edge-case rows and its `ts::` test names remain binding in this
    repository and are the specification the SDK repository implements. A change to the SDK's behaviour is

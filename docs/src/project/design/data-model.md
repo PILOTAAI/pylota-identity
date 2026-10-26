@@ -26,7 +26,17 @@ of truth for both.
   | `sac_` | service-ledger entry | `drf_` | draft |
   | `evc_` | durable event consumer | `wsc_` | WebSocket connection |
   | `sfb_` | screening feedback | `upl_` | upload (mailbox) |
-  | `asu_` | agent sign-up | | |
+  | `asu_` | agent sign-up | `pnm_` | phone number |
+  | `phr_` | phone request | `pdr_` | phone onboarding draft |
+  | `cpp_` | phone compliance profile | `cpd_` | phone compliance document |
+  | `a2p_` | US messaging registration | `pvc_` | voice connector |
+  | `vrt_` | voice route | `pto_` | port-out |
+  | `pti_` | port-in record | `chg_` | phone charge |
+  | `pev_` | phone provider event (local ID) | `sms_` | SMS message (mailbox) |
+  | `smc_` | SMS conversation (mailbox) | `cal_` | call (mailbox) |
+  | `vit_` | vault item | `vgr_` | vault grant |
+  | `vus_` | vault use | `vcn_` | vault consumer |
+  | `vad_` | vault audit row | `vtk_` | vault ticket (never stored; its SHA-256 only) |
 
 - **Times** are stored as Unix milliseconds (`INTEGER`) and exposed in the API as RFC 3339 UTC strings.
 - **Email addresses** are stored lower-cased, with the domain as an IDNA A-label (punycode). Local parts
@@ -624,6 +634,11 @@ CREATE TABLE service_accounts (
   closed_by_user_id   TEXT,
   closed_at           INTEGER,
   expires_at          INTEGER,                              -- pending only: created_at + 7 days
+  phone_number_id     TEXT,                                 -- pnm_: the number a code is expected on (Phone
+                                                            -- numbers § 11.2)
+  sms_senders_json    TEXT,                                 -- JSON array of up to 10 SMS senders; read by the SMS gate
+  login_domains_json  TEXT NOT NULL DEFAULT '[]',          -- 0–5 organisational domains where the account
+                                                            -- signs in (Vault § 3.3); read by the vault's origin rule
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL
 );
@@ -1026,8 +1041,11 @@ CREATE TABLE billing_events (                              -- Stripe webhook ded
 
 -- Deployment-wide switches written by crons (Cloud sign-up § 10.3).
 CREATE TABLE platform_state (
-  key        TEXT PRIMARY KEY CHECK (key IN ('send_breaker')),
+  key        TEXT PRIMARY KEY CHECK (key IN ('send_breaker','phone_account')),
   value_json TEXT NOT NULL,                                -- send_breaker: {"stage": 1 | 2, "until": <ms>, "share": <0..1>}
+                                                           -- phone_account: {"level": "paid" | "verified" | "unknown",
+                                                           -- "probed_at": <ms>, "us_enabled": bool}, written by
+                                                           -- POST /v1/platform/phone/probe (Phone numbers § 2.1)
   updated_at INTEGER NOT NULL
 );
 
@@ -1038,9 +1056,13 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER 
 -- request router (read_only), the outbound submit and consumer (read_only, free_sending) and the tenant
 -- retention job (emergency_prune); shown by GET /v1/platform/status. A missing row means the default.
 CREATE TABLE ops_switches (
-  name       TEXT PRIMARY KEY CHECK (name IN ('read_only','free_sending','emergency_prune','agent_signup')),
-  state      TEXT NOT NULL CHECK (state IN ('on','off')),  -- defaults: read_only off, free_sending on,
-                                                           -- emergency_prune off, agent_signup on
+  name       TEXT PRIMARY KEY CHECK (name IN ('read_only','free_sending','emergency_prune','agent_signup',
+                                          'phone','vault_redeem')),
+  state      TEXT NOT NULL CHECK (state IN ('on','off','paused_purchases','paused')),
+                                                           -- defaults: read_only off, free_sending on,
+                                                           -- emergency_prune off, agent_signup on, phone on,
+                                                           -- vault_redeem on. paused_purchases and paused are
+                                                           -- the phone switch's only (Phone numbers § 30)
   set_by     TEXT NOT NULL CHECK (set_by IN ('auto','platform')),
   reason     TEXT NOT NULL,                                -- the containment rule, or the operator's note
   actor_key_id TEXT,                                       -- the platform key, when set_by = 'platform'
@@ -1052,6 +1074,617 @@ CREATE TABLE platform_objects (
   name       TEXT PRIMARY KEY CHECK (name IN ('ses_control')),
   do_id      TEXT NOT NULL,                                -- minted by the every-minute cron
   created_at INTEGER NOT NULL
+);
+```
+
+```sql
+-- migrations/d1/00NN_phone.sql (M38; M39 and M40 add the tables marked with their milestone in later files)
+
+-- Phone numbers § 8: one row per tenant with its provider resources, created before the first billable action.
+CREATE TABLE phone_tenants (
+  tenant_id                 TEXT PRIMARY KEY REFERENCES tenants(id),
+  provider                  TEXT NOT NULL DEFAULT 'telnyx' CHECK (provider IN ('telnyx')),
+  provider_account_id       TEXT NOT NULL,                 -- PM_TELNYX_ACCOUNT_ID at creation
+  messaging_profile_id      TEXT,
+  connection_id             TEXT,                          -- the tenant's credential connection
+  outbound_voice_profile_id TEXT,
+  billing_group_id          TEXT,
+  sip_user                  TEXT,
+  sip_sealed                BLOB,                          -- pm1 envelope of the SIP password (sealed.rs)
+  resources_status          TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (resources_status IN ('pending','ready','failed')),
+  sync_due_at               INTEGER,                       -- a policy change waits to be applied (§ 8)
+  last_checked_at           INTEGER,
+  created_at                INTEGER NOT NULL,
+  updated_at                INTEGER NOT NULL
+);
+
+-- Phone numbers § 7.1: the directory and history. A row is never deleted while its identity exists.
+CREATE TABLE phone_numbers (
+  id                     TEXT PRIMARY KEY,                 -- pnm_
+  tenant_id              TEXT NOT NULL REFERENCES tenants(id),
+  identity_id            TEXT NOT NULL REFERENCES identities(id),
+  e164                   TEXT NOT NULL,
+  country                TEXT NOT NULL,                    -- ISO 3166-1 alpha-2
+  number_type            TEXT NOT NULL CHECK (number_type IN ('mobile','local','national','toll_free')),
+  catalogue_capabilities_json TEXT NOT NULL,               -- the row's capabilities at purchase (§ 3.3)
+  provider               TEXT NOT NULL DEFAULT 'telnyx',
+  provider_account_id    TEXT NOT NULL,
+  provider_number_id     TEXT,
+  provider_order_id      TEXT,
+  provider_sub_order_id  TEXT,
+  request_id             TEXT,                             -- the purchase, port-in or adoption that made it
+  status                 TEXT NOT NULL CHECK (status IN ('ordering','uncertain','under_review','requirements_pending',
+                           'configuring','active','suspended','port_out_pending','porting_in','releasing',
+                           'released','ported_out','failed')),
+  status_reason          TEXT,                             -- e.g. missing_at_provider, legacy_unpapered, moved
+  carrier_status         TEXT NOT NULL DEFAULT 'pending' CHECK (carrier_status IN ('pending','active','failed')),
+  sms_status             TEXT NOT NULL CHECK (sms_status IN ('not_applicable','pending','configuring','ready','failed')),
+  voice_status           TEXT NOT NULL CHECK (voice_status IN ('not_applicable','pending','configuring','ready','failed')),
+  a2p_status             TEXT NOT NULL DEFAULT 'not_applicable'
+                         CHECK (a2p_status IN ('not_applicable','not_registered','pending','ready','failed')),
+  emergency_status       TEXT NOT NULL DEFAULT 'not_applicable'
+                         CHECK (emergency_status IN ('not_applicable','none','pending','registered')),
+  primary_sms            INTEGER NOT NULL DEFAULT 0 CHECK (primary_sms IN (0,1)),
+  primary_voice          INTEGER NOT NULL DEFAULT 0 CHECK (primary_voice IN (0,1)),
+  provisioning_code      TEXT,                             -- § 6.4 code set
+  provisioning_retryable INTEGER CHECK (provisioning_retryable IN (0,1)),
+  requirements_status    TEXT,
+  deadline_at            INTEGER,
+  action_needed_json     TEXT,                             -- {kind, message (untrusted), deadline_at}
+  review_started_at      INTEGER,
+  compliance_status      TEXT NOT NULL DEFAULT 'own' CHECK (compliance_status IN ('own','legacy_group')),
+  legacy_deadline        INTEGER,                          -- § 1.1; NULL until the sole-trader decision
+  expires_at             INTEGER,                          -- § 6.8
+  port_pin               TEXT NOT NULL DEFAULT 'missing' CHECK (port_pin IN ('set','missing')),
+  adopted_at             INTEGER,
+  active_from            INTEGER,
+  active_until           INTEGER,
+  last_event_at          INTEGER,
+  next_check_at          INTEGER,
+  checks                 INTEGER NOT NULL DEFAULT 0,
+  client_reference       TEXT,
+  created_at             INTEGER NOT NULL,
+  updated_at             INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX phone_numbers_live ON phone_numbers(e164)
+  WHERE status IN ('ordering','uncertain','under_review','requirements_pending','configuring','active','suspended',
+                   'port_out_pending','porting_in','releasing');
+CREATE INDEX phone_numbers_identity ON phone_numbers(identity_id, status);
+CREATE INDEX phone_numbers_tenant ON phone_numbers(tenant_id, status);
+CREATE INDEX phone_numbers_due ON phone_numbers(next_check_at) WHERE next_check_at IS NOT NULL;
+CREATE INDEX phone_numbers_expiring ON phone_numbers(expires_at) WHERE expires_at IS NOT NULL;
+
+-- Phone numbers § 7.5: released numbers withheld from other tenants for 90 days.
+CREATE TABLE phone_number_releases (
+  e164_hash   TEXT PRIMARY KEY,                            -- hex HMAC(PM_HASH_KEY, e164)
+  tenant_id   TEXT NOT NULL,
+  released_at INTEGER NOT NULL,
+  purge_at    INTEGER NOT NULL                             -- released_at + 90 days
+);
+
+-- Phone numbers § 5: the object a person (or the standing budget) approves.
+CREATE TABLE phone_requests (
+  id                   TEXT PRIMARY KEY,                   -- phr_
+  tenant_id            TEXT NOT NULL REFERENCES tenants(id),
+  identity_id          TEXT NOT NULL REFERENCES identities(id),
+  kind                 TEXT NOT NULL CHECK (kind IN ('purchase_number','port_in','release_number','submit_compliance',
+                         'register_us_a2p','verify_toll_free','enable_emergency','set_voice_route','outbound_call')),
+  payload_json         TEXT NOT NULL,                      -- normalised (core::phone::requests::normalise)
+  quote_json           TEXT,                               -- GBP; with follow_on[] for purchases
+  digest               TEXT NOT NULL,                      -- 64 hex
+  status               TEXT NOT NULL CHECK (status IN ('pending_approval','approved','executing','in_progress',
+                         'action_needed','uncertain','completed','failed','rejected','canceled')),
+  reason               TEXT,
+  blocked_by_json      TEXT NOT NULL DEFAULT '[]',         -- ["compliance","platform_prerequisite"] (§ 5.8)
+  unblocked_at         INTEGER,
+  approved_by          TEXT CHECK (approved_by IN ('person','key','standing_budget','purchase')),
+  budget_version       INTEGER,                            -- with approved_by = 'standing_budget'
+  parent_request_id    TEXT,                               -- a scheduled release's purchase (§ 6.8)
+  release_at           INTEGER,                            -- purchase with expires_at
+  requested_by_key_id  TEXT,
+  requested_by_user_id TEXT,
+  decided_by_key_id    TEXT,
+  decided_by_user_id   TEXT,
+  on_behalf_of         TEXT,
+  note                 TEXT,
+  decided_at           INTEGER,
+  attempt              INTEGER NOT NULL DEFAULT 0,
+  candidates_tried     INTEGER NOT NULL DEFAULT 0,         -- taken numbers replaced (§ 6.7), at most 5
+  customer_reference   TEXT,                               -- pi:{id}:{attempt}
+  spend_intent_at      INTEGER,
+  exec_token           TEXT,
+  exec_until           INTEGER,
+  next_check_at        INTEGER,
+  checks               INTEGER NOT NULL DEFAULT 0,
+  result_json          TEXT,
+  secrets_sealed       BLOB,                               -- port-in losing-carrier details; cleared at the end
+  client_reference     TEXT,
+  expires_at           INTEGER,                            -- pending only (§ 5.2, § 5.8)
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+CREATE INDEX phone_requests_tenant ON phone_requests(tenant_id, status, created_at);
+CREATE INDEX phone_requests_identity ON phone_requests(identity_id, status, created_at);
+CREATE INDEX phone_requests_due ON phone_requests(next_check_at) WHERE next_check_at IS NOT NULL;
+CREATE INDEX phone_requests_release ON phone_requests(release_at) WHERE release_at IS NOT NULL;
+CREATE UNIQUE INDEX phone_requests_reference ON phone_requests(customer_reference) WHERE customer_reference IS NOT NULL;
+
+-- Phone numbers § 4.7: registration text an agent drafted for a person to submit. No personal data by schema.
+CREATE TABLE phone_onboarding_drafts (
+  id                 TEXT PRIMARY KEY,                     -- pdr_
+  tenant_id          TEXT NOT NULL REFERENCES tenants(id),
+  country            TEXT NOT NULL,
+  fields_json        TEXT NOT NULL,                        -- validated against the draft schema (untrusted text)
+  drafted_by_key_id  TEXT,
+  drafted_by_user_id TEXT,
+  purge_at           INTEGER NOT NULL,                     -- updated_at + 30 days
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  UNIQUE (tenant_id, country)
+);
+
+-- Phone numbers § 4.1: the legal entity numbers are registered under.
+CREATE TABLE phone_compliance_profiles (
+  id                    TEXT PRIMARY KEY,                  -- cpp_
+  tenant_id             TEXT NOT NULL UNIQUE REFERENCES tenants(id),
+  legal_name            TEXT NOT NULL,
+  trading_name          TEXT,
+  entity_type           TEXT NOT NULL CHECK (entity_type IN ('limited_company','llp','partnership','public_company',
+                          'non_profit','sole_trader')),       -- sole_trader accepted only per § 1.1
+  registration_country  TEXT NOT NULL,
+  company_number        TEXT,
+  company_registry_json TEXT,                              -- {country, region, name}
+  tax_ids_sealed        BLOB,
+  website               TEXT,
+  use_case              TEXT,
+  representative_json   TEXT,                              -- {name, role}
+  representative_sealed BLOB,                              -- email, phone, birth data where a row needs them
+  addresses_json        TEXT NOT NULL DEFAULT '[]',        -- [{id, kind, lines, locality, region, postal_code, country, verified}]
+  created_at            INTEGER NOT NULL,
+  updated_at            INTEGER NOT NULL
+);
+
+-- Phone numbers § 4.2: write-only KYC documents.
+CREATE TABLE phone_compliance_documents (
+  id                   TEXT PRIMARY KEY,                   -- cpd_
+  tenant_id            TEXT NOT NULL REFERENCES tenants(id),
+  profile_id           TEXT NOT NULL REFERENCES phone_compliance_profiles(id),
+  kind                 TEXT NOT NULL CHECK (kind IN ('company_registration_certificate','proof_of_address',
+                         'representative_id','registration_form','power_of_attorney','letter_of_authorisation',
+                         'invoice','other')),
+  filename             TEXT NOT NULL,
+  content_type         TEXT NOT NULL CHECK (content_type IN ('application/pdf','image/png','image/jpeg')),
+  size                 INTEGER NOT NULL,
+  sha256               TEXT NOT NULL,
+  valid_until          INTEGER,
+  status               TEXT NOT NULL CHECK (status IN ('pending_upload','ready','deleted')),
+  key_sealed           BLOB,                               -- the document's data key; deleting it shreds the document
+  provider_document_id TEXT,
+  hold_reason          TEXT CHECK (hold_reason IN ('kyc_retention')),
+  retain_until         INTEGER,
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+CREATE INDEX phone_compliance_documents_tenant ON phone_compliance_documents(tenant_id, status);
+
+-- Phone numbers § 4.3 and § 4.4: one row per tenant, country, number type and action.
+CREATE TABLE phone_requirement_groups (
+  id                   TEXT PRIMARY KEY,
+  tenant_id            TEXT NOT NULL REFERENCES tenants(id),
+  profile_id           TEXT NOT NULL REFERENCES phone_compliance_profiles(id),
+  country              TEXT NOT NULL,
+  number_type          TEXT NOT NULL,
+  action               TEXT NOT NULL CHECK (action IN ('ordering','porting')),
+  provider_group_id    TEXT,
+  status               TEXT NOT NULL CHECK (status IN ('draft','under_review','approved','rejected','expired')),
+  provider_status      TEXT,
+  comments             TEXT,                               -- provider comments, untrusted
+  requirements_version TEXT,
+  requirements_json    TEXT,                               -- the requirement set submitted against (cached 24 h)
+  expires_at           INTEGER,
+  last_checked_at      INTEGER,
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL,
+  UNIQUE (tenant_id, country, number_type, action)
+);
+
+-- Phone numbers § 13 (M39): brands, campaigns and toll-free verifications.
+CREATE TABLE phone_registrations (
+  id                   TEXT PRIMARY KEY,                   -- a2p_
+  tenant_id            TEXT NOT NULL REFERENCES tenants(id),
+  kind                 TEXT NOT NULL CHECK (kind IN ('brand','campaign','toll_free')),
+  brand_entity         TEXT CHECK (brand_entity IN ('standard','sole_proprietor')),
+  brand_country        TEXT,
+  provider_brand_id    TEXT CHECK (provider_brand_id IS NULL OR provider_brand_id NOT LIKE 'sim-%'),
+  provider_campaign_id TEXT,
+  reference_id         TEXT UNIQUE,                        -- campaigns: pi:{request_id}
+  status               TEXT NOT NULL CHECK (status IN ('draft','submitted','pending','ready','failed','deactivated')),
+  provider_status_json TEXT,                               -- identityStatus, campaignStatus, verification status
+  otp_status           TEXT CHECK (otp_status IN ('not_required','sent','verified','expired')),
+  otp_resends_today    INTEGER NOT NULL DEFAULT 0,
+  failure_reasons_json TEXT,
+  throughput_json      TEXT,
+  request_id           TEXT,
+  last_event_at        INTEGER,
+  next_check_at        INTEGER,
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+CREATE INDEX phone_registrations_tenant ON phone_registrations(tenant_id, kind, status);
+
+-- Phone numbers § 14.2 (M40): a tenant's Vapi connection.
+CREATE TABLE phone_voice_connectors (
+  id                 TEXT PRIMARY KEY,                     -- pvc_
+  tenant_id          TEXT NOT NULL REFERENCES tenants(id),
+  kind               TEXT NOT NULL CHECK (kind IN ('vapi')),
+  region             TEXT NOT NULL CHECK (region IN ('us','eu')),
+  api_key_sealed     BLOB NOT NULL,
+  vapi_credential_id TEXT,
+  status             TEXT NOT NULL CHECK (status IN ('active','failed','deleted')),
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+
+-- Phone numbers § 14.1 (M40): one route per voice-capable number.
+CREATE TABLE phone_voice_routes (
+  id                   TEXT PRIMARY KEY,                   -- vrt_
+  tenant_id            TEXT NOT NULL REFERENCES tenants(id),
+  number_id            TEXT NOT NULL UNIQUE REFERENCES phone_numbers(id),
+  kind                 TEXT NOT NULL CHECK (kind IN ('vapi','sip','forward','none')),
+  config_json          TEXT NOT NULL,
+  connector_id         TEXT REFERENCES phone_voice_connectors(id),
+  server_secret_sealed BLOB,
+  vapi_phone_number_id TEXT,
+  declares_recording   INTEGER NOT NULL DEFAULT 0 CHECK (declares_recording IN (0,1)),
+  status               TEXT NOT NULL CHECK (status IN ('pending','ready','failed')),
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+
+-- Phone numbers § 15 (M41): one record per provider porting order of a port-in request.
+CREATE TABLE phone_port_ins (
+  id                     TEXT PRIMARY KEY,                 -- pti_
+  tenant_id              TEXT NOT NULL REFERENCES tenants(id),
+  request_id             TEXT NOT NULL REFERENCES phone_requests(id),
+  provider_porting_order_id TEXT,
+  status                 TEXT NOT NULL,
+  foc_at                 INTEGER,
+  comments               TEXT,                             -- provider comments, untrusted
+  created_at             INTEGER NOT NULL,
+  updated_at             INTEGER NOT NULL
+);
+
+-- Phone numbers § 16 (M41): port-outs and their decisions.
+CREATE TABLE phone_port_outs (
+  id                   TEXT PRIMARY KEY,                   -- pto_
+  tenant_id            TEXT NOT NULL REFERENCES tenants(id),
+  number_id            TEXT NOT NULL REFERENCES phone_numbers(id),
+  provider_port_out_id TEXT NOT NULL UNIQUE,
+  status               TEXT NOT NULL CHECK (status IN ('pending','authorized','rejected','rejected_pending','ported','canceled')),
+  respond_by           INTEGER NOT NULL,
+  decision             TEXT CHECK (decision IN ('authorized','rejected','provider_authorized')),
+  reason_code          TEXT,
+  reason_text          TEXT,
+  decided_by_key_id    TEXT,
+  decided_by_user_id   TEXT,
+  on_behalf_of         TEXT,
+  decided_at           INTEGER,
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+
+-- Phone numbers § 10.5 (M39): the consent ledger, per tenant brand and counterparty hash.
+CREATE TABLE phone_consent (
+  tenant_id         TEXT NOT NULL REFERENCES tenants(id),
+  counterparty_hash TEXT NOT NULL,                         -- hex HMAC(PM_HASH_KEY, e164)
+  hint              TEXT NOT NULL,                         -- masked, e.g. +44 •••• ••0123
+  state             TEXT NOT NULL CHECK (state IN ('opted_out','opted_in')),
+  purpose           TEXT CHECK (purpose IN ('marketing','all')),
+  source            TEXT NOT NULL CHECK (source IN ('keyword','api','console','provider_sync')),
+  evidence          TEXT,                                  -- untrusted, ≤ 1,000 chars
+  sms_id            TEXT,
+  updated_by_key_id TEXT,
+  updated_at        INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, counterparty_hash)
+);
+
+-- Phone numbers § 18.2: one row per charge, unique by source.
+CREATE TABLE phone_charges (
+  id                     TEXT PRIMARY KEY,                 -- chg_
+  tenant_id              TEXT NOT NULL REFERENCES tenants(id),
+  identity_id            TEXT,
+  number_id              TEXT,
+  kind                   TEXT NOT NULL CHECK (kind IN ('number_setup','number_monthly','sms_out','sms_in','mms_in',
+                           'voice_in','voice_out','voice_forward','a2p_fee','emergency_monthly','port_fee')),
+  pence                  INTEGER NOT NULL,
+  provider_cost_usd      TEXT,                             -- decimal string
+  card_version           INTEGER NOT NULL,
+  month                  TEXT NOT NULL,                    -- YYYY-MM, UTC
+  source                 TEXT NOT NULL UNIQUE,             -- provider event ID or monthly:{number_id}:{YYYY-MM}
+  invoiced_at            INTEGER,
+  stripe_invoice_item_id TEXT,
+  created_at             INTEGER NOT NULL
+);
+CREATE INDEX phone_charges_tenant_month ON phone_charges(tenant_id, month);
+
+-- Phone numbers § 9.5: provider events, deduplicated by the provider's event ID.
+CREATE TABLE phone_provider_events (
+  provider_event_id TEXT PRIMARY KEY,
+  id                TEXT NOT NULL UNIQUE,                  -- pev_
+  provider          TEXT NOT NULL DEFAULT 'telnyx',
+  event_type        TEXT NOT NULL,
+  occurred_at       INTEGER NOT NULL,
+  resource_id       TEXT,
+  tenant_id         TEXT,
+  status            TEXT NOT NULL CHECK (status IN ('pending','processed','ignored_mismatch','ignored_unrouted',
+                      'pending_target')),
+  r2_key            TEXT NOT NULL,
+  created_at        INTEGER NOT NULL,
+  processed_at      INTEGER
+);
+CREATE INDEX phone_provider_events_pending ON phone_provider_events(status, created_at)
+  WHERE status IN ('pending','pending_target');
+
+-- Phone numbers § 12.3 (M39): provider message ID → owner, written at dispatch.
+CREATE TABLE phone_message_index (
+  provider_message_id TEXT PRIMARY KEY,
+  tenant_id           TEXT NOT NULL,
+  identity_id         TEXT NOT NULL,
+  sms_id              TEXT NOT NULL,
+  created_at          INTEGER NOT NULL
+);
+```
+
+```sql
+-- The tenant vault key (Vault § 4.2): one active X25519 key per tenant, a retiring one during rotation.
+-- Written by the first vault write, rotate-key, custody changes and erasure; read when a DEK is sealed
+-- (public key) or unwrapped (private key: mint, sign, reveal, rotation).
+CREATE TABLE vault_keys (
+  tenant_id      TEXT NOT NULL REFERENCES tenants(id),
+  kid            TEXT NOT NULL,                             -- RFC 7638 thumbprint of the public JWK
+  public_key     BLOB NOT NULL,                             -- 32 bytes
+  private_sealed BLOB,                                      -- pm1 envelope, aad pm1|vault_keys|private_sealed|{tenant_id}:{kid};
+                                                            -- NULL in partner custody
+  custody        TEXT NOT NULL CHECK (custody IN ('operator','partner')),
+  state          TEXT NOT NULL CHECK (state IN ('active','retiring')),
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, kid)
+);
+CREATE UNIQUE INDEX vault_keys_one_active ON vault_keys(tenant_id) WHERE state = 'active';
+
+-- Partner custody slots (Vault § 4.6): the tenant private key wrapped under an unlock key, then sealed under
+-- the master key. Written by enrol and release; read on unwrapping routes; deleted first by tenant erasure.
+CREATE TABLE vault_custody_slots (
+  tenant_id       TEXT NOT NULL REFERENCES tenants(id),
+  kid             TEXT NOT NULL,
+  slot            INTEGER NOT NULL CHECK (slot IN (1,2)),
+  private_wrapped BLOB NOT NULL,                            -- pm1( AES-256-GCM(unlock key, private, aad pvu1|{tenant_id}|{kid}|{slot}) )
+  created_at      INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, kid, slot)
+);
+
+-- Vault items (Vault § 3.1). Values are never here: they are in vault_item_versions or R2.
+CREATE TABLE vault_items (
+  id                TEXT PRIMARY KEY,                       -- vit_
+  tenant_id         TEXT NOT NULL REFERENCES tenants(id),
+  identity_id       TEXT REFERENCES identities(id),         -- NULL: tenant-scoped
+  kind              TEXT NOT NULL CHECK (kind IN ('login','api_key','session','managed_secret')),
+  title             TEXT NOT NULL,                          -- 1–120 chars, untrusted
+  account_id        TEXT REFERENCES service_accounts(id),   -- required for identity-scoped items, except managed
+  username          TEXT,
+  origins_json      TEXT NOT NULL,                          -- 1–10 canonical origins
+  approval          TEXT NOT NULL CHECK (approval IN ('grant','per_run','per_use')),
+  state             TEXT NOT NULL CHECK (state IN ('active','archived')),
+  health            TEXT NOT NULL CHECK (health IN ('ok','needs_auth','needs_attention','needs_rotation')),
+  health_reason     TEXT,
+  current_version   INTEGER NOT NULL,
+  has_json          TEXT NOT NULL,                          -- which sealed fields exist; never values
+  otp_channel_json  TEXT,                                   -- login only
+  inject_json       TEXT,                                   -- api_key only: scheme, header_name, username
+  sign_json         TEXT,                                   -- api_key only, P1
+  rotate_after_use  INTEGER NOT NULL DEFAULT 0,
+  rotation_json     TEXT NOT NULL,                          -- remind_after_days, last_rotated_at
+  session_json      TEXT,                                   -- session only: ttl_seconds, expires_at, size_bytes, counts
+  totp_last_step    INTEGER,                                -- one code per step per item (§ 9.1)
+  managed_by        TEXT CHECK (managed_by IN ('phone')),
+  owner_ref         TEXT,                                   -- managed only: the owning service's resource ID
+  managed_purpose   TEXT CHECK (managed_purpose IN ('port_out_pin')),
+  created_by_key_id TEXT,
+  created_by_user_id TEXT,
+  first_used_at     INTEGER,
+  last_used_at      INTEGER,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+CREATE INDEX vault_items_identity ON vault_items(identity_id, state, created_at);
+CREATE INDEX vault_items_tenant ON vault_items(tenant_id, state, created_at);
+CREATE INDEX vault_items_account ON vault_items(account_id);
+CREATE UNIQUE INDEX vault_items_managed ON vault_items(tenant_id, owner_ref, managed_purpose) WHERE managed_by IS NOT NULL;
+
+-- Item versions (Vault § 4.3, § 11.1): at most current, previous and pending per item.
+CREATE TABLE vault_item_versions (
+  item_id          TEXT NOT NULL REFERENCES vault_items(id),
+  version          INTEGER NOT NULL,
+  role             TEXT NOT NULL CHECK (role IN ('current','previous','pending')),
+  tvk_kid          TEXT NOT NULL,                           -- the tenant key the DEK is sealed to
+  dek_sealed       BLOB NOT NULL,                           -- HPKE enc ‖ ciphertext, aad pv1|dek|{tenant}|{item}|{version}|{kid}
+  fields_json      TEXT,                                    -- {purpose: "pv1.{nonce}.{ct}"}; NULL for sessions
+  r2_sha256        TEXT,                                    -- sessions: SHA-256 of the R2 ciphertext
+  overlap_until    INTEGER,                                 -- previous only
+  expires_at       INTEGER,                                 -- sessions only
+  import_source    TEXT,                                    -- pylota_sealed_session
+  created_at       INTEGER NOT NULL,
+  PRIMARY KEY (item_id, version)
+);
+CREATE UNIQUE INDEX vault_item_versions_role ON vault_item_versions(item_id, role);
+CREATE INDEX vault_item_versions_kid ON vault_item_versions(tvk_kid);
+
+-- Grants (Vault § 5).
+CREATE TABLE vault_grants (
+  id                  TEXT PRIMARY KEY,                     -- vgr_
+  tenant_id           TEXT NOT NULL REFERENCES tenants(id),
+  item_id             TEXT NOT NULL REFERENCES vault_items(id),
+  identity_id         TEXT NOT NULL REFERENCES identities(id),
+  operations_json     TEXT NOT NULL,
+  origins_json        TEXT NOT NULL,
+  status              TEXT NOT NULL CHECK (status IN ('pending_approval','active','denied','revoked','expired')),
+  purpose             TEXT NOT NULL,                        -- untrusted
+  max_uses            INTEGER,
+  use_count           INTEGER NOT NULL DEFAULT 0,
+  requested_by_key_id TEXT,
+  decided_by_key_id   TEXT,
+  decided_by_user_id  TEXT,
+  on_behalf_of        TEXT,
+  note                TEXT,
+  decided_at          INTEGER,
+  expires_at          INTEGER NOT NULL,
+  revoked_at          INTEGER,
+  revoke_reason       TEXT,
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL
+);
+CREATE INDEX vault_grants_identity ON vault_grants(identity_id, status, created_at);
+CREATE INDEX vault_grants_item ON vault_grants(item_id, status);
+CREATE INDEX vault_grants_tenant ON vault_grants(tenant_id, status, created_at);
+
+-- Uses (Vault § 6, § 7). dek_ticket_sealed is cleared when the use ends; ticket_hash at ticket_valid_until (§ 4.4).
+CREATE TABLE vault_uses (
+  id                 TEXT PRIMARY KEY,                      -- vus_
+  tenant_id          TEXT NOT NULL REFERENCES tenants(id),
+  identity_id        TEXT NOT NULL REFERENCES identities(id),
+  item_id            TEXT NOT NULL REFERENCES vault_items(id),
+  grant_id           TEXT NOT NULL REFERENCES vault_grants(id),
+  consumer_id        TEXT REFERENCES vault_consumers(id),   -- NULL for sign
+  operation          TEXT NOT NULL CHECK (operation IN ('fill','rotate_fill','session_load','session_capture','inject','sign')),
+  phases_json        TEXT NOT NULL,
+  phases_redeemed_json TEXT NOT NULL DEFAULT '[]',
+  run_id             TEXT NOT NULL,
+  origin             TEXT NOT NULL,
+  trigger            TEXT NOT NULL,
+  purpose            TEXT NOT NULL,                         -- untrusted
+  capture_into       TEXT REFERENCES vault_items(id),
+  run_window_seconds INTEGER,
+  version_choice     TEXT NOT NULL DEFAULT 'current' CHECK (version_choice IN ('current','previous')),
+  status             TEXT NOT NULL CHECK (status IN ('pending_approval','approved','in_use','closed','denied','expired','canceled')),
+  approval_reason    TEXT,
+  approved_by        TEXT CHECK (approved_by IN ('person','key','run','grant')),
+  run_approval_until INTEGER,
+  digest             TEXT NOT NULL,
+  deadline_at        INTEGER,
+  ticket_lookup      TEXT,
+  ticket_hash        TEXT,                                  -- hex SHA-256 of the ticket
+  ticket_version     INTEGER,
+  dek_ticket_sealed  BLOB,                                  -- AES-256-GCM under the ticket secret
+  ticket_issued_at   INTEGER,
+  redeem_by          INTEGER,
+  first_redeemed_at  INTEGER,
+  closes_at          INTEGER,
+  closed_at          INTEGER,
+  ticket_valid_until INTEGER,                               -- reports and allowed write-backs authenticate until then
+  close_reason       TEXT,
+  outcome            TEXT,
+  write_back_done    INTEGER NOT NULL DEFAULT 0,
+  created_by_key_id  TEXT NOT NULL,
+  decided_by_key_id  TEXT,
+  decided_by_user_id TEXT,
+  on_behalf_of       TEXT,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vault_uses_ticket ON vault_uses(ticket_lookup) WHERE ticket_lookup IS NOT NULL;
+CREATE INDEX vault_uses_identity ON vault_uses(identity_id, status, created_at);
+CREATE INDEX vault_uses_tenant ON vault_uses(tenant_id, status, created_at);
+CREATE INDEX vault_uses_item_open ON vault_uses(item_id) WHERE status IN ('pending_approval','approved','in_use');
+CREATE INDEX vault_uses_deadlines ON vault_uses(status, deadline_at, redeem_by, closes_at);
+
+-- Consumers (Vault § 8.1, § 8.2).
+CREATE TABLE vault_consumers (
+  id                   TEXT PRIMARY KEY,                    -- vcn_
+  kind                 TEXT NOT NULL CHECK (kind IN ('browser','egress_proxy','executor')),
+  name                 TEXT NOT NULL,
+  level                TEXT NOT NULL CHECK (level IN ('platform','partner','tenant')),
+  partner_id           TEXT REFERENCES partners(id),
+  tenant_id            TEXT REFERENCES tenants(id),
+  hosting              TEXT NOT NULL CHECK (hosting IN ('self_hosted','third_party')),
+  provider             TEXT,
+  contract             TEXT NOT NULL,
+  signing_jwk_json     TEXT,                                -- cleared on revoke
+  signing_kid          TEXT,
+  prev_signing_jwk_json TEXT,
+  prev_signing_kid     TEXT,
+  prev_signing_until   INTEGER,
+  encryption_jwk_json  TEXT,
+  encryption_kid       TEXT,
+  declarations_json    TEXT NOT NULL,
+  status               TEXT NOT NULL CHECK (status IN ('pending_activation','active','suspended','revoked')),
+  activation_note      TEXT,
+  activated_by_key_id  TEXT,
+  activated_by_user_id TEXT,
+  activated_at         INTEGER,
+  revoked_at           INTEGER,
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vault_consumers_signing_kid ON vault_consumers(signing_kid) WHERE signing_kid IS NOT NULL;
+CREATE INDEX vault_consumers_prev_kid ON vault_consumers(prev_signing_kid) WHERE prev_signing_kid IS NOT NULL;
+CREATE INDEX vault_consumers_scope ON vault_consumers(level, partner_id, tenant_id, status);
+
+-- Consumer signature nonces (Vault § 8.4): kept until 60 s after the signature's expires.
+CREATE TABLE vault_consumer_nonces (
+  consumer_id TEXT NOT NULL,
+  nonce       TEXT NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  PRIMARY KEY (consumer_id, nonce)
+);
+CREATE INDEX vault_consumer_nonces_expiry ON vault_consumer_nonces(expires_at);
+
+-- The vault audit (Vault § 14): append-only, hash-chained, per tenant; deleted only by age (400 days) and erasure.
+CREATE TABLE vault_audit (
+  id                TEXT PRIMARY KEY,                       -- vad_
+  tenant_id         TEXT NOT NULL,
+  seq               INTEGER NOT NULL,
+  prev_hash         TEXT NOT NULL,
+  row_hash          TEXT NOT NULL,
+  action            TEXT NOT NULL,
+  item_id           TEXT,
+  version           INTEGER,
+  grant_id          TEXT,
+  use_id            TEXT,
+  consumer_id       TEXT,
+  identity_id       TEXT,
+  actor_key_id      TEXT,
+  actor_user_id     TEXT,
+  actor_consumer_id TEXT,
+  on_behalf_of      TEXT,
+  operation         TEXT,
+  phase             TEXT,
+  outcome           TEXT,
+  reason            TEXT,
+  site              TEXT,                                   -- registrable domain, never a URL
+  details_json      TEXT NOT NULL DEFAULT '{}',             -- counts and enumerations only
+  created_at        INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX vault_audit_seq ON vault_audit(tenant_id, seq);
+CREATE INDEX vault_audit_item ON vault_audit(tenant_id, item_id, seq);
+CREATE INDEX vault_audit_created ON vault_audit(created_at);
+
+-- The run of each audit row (Vault § 14.1), outside row_hash, so identity erasure can delete it
+-- without changing the chain.
+CREATE TABLE vault_audit_runs (
+  audit_id   TEXT PRIMARY KEY REFERENCES vault_audit(id) ON DELETE CASCADE,
+  tenant_id  TEXT NOT NULL,
+  run_id     TEXT NOT NULL
+);
+CREATE INDEX vault_audit_runs_run ON vault_audit_runs(tenant_id, run_id);
+
+-- Audit anchors (Vault § 16.1): the last row retention deleted, so the chain stays verifiable.
+CREATE TABLE vault_audit_anchors (
+  tenant_id  TEXT PRIMARY KEY,
+  seq        INTEGER NOT NULL,
+  row_hash   TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 ```
 
@@ -1250,6 +1883,16 @@ CREATE TABLE platform_objects (
   `api_keys` and `identities` ([Privacy § 6.6](privacy.md#66-tenant-scope)); `agent_signup_refusals` is never
   deleted by erasure, because it records an objection to contact, as `suppressions` does.
 
+- **Phone numbers.** `phone_numbers` is both the routing directory (one live row per E.164, enforced by
+  `phone_numbers_live`) and the history of ownership periods. Requests, numbers, registrations and port-outs
+  move only under the execution lease of [Phone numbers § 5.5](phone-numbers.md#55-execution-leases-and-attempts);
+  `customer_reference` is unique so a recovered order can be attributed to exactly one attempt. The standing
+  budget's month count and the phone spend holds live in `TenantQuota` (`phone_budget:t:*`, `phone_spend:*`),
+  not in D1.
+- **Vault.** Every `vault_*` table is written by the vault handlers and jobs named in [Vault](vault.md)
+  (§ 3–§ 16) and read by the same routes, the consumer routes, the every-minute vault cron, the daily vault
+  sweep, the global retention job's `vault` step and the erasure steps.
+
 ## 2. `IdentityMailbox` Durable Object (SQLite)
 
 One object per identity. Every write path runs inside `transaction_sync` (or the `workers-rs`
@@ -1383,9 +2026,9 @@ CREATE TABLE IF NOT EXISTS messages (
   quarantine_reason   TEXT                                 -- NULL unless status is quarantined or hidden
                       CHECK (quarantine_reason IN ('auth_failed','auth_unverified','spam','risky_attachment',
                                                    'blocked_sender','otp_unsolicited','account_unapproved',
-                                                   'steering_suspected','screening_unavailable')),  -- blocked_sender:
+                                                   'steering_suspected','screening_unavailable','vault_code')),  -- blocked_sender:
                                                            -- a receive-block entry only (D7); the last two:
-                                                           -- Screening § 4.3, § 7
+                                                           -- Screening § 4.3, § 7; vault_code: Vault § 9.2
   flags_json          TEXT NOT NULL DEFAULT '[]',          -- parse_degraded, message_id_conflict, encrypted,
                                                            -- hidden_text, sent_via_fallback, reprocessed, bcc,
                                                            -- thread_join_unverified, reconciled, loopback,
@@ -1584,6 +2227,9 @@ CREATE TABLE IF NOT EXISTS verifications (                 -- codes and links fo
   account_id    TEXT                                       -- sac_ of the approved service-ledger entry that
                                                            -- matched (rule 4a); NULL when the tenant does not
                                                            -- require approval. Read by wait before a release
+  vault_item_id     TEXT,                                  -- set by quarantine rule 4b (Vault § 9.2)
+  vault_use_id      TEXT,                                  -- set by VaultTakeCode
+  vault_consumed_at INTEGER                                -- set by VaultTakeCode; a consumed code is never released
 );
 
 -- Drafts, approvals and scheduled send (Drafts § 9.1)
@@ -1739,6 +2385,109 @@ CREATE TABLE IF NOT EXISTS rate_windows (                  -- inbound volume cap
   PRIMARY KEY (sender, window_start)
 );
 ```
+
+```sql
+-- crates/worker/src/mailbox/schema/00NN_sms.sql (M39)
+CREATE TABLE sms_conversations (
+  id                TEXT PRIMARY KEY,                      -- smc_
+  number_id         TEXT NOT NULL,                         -- pnm_ of this identity
+  counterparty      TEXT NOT NULL,                         -- E.164, short code or alphanumeric sender
+  counterparty_hash TEXT NOT NULL,
+  last_message_at   INTEGER NOT NULL,
+  created_at        INTEGER NOT NULL,
+  UNIQUE (number_id, counterparty)
+);
+
+CREATE TABLE sms_messages (
+  id                  TEXT PRIMARY KEY,                    -- sms_
+  conversation_id     TEXT NOT NULL REFERENCES sms_conversations(id),
+  number_id           TEXT NOT NULL,
+  direction           TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+  status              TEXT NOT NULL CHECK (status IN ('received','quarantined','screening','hidden','throttled',
+                        'queued','sent_to_provider','sent','delivered','failed','delivery_unconfirmed',
+                        'uncertain','reconciled')),
+  quarantine_reason   TEXT,
+  kind                TEXT CHECK (kind IN ('transactional','marketing','verification')),
+  from_party          TEXT NOT NULL,
+  to_party            TEXT NOT NULL,
+  text                TEXT,                                -- NFC, ≤ 10,000 chars; codes stay here, redacted on read
+  text_digest         TEXT,
+  truncated           INTEGER NOT NULL DEFAULT 0,
+  segments            INTEGER,
+  encoding            TEXT,
+  flags_json          TEXT NOT NULL DEFAULT '["sender_unverified"]',
+  screening_json      TEXT,
+  provider_message_id TEXT UNIQUE,
+  sender_used         TEXT,
+  sender_substituted  INTEGER NOT NULL DEFAULT 0,
+  reason              TEXT,
+  client_reference    TEXT,
+  received_at         INTEGER,
+  sent_at             INTEGER,
+  last_event_at       INTEGER,
+  created_at          INTEGER NOT NULL
+);
+CREATE INDEX sms_messages_conversation ON sms_messages(conversation_id, created_at);
+CREATE INDEX sms_messages_status ON sms_messages(status, created_at);
+
+CREATE TABLE sms_media (
+  sms_id       TEXT NOT NULL REFERENCES sms_messages(id),
+  n            INTEGER NOT NULL,
+  content_type TEXT,
+  size         INTEGER,
+  status       TEXT NOT NULL CHECK (status IN ('pending','stored','unavailable','risky')),
+  r2_key       TEXT,
+  PRIMARY KEY (sms_id, n)
+);
+
+CREATE TABLE sms_verifications (
+  sms_id            TEXT PRIMARY KEY REFERENCES sms_messages(id),
+  number_id         TEXT NOT NULL,
+  sender            TEXT NOT NULL,
+  account_id        TEXT,                                  -- the ledger entry that matched
+  vault_item_id     TEXT,                                  -- a vault login item's phone channel claimed it
+  kind              TEXT NOT NULL CHECK (kind IN ('code')),
+  value             TEXT NOT NULL,                         -- never logged, never in an event
+  solicited         INTEGER NOT NULL CHECK (solicited IN (0,1)),
+  consumed_at       INTEGER,
+  vault_consumed_at INTEGER,
+  vault_use_id      TEXT,
+  received_at       INTEGER NOT NULL,
+  expires_at        INTEGER NOT NULL                       -- received_at + 24 h
+);
+
+CREATE TABLE sms_waits (
+  id          TEXT PRIMARY KEY,
+  number_id   TEXT NOT NULL,
+  from_party  TEXT,
+  account_id  TEXT,
+  expires_at  INTEGER NOT NULL
+);
+
+-- crates/worker/src/mailbox/schema/00NN_calls.sql (M40)
+CREATE TABLE calls (
+  id                 TEXT PRIMARY KEY,                     -- cal_
+  number_id          TEXT NOT NULL,
+  direction          TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+  counterparty       TEXT NOT NULL,
+  route_kind         TEXT,
+  provider_call_id   TEXT UNIQUE,
+  vapi_call_id       TEXT,
+  status             TEXT NOT NULL CHECK (status IN ('placing','ringing','in_progress','ended','uncertain')),
+  outcome            TEXT CHECK (outcome IN ('answered','no_answer','busy','failed','rejected')),
+  disclosure_applied INTEGER NOT NULL DEFAULT 0,
+  started_at         INTEGER,
+  answered_at        INTEGER,
+  ended_at           INTEGER,
+  duration_seconds   INTEGER,
+  cost_pence         INTEGER,
+  source             TEXT NOT NULL DEFAULT 'webhook' CHECK (source IN ('webhook','cdr')),
+  created_at         INTEGER NOT NULL
+);
+CREATE INDEX calls_number ON calls(number_id, created_at);
+```
+
+The mailbox `idempotency` table gains `sms_id TEXT` (nullable), the SMS a send key produced.
 
 ### Mailbox notes
 
@@ -2111,6 +2860,10 @@ CREATE TABLE IF NOT EXISTS erased_refs (                   -- refuses late appen
 | `t/{ten}/i/{idn}/up/{upl}` | Upload bytes, verified against the declared SHA-256 ([Uploads § 5.1](uploads.md#51-mailbox-table)) | `tenant`, `identity`, `upload`, `sha256` | Rejection, expiry, `DELETE`, erasure; the orphan sweep after 15 days when no row names it |
 | `t/{ten}/i/{idn}/drafts/{drf}/a/{att}` | A draft attachment: an inline part, or the copy of an upload ([Drafts § 9.4](drafts.md#94-r2)) | – | When it is removed by `PATCH`, when the draft is sent or canceled (after commit; for a held draft, when the hold ends), by erasure and by the retention purge of its draft; the orphan sweep removes uncommitted ones |
 | `t/{ten}/exports/{exp}.zip` | Subject-access export | `tenant`, `export` | 7 days after creation |
+| `phone-staging/{yyyy}/{mm}/{dd}/{event_id}.json` | A raw provider event (written by: `POST /hooks/telnyx`) | – | The consumer after processing; a lifecycle rule after 15 days |
+| `t/{ten}/phone/docs/{cpd}` | A KYC document, AES-256-GCM under its sealed data key (written by: The upload link) | – | Document delete, retention, tenant erasure |
+| `t/{ten}/i/{idn}/sms/{sms}/m/{n}` | An inbound MMS item (written by: The `pm-phone` consumer) | – | Retention and erasure, with its SMS |
+| `t/{tenant_id}/vault/{item_id}/{version}` | A session version's `session_state` ciphertext (AES-256-GCM under the version's DEK), at most 1 MiB of plaintext (written by: Session create, import and write-back) | – | Write-back of the next version, expiry, item deletion, erasure, the daily orphan sweep. Never copied to `PM_BACKUP_BUCKET` |
 
 For Email Routing, `email()` writes straight to the final key when routing resolved (the normal case);
 the dated staging key is used only when the directory lookup fails transiently and the message is accepted

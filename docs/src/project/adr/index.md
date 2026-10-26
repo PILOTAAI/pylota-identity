@@ -26,8 +26,11 @@ ADR supersedes it (AGENTS.md).
 | [0015](0015-solo-operator.md) | One person builds and operates Pylota Identity Cloud | Accepted | 2026-10-10 |
 | [0016](0016-plan-items-changed-for-v1.md) | Plan items that v1.0 defers or does differently | Accepted | 2026-10-10 |
 | [0017](0017-agentmail-parity.md) | What v1.0 adds, defers and refuses to match AgentMail | Proposed | 2026-10-17 |
-| [0018](0018-typescript-sdk-in-its-own-repository.md) | The TypeScript SDK in its own repository | Proposed | 2026-10-18 |
+| [0018](0018-typescript-sdk-in-its-own-repository.md) | The TypeScript SDK in its own repository (licence amended 2026-10-26 by [0022](0022-sdk-languages.md): Apache-2.0) | Proposed | 2026-10-18 |
 | [0019](0019-pylota-identity.md) | Pylota Mail becomes Pylota Identity | Accepted | 2026-10-24 |
+| [0020](0020-phone-numbers.md) | Phone numbers for agents, through Telnyx, approved by people (amended 2026-10-26: standing budget, one-call purchase, onboarding once per country, sole traders open) | Proposed | 2026-10-25 |
+| [0021](0021-agent-vault.md) | An agent credential vault inside Pylota Identity, used without reveal | Proposed | 2026-10-26 |
+| [0022](0022-sdk-languages.md) | SDK languages: Python and Go join Rust and TypeScript | Proposed | 2026-10-26 |
 
 ## When to write one
 

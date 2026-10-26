@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | Status | Proposed |
-| Date | 2026-10-25 |
+| Date | 2026-10-25; amended 2026-10-26 (decisions 4, 12 to 15) |
 | Deciders | The owner (TREFT LTD) |
-| Related | [Phone numbers](../design/phone-numbers.md), FR-PHN-1 to FR-PHN-42, edge rows P1–P107, milestones M38–M41, [ADR 0015](0015-solo-operator.md), [ADR 0019](0019-pylota-identity.md), the [vault design](../design/vault.md) (ADR 0021, written in parallel) |
+| Related | [Phone numbers](../design/phone-numbers.md), FR-PHN-1 to FR-PHN-54, edge rows P1–P131, milestones M38–M41, [ADR 0015](0015-solo-operator.md), [ADR 0019](0019-pylota-identity.md), the [vault design](../design/vault.md) (ADR 0021, written in parallel) |
 
 ## Context
 
@@ -49,10 +49,11 @@ The facts the decision rests on, each read on 2026-10-24:
 3. **Numbers belong to identities.** A number is an address of one identity; an identity may hold several and
    keeps its history when a number goes. Every number **must** be registered in the tenant's own legal name
    under the tenant's compliance profile; TREFT **must never** sub-allocate numbers registered in its name. v1
-   serves business end users only.
+   serves business end users; sole traders wait on decision 15.
 4. **People approve.** Agents may search and ask. Every purchase, port-in, release, KYC submission, US A2P fee,
    emergency registration, voice-route change and (by default) outbound call **must** be a phone request that a
-   person approves through `key_may_decide` (with the platform-or-partner opt-in `phone.key_approval`), bound to
+   person approves (a purchase one by one or through a standing budget the person set, decision 12) through
+   `key_may_decide` (with the platform-or-partner opt-in `phone.key_approval`), bound to
    a digest of the exact payload and GBP quote. Port-outs **must** be decided by a person and never rejected
    automatically.
 5. **Safe retries.** Pylota Identity supplies its own idempotency on every route that can cost money, writes a
@@ -70,7 +71,10 @@ The facts the decision rests on, each read on 2026-10-24:
    and each country row has an emergency setting.
 8. **Money.** Customer prices are GBP from a published rate card (provider USD × exchange rate × currency buffer
    × margin); monthly spend caps per tenant and per identity are enforced with holds in `TenantQuota`; charges
-   are invoiced as Stripe invoice items or partner statements.
+   are invoiced as Stripe invoice items or partner statements. The owner set the margin at 40% and the buffer at
+   10%, regulatory pass-through fees at cost with no margin, and the Cloud defaults (caps £20 a tenant, £10 an
+   identity and £60 for registration fees a month; Pylota's operator budget GB and US, 2 numbers per identity,
+   10 a month, £3 setup and £3 a month per number) on 2026-10-26.
 9. **Countries.** A data-driven catalogue; launch rows GB mobile (SMS and voice), GB geographic (voice), US local
    and toll-free, Ireland and the Netherlands; Germany, France, Spain and Italy only for tenants with local
    presence.
@@ -80,6 +84,29 @@ The facts the decision rests on, each read on 2026-10-24:
     disclosure, recording consent, KYC retention, sub-allocation, marketing consent, port-out rejection, tax) are
     listed for counsel and **must** be answered before the corresponding feature is opened to tenants in
     production ([Phone numbers § 32](../design/phone-numbers.md#32-questions-for-counsel)).
+
+12. **Standing purchase budget** (amends decision 4; approved by the owner on 2026-10-26). A
+    person **may** approve purchases in advance through `phone.auto_approve`: off by default, set or loosened
+    only by a decision reserved for people, bounded by country, type, numbers per identity, numbers per month
+    and price per number, under the spend caps, and recorded by version on every purchase it covers. It covers
+    `purchase_number` and the release a purchase schedules, nothing else.
+13. **One-call purchase.** `POST /v1/identities/{identity_id}/phone-numbers` **must** buy a number in one call:
+    the country required, the type defaulted per country (GB mobile, US local), `201` with the number inside the
+    budget, `202` with the request otherwise, a taken number replaced or answered with alternatives, and an
+    optional `expires_at` whose release the purchase's approval covers. The MCP tool `phone_buy_number` **must
+    not** take a confirmation flag: the server decides.
+14. **Onboarding once per tenant and country.** The regulatory work (the profile, documents, the requirement
+    group, the US 10DLC registration, emergency addresses) is done once per tenant and country, reported as one
+    setup status with the person who must act; agents may draft registration text and never submit it; a
+    purchase that waits on onboarding is kept with `blocked_by`, not refused. Every number reports four
+    capability facets (`enabled`, `activating`, `registration_required`, `not_available`) from the same
+    function the send and call gates use, and a quote lists the registrations still to come.
+15. **Sole traders: refused** (owner decision, 2026-10-26). Sole traders cannot hold numbers, for GB or US
+    rows; no US sole-proprietor 10DLC brand is registered. A number adopted from Pylota's platform-wide group
+    whose tenant is a sole trader keeps working with a dated exit (re-paper under an eligible business, or port
+    out to a carrier the tenant chooses) no earlier than 2027-01-24, and is never released by a deadline. The
+    options of allowing sole traders for GB and US rows, or for US rows only, were weighed and are kept in
+    [Phone numbers §1.1](../design/phone-numbers.md#11-sole-traders-refused-owner-decision-2026-10-26) for a later decision.
 
 ## Risk tier, flag, telemetry and rollback
 
@@ -111,6 +138,8 @@ binding and spend safety, and the owner's sign-off before each milestone merges.
   provider-side spend limits, the kill switch, balance alerts, and the trait that admits a second provider.
 - Prices are exposed to the USD/GBP rate. Mitigations: a currency buffer in the rate card, an alert at 5% drift,
   and 30 days' notice before existing numbers are re-priced.
+- Buying a number becomes one call once a tenant has onboarded a country and set a budget; the first number
+  in a country still waits on the provider's review (about 72 hours in GB) or the US carriers' vetting.
 - The build grows by four milestones (M38–M41), one queue binding (`Q_PHONE`, an exception to M5's "no new
   binding", as M31's was), three `TenantQuota` variants (an exception, as M35's was) and a new permission family.
 - Follow-up work: the answers from counsel; the questions to Telnyx listed in the design; Call Control and media
@@ -129,9 +158,16 @@ binding and spend safety, and the owner's sign-off before each milestone merges.
   Designed for, not built.
 - **Numbers registered in TREFT's name and sub-allocated.** Simplest KYC, but forbidden in France, doubtful
   elsewhere, and it makes TREFT the end user of every operator's number. Refused.
-- **Agents buying within a budget, without approval.** Matches some agent products, but purchases, ports and
-  KYC submissions cost money, move personal data or cannot be undone, and an agent can be steered by the SMS it
-  reads. Refused.
+- **Agents buying within a budget they control, without approval.** Matches some agent products (AgentPhone's
+  `buy_number` takes a `confirm` flag the agent passes itself), but purchases, ports and KYC submissions cost
+  money, move personal data or cannot be undone, and an agent can be steered by the SMS it reads. Refused. The
+  standing budget of decision 12 differs: a person sets it, the server enforces it, it covers purchases only,
+  and it is bounded and audited.
+- **Approval of every purchase one by one, with no budget.** Keeps a person in every purchase's path, so
+  buying a number for an agent can never be one call. Replaced by decision 12, which the owner
+  approved on 2026-10-26.
+- **Refusing a purchase until onboarding is complete.** Leaves the agent at a dead end with nothing to hand a
+  person. Replaced by `blocked_by` (decision 14).
 - **Call Control as the v1 voice route.** It would give Pylota Identity the call events and recording control,
   but its 500 ms command-retry expectation, its command surface and its pricing make it a v1.1 item; Pylota does
   not use it today.

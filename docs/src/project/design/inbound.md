@@ -983,6 +983,7 @@ Decided inside `ingest` (first match wins, FR-IN-5):
 | 3a | `verdict = 'unverified'` and `quarantine.on_auth_fail` (no trusted `Authentication-Results` yet, so SPF alignment could not be checked) | `quarantined` | `auth_unverified` |
 | 4 | Any attachment has a `risk` that quarantines ([Attachment safety](#attachment-safety)), or `scan_status = 'infected'`, or the SES source's `virusVerdict` is `FAIL` ([N27](../edge-cases.md)) | `quarantined` | `risky_attachment` |
 | 4a | A verification match, `accounts.require_approval`, no approved service-ledger entry matching it, and the effective receive decision is not `allow` ([E9](../edge-cases.md), [Service sign-up ledger §5](service-accounts.md#5-the-verification-gate)) | `quarantined` | `account_unapproved` |
+| 4b | A verification match with verdict `pass`, whose matched approved ledger entry has a linked `active` login item with `otp_channel.kind = "email"`, `otp_channel.address` equal to `delivered_to` and the sender's organisational domain in `otp_channel.sender_domains`; or, with `vault.codes_into_fills_only`, any verification match whatever its verdict, sender or entry, except receive-allowed senders ([Vault § 9.2](vault.md#92-email-codes)) | `hidden` | `vault_code` |
 | 5 | Unsolicited OTP ([E5](../edge-cases.md)) and `quarantine.unsolicited_otp` | `quarantined` | `otp_unsolicited` |
 | 6 | `spam_score ≥ quarantine.spam_threshold` and the effective receive decision is not `allow` | `quarantined` | `spam` |
 | 6a | Screening in `hold` mode, an eligible message ([Screening hold §4.3](screening.md#43-quarantine-rule-6a)): the scan is decisive, or a test tenant forced `suspect` | `quarantined` | `steering_suspected` |
@@ -1084,6 +1085,19 @@ Rules:
   match that no approved entry of [Service sign-up ledger §5](service-accounts.md#5-the-verification-gate)
   matches is quarantined `account_unapproved`, whether or not a `wait` registered its domain.
 
+**Codes for the vault.** A message held by rule 4b is invisible to every agent surface, and unlike other hidden
+mail its content is withheld from API keys whatever their permissions (`content_withheld: "vault_code"`; `raw`
+answers `404`). It is never released and never counted in notifications. Its `verifications` row records
+`account_id` and `vault_item_id`; `VaultTakeCode` consumes it once into an open `email_otp` phase. The message,
+raw object and row are deleted 24 hours after `received_at`. The step-12 query for approved entries returns each
+entry's linked items with an email channel (`IngestInput.approved_accounts[].vault_items`), so rule 4b reads
+nothing more.
+
+SMS uses the same trigger keywords and code patterns (`core::phone::verify::find_code` calls the shared
+patterns of `core::classify::find_verification`) without the link rule: a link in an SMS is never a verification
+object. Solicitation, the ledger gate, vault withholding and redaction for SMS are specified in
+[Phone numbers § 11](phone-numbers.md#11-verification-codes-over-sms).
+
 ## The `wait` handler (E4)
 
 `GET /v1/identities/{identity_id}/wait` (FR-IN-11; `search:read`, any key level, bucket `RL_API`), in
@@ -1100,7 +1114,8 @@ rule 5 (unsolicited OTP, [E5](../edge-cases.md)) depends on its registrations.
    `kind=verification` and the tenant's `accounts.require_approval: true`, the handler then needs an
    approved service-ledger entry of the identity whose `sender_domains` contains `from_domain`, or it answers
    `403 policy_denied` with `details.reason = "account_not_approved"` and registers nothing
-   ([E9](../edge-cases.md)).
+   ([E9](../edge-cases.md)). With the tenant's `vault.codes_into_fills_only: true`, `kind=verification`
+   answers `403 policy_denied` with `details.reason = "codes_into_fills_only"` ([Vault § 9.2](vault.md#92-email-codes)).
 2. **Register** (only when `from` is given). Send `MailboxRequest::RegisterWait { from_domain, ttl_ms }`
    with `ttl_ms = (timeout + 10) × 1000`. The mailbox sets
    `meta['wait:{from_domain}'] = max(stored value, now + ttl_ms)` in one transaction. The handler sends

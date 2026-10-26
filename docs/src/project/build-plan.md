@@ -39,10 +39,10 @@ wire behaviour and the design page wins for internal behaviour
 | Phase | What | Elapsed time with AI coding agents |
 |---|---|---|
 | A. Foundation and spikes | M0–M1 | 0.5–1 day. Spikes need a real Cloudflare account and DNS |
-| B. Build | M2–M19, M21–M27 and M29–M37, run as parallel tracks after M5; M29–M37 (the AgentMail-parity features, [ADR 0017](adr/0017-agentmail-parity.md)) follow the core tracks they extend | 3–5 days of agent time, depending on parallelism and review speed |
+| B. Build | M2–M19, M21–M27 and M29–M48, run as parallel tracks after M5; M29–M37 (the AgentMail-parity features, [ADR 0017](adr/0017-agentmail-parity.md)) follow the core tracks they extend; M38–M41 (phone numbers, [ADR 0020](adr/0020-phone-numbers.md)) follow M5, M6, M8, M14, M17 Foundation, M21, M22, M27, M30 and M31, and M41 also the vault's core milestone; M42–M45 (the vault, [ADR 0021](adr/0021-agent-vault.md)) follow M5, M6, M14, M15, M16, M17 Foundation, M21, M25, M27, M30 and M31; M46–M48 (the SDK conformance suite and the Python and Go SDKs, [ADR 0022](adr/0022-sdk-languages.md)) follow M36 and the phone and vault milestones whose routes they cover; M49 (launch) follows M28 | 3–5 days of agent time, depending on parallelism and review speed |
 | C. Live proof | M20: staging deploy, live end-to-end suite, deliverability checks | 2–5 days. DNS propagation, Email Sending onboarding and real-mailbox tests are wall-clock bound |
 | D. Hardening before production traffic | DMARC ramp (`p=none` → `quarantine` → `reject`), Postmaster Tools enrolment, external review | 4–6 weeks of calendar time, mostly waiting, run in parallel with early use |
-| E. Cloud production | M28: commission `pylotamail.com` and open it in three gated phases, partner-only, waitlist, then open ([Cloud commissioning](cloud-commissioning.md)) | Phase A within a day of M20; phase B at least 14 days later; phase C at least 30 days after B, alongside phase D |
+| E. Cloud production | M28: commission `pylotamail.com` and open it in three gated phases, partner-only, waitlist, then open ([Cloud commissioning](cloud-commissioning.md)); M49: launch, opening phone numbers, the vault and the SDKs through gates P, V and S once their rows of [Launch readiness](launch-readiness.md) are clear | Phase A within a day of M20; phase B at least 14 days later; phase C at least 30 days after B, alongside phase D |
 
 Writing the code is the fast part. The time that cannot be compressed is the live proof:
 
@@ -127,7 +127,26 @@ M8, M15, M16, M19 ─▶ M36 SDKs, skills and agent tooling ─▶ M20
    (its event helpers after M30, draft helpers after M29, upload helpers after M33)
 M7–M16, M21, M23, M27 ─▶ M37 parity additions ─▶ M20 (or the next staging candidate once M20 has passed)
    (M37 adds hooks to M29's drafts and M30's feed when those have landed)
-M20 staging + live proof ─▶ M28 Cloud production commissioning (phases A, B, C)
+M5, M6, M8, M14, M17 Foundation, M21, M22, M27 ─▶ M38 phone numbers, requests and compliance ─▶ M20
+   (M38 adds Q_PHONE to M5's template and three QuotaRequest variants, both named exceptions; four tools to
+    M15 and commands to M16; the standing budget and one-call purchase land here)
+M38, M30, M31 ─▶ M39 SMS ─▶ M20   (its vault code arm lands with whichever of M39 and the vault core comes second)
+M38 ─▶ M40 voice routes and calls ─▶ M20
+M38, M39, M40, vault core ─▶ M41 porting, port-out guard, reconciliation, invoicing and migration ─▶ M20
+   (production keeps PM_PHONE off until M41 is accepted)
+M5, M6, M14, M17 Foundation, M27 ─▶ M42 vault core: keys, items, audit, erasure ─▶ M20
+   (spikes S-VLT1 and S-VLT2 first; M42 adds the vault steps to M14's jobs and six permissions to M5's router)
+M42, M15, M16, M21, M25 ─▶ M43 grants, uses, approval, consumers, tickets ─▶ M20
+   (two Decision arms in M5's auth/people.rs; six tools to M15; the conformance fixtures in crates/conformance)
+M43, M30, M31 ─▶ M44 one-time codes and sessions ─▶ M20   (its SMS arm lands with whichever of M44 and M39 comes second)
+M44 ─▶ M45 rotation, signing, reveal, tooling and the Pylota cut-over ─▶ M20
+   (production keeps PM_VAULT off until M45 is accepted)
+M36, M38, M39, M43 ─▶ M46 SDK conformance suite, phone and vault helpers ─▶ M20
+   (M46 adds the py and go prefixes to M0's trace and two release assets to M19's release)
+M46 ─▶ M47 Python SDK   (in PILOTAAI/pylota-identity-python) ─▶ M20
+M46 ─▶ M48 Go SDK       (in PILOTAAI/pylota-identity-go) ─▶ M20
+M20 staging + live proof ─▶ M28 Cloud production commissioning (phases A, B, C; gates P, V, S as their milestones land)
+M28, M41, M45, M48 ─▶ M49 launch (every row of Launch readiness done or n/a for the gates opened)
 ```
 
 After M5, these tracks can run in parallel, each in its own branch and worktree:
@@ -153,7 +172,10 @@ named in their headings, for the reasons each gives; M34 also waits for M29, M30
 permissions, events, policy fields and routes its provisional overlay restricts. M37 comes after M7 to
 M16, M21, M23 and M27, because each of its nine additions extends one of them (the list in its hooks
 table); its additions are independent and can land as separate pull requests. All nine come before M20,
-so the live proof covers them. M28 runs against production after M20.
+so the live proof covers them. The phone milestones M38–M41, the vault milestones M42–M45 and the SDK
+milestones M46–M48 also come before M20, in the order of their headings: M41 needs the vault core M42 for
+the port-out PIN, M39 and M44 share the SMS code arm, and M46 needs the phone and vault routes it wraps. M28
+runs against production after M20, and M49 (launch) after M28, M41, M45 and M48.
 M17 is accepted in two halves, without renumbering: **M17 Foundation** (the
 metrics writer, the alert evaluator, the alert table and the master-key re-seal sweep) is Track 3's first
 pull request and merges before M7, M8 and M9, because M7 and M8 emit their SLI metrics through its writer
@@ -176,7 +198,10 @@ rule of their own:
   `billing/quota.rs`), M24 (`OutcomeRates`, `SystemMail`), M26 (the `NotifierRequest::UsageThreshold`
   hook), M31 (`CountScreenModel`) and M34 (`SystemMailClass::Signup`, `CountSignupOutcome`). The one
   exception is M35, which adds `GetRates` and the `thresholds` field of `RecordOutcome`
-  ([Deliverability metrics § 3.3](design/metrics.md#33-one-source-of-truth)).
+  ([Deliverability metrics § 3.3](design/metrics.md#33-one-source-of-truth)). M38 is a second exception: it adds
+  `PhoneSpendHold`, `PhoneSpendSettle` and `PhoneSpendRelease` and the counters `phone_spend:*`,
+  `phone_spend:reg:*`, `phone_budget:t:*` and `phone_search` ([Phone numbers § 18.3](design/phone-numbers.md#183-spend-caps),
+  [§ 5.7](design/phone-numbers.md#57-the-standing-purchase-budget)).
 - `consumers/index.rs`, the `pm-index` consumer. M7 creates it for attachment text, M10 adds chunking,
   embedding and reconciliation, M12 the triage job, and M31 the `Skip` of embedding and triage for a
   message in `screening`. M7 writes the whole `IndexJob` enum
@@ -191,11 +216,17 @@ rule of their own:
   `service_accounts` rows) each fill in their own stub; M29 (the draft rows and `drafts_deleted`), M30 (the
   event-log steps), M31 (the screening receipt counts), M33 (the upload rows and `uploads_deleted`), M34
   (the `agent_signups` rows and the person scrub) and M37 (`list_entries_deleted` and the identity-scope
-  `sender_lists` rows) each add their own steps.
+  `sender_lists` rows) each add their own steps, and M38 (the `phone_release` step, the compliance-document
+  steps and the phone receipt fields), M39 (the SMS rows), M40 (the call rows) and M42 (the vault steps of
+  identity and tenant erasure, custody slots first, and the receipt fields `vault_items_deleted`,
+  `vault_versions_shredded`, `vault_keys_shredded`, `vault_uses_deleted`, `vault_audit_deleted`).
 - `jobs/retention.rs`, the global retention job. M14 creates it with the job framework and the steps whose
   tables have writers by then; M21 (`console`), M22 (`billing_events`), M23 (`ses_ingest`), M24
   (`signup`), M25 (`identity_keys`), M27 (`service_accounts`), M29 (draft purge and pending-approval expiry)
-  and M30 (the event-log steps) each add their own step and its test. If M23 or M25 lands before
+  and M30 (the event-log steps), M38 (phone requests, provider events,
+  the message index, charges, KYC retention and onboarding drafts), M39 (SMS verification rows) and M42 (the
+  `vault` step: terminal grants and uses after 90 days, audit by age after 400 days with anchors, revoked
+  consumers after 400 days) each add their own step and its test. If M23 or M25 lands before
   M14, M14 writes that step, and the milestone's test runs once M14 has landed.
 - `deploy/wrangler.toml.tmpl` and the `export_worker!` call in `crates/worker/src/lib.rs`. M5 writes
   both whole: every binding of [Configuration › Bindings](../reference/configuration.md#bindings) (the
@@ -208,20 +239,36 @@ rule of their own:
   calls in M23), `Notifier` in M26, `TenantEvents` in M30. M5's `TenantEvents` stub also exports the three
   WebSocket hibernation handlers, each closing with `1011`, so that M30 changes no export. The one
   exception to "no binding" is M31: if M5 merged before `Q_SCREEN` was listed, M31 adds `Q_SCREEN`, the
-  `pm-screen` consumer and `pm-screen-dlq`. A queue whose consumer is not built yet has no producer either,
+  `pm-screen` consumer and `pm-screen-dlq`. M38 is the second exception: it adds `Q_PHONE`, the `pm-phone`
+  consumer, `pm-phone-dlq` and the R2 lifecycle rule for `phone-staging/`. A queue whose consumer is not built yet has no producer either,
   so it receives nothing.
 - `crates/core/src/sealed.rs`, the registry of columns sealed under `PM_MASTER_KEY`. M17 Foundation
   creates it with the columns written by then (`signing_keys.ciphertext`); each milestone that writes a
   sealed column adds its entry and its case in `it::secrets::master_key_rotation`: M8 (webhook secrets),
   M23 (SMTP credentials), M24 (second factors, the pending enrolment secret and PKCE verifiers), M25
-  (identity keys) and M37 (webhook delivery headers, `webhook_endpoints.headers_sealed`). M25 is the only
+  (identity keys) and M37 (webhook delivery headers, `webhook_endpoints.headers_sealed`), M38
+  (`phone_tenants.sip_sealed`, `phone_compliance_profiles.tax_ids_sealed` and `representative_sealed`,
+  `phone_compliance_documents.key_sealed`, `phone_requests.secrets_sealed`), M40
+  (`phone_voice_connectors.api_key_sealed`, `phone_voice_routes.server_secret_sealed`) and M42
+  (`vault_keys.private_sealed` and `vault_custody_slots.private_wrapped`, whose inner layer the sweep carries
+  unopened). M25 is the only
   one that can land before M17 Foundation; if it does, M17 Foundation adds its entry.
 - `drafts/attachments.rs`: its upload arm is written by whichever of M29 and M33 lands second, with
   `it::drafts::q6_upload_references` and `it::uploads::q108_draft_reference`.
 - `mailbox/ingest.rs` and `core::thread`: M7 creates them; M32 adds the `UID` step of thread resolution.
-  `core::compose`: M9 creates it; M32 adds the iMIP structure.
+  `core::compose`: M9 creates it; M32 adds the iMIP structure. M44 adds quarantine rule 4b and the
+  `vault_code` reason to `mailbox/ingest.rs`; `mailbox/codes.rs` gains `VaultTakeCode`.
 - `console/pending.rs`, the pending sign-in step: M24 creates it; M34 adds the `two_factor` step with
   `agent_signup_id`.
+- `auth/people.rs`: M38 adds `Decision::ApprovePhoneRequest`, `Decision::DecidePortOut` and
+  `Decision::SetPhoneBudget`; M43 adds `Decision::ApproveVault` and `Decision::ActivateConsumer`.
+- `auth/routespec.rs`: M42 adds `Auth::ConsumerSignature` for the five consumer routes (wired in M43) and the
+  six `vault:*` permissions with the identity-level refusals of
+  [Vault § 17.2](design/vault.md#172-what-each-kind-of-key-may-hold).
+- `xtask/src/trace.rs` and `xtask` `release`: M36 reads `ts::` names from `sdks/typescript-tests.json` and
+  attaches `ts-tests-required.json`; M46 adds the prefixes `py` and `go` with `sdks/python-tests.json`,
+  `sdks/go-tests.json`, `py-tests-required.json` and `go-tests-required.json`, and the two SDK repositories to
+  `release sign --repo`. Nothing else changes the inventory format.
 
 Each change to one of these files has one owner, the milestone that needs it. When two tracks change the
 same file at once, the one that merges second rebases onto the other and re-runs the gate; neither edits
@@ -1140,6 +1187,19 @@ which is its one definition, and PRD release criterion 7.
   for the repository; no workflow holds the crates.io token (J35).
 - `cli::wrangler::installs_from_signed_lockfile`: the bundle carries Wrangler's lockfile and `idvy`
   installs and runs Wrangler only from it (J34).
+- The site serves `/terms`, `/privacy`, `/dpa`, `/subprocessors` and `/trademarks` from pages counsel and the
+  owner supplied ([Launch readiness §4](launch-readiness.md#4-legal-pages-and-processors)); the landing page
+  links each from its footer; a link check covers them.
+- `xtask::release_artefacts_carry_licence`: every archive and package the release produces (the Worker
+  bundle, the CLI archives, each `.crate`) contains its licence file (`LICENSE.md`, or `LICENSE` and `NOTICE` for
+  the Apache-2.0 crates of [ADR 0022](adr/0022-sdk-languages.md)) and a `THIRD_PARTY_LICENSES` file generated
+  from its SBOM; `cargo deny check licenses` is green.
+- The release notes and `CHANGELOG.md` state each version's release date, from which its Apache-2.0 date
+  (the second anniversary) is computed and printed beside it.
+- A `dco` CI job refuses a pull request whose commits lack a `Signed-off-by` line matching the author
+  (`xtask::dco_refuses_unsigned`).
+- `xtask::docs_forbidden_claims` scans `site/public/index.html` copy as well as `docs/` and refuses "open
+  source" as a description of Pylota Identity (an `id` attribute is not copy).
 
 ---
 
@@ -1962,6 +2022,277 @@ rows Z1–Z81.
 
 ---
 
+## M38 · Phone numbers, requests and compliance (after M5, M6, M8, M14, M17 Foundation, M21, M22 and M27)
+
+M5 for the router, `key_may_decide` and the `TenantQuota` stubs; M6 for identities; M8 for platform events and
+fan-out; M14 for the erasure and retention jobs; M17 Foundation for metrics and alerts; M21 for the console;
+M22 for holds and Stripe; M27 for the service ledger that [Phone numbers § 11.2](design/phone-numbers.md#112-the-gate) extends.
+
+**Files:** `crates/core/src/phone/{mod.rs, e164.rs, catalogue.rs, requests.rs, budget.rs, onboarding.rs,
+capabilities.rs, numbers.rs, orders.rs, money.rs, telnyx.rs}`, `crates/core/data/{phone-catalogue.json,
+phone-rate-card.json}`, `crates/worker/src/phone/{provider.rs, telnyx/*, fake.rs, execute.rs, buy.rs,
+onboarding.rs, orders.rs, numbers.rs, tenant_resources.rs, compliance.rs, documents.rs, money.rs}`,
+`handlers/phone/{catalogue.rs, setup.rs, budget.rs, buy.rs, numbers.rs, requests.rs, compliance.rs, charges.rs,
+platform.rs}`,
+`handlers/hooks_telnyx.rs`, `consumers/phone.rs` (kinds `provider_event`, `execute`, `reconcile`, `configure`),
+`crons/phone.rs`, `console/pages/phone/{setup.rs, budget.rs, numbers.rs, requests.rs, compliance.rs, charges.rs}`,
+`crates/cli/src/commands/phone.rs` (setup, countries, setup status and drafts, budget, buy, search, request,
+requests, numbers, compliance, documents, charges). D1 tables of [Data model](design/data-model.md) for numbers, releases, requests, profiles, documents,
+requirement groups, tenants, provider events and charges.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `deploy/wrangler.toml.tmpl`, `lib.rs` (M5) | The binding `Q_PHONE`, queues `pm-phone` and `pm-phone-dlq`, the R2 lifecycle rule for `phone-staging/`; an exception to "no milestone adds a binding", as M31's `Q_SCREEN` is |
+| `quota/mod.rs` (M5, M22) | `QuotaRequest::PhoneSpendHold`, `PhoneSpendSettle`, `PhoneSpendRelease` (the hold taking the budget slot `phone_budget:t:*` with the spend in one transaction) and the counters `phone_spend:*`, `phone_spend:reg:*`, `phone_budget:t:*`, `phone_search`; an exception to "no new variants", as M35's is |
+| `auth/people.rs` (M5) | `Decision::ApprovePhoneRequest`, `Decision::DecidePortOut`, `Decision::SetPhoneBudget` |
+| `auth/routespec.rs`, `router.rs` (M5) | The phone routes and the seven permissions |
+| `core/src/sealed.rs` (M17) | The sealed columns of [Phone numbers § 23](design/phone-numbers.md#23-security-t2) |
+| `jobs/erasure.rs`, `jobs/retention.rs` (M14) | `phone_release`, the document steps, receipt fields; retention of requests, events, index and charges |
+| `billing/*` (M22) | The `phone_spend` hold feature |
+| `handlers/identities.rs` (M6) | `409 identity_has_phone_numbers` |
+| `observability/catalogue.rs` (M17) | The metrics and alerts of [Phone numbers § 29](design/phone-numbers.md#29-observability) |
+| `mcp/tools.rs` (M15) | `phone_list_numbers`, `phone_search_numbers`, `phone_buy_number`, `phone_setup_status`, `phone_get_request` |
+
+**Implements:** FR-PHN-1 to FR-PHN-20, FR-PHN-22 (order events), FR-PHN-39 (number charges and caps), FR-PHN-40,
+FR-PHN-41 (its tools), FR-PHN-43, FR-PHN-44, FR-PHN-45 (the facets that need no registration), FR-PHN-46,
+FR-PHN-47, FR-PHN-49 (GB onboarding and the status route), FR-PHN-50, FR-PHN-51, FR-PHN-53, and edge rows P1–P41,
+P73–P76, P98, P99, P101, P103, P104, P108–P114, P117, P118, P120–P123, P127, P129–P131.
+
+**Order.** The first pull request is `live::phone::order_contract` and `live::phone::webhook_signature` with the
+pure mapping tables, so the status tables rest on the real API before any state machine is built.
+
+**Acceptance:** the rows above with their tests; `it::phone::scope_matrix` joins
+`it::security::cross_tenant_matrix`; `sdk::coverage::every_operation` passes with the new operations.
+
+---
+
+## M39 · SMS (after M38, M30 and M31)
+
+M30 for event-feed visibility; M31 for the screening job SMS shares.
+
+**Files:** `crates/core/src/phone/{sms.rs, segments.rs, consent.rs, verify.rs, a2p.rs}`, `crates/worker/src/phone/{sms_out.rs,
+sms_in.rs, a2p.rs, codes.rs}`, `handlers/phone/{sms.rs, wait.rs, consent.rs}`, `mailbox/sms.rs` (the SMS tables,
+`IngestSms`, `SubmitSms`, `BeginSmsTransport`, `RegisterSmsWait`, `VaultTakeSmsCode`), the `send_sms` kind of
+`consumers/phone.rs`, `console/pages/phone/consent.rs`, CLI `sms`, `consent`, `registrations`.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `consumers/screen.rs` (M31) | `ScreenJob::Sms` |
+| `handlers/accounts.rs`, `core/src/accounts.rs` (M27) | `phone_number_id` and `sms_senders` on ledger entries |
+| `vault/*` (vault milestone M44) | `SmsCodeSource` and rule 2b land with whichever of M39 and M44 comes second, with `it::phone::vault_code_withheld` and `it::vault::sms_otp_phase` |
+| `mcp/tools.rs` (M15) | `phone_send_sms`, `phone_list_sms`, `phone_get_sms`, `phone_wait_sms`, `phone_record_opt_out` |
+
+**Implements:** FR-PHN-21 to FR-PHN-31, FR-PHN-45 (`outbound_sms` with registrations), FR-PHN-48, FR-PHN-49 (US
+onboarding, drafts for 10DLC), FR-PHN-52 (texting from US numbers and cross-border destinations), and edge rows P42–P72, P77 (SMS charges in the job's input),
+P80–P84, P105, P106, P115, P116, P119, P124 (SMS half), P125, P128.
+
+**Acceptance:** the rows above; `live::phone::send_idempotency` decides whether the repeats of [Phone numbers § 12.3](design/phone-numbers.md#123-dispatch-provider-idempotency-and-uncertain) are enabled;
+`live::phone::redaction_levels` recorded in [Phone numbers § 8](design/phone-numbers.md#8-tenant-provider-resources); `live::phone::a2p_paths`, `live::phone::sole_prop_otp`,
+`live::phone::cross_border_sms` and `live::phone::us_onboarding_end_to_end` pass on staging (the last gates step 5
+of [§2.5](design/phone-numbers.md#25-us-enablement), and its measured waits replace the catalogue's `typical_wait_days`);
+`live::phone::uk_brand_registration` is run and its result recorded, whatever it is.
+
+---
+
+## M40 · Voice routes and calls (after M38)
+
+**Files:** `crates/core/src/phone/voice.rs`, `crates/worker/src/phone/{voice.rs, vapi.rs}`,
+`handlers/phone/{routes.rs, connectors.rs, calls.rs}`, `mailbox/calls.rs`, CLI `connectors`, `route`, `calls`,
+`usage`; MCP `phone_place_call`, `phone_list_calls`.
+
+**Implements:** FR-PHN-32 to FR-PHN-35, FR-PHN-52 (calls from US numbers for tenants registered elsewhere) and
+edge rows P85–P91, P124 (calls half).
+
+**Acceptance:** the rows above; `live::phone::vapi_route`, `live::phone::vapi_call_list`,
+`live::phone::forwarding` and `live::phone::e911_address` pass on staging.
+
+---
+
+## M41 · Porting, port-out guard, reconciliation, invoicing and migration (after M38, M39, M40 and the vault core M42)
+
+**Files:** `crates/core/src/phone/porting.rs`, `crates/worker/src/phone/{porting.rs, port_out.rs, reconcile.rs,
+invoicing.rs}`, `handlers/phone/port_outs.rs`, `jobs/phone_reconcile.rs`, `console/pages/phone/port_outs.rs`,
+the adopt route, CLI `port-outs`, `reconcile`, `statement`, `numbers adopt`.
+
+**Implements:** FR-PHN-36 to FR-PHN-38, FR-PHN-39 (invoicing and statements), FR-PHN-42, FR-PHN-54 (the recorded
+decision and the legacy exit path), and edge rows P77–P79, P92–P97, P100, P102, P126. A backfill step sets a vault
+PIN on every number activated before this milestone.
+
+**Acceptance:** the rows above; a staging rehearsal of Pylota's migration (adopt or port a test number, send and
+receive, place an approved call, release); `live::phone::stripe_invoice_item`; seven days of the telemetry of
+[Phone numbers § 30](design/phone-numbers.md#30-rollout-telemetry-and-rollback) on staging before `PM_PHONE` is turned on in production; the sole-trader refusal enforced (ADR 0020 decision 15);
+no adopted number left without a lawful path (each legacy number has a `legacy_deadline` or a recorded
+re-papering).
+
+---
+
+## M42 · Vault core: keys, items, audit and erasure (after M5, M6, M14, M17 Foundation and M27)
+
+M5 for the router, permissions and `key_may_decide`; M6 for identities; M14 for the erasure and retention jobs;
+M17 Foundation for metrics and alerts; M27 for the service ledger that every item is bound to.
+
+**Files:** `crates/core/src/vault/{mod.rs, origin.rs, item.rs, refuse.rs, cookies.rs, audit.rs}`,
+`crates/core/src/crypto/{hpke.rs, pv1.rs}`, `crates/api-types/src/vault.rs`, `crates/worker/src/vault/{mod.rs,
+keys.rs, items.rs, audit.rs, erase.rs, channels.rs, managed.rs}`, `handlers/vault.rs` (items, tenant status,
+audit, custody, rotate-key), `console/pages/vault.rs` (items and audit), `crates/cli/src/commands/vault.rs`
+(`status`, `items`, `audit`, `custody`, `rotate-key`), `xtask` checks `vault_types_have_no_debug` and
+`docs_forbidden_claims`. D1 tables `vault_keys`, `vault_custody_slots`, `vault_items`, `vault_item_versions`,
+`vault_audit`, `vault_audit_anchors`; the column `service_accounts.login_domains_json`; R2 prefix
+`t/{tenant_id}/vault/`.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `auth/routespec.rs`, `router.rs` (M5) | The item, status, audit and custody routes; the six permissions and their level rules |
+| `core/src/sealed.rs` (M17) | `vault_keys.private_sealed`, `vault_custody_slots.private_wrapped` |
+| `jobs/erasure.rs`, `jobs/retention.rs` (M14) | The vault steps and receipt fields |
+| `handlers/accounts.rs`, `core/src/accounts.rs` (M27) | `login_domains`, `vault_login`; closing an entry archives its items |
+| `observability/catalogue.rs` (M17) | `vault_audit_append_failures_total`, `vault_decrypt_failed`, `vault_unlock_failures_total` |
+| `crates/worker/src/phone/*` (M41) | `put_managed` and `delete_managed` for the port-out PIN |
+
+**Order.** The first pull request is spike S-VLT1 with `core::crypto::hpke::rfc9180_vectors` and
+`live::vault::hpke_wasm`; the second is S-VLT2 with `live::vault::d1_audit_contention`. No other vault code merges
+before both are recorded in [Design index › Spikes](design/index.md#spikes).
+
+**Implements:** FR-VLT-1–7, FR-VLT-21, FR-VLT-22, FR-VLT-24, FR-VLT-25 and edge rows U1–U21, U59–U63, U66–U69, U83,
+U85, U90.
+
+**Acceptance:** the rows above with their tests; `xtask::vault_types_have_no_debug` and
+`xtask::docs_forbidden_claims` run in CI; `it::security::cross_tenant_matrix` covers the new routes.
+
+---
+
+## M43 · Grants, uses, approval, consumers and tickets (after M42, M15, M16, M21 and M25)
+
+M15 for the MCP tools; M16 for the CLI; M21 for the console's approval pages; M25 for the RFC 9421 signature base
+the consumer routes share with Web Bot Auth.
+
+**Files:** `crates/core/src/vault/{policy.rs, digest.rs, ticket.rs, consumer.rs}`, `crates/worker/src/vault/{grants.rs,
+uses.rs, tickets.rs, consumers.rs, redeem.rs, status.rs}`, `handlers/vault_consumer.rs` (`self`, `redeem`, `report`,
+`write-back`, `uses/{use_id}`), `auth/consumer.rs`, `console/pages/vault_approvals.rs`,
+`console/pages/vault_consumers.rs`, `crates/conformance/vault/` (fixture server, fixtures and a reference
+consumer), CLI `grants`, `uses`, `consumers`, `consumer-keys`, `consumer-check`, `conformance`. D1 tables
+`vault_grants`, `vault_uses`, `vault_consumers`, `vault_consumer_nonces`.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `auth/people.rs` (M5) | `Decision::ApproveVault`, `Decision::ActivateConsumer` |
+| `auth/routespec.rs` (M5) | `Auth::ConsumerSignature` on the five consumer routes |
+| `mcp/tools.rs` (M15) | `vault_list_items`, `vault_get_item`, `vault_request_grant`, `vault_list_grants`, `vault_get_use`; `vault_login` on `mail_request_account` |
+| `core/src/httpsig.rs` (M25) | Reused for consumer signature bases; no change |
+| `notify/*` (M26) | Vault approvals in "Needs a person" and the daily email, with escaped purpose text |
+| `crons/mod.rs` (M5) | The every-minute vault cron (`jobs/vault_cron.rs`): use deadlines, nonce expiry |
+
+**Implements:** FR-VLT-8–13, FR-VLT-26–28, FR-VLT-30 and edge rows U22–U40, U64, U65, U71–U82, U84, U86, U91.
+
+**Acceptance:** the rows above; spike S-VLT3 against RFC 9421 Appendix B and the committed fixed vectors (the TypeScript, Python and Go helpers are checked against the same vectors in M46–M48, not here); every `conf::vault::*` fixture passes against the reference consumer
+in CDP and proxy modes; `sdk::coverage::every_operation` passes with the new operations.
+
+---
+
+## M44 · One-time codes and sessions (after M43, M30 and M31; the SMS arm with M39)
+
+M30 for the event-feed visibility of `vault.*` events; M31 because rule 4b sits beside the screening rules.
+
+**Files:** `crates/core/src/vault/totp.rs`, `crates/worker/src/vault/{codes.rs, sessions.rs}`, `mailbox/ingest.rs`
+(rule 4b), `mailbox/codes.rs` (`VaultTakeCode`), `handlers/wait.rs` (the strict-mode refusal), the SMS arm in
+`mailbox/sms.rs` (`VaultTakeSmsCode`) and `phone/codes.rs` with M39. Mailbox columns `verifications.vault_item_id`,
+`verifications.vault_use_id`, `verifications.vault_consumed_at`.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `mailbox/ingest.rs` (M7, M27) | Quarantine rule 4b after 4a; `IngestInput.approved_accounts[].vault_items` |
+| `handlers/wait.rs` (M7) | `403 policy_denied` (`codes_into_fills_only`) |
+| `jobs/retention.rs` (M14) | Hidden `vault_code` mail and code rows after 24 hours |
+
+**Implements:** FR-VLT-14–17 and edge rows U41–U49, U51, U52, U70, U87.
+
+**Acceptance:** the rows above; `live::vault::email_code_into_fill` on staging; `it::vault::sms_otp_phase` once M39
+has landed.
+
+---
+
+## M45 · Rotation, signing, reveal, tooling and the Pylota cut-over (after M44)
+
+**Files:** `crates/worker/src/vault/{versions.rs, sign.rs, reveal.rs}`, the console reveal and "Show a new value"
+pages, `jobs/vault_cron.rs` (every minute: overlaps, re-wrap sweep; daily: session expiry, orphan objects, rotation
+reminders), the session import route, CLI `revoke-all`, `idvy ops switch vault_redeem`, the runbook "Vault
+incident" in [Observability § 9](design/observability.md#9-runbooks).
+
+**Implements:** FR-VLT-18–20, FR-VLT-29 and edge rows U50, U53–U58, U88, U89.
+
+**Acceptance:** the rows above; `live::vault::browserbase_settings`; a staging rehearsal of
+[Vault § 22.3](design/vault.md#223-migrating-from-browser_sealed_sessions) with a test integrator (register and
+activate consumers, import 20 sessions, load and write back, `revoke-all`); seven days of the vault telemetry on
+staging with no audit append failure, no `vault_value_exposed_total` outside the fixtures and no unexplained
+`placeholder_misplaced` before `PM_VAULT` is turned on in production.
+
+---
+
+## M46 · SDK conformance suite, phone and vault helpers (after M36, M38, M39 and M43)
+
+**Goal.** One language-neutral proof of the client rules, generated from the Rust side, and the phone and vault
+helpers in the Rust and TypeScript SDKs, so the Python and Go SDKs are built against data rather than prose.
+
+**Files:** in this repository, `sdks/fixtures/conformance/**`, `crates/sdk/src/{phone.rs, vault.rs,
+vault_consumer/{mod.rs, origin.rs, keys.rs, sign.rs, packet.rs, redact.rs}}`, `crates/sdk/tests/conformance.rs`,
+`xtask/src/gen_sdk_vectors.rs`, `sdks/python-tests.json` and `sdks/go-tests.json` (empty inventories), the guide
+`vault-consumers.md`. In `PILOTAAI/pylota-identity-typescript`: the conformance runner, the phone and vault
+helpers and the `vault-consumer` entry point.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `crates/sdk/Cargo.toml`, `crates/api-types/Cargo.toml` (M16, M0) | `license = "Apache-2.0"` in place of the workspace licence, with `LICENSE` and `NOTICE` in each crate; `deny.toml` allows `Apache-2.0` for these two ([ADR 0022](adr/0022-sdk-languages.md) decision 9) |
+| `crates/sdk/Cargo.toml` (M16) | Feature `vault-consumer` with `hpke` (the version the Worker pins), `zeroize` |
+| `xtask/src/trace.rs` (M0) | Prefixes `py` and `go`, read from `sdks/python-tests.json` and `sdks/go-tests.json` as `ts::` names are; a missing name is `pending (SDK)` |
+| `xtask` `release` (M19) | Assets `py-tests-required.json` and `go-tests-required.json`; `release sign --repo` accepts `PILOTAAI/pylota-identity-python` and `PILOTAAI/pylota-identity-go` with their trusted comments |
+| `.github/workflows/ci.yml` (M19) | `cargo xtask gen-sdk-vectors --check` in the `test` job |
+
+**Implements:** FR-SDK-28 – FR-SDK-31 and rows Y76–Y85, Y89 (the Rust and TypeScript parts).
+
+**Acceptance:** `sdk::conformance::*`, `xtask::sdk_vectors_current`, the extended `xtask::release_sign_sdk_repo`;
+in the TypeScript repository `ts::conformance::all`, `ts::package::y80_consumer_entry_point_separate`,
+`ts::it::vault::y78_consumer_signature_accepted` and `ts::it::phone::y82_buy_retry_one_number`; the reference
+consumer of [Vault § 24.3](design/vault.md#243-consumer-conformance-fixtures) built on the Rust helpers.
+
+---
+
+## M47 · Python SDK (after M46)
+
+**Files:** the repository `PILOTAAI/pylota-identity-python` ([SDKs § 3.5](design/sdk-and-skills.md#35-python)); here, `sdks/python-tests.json`
+(the inventory a release produces) and the guide `python-sdk.md`.
+
+**Implements:** FR-SDK-25, FR-SDK-32 and FR-SDK-33 for Python, and rows Y72, Y75, Y80, Y86, Y87, Y89, Y91,
+Y92 (Python parts).
+
+**Human prerequisites.** Create `PILOTAAI/pylota-identity-python` (Apache-2.0); register the PyPI project
+`pylota-identity` with a trusted publisher (repository `PILOTAAI/pylota-identity-python`, workflow
+`release-publish.yml`, environment `release`), which reserves the name; disallow API tokens on the project;
+give the repository a staging test key.
+
+**Acceptance:** the `py::` rows above pass in the SDK repository's CI on CPython 3.11–3.15 and are listed in
+`sdks/python-tests.json`; `py::conformance::all`; the first release publishes the sdist and wheel listed in its
+owner-signed `SHA256SUMS`, with PyPI attestations; `py::doctest::site_examples`; M20 gains
+`py::live::round_trip`.
+
+---
+
+## M48 · Go SDK (after M46)
+
+**Files:** the repository `PILOTAAI/pylota-identity-go` ([SDKs § 3.6](design/sdk-and-skills.md#36-go)); here, `sdks/go-tests.json`, the guide
+`go-sdk.md` and the Go section of the [SDKs](../reference/sdks.md) reference.
+
+**Implements:** FR-SDK-26, FR-SDK-32 and FR-SDK-33 for Go, and rows Y73, Y74, Y80, Y86, Y88, Y90, Y91, Y92
+(Go parts).
+
+**Human prerequisites.** Create `PILOTAAI/pylota-identity-go` (Apache-2.0) with an environment `release`
+whose token may push tags; give it a staging test key; keep the organisation name `PILOTAAI`.
+
+**Acceptance:** the `go::` rows above pass on Go 1.26.10 and 1.27.3 and are listed in `sdks/go-tests.json`;
+`go::conformance::all`; the first release's tag is pushed only after the owner's signature, and the proxy's
+`h1:` equals the signed one; `go::doctest::site_examples`; M20 gains `go::live::round_trip`.
+
+---
+
 ## M20 · Staging deploy and live proof
 
 **Implements:** NFR-OPS-1 (the timed rehearsal, step 12) and the live measurements of NFR-REL-3,
@@ -2033,9 +2364,16 @@ the ones marked manual there need a person in a browser and run with `cargo xtas
     (`live::uploads::large_attachment_link`, M33); agent self-sign-up end to end and its one-click refusal
     headers (`live::signup::end_to_end`, `live::signup::x40_refuse_one_click_headers`, M34); a bounce that
     moves the rates (`live::metrics::bounce_moves_rates`, M35); a TypeScript SDK round trip
-    (`ts::live::round_trip`, M36); and an ARC-sealed forward through Cloudflare and a `docs` link that
+    (`ts::live::round_trip`, M36); Python and Go SDK round trips
+    (`py::live::round_trip`, M47; `go::live::round_trip`, M48), each run by its SDK repository with a staging
+    test key; and an ARC-sealed forward through Cloudflare and a `docs` link that
     resolves (`live::arc::cloudflare_forward_behaviour`, `live::docs::z78_anchor_resolves`, M37). Each is
     defined on its milestone's design page.
+17. Phone numbers and the vault on staging, with the live tests their milestones name: a GB number bought,
+    used for SMS both ways and released; a US number whose first send is refused before its 10DLC campaign
+    is provisioned; a vault fill by a conformant browser consumer with a TOTP phase and a session
+    write-back; each product's kill switches turned off and on again
+    (`live::ops::phone_kill_switches`, `live::ops::vault_kill_switches`).
 
 **v1.0 release criteria:** [PRD §9](prd.md#9-release-criteria-v10). `v1.0.0` is tagged on a commit that
 changes only the workspace version of the last candidate that passed this milestone and adds
@@ -2065,3 +2403,42 @@ phases of §2.
 - Gate C: the [pre-release checklist](design/security.md#16-pre-release-checklist) complete; 30 days of
   phase B within the auto-pause thresholds; DMARC at `p=reject`; a second dry run and review on the
   phase-C configuration. `PM_SIGNUP=open`: Pylota Identity Cloud is public.
+- Gate P ([Cloud commissioning §10](cloud-commissioning.md#10-go-live-gates)), stage by stage: checks
+  CC20–CC27; the Telnyx steps of [§11](cloud-commissioning.md#11-phone-numbers-the-telnyx-account) for the
+  countries offered; the phone rows of [Launch readiness §3.3](launch-readiness.md#33-phone-numbers) `done`.
+  `PM_PHONE=on`; `phone.allowed` on for Pylota's first operator, then every Pylota operator, then others.
+- Gate V: checks CC28–CC32; Pylota's consumers activated after their conformance fixtures; the vault rows of
+  [Launch readiness §3.4](launch-readiness.md#34-vault) `done`. `PM_VAULT=on`; `vault.allowed` on for
+  Pylota's tenants, then others.
+- Gate S: check CC33 on the first full Python and Go SDK releases.
+
+---
+
+## M49 · Launch (after M28, M41, M45 and M48)
+
+**Files:** `docs/src/project/launch-readiness.md` (exists; statuses updated as rows close),
+`xtask/src/launch.rs` (parses the tracker's tables), `release-gates/v1.0.0.md`, and in the private operations
+repository the gate notes, signed legal documents and review reports the tracker names.
+
+| File (owner milestone) | Hook |
+|---|---|
+| `xtask/src/main.rs`, the `release-gate` command (M19) | Reads `docs/src/project/launch-readiness.md` and refuses `v1.0.0` while a row whose **Blocks** names `v1.0` is neither `done` nor `n/a` |
+| `crates/cli/src/commands/doctor.rs` (M16) | A `launch` section: for each flag that is on (`PM_SIGNUP` phase, `PM_PHONE`, `PM_VAULT`), warns when a row that blocks its gate is not `done`, reading the tracker published with the release |
+
+**Implements:** FR-OPS-6 and NFR-OPS-4.
+
+**Acceptance:**
+
+- `xtask::launch_readiness_refuses_open_blockers`: a tracker with a `v1.0` row `open` makes `release-gate`
+  fail with the row's ID; the same tracker with it `done` and an evidence link passes; a row without an
+  owner, evidence or status is a parse error.
+- `cli::doctor::launch_readiness_gates`: with `PM_PHONE=on` and a `P1` row `open`, `idvy doctor` prints a
+  `warn` naming the row.
+- Every row of [Launch readiness](launch-readiness.md) is `done` or `n/a` for the gates opened, each with
+  evidence a later reader can check: the legal pages and sub-processor list live (CC20), counsel's answers
+  recorded for the questions that block an opened gate, the tax decisions recorded, the licence rows done,
+  the security sign-off rows done, the operations rows done, and each opened gate's first-week note written
+  ([Launch readiness §11](launch-readiness.md#11-launch-day-and-the-first-week)).
+- A fresh agent that never saw the deployment reads [Launch readiness](launch-readiness.md) and
+  [Cloud commissioning](cloud-commissioning.md) alone and reports every row it cannot verify from the
+  evidence named; the owner fixes each before the milestone is accepted.

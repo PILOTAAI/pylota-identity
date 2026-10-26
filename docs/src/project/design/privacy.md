@@ -94,6 +94,24 @@ explanation is in [Privacy, retention and erasure](../../guides/privacy.md).
 | D1 `dlq_items` ([Observability](observability.md#8-dead-letter-queues)) | Pointers as received; inbound pointers include the envelope addresses | Dead-letter records and redrive | 14 days | Global retention job (`dlq` step); counterparty erasure deletes the tenant's rows whose pointer names the address, identity erasure the rows naming the identity, tenant erasure every row of the tenant (sections 6.4–6.6) |
 | Workers Logs | Pseudonyms and IDs only (FR-PRV-6) | Debugging | 7 days (Cloudflare) | Expiry |
 | Analytics Engine `pylota_identity_metrics` | Tenant and domain IDs only | Metrics and alerts | 3 months (Cloudflare) | Expiry |
+| R2 `phone-staging/…` | Raw provider events: SMS text, numbers | Process and reconcile provider events | Until the consumer processes them; at most 15 days | Deleted after processing; lifecycle rule. Not keyed by tenant, so listed as a residual |
+| Mailbox `sms_messages`, `sms_conversations`, `sms_media`, R2 media | Counterparty numbers, text, media | The identity's messages and calls | The tenant's `retention.message_days` and the identity's `retention.message_hours`, as mail | Retention; message, conversation, counterparty, identity and tenant erasure |
+| Mailbox `sms_verifications` | Codes | Verification codes for `sms/wait` and vault fills | 24 hours, or 1 hour after release; at deposit to the vault | Maintenance alarm |
+| Mailbox `calls` | Counterparty numbers, times, durations | The identity's messages and calls | As SMS | As SMS |
+| D1 `phone_consent` | Keyed hash and masked hint | Honour opt-outs | While the tenant exists; opt-outs survive counterparty erasure as hashes | Tenant erasure |
+| D1 `phone_compliance_profiles`, `phone_compliance_documents`, R2 `t/{ten}/phone/docs/` | Company data, representative's identity data, identity documents | Register numbers in the tenant's own name | [§4.6](phone-numbers.md#46-retention-and-erasure) | Crypto-shred and delete; receipt |
+| D1 `phone_numbers` | The tenant's own numbers (business data) | The tenant's numbers | Life of the identity | Identity deletion, tenant erasure |
+| D1 `phone_onboarding_drafts` | Business descriptions, sample messages and URLs an agent drafted; no personal data by schema | Prepare a registration a person submits | Until its request is created, or 30 days untouched | Deleted then; tenant erasure |
+| D1 `phone_compliance_profiles` of a `sole_trader` | The proprietor's name, address, mobile (sealed) and tax data (sealed) | Register numbers in the tenant's own name | As any profile ([§4.6](phone-numbers.md#46-retention-and-erasure)) | As any profile |
+| D1 `phone_requests` | Port-in losing-carrier secrets (sealed) | Port-in submission | Cleared when the port ends; the row for 400 days after it ends | Retention job; tenant erasure |
+| D1 `phone_provider_events`, `phone_message_index` | Provider IDs, no content | Process and reconcile provider events | 30 days | Retention job |
+| D1 `phone_charges` | None beyond IDs | Billing | 400 days after invoicing | Retention job; tenant erasure keeps only aggregate lines on the Stripe invoice |
+| Mailbox `sms_messages` withheld as `vault_code` | Code-bearing SMS | Codes for vault fills | 24 hours | Maintenance alarm; every erasure scope |
+| Vault managed secret | Port-out PINs | Port-out guard | Life of the number | `delete_managed` at release and port-out; the vault's erasure |
+| D1 (`vault_items`, `vault_item_versions`), R2 `t/{tenant_id}/vault/` (vault items, versions and session objects) | Credentials and sessions of the tenant's and its agents' third-party accounts; usernames are personal data | Use credentials without reveal | Until deleted; session versions until their TTL; `previous` versions for their overlap | Crypto-shred ([Vault § 16.2](vault.md#162-deleting-an-item)); identity and tenant erasure |
+| D1 `vault_grants`, `vault_uses` | Who may use what, when, for which run | Approvals and their record | 90 days after they end | The global retention job's `vault` step; erasure |
+| D1 `vault_audit`, `vault_audit_anchors` | IDs, sites (registrable domains), times, outcomes; no values, usernames, titles, purposes or URLs | Accountability for every vault change | 400 days by age, never by count | The `vault` step, anchored; tenant erasure |
+| Mailbox: hidden `vault_code` mail and its `verifications` rows | One-time codes | Codes delivered only into vault fills | 24 hours | Mailbox maintenance; every erasure scope |
 
 Webhook receivers, AI processing and the email providers are covered in section 11.
 
@@ -332,6 +350,8 @@ delivery log longer but never extends replay past 30 days ([Webhooks › Replay]
 | `signup` | `oauth_states` and `pending_auth` rows 24 hours past `expires_at`; `users.totp_pending_sealed` and `totp_pending_expires_at` cleared 24 hours past `totp_pending_expires_at`; `waitlist` rows 30 days after their invitation (there are no unconfirmed rows: an unused confirmation link simply expires after 10 minutes) | `it::retention::global_signup_rows` |
 | `staging` | Only the outage copies `inbound-staging/{yyyy}/{mm}/{dd}/{ulid}.eml` ([J7](../edge-cases.md)); never `inbound-staging/ses/` or `inbound-staging/role/`, which their own consumers and the lifecycle rule handle. The inbound consumer deletes an outage copy once its message is committed, so an object older than 1 hour that still exists is **unrouted**: it is re-queued once a day as `InboundJob::Staged`, built from the object's custom metadata (`envelope_from`, `envelope_to`, `received_at`) and its size (a pointer may sit in a dead-letter queue for up to 14 days). Objects are never deleted here (the 15-day lifecycle rule does that). An object still unrouted 14 days after it was written counts in `inbound_lost_total` | `it::retention::global_job_steps` |
 | `held_erasures` | For each `erasing` tenant whose latest tenant-scope erasure request is `completed_with_holds`: `ActiveHolds` on the mailbox of every identity still `deleting`; when every answer is 0, create a tenant-scope erasure request with reason `hold_released:{era_id}` and `resumes_id` = that request, audit-logged (`erasure.create`), which finishes the erasure (section 6.6, "Holds in a tenant being erased") | `it::erasure::i2_hold_tenant_scope` |
+| `phone` | `phone_provider_events` and `phone_message_index` rows older than 30 days; `phone_requests` 400 days after they ended (port-in secrets were cleared when the port ended); `phone_charges` 400 days after invoicing; `phone_onboarding_drafts` untouched for 30 days; `phone_number_releases` hashes after 90 days ([Phone numbers § 24](phone-numbers.md#24-privacy)) | `it::retention::global_job_steps` |
+| `vault` | Terminal grants and uses after 90 days (their ticket hashes and sealed keys were cleared when they ended); `vault_audit` rows older than 400 days, writing the last deleted row's `seq` and `row_hash` to `vault_audit_anchors` first; revoked consumers after 400 days; never a row by count. The every-minute vault cron and the daily vault sweep handle overlaps, nonces, expired sessions and orphan R2 objects ([Vault § 16.1](vault.md#161-retention)) | `it::retention::global_job_steps`, `it::vault::audit_chain_and_age_only` |
 | `audit` | One `audit_log` row per step with counts (`tenant_id = NULL`) | `it::retention::global_job_steps` |
 
 Each step is added to `jobs/retention.rs`, with its test, by the milestone that builds the feature
@@ -546,6 +566,11 @@ step 5) sets it to the system identity, so a person's deletion erases the system
 leaves the default tenant's other mailboxes untouched. `identities_affected` and the probes then cover only
 those identities.
 
+**Phone numbers.** A counterparty may be an E.164 number: its SMS, media and calls in every identity of the
+tenant are deleted, and its consent entry keeps the keyed hash only
+([Phone numbers § 24](phone-numbers.md#24-privacy)). Vault rows are not touched by counterparty, message or thread
+scope; a hidden `vault_code` message is erased with its message like any other.
+
 ### 6.5 Identity scope (FR-IDN-4)
 
 | # | Step | Does |
@@ -565,6 +590,14 @@ daily retention job (its `holds` step, section 5.2) finds a `deleting` identity 
 it creates a new identity-scope erasure request with reason `hold_released:{era_id}` and `resumes_id` =
 that request, audit-logged, which finishes the deletion and emits `erasure.completed`. Identities of a
 tenant that is being erased are handled by the global job's `held_erasures` step instead (section 6.6).
+
+**Phone numbers.** `DELETE /v1/identities/{id}` is refused while the identity holds a live number
+(`409 identity_has_phone_numbers`), so numbers are released first; the mailbox wipe covers `sms_*` and `calls`.
+**Vault.** In step `scrub_control_plane`, before `service_accounts`: the identity's identity-scoped vault items
+are crypto-shredded (versions, uses, grants, R2 objects by key); its uses of tenant-scoped items and then its
+grants on them are deleted; vault audit rows are kept unchanged (IDs only) and their `vault_audit_runs` rows,
+which hold the run identifiers outside the hash chain, are deleted
+([Vault § 16.3](vault.md#163-erasure-scopes)).
 
 ### 6.6 Tenant scope
 
@@ -617,6 +650,16 @@ thread, in any step, and the tenant is not `erased` while one remains:
 - Pylota, the first partner, releases its own holds before it erases a tenant, so its erasures end
   `completed`; the rule above is what happens when it does not.
 
+**Phone numbers.** A step `phone_release` runs right after `stop_routing`: cancel open phone requests (blocked
+ones included), release every live number (the erasure request is the person's decision, because it needs
+`tenants:erase`), cancel porting orders that can be cancelled, deactivate 10DLC campaigns, delete the tenant's
+provider resources and connectors and its onboarding drafts, then the compliance data, except documents in their
+KYC retention period, which are listed in the receipt ([Phone numbers § 24](phone-numbers.md#24-privacy)).
+**Vault.** Step `stop_routing` closes open vault uses; step `delete_d1_rows` deletes, in order,
+`vault_custody_slots`, `vault_keys` (the crypto-shred), `vault_uses`, `vault_grants`, `vault_item_versions`,
+`vault_items`, tenant-level `vault_consumers`, `vault_audit` and `vault_audit_anchors` except the
+`vault.revoke_all` row the erasure writes; step `sweep_r2` sweeps `t/{tenant_id}/vault/`.
+
 ### 6.7 Probes ([F6](../edge-cases.md))
 
 | Probe | How | Receipt field |
@@ -628,6 +671,9 @@ thread, in any step, and the tenant is not `erased` while one remains:
 
 A non-zero probe re-runs the step that should have deleted the item (counted as an attempt). The job
 completes only with all probes at zero, except held items.
+
+For the vault: no `vault_items`, `vault_item_versions`, `vault_keys` or `vault_custody_slots` row of the scope
+remains, and `t/{tenant_id}/vault/` lists empty for a tenant scope.
 
 ### 6.8 Waiting for Vectorize
 
@@ -853,6 +899,10 @@ agent asked by a message to "send us an export" holds an identity key ([I14](../
 the requesting key also holds `quarantine:review` is recorded in the job's `meta.include_held` when the
 export is created.
 
+An identity export also writes `sms.json` and `calls.json` (the identity's, or for counterparty scope the
+counterparty's across identities), and `vault.json` with vault items as metadata only (kind, title, origins,
+health, dates, the ledger entry): no value and no ciphertext is ever exported.
+
 ### 9.1 Job steps
 
 | # | Step | Does |
@@ -888,6 +938,9 @@ are in the exported messages' attachments, and the third is not about a data sub
 ```text
 exp_01JA4….zip
 ├── messages.json
+├── sms.json
+├── calls.json
+├── vault.json            (identity scope only)
 └── eml/
     └── idn_01J9Z3K8V4…/
         ├── 20260914T081203Z_msg_01J9….eml
@@ -1008,6 +1061,13 @@ The receipt matches the [erasure request object](../../reference/api.md#erasure-
 | `screenings_deleted` | `screenings` rows deleted (with their messages) |
 | `screening_feedback_deleted` | `screening_feedback` rows deleted (with their messages) |
 | `list_entries_deleted` | `sender_lists` rows deleted (identity and tenant scope) |
+| `sms_deleted`, `sms_media_deleted`, `calls_deleted` | SMS, media and call rows deleted |
+| `phone_numbers_released` | Numbers released; for platform and partner keys each with `{provider_number_id, provider_order_id, e164, vapi_phone_number_id}` |
+| `phone_documents_deleted`, `phone_documents_retained` | KYC documents shredded; documents kept in their retention period, each with `retain_until` |
+| `phone_consent_entries_deleted`, `phone_onboarding_drafts_deleted` | Consent entries and onboarding drafts deleted |
+| `provider_deletions` | Provider-side deletions `attempted` and `failed` |
+| `vault_items_deleted`, `vault_versions_shredded`, `vault_uses_deleted`, `vault_audit_deleted` | Vault rows deleted |
+| `vault_keys_shredded` | Tenant vault keys deleted (tenant scope) |
 | `identities_affected` | Identities where anything was deleted or held |
 | `held` | One entry per held thread skipped |
 | `probe` | Section 6.7: `keyword_hits`, `semantic_hits` and `log_hits`; `null` values only when the job failed before the probe step |
@@ -1052,6 +1112,13 @@ The receipt matches the [erasure request object](../../reference/api.md#erasure-
 | Verifiers of agent assertions and sites that received signed requests | The third party's systems | They hold what the tokens and `From` headers disclosed (section 7.4): the identity's address, display name and workspace name |
 | Key tombstones | Permanent | Thumbprints of deleted identity keys only ([O7](../edge-cases.md)) |
 | Workers Logs | 7 days | Pseudonyms only |
+| Telnyx message and call detail records | Telnyx's own retention | Numbers, times, costs; content not kept when the messaging profile's redaction is on. Processor-side |
+| Telnyx KYC copies after the last number | Until deleted by the executor | A copy still linked by the provider is retried daily for 30 days, then reported |
+| Vapi call data of `vapi` routes | The tenant's own Vapi account | Call content and transcripts |
+| KYC documents in their retention period | Until `retain_until` | Held under the reason `kyc_retention` and listed in the receipt |
+| R2 `phone-staging/` objects | At most 15 days | Raw provider events; not keyed by tenant |
+| Vault rows restored by D1 Time Travel | Until the erasure re-application after the restore | In partner custody, restored rows cannot be opened once the partner has discarded its unlock keys |
+| Vault sessions at the site | The site's own session lifetime | Deleting a session item does not sign the session out at the site |
 
 **Restores and erasure** ([I6](../edge-cases.md)). A D1 or Durable Object restore can resurrect erased
 data. The restore runbook ([Observability](observability.md#restore-from-pitr)) therefore:

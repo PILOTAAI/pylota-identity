@@ -48,11 +48,13 @@ request locally.
 
 Events are not guaranteed to arrive in order. Each payload carries `occurred_at`, and a `sequence` that
 increases strictly per owner: per identity for mailbox events (`message.*`, `identity.*`,
-`verification.received`, `calendar.received`, `draft.*`, `suppression.created`, `quota.warning`), per domain for `domain.*` events, and
+`verification.received`, `calendar.received`, `draft.*`, `suppression.created`, `quota.warning`, `sms.*`, `call.*`), per domain for `domain.*` events, and
 per job for `erasure.*` and `export.*` events, and for `identity.deleted`, which the erasure job emits
 after the mailbox is gone (it still carries `identity_id`, so identity-filtered endpoints receive it). Use it to discard stale updates, for example a
 `message.deferred` arriving after `message.delivered`. Platform events (`webhook.disabled`,
-`webhook.test`, `member.*`, `billing.*`, `tenant.policy_updated`, `account.*` and `signup.verified`) have
+`webhook.test`, `member.*`, `billing.*`, `tenant.policy_updated`, `account.*`, `signup.verified`, `phone_request.*`, `phone_number.*`,
+`phone_registration.*`, `phone_compliance.*`, `phone_consent.changed`, `phone_spend.warning`,
+`phone_setup.status_changed`, `phone_budget.changed` and `vault.*`) have
 `sequence: null`.
 
 `message.screened` always precedes, by one `sequence`, the `message.received` or `message.quarantined` it
@@ -226,6 +228,108 @@ Platform events with `tenant_id` and `identity_id` set, so an endpoint's identit
 | `account.rejected` | An operator rejected it, or it stayed undecided for 7 days | `account`, `reason` (`operator` or `expired`) |
 | `account.closed` | The entry was closed, or deleted while it was pending or approved | `account` |
 
+### Phone numbers
+
+**Mailbox events** carry the identity's `sequence`, like `message.*`. SMS text and transcripts are untrusted
+content; verification codes are never in an event (an SMS text shows them as `[code]`), and an SMS withheld for
+the vault (`vault_code`) emits nothing. Counterparty numbers appear in `sms` and `call` only where a mail event
+would carry an address; masked hints elsewhere.
+
+| Type | When | `data` |
+|---|---|---|
+| `sms.received` | An inbound SMS is stored and visible | `sms` (summary below), `conversation_id`, `trust` (`sender_unverified: true`, `screening`), `media[]` (`n`, content type, size) |
+| `sms.quarantined` | An inbound SMS is stored but held | As `sms.received` without `text`, plus `quarantine_reason` (`account_unapproved`, `otp_unsolicited`, `steering_suspected`, `screening_unavailable`, `risky_attachment`) |
+| `sms.released` | A held SMS was released | `sms_id`, `released_by_key_id` or `released_by_user_id` |
+| `sms.screened` | A screening verdict on an SMS | `sms_id`, `status`, `quarantine_reason`, `screening` |
+| `sms.verification_received` | A verification code was found in a visible SMS | `sms_id`, `number_id`, `sender_hint`, `kind` (`code`), `account_id`. The value is only available through `GET …/sms/wait` |
+| `sms.sent` | The provider accepted the SMS | `sms_id`, `segments`, `sender_used`, `sender_substituted` |
+| `sms.delivered` | The handset or carrier confirmed delivery | `sms_id` |
+| `sms.failed` | The SMS was refused or not delivered | `sms_id`, `reason` |
+| `sms.delivery_unconfirmed` | The carrier gave no final answer | `sms_id` |
+| `sms.uncertain` | The outcome is unknown; never resent automatically | `sms_id`, `reason`, `fix` |
+| `sms.reconciled` | An uncertain SMS was matched to a provider record | `sms_id`, `status` |
+| `call.started` | A call on one of the identity's numbers began | `call` |
+| `call.ended` | It ended, or a call record filled it in later | `call` (with `duration_seconds`, `outcome`, `cost_pence`, `source`: `webhook` or `cdr`) |
+
+The **SMS summary** in `data.sms`:
+
+```json
+{ "id": "sms_01JB…", "conversation_id": "smc_01JB…", "number_id": "pnm_01JB…", "direction": "inbound",
+  "status": "received", "from": "+447700900456", "to": "+447700900123", "text": "Can I collect at 3?",
+  "segments": 1, "client_reference": null, "received_at": "…", "sent_at": null, "flags": ["sender_unverified"] }
+```
+
+The **call** object: `id`, `number_id`, `direction` (`inbound`, `outbound`), `counterparty`, `route_kind`,
+`started_at`, `answered_at`, `ended_at`, `duration_seconds`, `outcome` (`answered`, `no_answer`, `busy`, `failed`,
+`rejected`), `disclosure_applied`, `cost_pence`, `source`.
+
+**Platform events** have `sequence: null`, with `tenant_id` and `identity_id` set where the subject belongs to an
+identity. `phone_request` is the [phone request](api.md#phone-requests) as the API returns it to the endpoint's
+level (provider costs only to platform and partner endpoints).
+
+| Type | When | `data` |
+|---|---|---|
+| `phone_request.requested` | A request was created, or returned to `pending_approval` because its price rose | `phone_request`, `reason` (`created` or `quote_changed`) |
+| `phone_request.approved` | A person, an allowed key or the tenant's standing budget approved it | `phone_request`, `approved_by` (`person`, `key`, `standing_budget`, `purchase`), `approved_by_key_id` or `approved_by_user_id`, `on_behalf_of`, `budget_version` (with `standing_budget`) |
+| `phone_request.rejected` | Rejected, or expired after 7 days | `phone_request`, `reason` (`operator` or `expired`) |
+| `phone_request.canceled` | Canceled by the requester, or by erasure | `phone_request`, `reason` |
+| `phone_request.completed` | The provider work ended successfully | `phone_request`, `result` |
+| `phone_request.failed` | The provider work ended without success | `phone_request`, `reason` |
+| `phone_request.uncertain` | A billable call's outcome is unknown; the service is reconciling | `phone_request` |
+| `phone_number.status_changed` | A number changed status | `number_id`, `identity_id`, `from`, `to`, `setup_state`, `provisioning` (`status`, `code`, `retryable`), `reason` (for example `moved`, `adopted`, `released`, `missing_at_provider`) |
+| `phone_number.capability_changed` | One of the number's capability facets changed state (for example `outbound_sms` from `activating` to `enabled` when a US registration became ready) | `number_id`, `identity_id`, `capability` (`outbound_sms`, `inbound_sms`, `inbound_calls`, `outbound_calls`), `from`, `to`, `reason`, `next_step` |
+| `phone_number.expiring` | A number bought with `expires_at` will be released within 24 hours | `number_id`, `identity_id`, `release_at` |
+| `phone_number.action_needed` | The provider needs information before a deadline | `number_id`, `action_needed` (`kind`, `message` as untrusted text, `deadline_at`) |
+| `phone_number.port_out_requested` | Another carrier asked for the number | `number_id`, `port_out_id`, `respond_by` |
+| `phone_number.port_out_decided` | A person authorised or rejected it, or the provider authorised it | `number_id`, `port_out_id`, `decision` (`authorized`, `rejected`, `provider_authorized`), `decided_by_key_id` or `decided_by_user_id` |
+| `phone_registration.status_changed` | A US 10DLC brand, campaign or number assignment, or a toll-free verification, changed status | `registration_id`, `kind`, `from`, `to`, `failure_reason` |
+| `phone_compliance.status_changed` | The compliance profile's status for a country, number type and action changed | `country`, `number_type`, `action`, `from`, `to` (no personal data) |
+| `phone_consent.changed` | A counterparty opted out or in | `number_hint` (masked), `state`, `purpose`, `source` |
+| `phone_spend.warning` | Phone spend reached 80% or 100% of a monthly cap | `scope` (`tenant`, `identity`, `registration`), `identity_id`, `percent`, `used_pence`, `cap_pence`, `resets_at` |
+| `phone_setup.status_changed` | The tenant's onboarding status for a country changed | `country`, `from`, `to`, `next_step` (no personal data) |
+| `phone_budget.changed` | The tenant's standing purchase budget was set, loosened, tightened or turned off | `version`, `enabled`, `change` (`set`, `loosened`, `tightened`, `disabled`), `decided_by` (`person`, `key`) |
+
+### Vault
+
+Platform events with `tenant_id` set, and `identity_id` set where the change concerns one identity. Every
+`data` carries `audit: { "seq", "row_hash" }`, the head of the tenant's hash-chained vault audit after the
+change, so an integrator that stores its events holds an independent copy of the chain heads. No event carries
+a value, a ticket, a packet, an unlock key or a placeholder. `item` is the [vault item](api.md#vault) as the
+API returns it (with `title` and `username`, which are not secrets; filter by type if you want neither in a
+webhook), `grant` and `use` likewise (a `use` never carries its ticket). `vault.item.*`, `vault.grant.*`,
+`vault.use.*` and `vault.ticket.*` need `vault:read`, and identity keys see those of their own identity;
+`vault.consumer.changed` and `vault.key.changed` need `vault:admin` and are never shown to identity keys.
+
+| Type | When | `data` (besides `audit`) |
+|---|---|---|
+| `vault.item.created` | An item was created or imported | `item` (with `import.source` for an import) |
+| `vault.item.updated` | Its metadata, origins, approval level or state changed | `item` |
+| `vault.item.rotated` | A new version became current (rotation, write-back, `rotate_fill`) | `item` |
+| `vault.item.deleted` | It was crypto-shredded | `item_id` and the shred receipt |
+| `vault.item.revealed` | A person revealed a value in the console, or was shown a new managed value once | `item_id`, `actor_user_id`, `rotated` |
+| `vault.item.health_changed` | Its health changed | `item_id`, `health`, `health_reason` |
+| `vault.grant.requested` | An agent asked for a grant | `grant` |
+| `vault.grant.approved` | A person (or a key under `vault.key_approval`) approved it, or created it approved | `grant` |
+| `vault.grant.denied` | It was denied | `grant` |
+| `vault.grant.revoked` | It was revoked, or given up by its agent | `grant` |
+| `vault.grant.expired` | Its pending week or active period ended | `grant` |
+| `vault.use.requested` | The orchestrator created a use (also for refusals at creation, with `outcome: "refused"`) | `use` |
+| `vault.use.approval_requested` | A person must decide | `use` |
+| `vault.use.approved` | It was approved; mint a ticket now | `use` |
+| `vault.use.denied` | It was denied | `use` |
+| `vault.use.expired` | Its approval deadline or first-redemption window passed | `use` |
+| `vault.use.canceled` | The orchestrator canceled it | `use` |
+| `vault.use.closed` | It closed, normally or early | `use` (with `close_reason`) |
+| `vault.ticket.issued` | A ticket was minted | `use_id`, `item_id`, `consumer_id` |
+| `vault.ticket.redeemed` | A consumer redeemed a phase | `use_id`, `item_id`, `consumer_id`, `phase` |
+| `vault.ticket.refused` | A redemption was refused | `use_id`, `item_id`, `consumer_id`, `phase`, `reason` |
+| `vault.ticket.reported` | A consumer reported an outcome | `use_id`, `item_id`, `consumer_id`, `phase`, `outcome` |
+| `vault.consumer.changed` | A consumer was registered, activated, suspended, resumed, re-keyed or revoked | `consumer_id`, `change` |
+| `vault.key.changed` | The tenant key rotated, custody changed, or `revoke-all` ran | `change` (`rotated`, `custody_changed`, `revoke_all`), `custody` |
+
+Twenty-four types. Subscribing an endpoint to `vault.consumer.changed` or `vault.key.changed` needs `vault:admin`,
+and to the others `vault:read`.
+
 ## Versioning
 
 `api_version` is the payload schema date. Additive changes, such as new fields or new event types, keep
@@ -243,4 +347,7 @@ tenant's event log for `retention.events_days` ([Event feed and live stream](../
 - `GET /v1/events/stream`: a WebSocket that pushes events and resumes from a cursor with nothing lost.
 
 Endpoint filters do not apply to the log. A key sees an event only when it could read its subject through
-the API, and events of the system identity are never in a log. Deduplicate on `id` across every surface.
+the API (SMS and call events need `phone:read`, held SMS events also `quarantine:review`; phone
+request, number, registration, consent, spend, setup and budget events need `phone:read`, and phone compliance
+events `phone:compliance`; vault events need `vault:read`, and `vault.consumer.changed` and `vault.key.changed`
+need `vault:admin`), and events of the system identity are never in a log. Deduplicate on `id` across every surface.

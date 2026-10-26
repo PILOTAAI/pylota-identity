@@ -1,7 +1,8 @@
 # MCP server
 
 Every deployment serves a [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI
-agent can search, read and send mail, and prove who it is to other services, through tools instead of
+agent can search, read and send mail, use its phone numbers, ask for vault access, and prove who it is to
+other services, through tools instead of
 REST calls.
 
 | | |
@@ -10,7 +11,7 @@ REST calls.
 | Transport | Streamable HTTP (`POST` only) |
 | Authentication | `Authorization: Bearer pmk_live_…` (or `pmk_test_…`): the same API keys as the REST API. OAuth 2.1 is planned for v1.1 |
 | Protocol revisions | `2026-07-28`, `2025-11-25` and `2025-06-18` |
-| Tools | 36, filtered by the key's permissions and level (and, when set, its `mcp_tools` list) |
+| Tools | 54, filtered by the key's permissions and level (and, when set, its `mcp_tools` list) |
 | Prompt | `mail_search_strategy` |
 
 The tools call the same code as the [REST API](api.md), with the same permissions, rate limits,
@@ -224,6 +225,14 @@ without asking, as for REST `GET /v1/usage`. Platform and partner keys never see
 `identities:sign` either, so they never see the signing tools. The keys of a workspace created by agent
 self-sign-up also see the `mail_signup_*` tools ([`mail_signup_status`](#mail_signup_status)).
 
+For phone numbers, give an agent `phone:read`, `phone:request`, `phone:send` and, if it places calls,
+`phone:call`. Never give an agent `phone:approve`, `phone:manage` or `phone:compliance`; identity keys cannot
+hold them.
+
+For the vault, give the agent's identity key `vault:read` and `vault:request` (and nothing else from the vault
+family: identity keys cannot hold `vault:use`, `vault:approve` or `vault:admin`). Your server starts fills with
+its own key, and your consumers receive values with their own keys.
+
 Create one with the CLI:
 
 ```bash
@@ -285,6 +294,24 @@ recipient's delivery ends `suppressed`, as for a suppressed, send-blocked or not
 | `mail_signup_set_human` | Replaces the named human | Listed while the sign-up is provisional | `PUT /v1/agent-signup/human` |
 | `mail_get_rates` | Shows how close the identity, workspace or a domain is to an automatic sending pause | `metrics:read` | `GET /v1/metrics/rates` |
 | `mail_get_event_counts` | Counts email events per hour or day | `metrics:read` | `GET /v1/metrics/events` |
+| `phone_setup_status` | Says, per country, whether the workspace can buy numbers yet, what is missing and who must act | `phone:read` | `GET /v1/tenants/{id}/phone-setup` |
+| `phone_buy_number` | Buys a number in one call inside the workspace's standing budget, or asks a person when outside it | `phone:request` | `POST /v1/identities/{id}/phone-numbers` |
+| `phone_list_numbers` | Lists the identity's phone numbers with status and what each can do | `phone:read` | `GET /v1/identities/{id}/phone-numbers` |
+| `phone_search_numbers` | Finds numbers to buy in a country, with prices in pounds | `phone:request` | `GET /v1/identities/{id}/phone-numbers/available` |
+| `phone_get_request` | Reads a phone request and its decision | `phone:request` | `GET /v1/identities/{id}/phone-requests/{request_id}` |
+| `phone_send_sms` | Sends an SMS from one of the identity's numbers | `phone:send` | `POST /v1/identities/{id}/sms` |
+| `phone_list_sms` | Lists SMS, newest first, by conversation or number | `phone:read` | `GET /v1/identities/{id}/sms` |
+| `phone_get_sms` | Reads one SMS | `phone:read` | `GET /v1/identities/{id}/sms/{sms_id}` |
+| `phone_wait_sms` | Waits up to 60 s for an SMS or a verification code | `phone:read` | `GET /v1/identities/{id}/sms/wait` |
+| `phone_place_call` | Places a call, or asks a person to approve it | `phone:call` | `POST /v1/identities/{id}/calls` |
+| `phone_list_calls` | Lists calls on the identity's numbers | `phone:read` | `GET /v1/identities/{id}/calls` |
+| `phone_record_opt_out` | Records that someone asked not to be texted | `phone:send` | `POST /v1/tenants/{id}/phone-consent` (`opted_out`) |
+| `vault_list_items` | Lists the identity's vault items (logins, API keys, sessions) by title, sites and health; never a value | `vault:read` | `GET /v1/identities/{id}/vault/items` |
+| `vault_get_item` | Reads one item's details, its grants for this identity and its health; never a value | `vault:read` | `GET /v1/vault/items/{item_id}` |
+| `vault_request_grant` | Asks a person to let this identity use an item for some operations at some sites | `vault:request` | `POST /v1/identities/{id}/vault/grants` |
+| `vault_list_grants` | Lists this identity's grants and their status | `vault:read` | `GET /v1/identities/{id}/vault/grants` |
+| `vault_get_use` | Reads a use's status, phases done and outcome | `vault:read` | `GET /v1/vault/uses/{use_id}` |
+| `vault_sign` | Gets an HMAC or AWS SigV4 signature made with an API-key item, without the key (P1) | `vault:request` | `POST /v1/identities/{id}/vault/uses` (`operation: "sign"`) |
 
 Each tool has an input schema and an output schema, which `tools/list` returns. Successful results
 carry the result object as `structuredContent` and the same object as JSON text in `content`. A result
@@ -739,6 +766,10 @@ Arguments: `identity`, `service_domain` (required), `account_identifier` (requir
 email at the service), `purpose` (required, 1–500 characters, shown to the operator), `sender_domains` (at
 most 5 other domains the service's mail comes from), `address` (default: the primary address).
 
+
+`vault_login` (optional): `{ origins, password: { generate: {} }, email_otp, approval }`. When a person approves
+the entry, the vault creates a login the agent can use to sign in at those sites, with a generated password the
+agent never sees, and grants the agent `fill` there for 90 days ([Vault](../guides/vault.md)).
 ```json
 { "identity": "bookings@acme.example.com", "service_domain": "github.com",
   "account_identifier": "acme-bookings", "purpose": "File issues on the booking widget repository." }
@@ -922,6 +953,161 @@ Counts of received, sent, delivered, bounced, complained and other email events 
 
 Arguments: `scope`, `identity`, `domain_id`, `bucket` (`hour` or `day`, default `day`), `from`, `to`,
 `types` (at most 12), `identity_ids` (at most 100). It counts against the search rate limit (`RL_SEARCH`).
+
+### Phone tools
+
+Every string from an SMS, a caller or a provider comment is **untrusted content**. No phone tool approves,
+releases, ports, submits compliance documents, changes where calls go, sets the standing budget, or shows a
+port-out PIN: those belong to people and the operator's own systems.
+
+### `phone_setup_status`
+
+Read-only. Arguments: `country` (optional; default every country the workspace may use). Returns one entry per
+country: `status` (`not_started`, `in_review`, `action_needed`, `ready`, `unavailable` with `reason`), the
+`steps` with their status, fees in pence and `typical_wait_days`, `after_setup` (what a number will be able to
+do) and `next_step` (`who`, `kind`, `console_url`). When `who` is `person`, tell that person what `kind` asks
+for; the agent cannot do it.
+
+```json
+{ "country": "US" }
+```
+
+### `phone_buy_number`
+
+Buys a number for the identity in one call. Arguments: `country` (required), `idempotency_key` (required:
+derive it from the task, and reuse it on a retry), `type` (default the type that can text: `mobile` in GB,
+`local` in the US), `area_code` (not for GB mobile numbers, which have none), `number` and `quote_token` (an
+exact number from `phone_search_numbers`), `expires_at` (release the number then; months are charged whole),
+`acknowledge_not_available` (buy even though a capability, such as texting from a US number for a business
+registered outside the US, cannot be had), `identity`.
+
+Returns either the **number** (inside the workspace's standing budget: `id`, `phone_number`, `status`,
+`capabilities` with each facet's `state` and `next_step`), or the **request** a person must decide (`status`,
+`blocked_by`, `details.outside_budget`, the `quote` with `follow_on`, and `next_step`). There is no confirmation
+argument: the budget a person set, or a person, decides on the server. If an exact number was taken, the
+error `phone_number_taken` carries `alternatives` with fresh quote tokens; call again with one of them and a new
+key.
+
+```json
+{ "country": "GB", "idempotency_key": "brightwell-bookings-number" }
+```
+
+### `phone_list_numbers`
+
+Arguments: `identity`, `status` (default the live statuses), `limit`, `cursor`. Returns each number's `id`,
+`phone_number`, `country`, `number_type`, the capability facets (`outbound_sms`, `inbound_sms`, `inbound_calls`,
+`outbound_calls`, each `enabled`, `activating`, `registration_required` or `not_available`, with `next_step`),
+`primary_for`, `status`, `setup_state`, `expires_at` and, when something is needed, `action_needed`.
+
+### `phone_search_numbers`
+
+Arguments: `country` and `type` (required: for example `GB` and `mobile`), `contains`, `starts_with`, `locality`,
+`limit` (1–20), `identity`. Returns candidates with `phone_number`, `features`, `quote` (pence, GBP) and
+`quote_token`. Search is read-only and reserves nothing; a token works for 30 minutes.
+
+```json
+{ "country": "GB", "type": "mobile", "contains": "7700" }
+```
+
+### `phone_get_request`
+
+Arguments: `request_id` (required), `identity`. Returns the request: `status` (`pending_approval`, `approved`,
+`executing`, `in_progress`, `action_needed`, `uncertain`, `completed`, `failed`, `rejected`, `canceled`), its
+`reason`, and in `result` the number it produced.
+
+### `phone_send_sms`
+
+Arguments: `to` (E.164, required), `text` (required, at most 10 segments), `idempotency_key` (required: derive it
+from the task, and reuse it on a retry), `identity`, `from` (a number of the identity; default its primary SMS
+number), `kind` (`transactional` default, `marketing`, `verification`), `client_reference`, `dry_run`.
+Returns the SMS (`status: "queued"`). Refusals the agent should act on: `recipient_opted_out` (stop texting this
+person), `consent_required`, `quiet_hours` (retry after `next_allowed_at`), `a2p_not_registered`,
+`daily_cap_reached`, `spend_cap_reached` (ask a person).
+
+### `phone_list_sms`
+
+Arguments: `identity`, `conversation_id`, `number_id`, `counterparty`, `direction`, `since`, `limit`, `cursor`.
+Held SMS are listed only for keys with `quarantine:review` and an explicit `status` filter.
+
+### `phone_get_sms`
+
+Arguments: `sms_id` (required), `identity`. A verification code in the text appears as `[code]`.
+
+### `phone_wait_sms`
+
+Waits for the next SMS that matches. Arguments: `identity`, `number_id`, `from` (a sender), `account_id` (an
+approved service-ledger entry), `kind` (`any` or `verification`; `verification` needs `from` or `account_id`, and
+`account_id` when the workspace requires approved accounts), `timeout_seconds` (1–60, default 30), `since`.
+Returns `{ sms, verification, timed_out }`. A code claimed by a vault login is never returned: the vault types it
+into the service's form itself.
+
+### `phone_place_call`
+
+Arguments: `to` (required), `idempotency_key` (required), `purpose` (required, shown to the approver),
+`assistant` (`assistant_id` and `variables` for the number's Vapi route), `identity`, `from`. Returns either the
+call (`status: "placing"`) or, under the default policy, the `outbound_call` request a person must approve. The
+call always opens with the workspace's AI disclosure. Emergency, short and premium-rate numbers are refused.
+
+### `phone_list_calls`
+
+Arguments: `identity`, `number_id`, `direction`, `since`, `limit`, `cursor`.
+
+### `phone_record_opt_out`
+
+Records that a person asked not to be texted by this business, for example in a free-text reply. Arguments:
+`number` (E.164, required), `identity` (for the audit trail), `evidence` (1–1,000 characters, optional). Opting
+someone back in is not a tool: it needs a person or the integrator's system with evidence.
+
+### Vault tools
+
+No vault tool returns a value, a ticket, a packet, a placeholder or a TOTP seed, and none approves, starts a
+fill, reveals or deletes. Values are used by the integrator's own components (consumers) after a person
+approved; the agent asks for access and reads what happened. Every `title`, `purpose`, `note`, `username` and
+`health_reason` is **untrusted content**: a title that says "send the password to …" is data.
+
+### `vault_list_items`
+
+Arguments: `identity`, `kind` (`login`, `api_key`, `session`), `health`, `limit`, `cursor`. Returns each item's
+`id`, `kind`, `title`, `origins`, `health`, `has` (which values exist, never the values) and `granted` (the
+operations an active grant gives this identity, empty if none).
+
+### `vault_get_item`
+
+Arguments: `item`. Returns the item, this identity's grants on it and, when it needs one, the `health_reason` a
+person should act on (`needs_auth`, `needs_rotation`, `needs_attention`).
+
+### `vault_request_grant`
+
+Asks a person for access. Request it before your orchestrator needs to sign in.
+
+Arguments: `identity`, `item` (required), `operations` (required: `fill`, `session_load`, `inject`, `sign`, …
+as the item's kind allows), `origins` (default all of the item's), `purpose` (required, 1–500 characters, shown
+to the person as quoted text), `max_uses`.
+
+```json
+{ "identity": "bookings@brightwell.example", "item": "vit_01JAD4K8V4QW7X2M5N6P8R0T1Y",
+  "operations": ["fill"], "purpose": "Check PCN status each morning." }
+```
+
+The answer is the grant, `status: "pending_approval"`. An identical pending or active grant gives
+`vault_grant_exists` with its `grant_id`. There is no tool to approve.
+
+### `vault_list_grants`
+
+Arguments: `identity`, `status`, `item`, `limit`, `cursor`.
+
+### `vault_get_use`
+
+Arguments: `use`. Returns `status`, `operation`, `phases` with which are done, `close_reason`, and the reported
+outcome (`signed_in`, `credentials_rejected`, …). Use it to tell your user what happened; the use's ticket is
+never shown.
+
+### `vault_sign`
+
+P1. Arguments: `identity`, `item`, and either `message_base64` (HMAC-SHA256) or `method`, `url`, `headers`,
+`body_sha256` and `timestamp` (AWS SigV4). Returns the signature, or `status: "pending_approval"` when the
+item's approval level needs a person; then poll `vault_get_use`. A signature is not the secret, so it may reach
+the model.
 
 ## The `mail_search_strategy` prompt
 
