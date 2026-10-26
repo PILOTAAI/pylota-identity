@@ -444,13 +444,20 @@ event only when it could read the event's subject through the API. The rules, in
    | `member.*` | `members:read` | never |
    | `billing.*` | `usage:read` | never |
    | `tenant.policy_updated` | nothing more | never |
+   | `sms.quarantined`, `sms.screened`, `sms.released` | `phone:read` and `quarantine:review` | own identity |
+   | `phone_request.*`, `phone_number.*`, `phone_registration.*`, `phone_consent.changed`, `phone_spend.warning`, `phone_setup.status_changed`, `phone_budget.changed` | `phone:read` | own identity (events with an `identity_id`; tenant-wide phone events need a tenant-level key) |
+   | `phone_compliance.status_changed` | `phone:compliance` | never |
+   | `vault.item.*`, `vault.grant.*`, `vault.use.*`, `vault.ticket.*` | `vault:read` | own identity |
+   | `vault.consumer.changed`, `vault.key.changed` | `vault:admin` | never |
    | `signup.verified` | nothing more | own identity: the agent that signed up learns that its person verified ([Agent self-sign-up](agent-signup.md)) |
    | any type without a row | never shown | never |
 
    The table is `core::events::visibility`. A type added later is invisible until its design adds a row
    (fail closed), and `core::events::visibility_covers_catalogue` fails the build for any type of the event
    catalogue without one. `message.released` needs only `messages:read`: once released, the message is
-   visible to any key that reads mail.
+   visible to any key that reads mail. An SMS withheld for the vault (`vault_code`) is never appended to the
+   log. A durable consumer or endpoint subscribing to the vault types needs the same permissions to be
+   created (the J29 rule).
 3. **Never in a log.** Events of the system identity and deployment-level platform events are never
    appended (§2.4), so no key, platform keys included, reads them from a feed.
 4. **Webhook endpoint filters do not apply.** Endpoint types, identity filters and disabled endpoints change
