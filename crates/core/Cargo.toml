@@ -14,6 +14,7 @@ cfb = { workspace = true }
 hmac = { workspace = true }
 html5ever = { workspace = true }
 idna = { workspace = true }
+mail-auth = { workspace = true }
 mail-parser = { workspace = true }
 miniz_oxide = { workspace = true }
 psl = { workspace = true }
@@ -23,6 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 unicode-normalization = { workspace = true }
+web-time = { workspace = true }
 x509-cert = { workspace = true }
 
 [dev-dependencies]

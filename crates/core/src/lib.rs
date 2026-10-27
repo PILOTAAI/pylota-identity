@@ -7,6 +7,7 @@
 
 pub mod address;
 pub mod attach;
+pub mod auth;
 pub mod classify;
 pub mod httpsig;
 pub mod ids;

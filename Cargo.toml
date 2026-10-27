@@ -16,6 +16,12 @@ members = [
     "spikes/s13-web-bot-auth",
 ]
 
+# vendor/mail-auth is a patched crates.io copy, not a member (vendor/mail-auth/PATCH.md).
+exclude = ["vendor/mail-auth"]
+
+[patch.crates-io]
+mail-auth = { path = "vendor/mail-auth" }
+
 [workspace.package]
 # The one place the version is set (Rust workspace § 9, `release --check-version`).
 version = "0.1.0"
@@ -86,6 +92,7 @@ unicode-normalization = { version = "=0.1.25", default-features = false }  # 202
 idna                  = { version = "=1.1.0", default-features = false, features = ["alloc", "compiled_data"] }  # 2025-08-21
 html5ever             = "=0.40.1"                                          # 2026-09-14; the version ammonia 4.2.4 resolves
 psl                   = { version = "=2.1.241", default-features = false, features = ["helpers"] }  # 2026-10-08; organisational domains (D2, D3)
+web-time              = "=1.1.0"                                           # the version mail-auth resolves; names its Instant type only
 proptest              = "=1.12.0"                                           # native dev-dependency; 2026-10-10
 
 # Native only, chosen at build time (the newest release at least two weeks old; crates.io, read 2026-10-19)
