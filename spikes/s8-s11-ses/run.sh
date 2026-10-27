@@ -38,6 +38,10 @@ setup() {
     aws sesv2 create-email-identity --email-identity "$D" \
       --tags Key=pylota-identity:api-host,Value=pi-spike-11 >/dev/null
 
+  echo "== DKIM tokens for $D (publish as <token>._domainkey.$D CNAME <token>.dkim.amazonses.com)"
+  aws sesv2 get-email-identity --email-identity "$D" --query 'DkimAttributes.Tokens' --output text
+  echo "== MX for $D: 10 inbound-smtp.$R.amazonaws.com"
+
   aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null ||
     aws s3api create-bucket --bucket "$BUCKET" --create-bucket-configuration LocationConstraint=$R >/dev/null
   aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
@@ -66,21 +70,12 @@ setup() {
 
   aws ses describe-receipt-rule-set --rule-set-name "$RS" >/dev/null 2>&1 ||
     aws ses create-receipt-rule-set --rule-set-name "$RS"
-  aws ses describe-receipt-rule --rule-set-name "$RS" --rule-name retired >/dev/null 2>&1 ||
-    aws ses create-receipt-rule --rule-set-name "$RS" --rule "$(jq -nc --arg d "$D" '{
-      Name: "retired", Enabled: true, Recipients: ["retired@\($d)"], ScanEnabled: true, TlsPolicy: "Optional",
-      Actions: [{ BounceAction: { SmtpReplyCode: "550", StatusCode: "5.1.1",
-                  Message: "This address no longer accepts mail", Sender: "mailer-daemon@\($d)" } },
-                { StopAction: { Scope: "RuleSet" } }] }')"
   aws ses describe-receipt-rule --rule-set-name "$RS" --rule-name pm-deliver >/dev/null 2>&1 ||
-    aws ses create-receipt-rule --rule-set-name "$RS" --after retired --rule "$(jq -nc --arg b "$BUCKET" --arg t "$(topic_arn)" '{
+    aws ses create-receipt-rule --rule-set-name "$RS" --rule "$(jq -nc --arg b "$BUCKET" --arg t "$(topic_arn)" '{
       Name: "pm-deliver", Enabled: true, ScanEnabled: true, TlsPolicy: "Optional",
       Actions: [{ S3Action: { BucketName: $b, ObjectKeyPrefix: "in/", TopicArn: $t } }] }')"
   aws ses set-active-receipt-rule-set --rule-set-name "$RS"
 
-  echo "== DKIM tokens for $D (publish as <token>._domainkey.$D CNAME <token>.dkim.amazonses.com)"
-  aws sesv2 get-email-identity --email-identity "$D" --query 'DkimAttributes.Tokens' --output text
-  echo "== MX for $D: 10 inbound-smtp.$R.amazonaws.com"
   echo "setup: ok"
 }
 
@@ -106,6 +101,16 @@ exercise() {
     sleep 10
   done
   aws sesv2 get-email-identity --email-identity "$D" --query '{verified: VerifiedForSendingStatus, dkim: DkimAttributes.Status}'
+
+  # The retired-address rule bounces from mailer-daemon@$D, and SES accepts a bounce sender only once the
+  # domain is verified. Without --after it goes first, ahead of pm-deliver.
+  aws ses describe-receipt-rule --rule-set-name "$RS" --rule-name retired >/dev/null 2>&1 ||
+    aws ses create-receipt-rule --rule-set-name "$RS" --rule "$(jq -nc --arg d "$D" '{
+      Name: "retired", Enabled: true, Recipients: ["retired@\($d)"], ScanEnabled: true, TlsPolicy: "Optional",
+      Actions: [{ BounceAction: { SmtpReplyCode: "550", StatusCode: "5.1.1",
+                  Message: "This address no longer accepts mail", Sender: "mailer-daemon@\($d)" } },
+                { StopAction: { Scope: "RuleSet" } }] }')"
+  aws ses describe-receipt-rule-set --rule-set-name "$RS" --query 'Rules[].Name' --output text
 
   # The spike Worker in workerd, with the role's temporary credentials.
   (cd "$HERE" && worker-build --release --locked >/dev/null)
