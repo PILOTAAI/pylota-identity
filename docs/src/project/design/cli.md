@@ -732,8 +732,11 @@ carries the tag `pylota-identity:api-host = {PM_API_HOST}` where the service acc
    steps below that already exists under its name (bucket, both topics, queue, configuration set, IAM user,
    platform identity) is read with its tags: a missing tag or another host's tag stops the command with
    exit 14, naming the resource. Nothing has been created or changed at that point. The tag-reading calls
-   per service (for example `GetBucketTagging`, `ListTagsForResource`, `ListQueueTags`, `ListUserTags`):
-   verify at build time.
+   are `s3:GetBucketTagging`, `sns:ListTagsForResource`, `sqs:ListQueueTags`, `iam:ListUserTags` and
+   `ses:ListTagsForResource` (Service Authorization Reference, read 2026-10-27).
+5. **Permissions boundary.** `iam:GetPolicy` on `pylota-identity-worker-boundary`. When it is missing, the
+   command prints the steps in `deploy/aws/README.md` and stops with exit 14. The IAM policies for the
+   credentials that run this command are in `deploy/aws/` ([ADR 0023](../adr/0023-staging-in-the-existing-account-and-ses-through-oidc.md)).
 
 **Steps**, in order. The numbers in brackets are the rows of Domains on any DNS host §4.2.
 
@@ -745,7 +748,7 @@ carries the tag `pylota-identity:api-host = {PM_API_HOST}` where the service acc
 | 4 | Receipt rule set and rule `pm-deliver` [7, 8] | An account that already has an active rule set keeps it: the rule is added to that set, and its name becomes `PM_SES_RULE_SET`. Otherwise the set `pylota-identity` is created and made active |
 | 5 | Configuration set, event destination and the delivery-events topic [10] | As in [Outbound › Amazon SES](outbound.md#amazon-ses). This topic, `PM_SES_SNS_TOPIC_ARN`, also gets `SignatureVersion = 2` |
 | 6 | Platform identity [9] | `CreateEmailIdentity` for the platform domain; its DKIM CNAMEs are written into the platform zone through the Cloudflare API (find, then create) |
-| 7 | IAM user `pylota-identity-worker-{dep}` and its policy [11] | The policy JSON is printed for review first. Interactive runs ask before applying it; non-interactive runs need `--yes`, else exit 2. An existing policy that differs is shown as a diff |
+| 7 | IAM user `pylota-identity-worker-{dep}` and its policy [11] | `CreateUser` with `PermissionsBoundary` = the boundary of check 5. The policy JSON is printed for review first. Interactive runs ask before applying it; non-interactive runs need `--yes`, else exit 2. An existing policy that differs is shown as a diff |
 | 8 | The Worker's access key | Only when `PM_SES_ACCESS_KEY_ID` is not among the Worker's secret names (Worker secrets are write-only, so an existing key is never read or replaced). `CreateAccessKey`, then `PM_SES_ACCESS_KEY_ID` and `PM_SES_SECRET_ACCESS_KEY` are piped to `wrangler secret put` on stdin and dropped from memory. They are never written to disk or printed; `--print-secrets` does not exist here |
 | 9 | Variables | Renders `deploy/wrangler.toml` ([§7](#7-rendering-wranglertoml)) with `PM_SES_REGION`, `PM_SES_INBOUND_BUCKET`, `PM_SES_INBOUND_TOPIC_ARN`, `PM_SES_INBOUND_QUEUE_URL`, `PM_SES_RULE_SET` and `PM_SES_SNS_TOPIC_ARN` under `[vars]`. These six are owned by `setup ses`: a re-run writes the values it found |
 | 10 | Deploy | `idvy deploy` ([§8](#8-deploy)), so the Worker reads the new variables. A re-run that changed nothing is a no-op ([§8.9](#89-no-op-redeploys)) |
@@ -765,7 +768,7 @@ receipt-rule-set calls, `CreateAccessKey` and the subscription status): verify a
 | 9 | The Worker's `/health` does not answer |
 | 10 | Wrangler (`secret put`, deploy) or a Cloudflare API call failed |
 | 13 | The SNS subscriptions were not confirmed within 5 minutes |
-| 14 | An AWS API call failed, the account has no SES production access, or the account and region hold another deployment's rule or resources (check 4) |
+| 14 | An AWS API call failed, the account has no SES production access, the account and region hold another deployment's rule or resources (check 4), or the permissions boundary is missing (check 5) |
 | 130 | Interrupted |
 
 JSON mode prints `{ "region", "rule_set", "steps": [ { "step", "status", "resource", "id" } ],

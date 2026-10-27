@@ -41,9 +41,13 @@ The plan also gave staging and the spikes long-lived AWS access keys for SES (`S
      (`pylota-identity-staging`) and the staging zones, with the per-Worker Editor role, as production's are.
 4. **SES access from GitHub Actions uses OIDC, not stored keys.** An IAM OIDC identity provider for
    `https://token.actions.githubusercontent.com` with audience `sts.amazonaws.com`, and one IAM role per GitHub
-   environment, trusted only for `repo:PILOTAAI/pylota-identity:environment:staging` (and `…:environment:production`
-   for production's setup jobs) through the `sub` condition, as GitHub's guide recommends (GitHub,
-   "Configuring OpenID Connect in Amazon Web Services", read 2026-10-27). Workflows request `id-token: write`
+   environment, trusted only for `repo:PILOTAAI@281272467/pylota-identity@1412185299:environment:staging` (and
+   `…:environment:production` for production's setup jobs) through the `sub` condition, as GitHub's guide
+   recommends (GitHub, "Configuring OpenID Connect in Amazon Web Services", read 2026-10-27). The subject
+   carries the owner and repository IDs because GitHub gives every repository created after 15 July 2026
+   that immutable format (GitHub, "OpenID Connect reference › Immutable subject claims", read 2026-10-27);
+   this one was created on 2026-10-09. The trust policy, the setup role's policy, the spikes' policy and
+   the Worker's permissions boundary are in [`deploy/aws/`](https://github.com/PILOTAAI/pylota-identity/tree/main/deploy/aws). Workflows request `id-token: write`
    and assume the role with `aws-actions/configure-aws-credentials` pinned to a full commit SHA. Spikes S8 and
    S11 run as a `workflow_dispatch` job in environment `staging`, so M1 needs no AWS key anywhere. The
    Actions secrets `STAGING_AWS_ACCESS_KEY_ID` and `STAGING_AWS_SECRET_ACCESS_KEY` are replaced by the variable
@@ -53,7 +57,9 @@ The plan also gave staging and the spikes long-lived AWS access keys for SES (`S
    "workload identity" and "federation" returned no Workers feature on 2026-10-27 (a negative result from a
    search; re-check before relying on it). So the Worker keeps the IAM user `pylota-identity-worker-{dep}` that
    `idvy setup ses` creates, with its policy limited to sending through the deployment's configuration set and
-   reading the receiving bucket, and:
+   reading the receiving bucket. The setup role may create that user and set its policy only with the
+   permissions boundary `pylota-identity-worker-boundary`, which the owner creates once and the role cannot
+   change, so a stolen job token cannot mint a user with wider rights. And:
    - `idvy setup ses --rotate-key` creates a second access key, writes it to the Worker's secrets, waits for a
      successful SES call with it, then deletes the old key (an IAM user holds at most two keys);
    - a scheduled GitHub Actions job (`ses-key-rotate.yml`, OIDC, environment `production`) runs the rotation

@@ -1,0 +1,162 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SesAccountLevel",
+      "Effect": "Allow",
+      "Action": [
+        "ses:GetAccount",
+        "ses:ListEmailIdentities"
+      ],
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "SesReceiptRulesHaveNoResourceType",
+      "Effect": "Allow",
+      "Action": [
+        "ses:DescribeActiveReceiptRuleSet",
+        "ses:DescribeReceiptRuleSet",
+        "ses:DescribeReceiptRule",
+        "ses:CreateReceiptRuleSet",
+        "ses:SetActiveReceiptRuleSet",
+        "ses:CreateReceiptRule",
+        "ses:UpdateReceiptRule",
+        "ses:DeleteReceiptRule",
+        "ses:DeleteReceiptRuleSet"
+      ],
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "SesIdentities",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:DeleteEmailIdentity",
+        "ses:PutEmailIdentityMailFromAttributes",
+        "ses:TagResource",
+        "ses:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:ses:eu-west-2:ACCOUNT_ID:identity/*"
+    },
+    {
+      "Sid": "SesConfigurationSet",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateConfigurationSet",
+        "ses:GetConfigurationSet",
+        "ses:DeleteConfigurationSet",
+        "ses:CreateConfigurationSetEventDestination",
+        "ses:GetConfigurationSetEventDestinations",
+        "ses:UpdateConfigurationSetEventDestination",
+        "ses:DeleteConfigurationSetEventDestination",
+        "ses:TagResource",
+        "ses:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:ses:eu-west-2:ACCOUNT_ID:configuration-set/pylota-identity"
+    },
+    {
+      "Sid": "InboundBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "s3:DeleteBucketPolicy",
+        "s3:PutBucketTagging",
+        "s3:GetBucketTagging"
+      ],
+      "Resource": "arn:aws:s3:::pylota-identity-ACCOUNT_ID-*-inbound",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "InboundObjectsDestroyOnly",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::pylota-identity-ACCOUNT_ID-*-inbound/in/*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "Topics",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:Subscribe",
+        "sns:Unsubscribe",
+        "sns:ListSubscriptionsByTopic",
+        "sns:GetSubscriptionAttributes",
+        "sns:TagResource",
+        "sns:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:sns:eu-west-2:ACCOUNT_ID:pylota-identity*"
+    },
+    {
+      "Sid": "BackstopQueue",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:DeleteQueue",
+        "sqs:GetQueueUrl",
+        "sqs:GetQueueAttributes",
+        "sqs:SetQueueAttributes",
+        "sqs:TagQueue",
+        "sqs:ListQueueTags"
+      ],
+      "Resource": "arn:aws:sqs:eu-west-2:ACCOUNT_ID:pylota-identity-inbound"
+    },
+    {
+      "Sid": "WorkerUserOnlyInsideTheBoundary",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateUser",
+        "iam:PutUserPolicy"
+      ],
+      "Resource": "arn:aws:iam::ACCOUNT_ID:user/pylota-identity-worker-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::ACCOUNT_ID:policy/pylota-identity-worker-boundary"
+        }
+      }
+    },
+    {
+      "Sid": "WorkerUserAndKeys",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetUser",
+        "iam:DeleteUser",
+        "iam:TagUser",
+        "iam:ListUserTags",
+        "iam:GetUserPolicy",
+        "iam:ListUserPolicies",
+        "iam:DeleteUserPolicy",
+        "iam:CreateAccessKey",
+        "iam:ListAccessKeys",
+        "iam:DeleteAccessKey"
+      ],
+      "Resource": "arn:aws:iam::ACCOUNT_ID:user/pylota-identity-worker-*"
+    },
+    {
+      "Sid": "ReadTheBoundary",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": "arn:aws:iam::ACCOUNT_ID:policy/pylota-identity-worker-boundary"
+    }
+  ]
+}

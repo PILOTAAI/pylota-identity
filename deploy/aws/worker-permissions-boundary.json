@@ -1,0 +1,62 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Send",
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": [
+        "arn:aws:ses:eu-west-2:ACCOUNT_ID:identity/*",
+        "arn:aws:ses:eu-west-2:ACCOUNT_ID:configuration-set/pylota-identity"
+      ]
+    },
+    {
+      "Sid": "Identities",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:DeleteEmailIdentity",
+        "ses:PutEmailIdentityMailFromAttributes",
+        "ses:TagResource"
+      ],
+      "Resource": "arn:aws:ses:eu-west-2:ACCOUNT_ID:identity/*"
+    },
+    {
+      "Sid": "AccountAndRetiredAddressRules",
+      "Effect": "Allow",
+      "Action": [
+        "ses:GetAccount",
+        "ses:ListEmailIdentities",
+        "ses:DescribeActiveReceiptRuleSet",
+        "ses:DescribeReceiptRule",
+        "ses:CreateReceiptRule",
+        "ses:UpdateReceiptRule",
+        "ses:DeleteReceiptRule"
+      ],
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "InboundObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::pylota-identity-ACCOUNT_ID-*-inbound/in/*"
+    },
+    {
+      "Sid": "Backstop",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage"
+      ],
+      "Resource": "arn:aws:sqs:eu-west-2:ACCOUNT_ID:pylota-identity-inbound"
+    }
+  ]
+}
