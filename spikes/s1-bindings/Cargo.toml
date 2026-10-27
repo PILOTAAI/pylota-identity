@@ -1,0 +1,16 @@
+[package]
+name = "pylota-identity-spike-s1"
+description = "Spike S1: every Cloudflare binding from Rust through the platform entry glue (not shipped)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# As crates/worker: never `worker` here; the entry points come from platform::export_worker!.
+[dependencies]
+pylota-identity-platform = { path = "../../crates/platform", features = ["spike-s1"] }

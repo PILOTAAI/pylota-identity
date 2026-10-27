@@ -9,6 +9,7 @@ members = [
     "crates/cli",
     "crates/conformance",
     "xtask",
+    "spikes/s1-bindings",
     "spikes/s13-web-bot-auth",
 ]
 

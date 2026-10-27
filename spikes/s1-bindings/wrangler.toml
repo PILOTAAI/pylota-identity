@@ -1,0 +1,26 @@
+# Spike S1's throwaway Worker (build plan M1, ADR 0023): deployed by run.sh, deleted when the spike ends.
+name = "pi-spike-1"
+main = "build/index.js"
+compatibility_date = "2026-09-22"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "SPIKE_OBJECT"
+class_name = "SpikeObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SpikeObject"]
+
+[[queues.producers]]
+binding = "SPIKE_QUEUE"
+queue = "pi-spike-1-q"
+
+[[queues.consumers]]
+queue = "pi-spike-1-q"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 5
+
+[[send_email]]
+name = "SEND"

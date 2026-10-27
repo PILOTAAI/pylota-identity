@@ -867,9 +867,17 @@ name = "pylota-identity-platform"
 version = "0.1.0"
 dependencies = [
  "js-sys",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "worker",
+]
+
+[[package]]
+name = "pylota-identity-spike-s1"
+version = "0.1.0"
+dependencies = [
+ "pylota-identity-platform",
 ]
 
 [[package]]

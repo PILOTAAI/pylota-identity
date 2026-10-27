@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish = false # shipped inside the Worker bundle, never to crates.io
 
+[features]
+# Spike S1's Worker logic (spikes/s1-bindings). Never enabled by crates/worker; M4 deletes it.
+spike-s1 = ["dep:serde_json"]
+
 # The Cloudflare implementations are compiled for wasm32 only (Rust workspace § 6.2). The direct
 # wasm-bindgen, wasm-bindgen-futures and js-sys pins hold the lockfile at the versions worker-build
 # 0.8.7 runs (it uses wasm-bindgen 0.2.129 exactly).
@@ -16,3 +20,4 @@ worker = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 js-sys = { workspace = true }
+serde_json = { workspace = true, optional = true }
