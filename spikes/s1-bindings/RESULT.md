@@ -1,6 +1,6 @@
-# S1 Bindings smoke: result (in progress)
+# S1 Bindings smoke: result
 
-Run against Pylota's account on 2026-10-27 with the Worker `pi-spike-1` (workers.dev), built by
+**Pass.** Run against Pylota's account on 2026-10-27 with the Worker `pi-spike-1` (workers.dev), built by
 `worker-build` 0.8.7 from `spikes/s1-bindings`, whose only dependency is `crates/platform`. The entry points
 come from `platform::export_worker!` and `platform::cf::glue`, which S1 wrote; the spike's own logic is in
 `platform::cf::spike_s1` (feature `spike-s1`, deleted at M4).
@@ -28,14 +28,40 @@ into a JS `Map`, which the queue's JSON content type drops. A body produced with
 `send_raw` and `QueueContentType::Json` arrives intact. The platform's `QueueProducer` must send that way, and
 its test must assert that a nested object survives the round trip.
 
-## Not yet run
+## Mail, deployed
 
-Blocked on the spike token: on `pylotamail.com`, DNS · Edit and Email Routing Rules · Edit still answer
-`Authentication error` (Zone Settings now reads).
+`pi-spike-1.pylotamail.com` was onboarded for sending (above) and enabled for routing with
+`POST /zones/{zone_id}/email/routing/dns` and `{"name": "pi-spike-1.pylotamail.com"}`, with literal rules
+for six addresses whose action is the Worker `pi-spike-1`. The Worker sent from
+`s1@pi-spike-1.pylotamail.com` to those addresses, so each message came back through its own `email` export.
 
-- Receive real mail through Email Routing: the deployed email event, `setReject` and a throwing handler as a
-  sending MTA sees them (the latter two are S2's subject too).
-- The structured `send()` with `replyTo`, `headers`, an `attachment` and an `inline` part with `contentId`,
-  and the raw `EmailMessage` calendar send to two recipients (whether one message takes several envelope
-  recipients, whether `text/calendar; method=REQUEST` and the composed `Message-ID` arrive unchanged). Mail is
-  sent to `pi-spike-1.pylotamail.com`, routed back to the Worker, so what arrives can be read.
+| Check | Result |
+|---|---|
+| Deployed email event | **Pass.** `from` (the `cf-bounce` return path), `to`, all headers, the raw stream and `rawSize` reach Rust |
+| Structured `send()` to two recipients, with `replyTo`, `headers` (`In-Reply-To`, `References`, `Auto-Submitted`, `X-Spike`), an `inline` GIF with `contentId` and an `attachment` | **Pass.** One message reached both addresses. `Reply-To`, each header, `Content-ID: <dot@s1>` with `Content-Disposition: inline`, and `notes.txt` as an attachment arrived as sent, in `multipart/mixed` › `related` › `alternative` |
+| `messageId` against the delivered `Message-ID` | **Equal** on every send, structured and raw. This decides S7 for strategy A |
+| Authentication of the received copy | `dkim=pass header.d=pi-spike-1.pylotamail.com` (selector `cf-bounce`), `dkim=pass header.d=cloudflare-smtp.org`, `dmarc=pass` |
+| Raw `EmailMessage`, one envelope with two recipients (`"a, b"`) | **Refused**: `E_VALIDATION_ERROR: invalid mail from email address (…): Invalid input` (the text says "mail from" though the field is the recipient). One raw message carries one envelope recipient |
+| Raw `EmailMessage`, one per recipient, `multipart/alternative` with `text/plain` and `text/calendar; method=REQUEST; charset=UTF-8` | **Pass.** Each arrived with the part, its `method` parameter and the iCalendar body (`METHOD:REQUEST`, both `ATTENDEE` lines) unchanged |
+| Composed `Message-ID` on a raw send | **Replaced.** Cloudflare sets its own, equal to the returned `messageId`. [Calendar invitations §5.6](../../docs/src/project/design/calendar-invitations.md#56-transports) now stores the returned value |
+| First send after enabling routing | The first message, sent about a minute after the subdomain's routing was enabled, never arrived; every later one did within seconds. Onboarding a domain must not be reported ready on the API's answer alone (the design's verification step stands) |
+
+Side effect for S9: enabling routing on the subdomain set the zone's routing to `enabled` with status
+`misconfigured`, and added `v=spf1 include:_spf.mx.cloudflare.net ~all` and the `cf2024-1._domainkey` key at
+the apex, without an apex MX.
+
+Not covered here: what a sending MTA sees for `setReject` and for a thrown handler on the deployed runtime.
+That is S2's question; the local answers are above.
+
+## Cleanup
+
+Removed on 2026-10-27: the Worker, its queue and D1 database, the six rules, the subdomain's routing
+records (unlocked with `PATCH /zones/{zone_id}/email/routing/dns` and `{"name": …}`, then deleted by ID), the
+zone's routing (`DELETE /zones/{zone_id}/email/routing/dns`, back to `unconfigured`) and the sending
+onboarding (`DELETE /zones/{zone_id}/email/sending/subdomains/{id}`).
+
+Left behind by Cloudflare, for S9 and for [Identities and domains › Domain removal](../../docs/src/project/design/identity-domains.md#domain-removal):
+neither removal deletes every record it created. `_dmarc.pi-spike-1` and the apex SPF record stayed and were
+deleted by hand. The apex `cf2024-1._domainkey` key stays: with routing disabled, deleting it still answers
+`1046 This record is managed by Email Routing. Disable Email Routing to modify/remove this record.` It is a
+public key, harmless, and the apex will use it when staging onboards it.

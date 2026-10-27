@@ -82,7 +82,7 @@ impl WorkerApp for SpikeApp {
                               "authentication-results", "dkim-signature", "in-reply-to",
                               "references", "auto-submitted", "reply-to", "x-spike"]),
             "header_names": msg.headers.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
-            "raw_head": String::from_utf8_lossy(&msg.raw[..msg.raw.len().min(6000)]),
+            "raw_head": String::from_utf8_lossy(&msg.raw[..msg.raw.len().min(60_000)]),
             "local": local,
         });
         let _ = self.append("email", &entry).await;

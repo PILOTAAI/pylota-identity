@@ -925,9 +925,11 @@ sending-paused) holds a calendar message like any other.
 
 **Message-ID.** On the raw Cloudflare path there is no hidden journal copy (strategy B of
 [Outbound › Message-ID](outbound.md#message-id-of-outbound-mail-spike-s7)), because the journal address
-would be a second envelope recipient. The composed `Message-ID` (`<{message ulid}@{from domain}>`, as
-loopback writes it) is stored as `rfc_message_id`; if S1 shows that Cloudflare replaces it, replies to that
-message thread by token and by `UID` only.
+would be a second envelope recipient. Cloudflare replaces the composed `Message-ID` with its own,
+and the `messageId` that `send()` returns is exactly the header recipients see (S1, 2026-10-27,
+`spikes/s1-bindings/RESULT.md`). So on this path `rfc_message_id` is set from the returned `messageId`, as
+for the structured send, and replies thread by `In-Reply-To` as well as by token and `UID`. Loopback, SES
+and SMTP keep the composed `<{message ulid}@{from domain}>`.
 
 ### 5.7 `kind`, `Auto-Submitted` and loops
 
