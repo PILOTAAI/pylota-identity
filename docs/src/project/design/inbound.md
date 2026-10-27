@@ -367,7 +367,10 @@ to the same handler, which:
    certificate host `sns.{PM_SES_REGION}.amazonaws.com`, the topic `PM_SES_INBOUND_TOPIC_ARN`, and
    `Timestamp` within one hour (14 days on the backstop path). Failure → `403 invalid_signature` and
    `ses_sns_rejected_total` ([N1](../edge-cases.md), [N2](../edge-cases.md));
-2. checks that the notification is `Received` with an S3 action on that bucket;
+2. checks that the notification is `Received` with an S3 action on that bucket. The object key
+   `in/AMAZON_SES_SETUP_NOTIFICATION` is SES's own test write, made when a receipt rule with an S3 action
+   is created (recipient `recipient@example.com`, from `no-reply-aws@amazon.com`; S11, 2026-10-27): it is
+   acknowledged, its object deleted, and nothing is ingested;
 3. for each `receipt.recipients` entry, runs `INSERT OR IGNORE INTO ses_ingest` (status `queued`) and
    queues an `InboundPointer` with `source = ses` only when a row was inserted. Duplicates from SNS
    retries, the backstop, or both stop here ([N3](../edge-cases.md));
