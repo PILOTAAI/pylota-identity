@@ -791,8 +791,16 @@ the header value, and its examples show bare IDs without `<…@…>`
 Replies match our mail by thread token first ([C7](../edge-cases.md)); the header ID is needed for
 replies that drop the `Reply-To` token, matched through `In-Reply-To`.
 
-**Strategy A (derived).** If S7 finds a deterministic mapping, `core::compose::derive_cf_message_id(provider_id)`
-implements it, and `RecordTransportOutcome` stores `rfc_message_id` with `provider_message_id`.
+**Spike result (S7, from S1's sends, 2026-10-27, `spikes/s7-message-id/RESULT.md`): strategy A.** The
+`messageId` that `send()` returns is exactly the `Message-ID` header recipients see, angle brackets
+included, for structured and raw sends alike, and its domain is the sending domain (for example
+`<BjpILarfgnpagEBJyWhbvPShPmm988BzTEYp@pi-spike-1.pylotamail.com>`), not a Cloudflare one. A `Message-ID`
+composed into a raw message is replaced by that value.
+
+**Strategy A (derived).** `core::compose::derive_cf_message_id(provider_id)` is the identity: it checks
+the `<…@{from domain}>` form and returns it unchanged, and `RecordTransportOutcome` stores it as
+`rfc_message_id` with `provider_message_id`. Strategy B below is not built; the cap of 49 recipients
+stays, so a later move to strategy B needs no limit change.
 
 **Strategy B (journal copy).** Otherwise every Cloudflare send adds a hidden BCC
 `journal+{message ulid}.{identity ulid}@{PM_PLATFORM_DOMAIN}` (both ULIDs lower case, without prefixes;
@@ -1276,6 +1284,16 @@ is opened with `StartTls` and upgraded once, after the server advertises `STARTT
 sent without TLS. There is one connection per message and no pipelining: `EHLO`, (`STARTTLS`, `EHLO`),
 `AUTH PLAIN` (or `AUTH LOGIN`), `MAIL FROM` (with `SIZE=` when advertised), one `RCPT TO` per `queued`
 delivery, `DATA`, the dot-stuffed stored `.eml`, the final `.`, `QUIT`.
+
+**Spike result (S12, 2026-10-27, `spikes/s12-smtp/RESULT.md`).** From a Worker, Gmail and AgentMail both
+authenticated and accepted mail on 465 and on 587. Three rules follow. (1) After `startTls()`, the new
+socket's `opened` resolves even when the certificate does not match the host; the failure shows on the
+next read. TLS counts as established only when the post-`STARTTLS` `EHLO` has been answered, and `AUTH`
+is never written before that. (2) A certificate that does not match, an unreachable host and a refused
+connection all fail with the same runtime message, so the client cannot tell them apart; all three take
+the connect row of [Domains on any DNS host §5.2](domain-connections.md), `RetryLater` (`Relay`). (3) The runtime refuses
+port 25 (`Connections to port 25 are prohibited`), so a relay is 465 or 587 only, as configured. Gmail kept
+the composed `Message-ID`; AgentMail sends through Amazon SES, which replaces it.
 
 **Outcomes** (also rows of [Transport outcome classification](#transport-outcome-classification)):
 

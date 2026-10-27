@@ -1,0 +1,15 @@
+# Spike S12's throwaway Worker (build plan M1): S1's spike Worker; its `/s12/*` routes open TCP sockets
+# with the runtime's connect(). Build it first with `worker-build --release` in spikes/s1-bindings. Deleted
+# when the spike ends.
+name = "pi-spike-12"
+main = "../s1-bindings/build/index.js"
+compatibility_date = "2026-09-22"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "SPIKE_OBJECT"
+class_name = "SpikeObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SpikeObject"]

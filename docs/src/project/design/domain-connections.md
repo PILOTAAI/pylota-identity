@@ -543,8 +543,10 @@ Timeouts are 10 seconds to connect, 30 seconds per command and 60 seconds for th
 There is one connection per message and no pipelining. A Worker invocation can have at most six
 connections waiting at once
 ([limits](https://developers.cloudflare.com/workers/platform/limits/), read 2026-10-09), so the outbound
-consumer runs at most four SMTP sends in parallel. TLS certificate and host-name checking by the runtime is
-part of **spike S12**. If the runtime does not check the host name, `smtp_relay` does not ship. The replies
+consumer runs at most four SMTP sends in parallel. **Spike S12 (2026-10-27): the runtime checks the
+certificate's host name**, on 465 and after `STARTTLS` on 587: an alias whose certificate names another host
+is refused before any SMTP byte (465) or before the second `EHLO` is answered (587), so `smtp_relay` ships.
+`AUTH` is written only after the post-`STARTTLS` `EHLO` reply ([Outbound › SMTP relay](outbound.md#smtp-relay)). The replies
 this table leaves open (another `5xx` to `AUTH`, a `4xx` or `5xx` to the final `.`, the 4-minute overall
 deadline, and how a delivery that got a `4xx` is retried) are settled in
 [Outbound › SMTP relay](outbound.md#smtp-relay).
