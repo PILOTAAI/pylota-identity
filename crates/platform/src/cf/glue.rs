@@ -40,6 +40,16 @@ impl CfPlatform {
     pub fn env(&self) -> &worker::Env {
         &self.env
     }
+
+    /// A variable or secret, for the spikes only; M4 replaces this with `Config` and `Secrets`.
+    #[cfg(feature = "spike-s1")]
+    pub fn var(&self, name: &str) -> Option<String> {
+        self.env
+            .secret(name)
+            .or_else(|_| self.env.var(name))
+            .ok()
+            .map(|v| v.to_string())
+    }
 }
 
 /// A Durable Object's state, handed to [`ObjectApp::new`].

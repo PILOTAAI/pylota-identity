@@ -942,3 +942,34 @@ async fn s12_tls(body: &Value) -> Value {
     json!({ "host": host, "port": port, "ok": result.is_ok(), "first_line": result.as_ref().ok(),
             "error": result.err(), "elapsed_ms": js_sys::Date::now() - started })
 }
+
+/// One HTTP request through the runtime's `fetch`, for the spikes only; M4 replaces it with
+/// `HttpClient`. Returns the status, the response headers and the body.
+pub async fn http(
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: Vec<u8>,
+) -> Result<(u16, Vec<(String, String)>, Vec<u8>), String> {
+    let h = worker::Headers::new();
+    for (name, value) in headers {
+        h.set(name, value).map_err(err)?;
+    }
+    let mut init = worker::RequestInit::new();
+    init.with_method(worker::Method::from(method.to_owned()))
+        .with_headers(h);
+    if !body.is_empty() {
+        init.with_body(Some(js_sys::Uint8Array::from(body.as_slice()).into()));
+    }
+    let request = worker::Request::new_with_init(url, &init).map_err(err)?;
+    let mut response = worker::Fetch::Request(request).send().await.map_err(err)?;
+    let status = response.status_code();
+    let headers = response.headers().entries().collect();
+    let bytes = response.bytes().await.map_err(err)?;
+    Ok((status, headers, bytes))
+}
+
+/// The current time in milliseconds, for the spikes only; M4 replaces it with `Clock`.
+pub fn now_ms() -> f64 {
+    js_sys::Date::now()
+}

@@ -12,6 +12,7 @@ members = [
     "spikes/s1-bindings",
     "spikes/s4-wasm-budget",
     "spikes/s5-mcp",
+    "spikes/s8-s11-ses",
     "spikes/s13-web-bot-auth",
 ]
 

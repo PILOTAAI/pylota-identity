@@ -7,6 +7,8 @@
 
 pub mod httpsig;
 pub mod jwk;
+pub mod ses;
+pub mod sns;
 
 #[cfg(test)]
 mod tests {

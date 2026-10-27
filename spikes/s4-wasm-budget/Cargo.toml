@@ -19,6 +19,6 @@ mail-parser = { workspace = true }
 mail-builder = { workspace = true }
 ammonia = { workspace = true }
 sha2 = { workspace = true }
-rsa = { workspace = true, features = ["sha2"] }
+rsa = { workspace = true }
 ed25519-dalek = { workspace = true }
 serde_json = { workspace = true }
