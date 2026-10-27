@@ -1,1 +1,2 @@
 setup
+run 2: STAGING_AWS_ROLE_ARN added as an environment variable
