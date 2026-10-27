@@ -669,14 +669,22 @@ const COMMAND_MS: f64 = 30_000.0;
 
 async fn with_timeout(promise: js_sys::Promise, ms: f64) -> Result<JsValue, String> {
     let timer = js_sys::Promise::new(&mut |resolve, _| {
-        let set_timeout: js_sys::Function = js_sys::Reflect::get(&js_sys::global(), &"setTimeout".into())
-            .expect("setTimeout")
-            .unchecked_into();
+        let set_timeout: js_sys::Function =
+            js_sys::Reflect::get(&js_sys::global(), &"setTimeout".into())
+                .expect("setTimeout")
+                .unchecked_into();
         // setTimeout(resolve, ms, "__timeout__"): the timer resolves with the marker.
-        let _ = set_timeout.call3(&JsValue::UNDEFINED, &resolve, &ms.into(), &"__timeout__".into());
+        let _ = set_timeout.call3(
+            &JsValue::UNDEFINED,
+            &resolve,
+            &ms.into(),
+            &"__timeout__".into(),
+        );
     });
     let raced = js_sys::Promise::race(&js_sys::Array::of2(&promise, &timer));
-    let value = wasm_bindgen_futures::JsFuture::from(raced).await.map_err(js_err)?;
+    let value = wasm_bindgen_futures::JsFuture::from(raced)
+        .await
+        .map_err(js_err)?;
     if value.as_string().as_deref() == Some("__timeout__") {
         return Err(format!("timeout after {ms} ms"));
     }
@@ -684,7 +692,9 @@ async fn with_timeout(promise: js_sys::Promise, ms: f64) -> Result<JsValue, Stri
 }
 
 fn call0(target: &JsValue, method: &str) -> Result<JsValue, String> {
-    let f: js_sys::Function = js_sys::Reflect::get(target, &method.into()).map_err(js_err)?.unchecked_into();
+    let f: js_sys::Function = js_sys::Reflect::get(target, &method.into())
+        .map_err(js_err)?
+        .unchecked_into();
     f.call0(target).map_err(js_err)
 }
 
@@ -694,7 +704,8 @@ impl Conn {
         js_sys::Reflect::set(&address, &"hostname".into(), &host.into()).map_err(js_err)?;
         js_sys::Reflect::set(&address, &"port".into(), &port.into()).map_err(js_err)?;
         let options = js_sys::Object::new();
-        js_sys::Reflect::set(&options, &"secureTransport".into(), &transport.into()).map_err(js_err)?;
+        js_sys::Reflect::set(&options, &"secureTransport".into(), &transport.into())
+            .map_err(js_err)?;
         let sock = worker::worker_sys::connect(address.into(), options.into()).map_err(js_err)?;
         with_timeout(sock.opened().map_err(js_err)?, CONNECT_MS).await?;
         Self::attach(sock)
@@ -703,7 +714,12 @@ impl Conn {
     fn attach(sock: worker::worker_sys::Socket) -> Result<Self, String> {
         let reader = call0(&sock.readable().map_err(js_err)?.into(), "getReader")?;
         let writer = call0(&sock.writable().map_err(js_err)?.into(), "getWriter")?;
-        Ok(Self { sock, reader, writer, buf: Vec::new() })
+        Ok(Self {
+            sock,
+            reader,
+            writer,
+            buf: Vec::new(),
+        })
     }
 
     /// Releases the stream locks, upgrades with `startTls()` and re-attaches.
@@ -716,8 +732,13 @@ impl Conn {
     }
 
     async fn send(&mut self, bytes: &[u8]) -> Result<(), String> {
-        let f: js_sys::Function = js_sys::Reflect::get(&self.writer, &"write".into()).map_err(js_err)?.unchecked_into();
-        let p: js_sys::Promise = f.call1(&self.writer, &js_sys::Uint8Array::from(bytes)).map_err(js_err)?.unchecked_into();
+        let f: js_sys::Function = js_sys::Reflect::get(&self.writer, &"write".into())
+            .map_err(js_err)?
+            .unchecked_into();
+        let p: js_sys::Promise = f
+            .call1(&self.writer, &js_sys::Uint8Array::from(bytes))
+            .map_err(js_err)?
+            .unchecked_into();
         with_timeout(p, COMMAND_MS).await.map(|_| ())
     }
 
@@ -725,14 +746,19 @@ impl Conn {
     async fn reply(&mut self, timeout_ms: f64) -> Result<(u16, String), String> {
         loop {
             if let Some(end) = complete_reply(&self.buf) {
-                let text = String::from_utf8_lossy(&self.buf[..end]).trim_end().to_owned();
+                let text = String::from_utf8_lossy(&self.buf[..end])
+                    .trim_end()
+                    .to_owned();
                 self.buf.drain(..end);
                 let code = text.get(..3).and_then(|c| c.parse().ok()).unwrap_or(0);
                 return Ok((code, text));
             }
             let p: js_sys::Promise = call0(&self.reader, "read")?.unchecked_into();
             let chunk = with_timeout(p, timeout_ms).await?;
-            if js_sys::Reflect::get(&chunk, &"done".into()).map_err(js_err)?.is_truthy() {
+            if js_sys::Reflect::get(&chunk, &"done".into())
+                .map_err(js_err)?
+                .is_truthy()
+            {
                 return Err("connection closed".to_owned());
             }
             let value = js_sys::Reflect::get(&chunk, &"value".into()).map_err(js_err)?;
@@ -740,7 +766,12 @@ impl Conn {
         }
     }
 
-    async fn command(&mut self, line: &str, log: &mut Vec<String>, shown: &str) -> Result<(u16, String), String> {
+    async fn command(
+        &mut self,
+        line: &str,
+        log: &mut Vec<String>,
+        shown: &str,
+    ) -> Result<(u16, String), String> {
         self.send(format!("{line}\r\n").as_bytes()).await?;
         let reply = self.reply(COMMAND_MS).await?;
         log.push(format!("C: {shown}"));
@@ -766,13 +797,27 @@ fn first_line(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     match lines.len() {
         0 | 1 => text.to_owned(),
-        n => format!("{} (+{} lines: {})", lines[0], n - 1, lines[1..].iter().map(|l| l.get(4..).unwrap_or(l)).collect::<Vec<_>>().join(", ")),
+        n => format!(
+            "{} (+{} lines: {})",
+            lines[0],
+            n - 1,
+            lines[1..]
+                .iter()
+                .map(|l| l.get(4..).unwrap_or(l))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 
 fn btoa(text: &str) -> Result<String, String> {
-    let f: js_sys::Function = js_sys::Reflect::get(&js_sys::global(), &"btoa".into()).map_err(js_err)?.unchecked_into();
-    f.call1(&JsValue::UNDEFINED, &text.into()).map_err(js_err)?.as_string().ok_or_else(|| "btoa".to_owned())
+    let f: js_sys::Function = js_sys::Reflect::get(&js_sys::global(), &"btoa".into())
+        .map_err(js_err)?
+        .unchecked_into();
+    f.call1(&JsValue::UNDEFINED, &text.into())
+        .map_err(js_err)?
+        .as_string()
+        .ok_or_else(|| "btoa".to_owned())
 }
 
 /// `{host, port, mode: "implicit"|"starttls", user, password, from?, to?}`: connects, authenticates and,
@@ -795,7 +840,13 @@ async fn s12_session(body: &Value, log: &mut Vec<String>) -> Result<Option<Strin
     let mut conn = Conn::open(&host, port, if implicit { "on" } else { "starttls" }).await?;
     let greeting = conn.reply(COMMAND_MS).await?;
     log.push(format!("S: {}", first_line(&greeting.1)));
-    let (code, ehlo) = conn.command("EHLO pylota-spike.example", log, "EHLO pylota-spike.example").await?;
+    let (code, ehlo) = conn
+        .command(
+            "EHLO pylota-spike.example",
+            log,
+            "EHLO pylota-spike.example",
+        )
+        .await?;
     if code != 250 {
         return Err(format!("EHLO {code}"));
     }
@@ -809,10 +860,21 @@ async fn s12_session(body: &Value, log: &mut Vec<String>) -> Result<Option<Strin
         }
         conn = conn.start_tls().await?;
         log.push("-- TLS established --".to_owned());
-        conn.command("EHLO pylota-spike.example", log, "EHLO pylota-spike.example").await?;
+        conn.command(
+            "EHLO pylota-spike.example",
+            log,
+            "EHLO pylota-spike.example",
+        )
+        .await?;
     }
-    let plain = btoa(&format!("\0{}\0{}", str_field(body, "user")?, str_field(body, "password")?))?;
-    let (code, text) = conn.command(&format!("AUTH PLAIN {plain}"), log, "AUTH PLAIN [redacted]").await?;
+    let plain = btoa(&format!(
+        "\0{}\0{}",
+        str_field(body, "user")?,
+        str_field(body, "password")?
+    ))?;
+    let (code, text) = conn
+        .command(&format!("AUTH PLAIN {plain}"), log, "AUTH PLAIN [redacted]")
+        .await?;
     if code != 235 {
         return Err(format!("smtp_auth_failed: {}", first_line(&text)));
     }
@@ -822,7 +884,11 @@ async fn s12_session(body: &Value, log: &mut Vec<String>) -> Result<Option<Strin
     };
     let from = str_field(body, "from")?;
     let message_id = format!("<s12-{}@pylota-spike.example>", js_sys::Date::now() as u64);
-    for (line, expect) in [(format!("MAIL FROM:<{from}>"), 250), (format!("RCPT TO:<{to}>"), 250), ("DATA".to_owned(), 354)] {
+    for (line, expect) in [
+        (format!("MAIL FROM:<{from}>"), 250),
+        (format!("RCPT TO:<{to}>"), 250),
+        ("DATA".to_owned(), 354),
+    ] {
         let (code, text) = conn.command(&line, log, &line).await?;
         if code != expect {
             return Err(format!("{line}: {}", first_line(&text)));
@@ -830,7 +896,8 @@ async fn s12_session(body: &Value, log: &mut Vec<String>) -> Result<Option<Strin
     }
     let message = format!(
         "From: <{from}>\r\nTo: <{to}>\r\nSubject: S12 {host}:{port} {}\r\nMessage-ID: {message_id}\r\nDate: Tue, 27 Oct 2026 21:30:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSpike S12 over {host}:{port} ({}).\r\n.leading dot is stuffed\r\n",
-        body["mode"].as_str().unwrap_or(""), body["mode"].as_str().unwrap_or("")
+        body["mode"].as_str().unwrap_or(""),
+        body["mode"].as_str().unwrap_or("")
     );
     let stuffed = message.replace("\r\n.", "\r\n..");
     conn.send(stuffed.as_bytes()).await?;
@@ -851,12 +918,25 @@ async fn s12_tls(body: &Value) -> Value {
     let transport = body["transport"].as_str().unwrap_or("on").to_owned();
     let result = async {
         let mut conn = Conn::open(&host, port, &transport).await?;
-        conn.send(format!("HEAD / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").as_bytes()).await?;
+        conn.send(
+            format!("HEAD / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+        .await?;
         let p: js_sys::Promise = call0(&conn.reader, "read")?.unchecked_into();
         let chunk = with_timeout(p, COMMAND_MS).await?;
         let value = js_sys::Reflect::get(&chunk, &"value".into()).map_err(js_err)?;
-        let bytes = if value.is_undefined() { Vec::new() } else { js_sys::Uint8Array::new(&value).to_vec() };
-        Ok::<String, String>(String::from_utf8_lossy(&bytes).lines().next().unwrap_or_default().to_owned())
+        let bytes = if value.is_undefined() {
+            Vec::new()
+        } else {
+            js_sys::Uint8Array::new(&value).to_vec()
+        };
+        Ok::<String, String>(
+            String::from_utf8_lossy(&bytes)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
+        )
     }
     .await;
     json!({ "host": host, "port": port, "ok": result.is_ok(), "first_line": result.as_ref().ok(),
