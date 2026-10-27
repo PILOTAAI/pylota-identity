@@ -80,6 +80,13 @@ cfb         = "=0.15.0"                                         # OLE compound-f
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
 zeroize       = "=1.9.0"                                        # unsealed seed buffers (Zeroizing)
 
+# Chosen at build time for core (crates.io API, read 2026-10-27: the newest release at least two weeks old)
+regex                 = { version = "=1.13.1", default-features = false, features = ["std", "unicode-perl"] }  # 2026-07-15
+unicode-normalization = { version = "=0.1.25", default-features = false }  # 2025-10-30; 0.1.26 (2026-10-16) is newer
+idna                  = { version = "=1.1.0", default-features = false, features = ["alloc", "compiled_data"] }  # 2025-08-21
+psl                   = { version = "=2.1.241", default-features = false, features = ["helpers"] }  # 2026-10-08; organisational domains (D2, D3)
+proptest              = "=1.12.0"                                           # native dev-dependency; 2026-10-10
+
 # Native only, chosen at build time (the newest release at least two weeks old; crates.io, read 2026-10-19)
 toml = "=1.1.6" # xtask: reads Cargo.toml; 1.1.6+spec-1.1.0 published 2026-09-10 (1.1.7 and 1.1.8 are newer)
 
