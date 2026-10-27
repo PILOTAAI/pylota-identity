@@ -23,8 +23,20 @@ The plan also gave staging and the spikes long-lived AWS access keys for SES (`S
 ## Decision
 
 1. **Staging and the spikes run in Pylota's existing Cloudflare account** (owner, 2026-10-27), on Workers
-   Paid, which the credits cover. Staging uses its own zones (a staging platform zone and a staging tenant
-   zone), never `pylotamail.com`, `pylota.io` or any other zone in production use.
+   Paid, which the credits cover. **No domain is bought for staging** (owner, 2026-10-27). Until production
+   commissioning (M28), the spikes and staging use `pylotamail.com`, which receives no mail yet (no MX
+   record on 2026-10-27):
+   - its apex is staging's platform domain, because the platform domain must be a zone apex: Email
+     Routing's catch-all rules exist only on the apex (Cloudflare Email Service, "Configure subdomains", read
+     2026-10-27; [ADR 0003](0003-addressing.md));
+   - the spikes onboard throwaway subdomains `pi-spike-{n}.pylotamail.com`, and remove them when they finish;
+   - `pylota.io` is never used: it receives Pylota's company mail.
+
+   What waits for a second zone: the cases that need a tenant zone other than the platform domain's (names
+   under the platform domain's zone are refused for tenant keys, [H8](../edge-cases.md)), which are M20
+   step 4's zone cases and S9's subdomain in a zone whose apex has a foreign MX. Until then they run only
+   against the Cloudflare fake, and the spike result says so. At M28 production takes `pylotamail.com`;
+   staging then moves to a zone of its own or is removed, and this ADR is revisited.
 2. **A deployment has a name, and every resource name derives from it.** `idvy setup --name <name>` (default
    `pylota-identity`) sets the deployment name; the Worker, the D1 database and the R2 bucket are `{name}`,
    `{name}` and `{name}-blobs`, and the queues, the Vectorize index, the lifecycle rule IDs and the event
@@ -35,10 +47,11 @@ The plan also gave staging and the spikes long-lived AWS access keys for SES (`S
    what they create when they finish.
 3. **Tokens are narrow and short-lived.**
    - The **spike token** has the first-run token's permissions plus AI Gateway · Edit and Account Analytics ·
-     Read, zone permissions on the two staging zones only, and an expiry of at most 14 days. It is deleted
+     Read, zone permissions on `pylotamail.com` only, and an expiry of at most 14 days. It is deleted
      when M1's gate is met.
    - Staging then uses its own first-run and deploy tokens, scoped to the staging Worker
-     (`pylota-identity-staging`) and the staging zones, with the per-Worker Editor role, as production's are.
+     (`pylota-identity-staging`) and `pylotamail.com`, with the per-Worker Editor role, as production's are.
+     They are deleted before production's tokens are created at M28.
 4. **SES access from GitHub Actions uses OIDC, not stored keys.** An IAM OIDC identity provider for
    `https://token.actions.githubusercontent.com` with audience `sts.amazonaws.com`, and one IAM role per GitHub
    environment, trusted only for `repo:PILOTAAI@281272467/pylota-identity@1412185299:environment:staging` (and
@@ -74,7 +87,7 @@ The plan also gave staging and the spikes long-lived AWS access keys for SES (`S
   R2, Queues, Vectorize and Workers AI Edit, and Workers Admin at product scope for the first-run and spike
   tokens). Any of those tokens can change any database, bucket, queue or Worker in the account, Pylota's
   included. Mitigations: the deployment name keeps every resource separate; tokens expire within 14 days
-  (spikes) or are deleted after use (first-run); zone permissions name only the staging zones; the owner
+  (spikes) or are deleted after use (first-run); zone permissions name only `pylotamail.com`, which receives no mail before M28; the owner
   reviews the account's audit log after M1 and after each staging setup. The owner accepted this on
   2026-10-27.
 - Staging and production share the account's limits (Workers subrequests and CPU, the Email Sending daily

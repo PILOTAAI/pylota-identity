@@ -94,7 +94,7 @@ permission is dropped if the deploy succeeds without it. Staging lives in this s
 deployment `pylota-identity-staging` ([ADR 0023](adr/0023-staging-in-the-existing-account-and-ses-through-oidc.md)),
 so `STAGING_CLOUDFLARE_API_TOKEN` (for `release-publish.yml`'s `staging` job) is a deploy token, never a setup
 token: the per-Worker Editor role on `pylota-identity-staging`, D1 Edit and Queues Edit (account-wide, the
-accepted risk of ADR 0023), and zone permissions on the staging zones only, with no Workers Admin, R2 or
+accepted risk of ADR 0023), and zone permissions on `pylotamail.com` only (until M28, ADR 0023), with no Workers Admin, R2 or
 Vectorize permission; it expires after 30 days and the owner replaces it.
 No token holds token management, billing, members or Email Routing destination addresses
 ([Deploy › step 2](../self-hosting.md#2-create-a-cloudflare-api-token) lists what each permission is for).
