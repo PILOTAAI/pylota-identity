@@ -1,0 +1,13 @@
+id      = "d1_unaligned_third_party_signature"
+edge    = ["D1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bounce@relay.example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+dkim = ["pass"]
+dmarc = "fail"
+verdict = "unverified"

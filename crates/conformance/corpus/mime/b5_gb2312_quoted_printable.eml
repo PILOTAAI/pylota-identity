@@ -1,0 +1,10 @@
+From: Sender <sender@example.net>
+To: bookings.acme@agents.example
+Subject: =?gb2312?B?1KS2qdLRyLfIzw==?=
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <cs-gb2312-quoted-printable@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="gb2312"
+Content-Transfer-Encoding: quoted-printable
+
+=D4=A4=B6=A9=D2=D1=C8=B7=C8=CF

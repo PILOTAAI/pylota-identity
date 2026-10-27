@@ -1,0 +1,13 @@
+id      = "d1_body_tampered"
+edge    = ["D1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bounce@brightwell.example"
+to   = "bookings.acme@agents.example"
+
+[expect]
+dkim = ["fail"]
+dmarc = "fail"
+verdict = "unverified"

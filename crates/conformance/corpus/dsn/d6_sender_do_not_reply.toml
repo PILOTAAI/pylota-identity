@@ -1,0 +1,11 @@
+id      = "d6_sender_do_not_reply"
+edge    = ["D6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bounce@billing.example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "automated"

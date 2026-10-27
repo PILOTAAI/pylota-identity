@@ -1,0 +1,13 @@
+id      = "d6_pylota_agent_hop_3"
+edge    = ["D6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "normal"
+evidence = ["pylota_agent"]
+hop = 3

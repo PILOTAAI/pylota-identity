@@ -1,0 +1,33 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Re: Pick-up time
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <f0f8749c@brightwell.example>
+MIME-Version: 1.0
+In-Reply-To: <orig-fr@agents.example>
+References: <orig-fr@agents.example>
+Content-Type: multipart/alternative; boundary="000000000000a1b2c3d4"
+
+--000000000000a1b2c3d4
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Vendredi =C3=A0 10h00 nous convient. R=C3=A9f=C3=A9rence BK-2291.
+
+Le lun. 26 oct. 2026 =C3=A0 09:12, Bo Lind <bo@example.com> a =C3=A9crit :
+
+> Can we move the pick-up to Friday?
+>
+> Bo
+
+--000000000000a1b2c3d4
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">Vendredi =C3=A0 10h00 nous convient. R=C3=A9f=C3=A9rence B=
+K-2291.</div><br><div class=3D"gmail_quote"><div dir=3D"ltr" class=3D"gmail=
+_attr">Le lun. 26 oct. 2026 =C3=A0 09:12, Bo Lind <bo@example.com> a =C3=A9=
+crit :<br></div><blockquote class=3D"gmail_quote" style=3D"margin:0px 0px 0=
+px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">Can we mo=
+ve the pick-up to Friday?<br><br>Bo</blockquote></div>
+--000000000000a1b2c3d4--

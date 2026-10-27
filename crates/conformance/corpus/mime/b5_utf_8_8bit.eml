@@ -1,0 +1,10 @@
+From: Sender <sender@example.net>
+To: bookings.acme@agents.example
+Subject: =?utf-8?B?UsOpc3Vtw6kg4pyTIOS6iOe0hA==?=
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <cs-utf-8-8bit@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Résumé ✓ 予約

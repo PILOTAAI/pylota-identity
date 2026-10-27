@@ -1,0 +1,24 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment zip_three_levels
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <c4be4387@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/zip; name="a.zip"
+Content-Disposition: attachment; filename="a.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAAAAAAAADXIocC2QAAANkAAAAFAAAAYi56aXBQSwMEFAAAAAAAAAAAADl0k11tAAAA
+bQAAAAUAAABjLnppcFBLAwQUAAAAAAAAAAAAgxbcjAEAAAABAAAABQAAAHgudHh0eFBLAQIUABQA
+AAAAAAAAAACDFtyMAQAAAAEAAAAFAAAAAAAAAAAAAAAAAAAAAAB4LnR4dFBLBQYAAAAAAQABADMA
+AAAkAAAAAABQSwECFAAUAAAAAAAAAAAAOXSTXW0AAABtAAAABQAAAAAAAAAAAAAAAAAAAAAAYy56
+aXBQSwUGAAAAAAEAAQAzAAAAkAAAAAAAUEsBAhQAFAAAAAAAAAAAANcihwLZAAAA2QAAAAUAAAAA
+AAAAAAAAAAAAAAAAAGIuemlwUEsFBgAAAAABAAEAMwAAAPwAAAAAAA==
+--att--

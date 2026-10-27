@@ -1,0 +1,10 @@
+From: Sender <sender@example.net>
+To: bookings.acme@agents.example
+Subject: =?euc-kr?B?v7m+4MDMIMiuwM61x776vcC0z7TZ?=
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <cs-euc-kr-quoted-printable@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="euc-kr"
+Content-Transfer-Encoding: quoted-printable
+
+=BF=B9=BE=E0=C0=CC =C8=AE=C0=CE=B5=C7=BE=FA=BD=C0=B4=CF=B4=D9

@@ -275,7 +275,19 @@ fn unfold(s: &str) -> String {
 }
 
 fn read_headers(m: &Message<'_>, out: &mut ParsedMessage) {
-    let (from, from_count) = mailboxes(m.from());
+    // Every `From` header in order (mail-parser's `from()` returns the last one); B13 takes the first
+    // parseable mailbox.
+    let mut from = Vec::new();
+    let mut from_count = 0;
+    for value in m.header_values(mail_parser::HeaderName::From) {
+        if let mail_parser::HeaderValue::Address(a) = value {
+            let (mbx, n) = mailboxes(Some(a));
+            from.extend(mbx);
+            from_count += n;
+        } else {
+            from_count += 1;
+        }
+    }
     out.from_count = from_count;
     out.from = from.into_iter().next();
     if out.from.is_none() || from_count > 1 {
@@ -437,7 +449,8 @@ impl Walk<'_, '_> {
             return Bodies::default();
         }
         self.parts_seen += 1;
-        if part.is_encoding_problem {
+        // mail-parser also marks an empty body (headers with no separator line) as a problem.
+        if part.is_encoding_problem && part.offset_end > part.offset_body {
             self.degrade();
         }
         let (ct, _) = content_type(part);
@@ -741,6 +754,25 @@ mod tests {
         let p = parse(pgp.as_bytes(), &Caps::default());
         assert!(p.has(Flag::Encrypted));
         assert_eq!(p.text, None);
+    }
+
+    #[test]
+    fn b13_first_from_header_wins() {
+        let raw =
+            b"From: ana@brightwell.example\r\nFrom: eve@example.net\r\nSubject: x\r\n\r\nbody";
+        let p = parse(raw, &Caps::default());
+        assert_eq!(
+            p.from.as_ref().map(|f| f.address.as_str()),
+            Some("ana@brightwell.example")
+        );
+        assert_eq!(p.from_count, 2);
+        assert!(p.has(Flag::ParseDegraded));
+        // Headers with no body are not degraded.
+        let p = parse(
+            b"From: ana@brightwell.example\r\nSubject: x\r\nMessage-ID: <a@b.example>\r\n",
+            &Caps::default(),
+        );
+        assert!(p.flags.is_empty(), "{:?}", p.flags);
     }
 
     #[test]

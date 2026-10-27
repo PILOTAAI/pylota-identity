@@ -1,0 +1,15 @@
+id      = "b7_apple_mail_inline_images_4"
+edge    = ["B7"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+note    = "Apple Mail splits text around inline images; the first text part is the body"
+
+[envelope]
+from = "bo@example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+attachments = 2
+attachment_types = ["image/jpeg", "text/plain"]
+text_contains = ["Front bumper:"]
+risks = []

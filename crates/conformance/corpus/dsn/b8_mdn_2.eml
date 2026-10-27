@@ -1,0 +1,20 @@
+From: Ana <ana@brightwell.example>
+To: desk@agents.example
+Subject: Read: Booking
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <mdn2@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=disposition-notification; boundary="mdn"
+
+--mdn
+Content-Type: text/plain
+
+Your message was read.
+--mdn
+Content-Type: message/disposition-notification
+
+Reporting-UA: mail.brightwell.example; Mail
+Final-Recipient: rfc822;ana@brightwell.example
+Original-Message-ID: <sent2@Agents.Example>
+Disposition: manual-action/MDN-sent-manually; displayed
+--mdn--

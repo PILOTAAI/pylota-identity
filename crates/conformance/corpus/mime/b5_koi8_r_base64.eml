@@ -1,0 +1,10 @@
+From: Sender <sender@example.net>
+To: bookings.acme@agents.example
+Subject: =?koi8-r?B?4tLPzsnSz9fBzsnFINDPxNTXxdLWxMXOzw==?=
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <cs-koi8-r-base64@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="koi8-r"
+Content-Transfer-Encoding: base64
+
+4tLPzsnSz9fBzsnFINDPxNTXxdLWxMXOzw==

@@ -1,0 +1,18 @@
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=relaxed.example;
+ i=@relaxed.example; q=dns/txt; s=s1; t=1793138400; h=from : to :
+ subject : date : message-id;
+ bh=PXho0u3FP1ztmc0WuFb0riY1enC7GvVIzgoYzGRd53k=;
+ b=VFhw0NV3xkgHGhV+Zi724H7qhufjo24HorEireu9xLT57ANhCiuliRrkg9hWsEQPZrbb6
+ sDrfl6T/0o9WTHdFaPayFyERTFyl6dpCx2W2th676Ln2/6SJl9XuVecC1pswuIdNNFk1MM0
+ Bawl6IIvKQ8n81zDqwPUjcyXQUVl/c5dfSXScZ1HRVzih2qS3hYmQeLe5Mz8k32GLSmLroJ
+ eFJaiT3wxcJO1DLP5bxe1emHhtgEk9grbAAamvdxRIWzoUb401CyRWTYJFcr24oEZTGAPdD
+ /B99qZAQwTxyywh3XWq6kDfHDk/PalaTvBF2nMUQ/v7Hj7wxAfq15AYeh7DA==
+From: Rel <a@relaxed.example>
+To: bookings.acme@agents.example
+Subject: Invoice 88213
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <427dcd48@relaxed.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Pay invoice INV-88213 by Friday.

@@ -1,0 +1,10 @@
+From: Sender <sender@example.net>
+To: bookings.acme@agents.example
+Subject: =?windows-1251?B?x+Dq4Ocg7e7s5fAgNDI=?=
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <cs-windows-1251-8bit@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="windows-1251"
+Content-Transfer-Encoding: 8bit
+
+Заказ номер 42

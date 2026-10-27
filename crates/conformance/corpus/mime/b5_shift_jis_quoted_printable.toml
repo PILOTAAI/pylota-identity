@@ -1,0 +1,13 @@
+id      = "b5_shift_jis_quoted_printable"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "ご予約の確認"
+text_contains = ["ご予約の確認"]
+flags = []

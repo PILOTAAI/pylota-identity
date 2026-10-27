@@ -1,0 +1,16 @@
+id      = "b4_apple_mail_reply_2"
+edge    = ["B4", "C8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bo@example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "Re: Friday"
+normalised_subject = "Friday"
+extracted_equals = "Running 10 minutes late."
+message_id = "APPLE0002-ABCD@example.com"
+flags = []
+attachments = 0

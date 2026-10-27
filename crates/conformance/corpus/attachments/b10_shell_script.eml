@@ -1,0 +1,19 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment shell_script
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <a66c5b49@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: text/plain; name="notes.txt"
+Content-Disposition: attachment; filename="notes.txt"
+Content-Transfer-Encoding: base64
+
+IyEvYmluL3NoCmVjaG8gaGkK
+--att--

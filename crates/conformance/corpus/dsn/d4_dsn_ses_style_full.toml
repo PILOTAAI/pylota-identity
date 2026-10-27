@@ -1,0 +1,16 @@
+id      = "d4_dsn_ses_style_full"
+edge    = ["D4"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = ""
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "dsn"
+automated = true
+dsn_recipients = ["gone@example.com"]
+dsn_status = ["5.1.1"]
+dsn_action = ["failed"]
+dsn_original_message_id = "out-ses_style@agents.example"

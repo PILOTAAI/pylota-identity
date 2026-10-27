@@ -1,0 +1,12 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: inline PGP
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <75b9f0b7@brightwell.example>
+MIME-Version: 1.0
+
+-----BEGIN PGP MESSAGE-----
+
+hQEMA1234567890
+=abcd
+-----END PGP MESSAGE-----

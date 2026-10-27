@@ -1,0 +1,19 @@
+id      = "b4_gmail_reply_en"
+edge    = ["B4", "C1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "Re: Pick-up time"
+normalised_subject = "Pick-up time"
+kind = "normal"
+attachments = 0
+flags = []
+extracted_equals = "Friday at 10:00 works for us. Reference BK-2291."
+in_reply_to = "orig-en@agents.example"
+references = 1
+html_absent = ["style=", "class="]

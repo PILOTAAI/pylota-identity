@@ -1,0 +1,18 @@
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+ d=relay.example.net; i=@relay.example.net; q=dns/txt; s=s1;
+ t=1793138400; h=from : to : subject : date : message-id;
+ bh=PXho0u3FP1ztmc0WuFb0riY1enC7GvVIzgoYzGRd53k=;
+ b=OV0ZV3dTxZ+Whf2o4LYNjjDp1Vo/CW6ZIbTvABKJQPkWx7MYH0h+r7IWj8XLOTDUwvPdr
+ J4G/hJ/F+1/w0yx+jrKHOLUk/NlBNl4eBLUF5WINhSaYYBPaVFxvTyW5EnSDsqOSBVxKapK
+ g8iWiYQmPEpCKz5k3MFrLYv9Rf2p9FSMs46uZkP6peV9DA9Yuf5UFmefkzGYxfvC9bgAgSr
+ jHVKWdL5eHKE6G8P62bkBjd6C+yGJHXdC3baWrA30c2sQ3Pbe/Vr/aJZI5LHtKo/DAIkZPv
+ Pcgw1d28e7z+PmENHAYvrZmkxTDbFgqDyjX0cViXIY8XmElpgCnl32qE+g4Q==
+From: Relay <ops@relay.example.net>
+To: bookings.acme@agents.example
+Subject: Invoice 88213
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <9e2c830d@relay.example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Pay invoice INV-88213 by Friday.

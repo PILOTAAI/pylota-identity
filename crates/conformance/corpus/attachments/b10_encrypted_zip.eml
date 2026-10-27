@@ -1,0 +1,21 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment encrypted_zip
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <e0ff8ef6@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/zip; name="secret.zip"
+Content-Disposition: attachment; filename="secret.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAQAAAAAAAAAEwL7RBAAAAAQAAAAKAAAAc2VjcmV0LnBkZiVQREZQSwECFAAUAAEAAAAA
+AAAABMC+0QQAAAAEAAAACgAAAAAAAAAAAAAAAAAAAAAAc2VjcmV0LnBkZlBLBQYAAAAAAQABADgA
+AAAsAAAAAAA=
+--att--

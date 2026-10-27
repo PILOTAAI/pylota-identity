@@ -1,0 +1,13 @@
+id      = "b5_iso_8859_2_8bit"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "Zażółć gęślą jaźń"
+text_contains = ["Zażółć gęślą jaźń"]
+flags = []

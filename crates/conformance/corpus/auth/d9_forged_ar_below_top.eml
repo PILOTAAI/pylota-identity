@@ -1,0 +1,20 @@
+Authentication-Results: other.example; none
+Authentication-Results: mx.cloudflare.net; spf=pass smtp.mailfrom=ceo@brightwell.example; dmarc=pass
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+ d=relay.example.net; i=@relay.example.net; q=dns/txt; s=s1;
+ t=1793138400; h=from : to : subject : date : message-id;
+ bh=PXho0u3FP1ztmc0WuFb0riY1enC7GvVIzgoYzGRd53k=;
+ b=ngWRFdXK+RAEME32TsKTptgNzJAV+Qk73bHBOP5Eo4RkG7Zb3oj9Y0QvG+NkQ8ualbg03
+ F76nSuxOFf8jVuNqSjnzpYvIdNZSFyMed5hFYUk5u8pOhZPONghEuV/R9mnJuiT64lDoFJr
+ Vpa22wnEm1vcnatXx3QbNhLFo9dVhp6n6DC865mBcALoyR5louTdL4b+Qi2AnixBz1rTvuO
+ xbFAApPx2FTa34kjG4AiV3nHq3AooOCk6kQPcvljGtVBhkvvdSQM1SsaX0m2KcxhbSfg6e+
+ yTEudswOYr99u1qhOPSd8bGKq8yjJugslKvdwHkMkUCYLSm7c/PF69nG645Q==
+From: CEO <ceo@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Invoice 88213
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <ca6b6dc2@relay.example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Pay invoice INV-88213 by Friday.

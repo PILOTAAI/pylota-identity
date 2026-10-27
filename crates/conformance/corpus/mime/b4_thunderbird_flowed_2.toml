@@ -1,0 +1,14 @@
+id      = "b4_thunderbird_flowed_2"
+edge    = ["C8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "cy@example.org"
+to   = "bookings.acme@agents.example"
+
+[expect]
+extracted_equals = "Can I add a child seat?"
+flags = []
+attachments = 0
+in_reply_to = "r2@agents.example"

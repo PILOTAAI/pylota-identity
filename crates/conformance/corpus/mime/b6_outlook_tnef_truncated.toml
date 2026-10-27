@@ -1,0 +1,12 @@
+id      = "b6_outlook_tnef_truncated"
+edge    = ["B6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+attachments = 1
+attachment_names = ["winmail.dat"]

@@ -1,0 +1,12 @@
+id      = "d6_list_mailman"
+edge    = ["D6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "ops-bounces@lists.example.org"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "list"
+automated = true

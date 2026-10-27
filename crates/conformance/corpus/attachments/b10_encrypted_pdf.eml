@@ -1,0 +1,19 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment encrypted_pdf
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <a51c585a@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/pdf; name="statement.pdf"
+Content-Disposition: attachment; filename="statement.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjcKdHJhaWxlcgo8PCAvUm9vdCAxIDAgUiAvRW5jcnlwdCA1IDAgUiA+PgolJUVPRg==
+--att--

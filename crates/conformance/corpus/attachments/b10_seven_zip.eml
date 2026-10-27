@@ -1,0 +1,19 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment seven_zip
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <09ed13cc@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/x-7z-compressed; name="files.7z"
+Content-Disposition: attachment; filename="files.7z"
+Content-Transfer-Encoding: base64
+
+N3q8ryccAAQ=
+--att--

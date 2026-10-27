@@ -1,0 +1,25 @@
+From: Bo Lind <bo@example.com>
+To: bookings.acme@agents.example
+Subject: Fwd: Delivery 2
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <9ae9134c@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fw2"
+
+--fw2
+Content-Type: text/plain
+
+FYI, see below.
+--fw2
+Content-Type: message/rfc822
+Content-Disposition: attachment
+
+From: Carrier <ops@carrier.example>
+To: bo@example.com
+Subject: Delivery 2
+Message-ID: <inner2@carrier.example>
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+
+Your parcel 2 is on its way.
+
+--fw2--

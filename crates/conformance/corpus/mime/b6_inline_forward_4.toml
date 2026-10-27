@@ -1,0 +1,14 @@
+id      = "b6_inline_forward_4"
+edge    = ["B6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bo@example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+normalised_subject = "Delivery 4"
+flags = []
+attachments = 0
+extracted_contains = ["Parcel 4 arrives Friday."]

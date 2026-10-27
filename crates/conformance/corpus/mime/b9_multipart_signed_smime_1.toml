@@ -1,0 +1,14 @@
+id      = "b9_multipart_signed_smime_1"
+edge    = ["B9"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+signature = "smime"
+text_contains = ["Signed content stays readable."]
+flags = []
+attachments = 1

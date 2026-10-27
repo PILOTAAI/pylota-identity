@@ -1,0 +1,39 @@
+From: MAILER-DAEMON@amazonses.example.com
+To: desk@agents.example
+Subject: Delivery Status Notification (Failure)
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <dsn-ses_style-full@example.net>
+MIME-Version: 1.0
+Auto-Submitted: auto-replied
+Content-Type: multipart/report; report-type=delivery-status; boundary="dsnb"
+
+--dsnb
+Content-Type: text/plain; charset=us-ascii
+
+This is the mail system. Your message could not be delivered.
+
+--dsnb
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; a1.example.com
+X-Queue-ID: 4ABC
+Arrival-Date: Tue, 27 Oct 2026 22:00:00 +0000
+
+Final-Recipient: rfc822; gone@example.com
+Original-Recipient: rfc822;gone@example.com
+Action: failed
+Status: 5.1.1
+Diagnostic-Code: smtp; 550 5.1.1 user unknown
+
+--dsnb
+Content-Type: message/rfc822
+
+From: Desk <desk@agents.example>
+To: gone@example.com
+Subject: Booking
+Message-ID: <out-ses_style@agents.example>
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+
+Original body.
+
+--dsnb--

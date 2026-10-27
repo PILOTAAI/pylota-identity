@@ -1,0 +1,12 @@
+id      = "c2_150_references"
+edge    = ["C2"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+references = 150
+in_reply_to = "r149@agents.example"

@@ -1,0 +1,13 @@
+id      = "d4_heuristic_bounce_1"
+edge    = ["D4"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = ""
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "dsn"
+evidence_first = "bounce_heuristic"
+dsn_original_message_id = "hbo1@agents.example"

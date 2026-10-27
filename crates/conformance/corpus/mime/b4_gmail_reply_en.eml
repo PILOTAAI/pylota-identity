@@ -1,0 +1,33 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Re: Pick-up time
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <09456674@brightwell.example>
+MIME-Version: 1.0
+In-Reply-To: <orig-en@agents.example>
+References: <orig-en@agents.example>
+Content-Type: multipart/alternative; boundary="000000000000a1b2c3d4"
+
+--000000000000a1b2c3d4
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Friday at 10:00 works for us. Reference BK-2291.
+
+On Mon, 26 Oct 2026 at 09:12, Bo Lind <bo@example.com> wrote:
+
+> Can we move the pick-up to Friday?
+>
+> Bo
+
+--000000000000a1b2c3d4
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">Friday at 10:00 works for us. Reference BK-2291.</div><br>=
+<div class=3D"gmail_quote"><div dir=3D"ltr" class=3D"gmail_attr">On Mon, 26=
+ Oct 2026 at 09:12, Bo Lind <bo@example.com> wrote:<br></div><blockquote cl=
+ass=3D"gmail_quote" style=3D"margin:0px 0px 0px 0.8ex;border-left:1px solid=
+ rgb(204,204,204);padding-left:1ex">Can we move the pick-up to Friday?<br><=
+br>Bo</blockquote></div>
+--000000000000a1b2c3d4--

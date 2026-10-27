@@ -1,0 +1,33 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Re: Pick-up time
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <8a0ecf44@brightwell.example>
+MIME-Version: 1.0
+In-Reply-To: <orig-es@agents.example>
+References: <orig-es@agents.example>
+Content-Type: multipart/alternative; boundary="000000000000a1b2c3d4"
+
+--000000000000a1b2c3d4
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+El viernes a las 10:00 nos viene bien. Referencia BK-2291.
+
+El lun, 26 oct 2026 a las 09:12, Bo Lind (<bo@example.com>) escribi=C3=B3:
+
+> Can we move the pick-up to Friday?
+>
+> Bo
+
+--000000000000a1b2c3d4
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">El viernes a las 10:00 nos viene bien. Referencia BK-2291.=
+</div><br><div class=3D"gmail_quote"><div dir=3D"ltr" class=3D"gmail_attr">=
+El lun, 26 oct 2026 a las 09:12, Bo Lind (<bo@example.com>) escribi=C3=B3:<=
+br></div><blockquote class=3D"gmail_quote" style=3D"margin:0px 0px 0px 0.8e=
+x;border-left:1px solid rgb(204,204,204);padding-left:1ex">Can we move the =
+pick-up to Friday?<br><br>Bo</blockquote></div>
+--000000000000a1b2c3d4--

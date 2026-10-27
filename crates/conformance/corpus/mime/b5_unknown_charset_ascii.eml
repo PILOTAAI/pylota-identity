@@ -1,0 +1,8 @@
+From: s@example.net
+To: bookings.acme@agents.example
+Subject: x-unknown
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <unk@example.net>
+Content-Type: text/plain; charset=x-made-up
+
+plain ascii body

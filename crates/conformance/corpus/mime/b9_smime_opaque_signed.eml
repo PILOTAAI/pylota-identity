@@ -1,0 +1,11 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Opaque signed
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <afcbf2ec@brightwell.example>
+MIME-Version: 1.0
+Content-Type: application/pkcs7-mime; smime-type=signed-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+
+MGcGCSqGSIb3DQEHAqBaMFgCAQExADBPBgkqhkiG9w0BBwGgQgRAQ29udGVudC1UeXBlOiB0ZXh0
+L3BsYWluOyBjaGFyc2V0PXV0Zi04DQoNCk9wYXF1ZSBzaWduZWQgYm9keS4NCjEA

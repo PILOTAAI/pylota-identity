@@ -1,0 +1,8 @@
+From: ana@brightwell.example
+From: eve@example.net
+To: bookings.acme@agents.example
+Subject: two headers
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <two2@example.net>
+
+x

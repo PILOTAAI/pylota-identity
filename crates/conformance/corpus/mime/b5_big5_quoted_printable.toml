@@ -1,0 +1,13 @@
+id      = "b5_big5_quoted_printable"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "預訂已確認"
+text_contains = ["預訂已確認"]
+flags = []

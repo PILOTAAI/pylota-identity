@@ -1,0 +1,10 @@
+From: Ops List <ops@lists.example.org>
+To: bookings.acme@agents.example
+Subject: [ops] Weekly sympa
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <9ab3c555@brightwell.example>
+MIME-Version: 1.0
+List-Id: <agents@sympa.example.org>
+List-Archive: <https://sympa.example.org/arc/agents>
+
+This week's update.

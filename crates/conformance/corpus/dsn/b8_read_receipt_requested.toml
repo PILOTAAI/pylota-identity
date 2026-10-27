@@ -1,0 +1,12 @@
+id      = "b8_read_receipt_requested"
+edge    = ["B8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "normal"
+evidence = ["mdn_requested"]

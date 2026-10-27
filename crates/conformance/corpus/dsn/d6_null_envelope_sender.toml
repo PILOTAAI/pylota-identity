@@ -1,0 +1,11 @@
+id      = "d6_null_envelope_sender"
+edge    = ["D6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = ""
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "automated"

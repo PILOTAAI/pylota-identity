@@ -1,0 +1,20 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment zip_octet_stream
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <4fbad640@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/octet-stream; name="logs.zip"
+Content-Disposition: attachment; filename="logs.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAIAAAAAABH3dx5BAAAAAIAAAAFAAAAYS5sb2fLzwYAUEsBAhQAFAAAAAgAAAAAAEfd
+3HkEAAAAAgAAAAUAAAAAAAAAAAAAAAAAAAAAAGEubG9nUEsFBgAAAAABAAEAMwAAACcAAAAAAA==
+--att--

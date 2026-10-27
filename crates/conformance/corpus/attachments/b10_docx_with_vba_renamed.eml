@@ -1,0 +1,27 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment docx_with_vba_renamed
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <5fe1c753@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="report.docx"
+Content-Disposition: attachment; filename="report.docx"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAIAAAAAADdEsBqZwAAAHkAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbD2NSwqDMBQA
+ryJuxeQCqRsP0E0vEJIXeZD34SW19fYqhW5nGCa8DoW2hOcOZphhWIU7cL/xY4yqFVPsKOx3zk4U
++Eu1iFHsbZZSMEGW9KYrcR+xrCYJWkPeqLq/oYg8XeHol+B/xxNQSwMEFAAAAAgAAAAAABbDehkG
+AAAABAAAABEAAAB3b3JkL2RvY3VtZW50LnhtbLMp17cDAFBLAwQUAAAACAAAAAAAgxbcjAMAAAAB
+AAAAEwAAAHdvcmQvdmJhUHJvamVjdC5iaW6rAABQSwECFAAUAAAACAAAAAAA3RLAamcAAAB5AAAA
+EwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUABQAAAAIAAAAAAAWw3oZ
+BgAAAAQAAAARAAAAAAAAAAAAAAAAAJgAAAB3b3JkL2RvY3VtZW50LnhtbFBLAQIUABQAAAAIAAAA
+AACDFtyMAwAAAAEAAAATAAAAAAAAAAAAAAAAAM0AAAB3b3JkL3ZiYVByb2plY3QuYmluUEsFBgAA
+AAADAAMAwQAAAAEBAAAAAA==
+--att--

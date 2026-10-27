@@ -1,0 +1,13 @@
+id      = "d1_p_none_aligned"
+edge    = ["D1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bounce@relaxed.example"
+to   = "bookings.acme@agents.example"
+
+[expect]
+dkim = ["pass"]
+dmarc = "pass"
+verdict = "pass"

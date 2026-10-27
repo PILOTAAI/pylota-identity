@@ -1,0 +1,14 @@
+id      = "b4_thunderbird_flowed_1"
+edge    = ["C8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "cy@example.org"
+to   = "bookings.acme@agents.example"
+
+[expect]
+extracted_equals = "No, cancel it."
+flags = []
+attachments = 0
+in_reply_to = "r1@agents.example"

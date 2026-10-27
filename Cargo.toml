@@ -87,7 +87,7 @@ ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zer
 zeroize       = "=1.9.0"                                        # unsealed seed buffers (Zeroizing)
 
 # Chosen at build time for core (crates.io API, read 2026-10-27: the newest release at least two weeks old)
-regex                 = { version = "=1.13.1", default-features = false, features = ["std", "unicode-perl"] }  # 2026-07-15
+regex                 = { version = "=1.13.1", default-features = false, features = ["std", "unicode-perl", "unicode-case"] }  # 2026-07-15; unicode-case for (?i) quote headers
 unicode-normalization = { version = "=0.1.25", default-features = false }  # 2025-10-30; 0.1.26 (2026-10-16) is newer
 idna                  = { version = "=1.1.0", default-features = false, features = ["alloc", "compiled_data"] }  # 2025-08-21
 html5ever             = "=0.40.1"                                          # 2026-09-14; the version ammonia 4.2.4 resolves

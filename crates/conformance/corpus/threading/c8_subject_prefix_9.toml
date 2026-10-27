@@ -1,0 +1,11 @@
+id      = "c8_subject_prefix_9"
+edge    = ["C8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+normalised_subject = "R2D2 servicing"

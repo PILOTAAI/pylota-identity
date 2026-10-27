@@ -1,0 +1,38 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Re: Pick-up time
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <69122ad0@brightwell.example>
+MIME-Version: 1.0
+In-Reply-To: <orig-ru@agents.example>
+References: <orig-ru@agents.example>
+Content-Type: multipart/alternative; boundary="000000000000a1b2c3d4"
+
+--000000000000a1b2c3d4
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+=D0=9F=D1=8F=D1=82=D0=BD=D0=B8=D1=86=D0=B0 =D0=B2 10:00 =D0=BD=D0=B0=D0=BC =
+=D0=BF=D0=BE=D0=B4=D1=85=D0=BE=D0=B4=D0=B8=D1=82. =D0=9D=D0=BE=D0=BC=D0=B5=
+=D1=80 BK-2291.
+
+=D0=91=D0=BE =D0=9B=D0=B8=D0=BD=D0=B4 <bo@example.com> =D0=BF=D0=B8=D1=81=
+=D0=B0=D0=BB(=D0=B0):
+
+> Can we move the pick-up to Friday?
+>
+> Bo
+
+--000000000000a1b2c3d4
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">=D0=9F=D1=8F=D1=82=D0=BD=D0=B8=D1=86=D0=B0 =D0=B2 10:00 =
+=D0=BD=D0=B0=D0=BC =D0=BF=D0=BE=D0=B4=D1=85=D0=BE=D0=B4=D0=B8=D1=82. =D0=9D=
+=D0=BE=D0=BC=D0=B5=D1=80 BK-2291.</div><br><div class=3D"gmail_quote"><div =
+dir=3D"ltr" class=3D"gmail_attr">=D0=91=D0=BE =D0=9B=D0=B8=D0=BD=D0=B4 <bo@=
+example.com> =D0=BF=D0=B8=D1=81=D0=B0=D0=BB(=D0=B0):<br></div><blockquote c=
+lass=3D"gmail_quote" style=3D"margin:0px 0px 0px 0.8ex;border-left:1px soli=
+d rgb(204,204,204);padding-left:1ex">Can we move the pick-up to Friday?<br>=
+<br>Bo</blockquote></div>
+--000000000000a1b2c3d4--

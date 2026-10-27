@@ -1,0 +1,10 @@
+From: Sender <sender@example.net>
+To: bookings.acme@agents.example
+Subject: =?euc-jp?B?zb3M88jWueakx6S5?=
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <cs-euc-jp-8bit@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="euc-jp"
+Content-Transfer-Encoding: 8bit
+
+予約番号です

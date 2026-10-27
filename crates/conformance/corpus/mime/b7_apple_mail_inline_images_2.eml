@@ -1,0 +1,26 @@
+From: Bo Lind <bo@example.com>
+To: bookings.acme@agents.example
+Subject: Damage photos 2
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-Id: <ap-img2@example.com>
+Mime-Version: 1.0 (Mac OS X Mail 16.0 \(3774.600.62\))
+Content-Type: multipart/mixed; boundary="Apple-Mail=_IMG2"
+
+--Apple-Mail=_IMG2
+Content-Transfer-Encoding: 7bit
+Content-Type: text/plain; charset=us-ascii
+
+Front bumper:
+
+--Apple-Mail=_IMG2
+Content-Disposition: inline; filename=IMG_0002.jpeg
+Content-Type: image/jpeg; x-unix-mode=0644; name="IMG_0002.jpeg"
+Content-Transfer-Encoding: base64
+
+/9j/4AAQSkZJRgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+--Apple-Mail=_IMG2
+Content-Transfer-Encoding: 7bit
+Content-Type: text/plain; charset=us-ascii
+
+Rear door.
+--Apple-Mail=_IMG2--

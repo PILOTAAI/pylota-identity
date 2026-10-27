@@ -1,0 +1,14 @@
+id      = "b6_inline_forward_3"
+edge    = ["B6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bo@example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+normalised_subject = "Delivery 3"
+flags = []
+attachments = 0
+extracted_equals = "FYI"

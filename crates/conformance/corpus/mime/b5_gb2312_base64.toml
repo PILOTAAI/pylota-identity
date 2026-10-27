@@ -1,0 +1,13 @@
+id      = "b5_gb2312_base64"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "预订已确认"
+text_contains = ["预订已确认"]
+flags = []

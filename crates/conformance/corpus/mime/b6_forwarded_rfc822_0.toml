@@ -1,0 +1,16 @@
+id      = "b6_forwarded_rfc822_0"
+edge    = ["B6"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+attachments = 1
+attachment_names = ["Delivery 0.eml"]
+nested_message_ids = ["inner0@carrier.example"]
+nested_text_contains = ["Your parcel 0 is on its way."]
+text_contains = ["FYI, see below."]
+normalised_subject = "Delivery 0"

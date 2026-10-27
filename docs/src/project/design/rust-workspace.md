@@ -186,7 +186,7 @@ zeroize       = "=1.9.0"                                        # unsealed seed 
 Crates used without a verified version in this document are added with an exact pin chosen **at build
 time** (the newest release at least two weeks old), and recorded in `Cargo.toml`: `html5ever` and
 `markup5ever_rcdom` (DOM walk for hidden-text removal and text derivation; same versions `ammonia`
-resolves), `regex` (custom references; `default-features = false`, features `std`, `unicode-perl`),
+resolves), `regex` (custom references and quote headers; `default-features = false`, features `std`, `unicode-perl` and `unicode-case`, which the case-insensitive non-ASCII quote-header patterns need: without it `Regex::new` fails at run time, found by the M2 corpus),
 `idna`, `psl`, `unicode-normalization`, `aes-gcm` (secrets at rest, `core::crypto`), `thiserror`, `futures-util`, and for
 native code only: `rusqlite` with a bundled SQLite that has FTS5 (fakes), `proptest`, `libfuzzer-sys`,
 `tar`, `flate2`, `toml`, and `pulldown-cmark` (`xtask` only: the skills contract scanner,

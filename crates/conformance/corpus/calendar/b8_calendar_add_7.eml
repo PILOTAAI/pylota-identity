@@ -1,0 +1,45 @@
+From: Bo Lind <bo@example.com>
+To: bookings.acme@agents.example
+Subject: Invitation: Vehicle handover 7
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <42fc1ac8@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="cal7"
+
+--cal7
+Content-Type: multipart/alternative; boundary="calalt7"
+
+--calalt7
+Content-Type: text/plain; charset=UTF-8
+
+You have been invited.
+--calalt7
+Content-Type: text/calendar; charset=UTF-8; method=ADD
+
+BEGIN:VCALENDAR
+PRODID:-//Example//Calendar//EN
+VERSION:2.0
+METHOD:ADD
+BEGIN:VEVENT
+UID:evt-7@example.com
+DTSTAMP:20261027T220000Z
+DTSTART:20261030T100000Z
+DTEND:20261030T110000Z
+SUMMARY:Vehicle handover 7
+ORGANIZER;CN=Bo:mailto:bo@example.com
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:bookings.acme@agents.example
+END:VEVENT
+END:VCALENDAR
+--calalt7--
+--cal7
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: base64
+
+QkVHSU46VkNBTEVOREFSClBST0RJRDotLy9FeGFtcGxlLy9DYWxlbmRhci8vRU4KVkVSU0lPTjoy
+LjAKTUVUSE9EOkFERApCRUdJTjpWRVZFTlQKVUlEOmV2dC03QGV4YW1wbGUuY29tCkRUU1RBTVA6
+MjAyNjEwMjdUMjIwMDAwWgpEVFNUQVJUOjIwMjYxMDMwVDEwMDAwMFoKRFRFTkQ6MjAyNjEwMzBU
+MTEwMDAwWgpTVU1NQVJZOlZlaGljbGUgaGFuZG92ZXIgNwpPUkdBTklaRVI7Q049Qm86bWFpbHRv
+OmJvQGV4YW1wbGUuY29tCkFUVEVOREVFO1BBUlRTVEFUPU5FRURTLUFDVElPTjptYWlsdG86Ym9v
+a2luZ3MuYWNtZUBhZ2VudHMuZXhhbXBsZQpFTkQ6VkVWRU5UCkVORDpWQ0FMRU5EQVIK
+--cal7--

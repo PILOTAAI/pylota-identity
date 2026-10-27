@@ -1,0 +1,10 @@
+From: Ops List <ops@lists.example.org>
+To: bookings.acme@agents.example
+Subject: [ops] Weekly newsletter
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <1a8bab1a@brightwell.example>
+MIME-Version: 1.0
+List-Unsubscribe: <https://news.example.com/u/abc>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+
+This week's update.

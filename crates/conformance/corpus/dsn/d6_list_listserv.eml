@@ -1,0 +1,10 @@
+From: Ops List <ops@lists.example.org>
+To: bookings.acme@agents.example
+Subject: [ops] Weekly listserv
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <b20960ec@brightwell.example>
+MIME-Version: 1.0
+List-Id: <dealers.listserv.example.net>
+Precedence: bulk
+
+This week's update.

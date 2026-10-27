@@ -1,0 +1,21 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment nested_zip_with_js
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <140a191a@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/zip; name="files.zip"
+Content-Disposition: attachment; filename="files.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAIAAAAAAAvsNLENAAAAG8AAAAJAAAAaW5uZXIuemlwC/BmZhFhgIFmsTs9jEAahNmA
+uKg0Ty+ruCLAm5FJhAG3MlQA0RTgzQqWYgRCEyCtCpYDAFBLAQIUABQAAAAIAAAAAAAvsNLENAAA
+AG8AAAAJAAAAAAAAAAAAAAAAAAAAAABpbm5lci56aXBQSwUGAAAAAAEAAQA3AAAAWwAAAAAA
+--att--

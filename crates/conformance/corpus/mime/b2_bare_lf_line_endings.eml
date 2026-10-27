@@ -1,0 +1,9 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: bare lf
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <edca2640@brightwell.example>
+MIME-Version: 1.0
+
+body with bare line feeds
+second line

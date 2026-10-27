@@ -1,0 +1,22 @@
+From: MAILER-DAEMON@old.example.org
+To: desk@agents.example
+Subject: failure notice
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <hb1@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="hb"
+
+--hb
+Content-Type: text/plain
+
+Sorry, I couldn't deliver it.
+--hb
+Content-Type: message/rfc822
+
+From: desk@agents.example
+To: x@example.com
+Subject: Booking
+Message-ID: <hbo1@agents.example>
+
+body
+--hb--

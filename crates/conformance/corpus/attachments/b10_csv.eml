@@ -1,0 +1,19 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment csv
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <c889041a@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: text/csv; name="fleet.csv"
+Content-Disposition: attachment; filename="fleet.csv"
+Content-Transfer-Encoding: base64
+
+cGxhdGUsbWlsZWFnZQpBQjEyQ0RFLDQxMjAwCg==
+--att--

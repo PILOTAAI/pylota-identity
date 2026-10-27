@@ -1,0 +1,17 @@
+id      = "b7_gmail_inline_image"
+edge    = ["B7"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+attachments = 2
+attachment_types = ["image/png", "application/pdf"]
+risks = []
+cids = ["ii_lk1"]
+html_contains = ["src=\"cid:ii_lk1\""]
+text_contains = ["Photo of the scratch below."]
+flags = []

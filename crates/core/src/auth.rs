@@ -286,6 +286,11 @@ impl From<&DkimResult> for SigResult {
     fn from(r: &DkimResult) -> Self {
         match r {
             DkimResult::Pass => SigResult::Pass,
+            // A body-hash mismatch is a failed verification (RFC 6376 § 6.3, and the reference
+            // implementation of the S4 parity check); mail-auth reports it as neutral.
+            DkimResult::Neutral(Error::Dkim(mail_auth::dkim::DkimError::FailedBodyHashMatch)) => {
+                SigResult::Fail
+            }
             DkimResult::Neutral(_) => SigResult::Neutral,
             DkimResult::Fail(_) => SigResult::Fail,
             DkimResult::PermError(_) => SigResult::Permerror,

@@ -1,0 +1,13 @@
+id      = "b5_euc_kr_base64"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "예약이 확인되었습니다"
+text_contains = ["예약이 확인되었습니다"]
+flags = []

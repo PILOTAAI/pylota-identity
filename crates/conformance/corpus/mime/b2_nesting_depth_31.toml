@@ -1,0 +1,12 @@
+id      = "b2_nesting_depth_31"
+edge    = ["B2"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+text_contains = ["deep text"]
+flags = []

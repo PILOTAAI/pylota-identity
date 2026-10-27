@@ -1,0 +1,11 @@
+id      = "b3_missing_message_id"
+edge    = ["B3"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+flags = ["message_id_synthetic"]

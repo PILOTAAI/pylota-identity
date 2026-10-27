@@ -1,0 +1,12 @@
+id      = "b7_scripts_removed"
+edge    = ["B7"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+html_absent = ["<script", "onclick", "<svg"]
+text_contains = ["Hi"]

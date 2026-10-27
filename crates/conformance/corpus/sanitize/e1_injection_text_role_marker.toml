@@ -1,0 +1,13 @@
+id      = "e1_injection_text_role_marker"
+edge    = ["E1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+note    = "stored as untrusted content; detection is core::injection"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+text_contains = ["### system"]
+kind = "normal"

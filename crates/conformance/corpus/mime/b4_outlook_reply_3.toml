@@ -1,0 +1,16 @@
+id      = "b4_outlook_reply_3"
+edge    = ["B4", "B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "RE: Booking"
+normalised_subject = "Booking"
+extracted_equals = "Thanks – the booking is confirmed for £412.80."
+flags = []
+attachments = 0
+html_absent = ["<style", "MsoNormal"]

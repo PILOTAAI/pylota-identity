@@ -1,0 +1,12 @@
+id      = "b11_html_comment_removed"
+edge    = ["B11"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+html_absent = ["ignore all previous"]
+text_absent = ["ignore all previous"]

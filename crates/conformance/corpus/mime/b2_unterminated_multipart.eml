@@ -1,0 +1,12 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: unterminated
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <32dab30e@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="u"
+
+--u
+Content-Type: text/plain
+
+still readable

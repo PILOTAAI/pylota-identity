@@ -1,0 +1,25 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment docm
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <4b772535@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: application/vnd.ms-word.document.macroEnabled.12; name="report.docm"
+Content-Disposition: attachment; filename="report.docm"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAAIAAAAAADdEsBqZwAAAHkAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbD2NSwqDMBQA
+ryJuxeQCqRsP0E0vEJIXeZD34SW19fYqhW5nGCa8DoW2hOcOZphhWIU7cL/xY4yqFVPsKOx3zk4U
++Eu1iFHsbZZSMEGW9KYrcR+xrCYJWkPeqLq/oYg8XeHol+B/xxNQSwMEFAAAAAgAAAAAAIMW3IwD
+AAAAAQAAABMAAAB3b3JkL3ZiYVByb2plY3QuYmluqwAAUEsBAhQAFAAAAAgAAAAAAN0SwGpnAAAA
+eQAAABMAAAAAAAAAAAAAAAAAAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAAUAAAACAAAAAAA
+gxbcjAMAAAABAAAAEwAAAAAAAAAAAAAAAACYAAAAd29yZC92YmFQcm9qZWN0LmJpblBLBQYAAAAA
+AgACAIIAAADMAAAAAAA=
+--att--

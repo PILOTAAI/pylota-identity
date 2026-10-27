@@ -1,0 +1,12 @@
+id      = "b2_headers_only_no_body"
+edge    = ["B2"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "headers only"
+flags = []

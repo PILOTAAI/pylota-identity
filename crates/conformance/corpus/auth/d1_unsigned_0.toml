@@ -1,0 +1,13 @@
+id      = "d1_unsigned_0"
+edge    = ["D1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+dkim = []
+dmarc = "fail"
+verdict = "unverified"

@@ -1,0 +1,12 @@
+id      = "d4_dsn_five_recipients"
+edge    = ["D4"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = ""
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "dsn"
+dsn_recipients = ["r0@example.com", "r1@example.com", "r2@example.com", "r3@example.com", "r4@example.com"]

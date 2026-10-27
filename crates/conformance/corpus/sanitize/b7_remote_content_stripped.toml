@@ -1,0 +1,13 @@
+id      = "b7_remote_content_stripped"
+edge    = ["B7"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+html_absent = ["track.example.com", "cdn.example.com/logo", "<iframe", "javascript:", "<link"]
+html_contains = ["href=\"https://shop.example.com/offer\"", "alt=\"Logo\""]
+text_contains = ["Offer (https://shop.example.com/offer)", "[image: Logo]"]

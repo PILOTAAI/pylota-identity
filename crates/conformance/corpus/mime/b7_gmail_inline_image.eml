@@ -1,0 +1,41 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Car photo
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <0171e85b@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed1"
+
+--mixed1
+Content-Type: multipart/related; boundary="rel1"
+
+--rel1
+Content-Type: multipart/alternative; boundary="alt1"
+
+--alt1
+Content-Type: text/plain; charset=UTF-8
+
+Photo of the scratch below.
+[image: scratch.png]
+--alt1
+Content-Type: text/html; charset=UTF-8
+
+<div dir="ltr">Photo of the scratch below.<div><img src="cid:ii_lk1" alt="scratch.png"></div></div>
+--alt1--
+--rel1
+Content-Type: image/png; name="scratch.png"
+Content-Disposition: inline; filename="scratch.png"
+Content-Transfer-Encoding: base64
+Content-ID: <ii_lk1>
+X-Attachment-Id: ii_lk1
+
+iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+--rel1--
+--mixed1
+Content-Type: application/pdf; name="invoice-88213.pdf"
+Content-Disposition: attachment; filename="invoice-88213.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjcKJeLjz9MKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8L1Jvb3QgMSAwIFI+Pgol
+JUVPRg==
+--mixed1--

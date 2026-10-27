@@ -1,0 +1,21 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: PGP/MIME
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <6285e384@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="pgp1"
+
+--pgp1
+Content-Type: application/pgp-encrypted
+
+Version: 1
+--pgp1
+Content-Type: application/octet-stream; name="encrypted.asc"
+
+-----BEGIN PGP MESSAGE-----
+
+hQEMA1234567890
+=abcd
+-----END PGP MESSAGE-----
+--pgp1--

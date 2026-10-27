@@ -1,0 +1,14 @@
+id      = "b4_thunderbird_html_only_4"
+edge    = ["B4"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "cy@example.org"
+to   = "bookings.acme@agents.example"
+
+[expect]
+extracted_equals = "Address is 12 High Street."
+text_contains = ["Address is 12 High Street.", "How many days?"]
+flags = []
+attachments = 0

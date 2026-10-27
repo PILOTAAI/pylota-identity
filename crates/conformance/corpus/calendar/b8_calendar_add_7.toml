@@ -1,0 +1,15 @@
+id      = "b8_calendar_add_7"
+edge    = ["B8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+note    = "classification only; the calendar object is read at consumer step 10a (later milestone)"
+
+[envelope]
+from = "bo@example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "normal"
+attachments = 2
+attachment_types = ["text/calendar", "text/calendar"]
+text_contains = ["You have been invited."]

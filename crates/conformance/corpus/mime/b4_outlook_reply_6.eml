@@ -1,0 +1,38 @@
+From: Desk <desk@brightwell.example>
+To: bookings.acme@agents.example
+Subject: RE: Booking
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <3c1a059e@brightwell.example>
+MIME-Version: 1.0
+Thread-Topic: Booking
+Thread-Index: AQHZ
+X-MS-Has-Attach:
+Content-Language: en-GB
+Content-Type: multipart/alternative; boundary="_000_DB9PR_"
+
+--_000_DB9PR_
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Thanks =E2=80=93 the booking is confirmed for =C2=A3412.80.
+
+________________________________
+Od: Bo Lind <bo@example.com>
+Wys=C5=82ano: 26 October 2026 09:12
+To: Desk <desk@brightwell.example>
+Subject: Booking
+
+Can we move the pick-up to Friday?
+
+--_000_DB9PR_
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; charset=
+=3DWindows-1252"><style>p.MsoNormal{margin:0}</style></head><body><div clas=
+s=3D"WordSection1"><p class=3D"MsoNormal">Thanks =E2=80=93 the booking is c=
+onfirmed for =C2=A3412.80.</p></div><div id=3D"appendonsend"></div><hr styl=
+e=3D"display:inline-block;width:98%"><div id=3D"divRplyFwdMsg" dir=3D"ltr">=
+<b>Od:</b> Bo Lind<br><b>Wys=C5=82ano:</b> 26 October 2026 09:12<br></div><=
+div>Can we move the pick-up to Friday?</div></body></html>
+--_000_DB9PR_--

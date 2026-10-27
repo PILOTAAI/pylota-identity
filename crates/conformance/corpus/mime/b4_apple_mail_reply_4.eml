@@ -1,0 +1,35 @@
+Content-Type: multipart/alternative;
+	boundary="Apple-Mail=_5B2F04"
+Mime-Version: 1.0 (Mac OS X Mail 16.0 \(3774.600.62\))
+Subject: Re: Friday
+From: Bo Lind <bo@example.com>
+In-Reply-To: <m4@agents.example>
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-Id: <APPLE0004-ABCD@example.com>
+References: <m4@agents.example>
+To: Desk <bookings.acme@agents.example>
+X-Mailer: Apple Mail (2.3774.600.62)
+
+
+--Apple-Mail=_5B2F04
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/plain;
+	charset=utf-8
+
+Can you send the invoice?
+
+> On 26 Oct 2026, at 09:12, Desk <bookings.acme@agents.example> wrote:
+>
+> Friday at 10?
+
+--Apple-Mail=_5B2F04
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html;
+	charset=utf-8
+
+<html><head><meta http-equiv=3D"content-type" content=3D"text/html; charset=
+=3Dutf-8"></head><body style=3D"overflow-wrap: break-word;">Can you send th=
+e invoice?<br id=3D"lineBreakAtBeginningOfMessage"><div><br><blockquote typ=
+e=3D"cite"><div>On 26 Oct 2026, at 09:12, Desk wrote:</div><br><div><div>Fr=
+iday at 10?</div></div></blockquote></div><br></body></html>
+--Apple-Mail=_5B2F04--

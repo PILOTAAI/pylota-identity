@@ -1,0 +1,18 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Report
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <8f6d8c92@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="tb"
+
+--tb
+Content-Type: text/plain
+
+x
+--tb
+Content-Type: application/ms-tnef; name=winmail.dat
+Content-Transfer-Encoding: base64
+
+eJ8+IgEAAg+A
+--tb--

@@ -1,0 +1,11 @@
+id      = "c7_reply_to_provider_id"
+edge    = ["C7"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+in_reply_to = "0102018abc-def@email.agents.example"

@@ -195,22 +195,19 @@ fn join(lines: &[&str]) -> String {
 /// `extracted_text`: the new content of a message. `html` is the DOM after the sanitising DOM pass, when
 /// the message has an HTML body; its quote markers win over the text algorithm.
 pub fn extract_new_content(text: &str, html: Option<&Handle>) -> String {
-    let source;
-    let text = match html.and_then(|root| html_marker(root).map(|m| (root, m))) {
-        Some((root, marker)) => {
-            source = derive_text_until(root, Some(&marker));
-            if !source.trim().is_empty() {
-                let lines: Vec<&str> = source.lines().collect();
-                let end = strip_signature(&lines);
-                let out = join(&lines[..end]);
-                if !out.is_empty() {
-                    return out;
-                }
-            }
-            text
+    if let Some((root, marker)) = html.and_then(|root| html_marker(root).map(|m| (root, m))) {
+        // The DOM is cut at the marker; the text before it still goes through the text algorithm, which
+        // removes an attribution line kept outside the marker (Thunderbird's `moz-cite-prefix`).
+        let before = derive_text_until(root, Some(&marker));
+        let out = text_algorithm(&before);
+        if !out.is_empty() {
+            return out;
         }
-        None => text,
-    };
+    }
+    text_algorithm(text)
+}
+
+fn text_algorithm(text: &str) -> String {
     let normalised = text.replace("\r\n", "\n");
     let lines: Vec<&str> = normalised.lines().collect();
     let cut = find_cut(&lines);

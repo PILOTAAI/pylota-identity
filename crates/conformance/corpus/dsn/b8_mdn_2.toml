@@ -1,0 +1,13 @@
+id      = "b8_mdn_2"
+edge    = ["B8"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "mdn"
+automated = true
+mdn_original_message_id = "sent2@agents.example"

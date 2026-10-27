@@ -1,0 +1,16 @@
+# DNS fixtures for the corpus (Testing § 5.1). A name not listed here is NXDOMAIN.
+
+[txt]
+"_dmarc.brightwell.example" = ["v=DMARC1; p=reject; rua=mailto:dmarc@brightwell.example"]
+"_dmarc.relaxed.example" = ["v=DMARC1; p=none"]
+"_dmarc.strict.example" = ["v=DMARC1; p=quarantine; adkim=s; aspf=s"]
+"_dmarc.two-records.example" = ["v=DMARC1; p=reject", "v=DMARC1; p=none"]
+"s1._domainkey.brightwell.example" = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAprgH/i3eEFThg95feJKWWU/P8a7DhDG76gC3/MYEnnj+c/G3U4/gD0LX0tI7mmqxqfTRbDidbZwPHO4bPkiuA+c4NmNLQf9kZv0qb3D4QB8X924xZAc+D0gN+Nc4DziS1a56RO8jg1B66h4UdWHUlTlEw2t0gxHwGPYgIgQ+mVqiF/eGcLftq8oIJc2UdNk1ijragMddl/Ggh/DsROLb+o4tJwXRwhlR88t0VXA2E4MNkhC+gdZHh87BEF3Gt8jknlSYxpMg5kOeTXjXhVxNDbRT0yo+Sg+Hegolw6NMNVTXmK/lRnJtEXYUV86Ewqij8kuugOxrXQ5OCwiL9oAaVwIDAQAB"]
+"s1._domainkey.mail.brightwell.example" = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAprgH/i3eEFThg95feJKWWU/P8a7DhDG76gC3/MYEnnj+c/G3U4/gD0LX0tI7mmqxqfTRbDidbZwPHO4bPkiuA+c4NmNLQf9kZv0qb3D4QB8X924xZAc+D0gN+Nc4DziS1a56RO8jg1B66h4UdWHUlTlEw2t0gxHwGPYgIgQ+mVqiF/eGcLftq8oIJc2UdNk1ijragMddl/Ggh/DsROLb+o4tJwXRwhlR88t0VXA2E4MNkhC+gdZHh87BEF3Gt8jknlSYxpMg5kOeTXjXhVxNDbRT0yo+Sg+Hegolw6NMNVTXmK/lRnJtEXYUV86Ewqij8kuugOxrXQ5OCwiL9oAaVwIDAQAB"]
+"s1._domainkey.relaxed.example" = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAprgH/i3eEFThg95feJKWWU/P8a7DhDG76gC3/MYEnnj+c/G3U4/gD0LX0tI7mmqxqfTRbDidbZwPHO4bPkiuA+c4NmNLQf9kZv0qb3D4QB8X924xZAc+D0gN+Nc4DziS1a56RO8jg1B66h4UdWHUlTlEw2t0gxHwGPYgIgQ+mVqiF/eGcLftq8oIJc2UdNk1ijragMddl/Ggh/DsROLb+o4tJwXRwhlR88t0VXA2E4MNkhC+gdZHh87BEF3Gt8jknlSYxpMg5kOeTXjXhVxNDbRT0yo+Sg+Hegolw6NMNVTXmK/lRnJtEXYUV86Ewqij8kuugOxrXQ5OCwiL9oAaVwIDAQAB"]
+"s1._domainkey.relay.example.net" = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAprgH/i3eEFThg95feJKWWU/P8a7DhDG76gC3/MYEnnj+c/G3U4/gD0LX0tI7mmqxqfTRbDidbZwPHO4bPkiuA+c4NmNLQf9kZv0qb3D4QB8X924xZAc+D0gN+Nc4DziS1a56RO8jg1B66h4UdWHUlTlEw2t0gxHwGPYgIgQ+mVqiF/eGcLftq8oIJc2UdNk1ijragMddl/Ggh/DsROLb+o4tJwXRwhlR88t0VXA2E4MNkhC+gdZHh87BEF3Gt8jknlSYxpMg5kOeTXjXhVxNDbRT0yo+Sg+Hegolw6NMNVTXmK/lRnJtEXYUV86Ewqij8kuugOxrXQ5OCwiL9oAaVwIDAQAB"]
+"s1._domainkey.strict.example" = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAprgH/i3eEFThg95feJKWWU/P8a7DhDG76gC3/MYEnnj+c/G3U4/gD0LX0tI7mmqxqfTRbDidbZwPHO4bPkiuA+c4NmNLQf9kZv0qb3D4QB8X924xZAc+D0gN+Nc4DziS1a56RO8jg1B66h4UdWHUlTlEw2t0gxHwGPYgIgQ+mVqiF/eGcLftq8oIJc2UdNk1ijragMddl/Ggh/DsROLb+o4tJwXRwhlR88t0VXA2E4MNkhC+gdZHh87BEF3Gt8jknlSYxpMg5kOeTXjXhVxNDbRT0yo+Sg+Hegolw6NMNVTXmK/lRnJtEXYUV86Ewqij8kuugOxrXQ5OCwiL9oAaVwIDAQAB"]
+"s1._domainkey.sub.strict.example" = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAprgH/i3eEFThg95feJKWWU/P8a7DhDG76gC3/MYEnnj+c/G3U4/gD0LX0tI7mmqxqfTRbDidbZwPHO4bPkiuA+c4NmNLQf9kZv0qb3D4QB8X924xZAc+D0gN+Nc4DziS1a56RO8jg1B66h4UdWHUlTlEw2t0gxHwGPYgIgQ+mVqiF/eGcLftq8oIJc2UdNk1ijragMddl/Ggh/DsROLb+o4tJwXRwhlR88t0VXA2E4MNkhC+gdZHh87BEF3Gt8jknlSYxpMg5kOeTXjXhVxNDbRT0yo+Sg+Hegolw6NMNVTXmK/lRnJtEXYUV86Ewqij8kuugOxrXQ5OCwiL9oAaVwIDAQAB"]
+
+[temperror]
+names = ["_dmarc.flaky.example"]

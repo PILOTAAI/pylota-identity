@@ -1,0 +1,12 @@
+id      = "b10_plain_pdf"
+edge    = ["B10"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+attachments = 1
+risks = []

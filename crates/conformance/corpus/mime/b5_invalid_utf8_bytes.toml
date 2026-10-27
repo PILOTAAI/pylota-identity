@@ -1,0 +1,12 @@
+id      = "b5_invalid_utf8_bytes"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+text_contains = ["Total: 12"]
+flags = ["parse_degraded"]

@@ -1,0 +1,19 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Attachment png_declared_jpeg
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <7d0d1c56@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="att"
+
+--att
+Content-Type: text/plain
+
+Please see the attachment.
+--att
+Content-Type: image/jpeg; name="photo.jpg"
+Content-Disposition: attachment; filename="photo.jpg"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAA==
+--att--

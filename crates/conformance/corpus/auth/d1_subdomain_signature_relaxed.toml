@@ -1,0 +1,13 @@
+id      = "d1_subdomain_signature_relaxed"
+edge    = ["D1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "bounce@mail.brightwell.example"
+to   = "bookings.acme@agents.example"
+
+[expect]
+dkim = ["pass"]
+dmarc = "pass"
+verdict = "pass"

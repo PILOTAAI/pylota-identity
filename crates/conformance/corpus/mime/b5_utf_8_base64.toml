@@ -1,0 +1,13 @@
+id      = "b5_utf_8_base64"
+edge    = ["B5"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+subject = "Résumé ✓ 予約"
+text_contains = ["Résumé ✓ 予約"]
+flags = []

@@ -1,0 +1,39 @@
+From: Mail Delivery System <Mailer-Daemon@mail.example.org>
+To: desk@agents.example
+Subject: Mail delivery failed: returning message to sender
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <dsn-exim-full@example.net>
+MIME-Version: 1.0
+Auto-Submitted: auto-replied
+Content-Type: multipart/report; report-type=delivery-status; boundary="dsnb"
+
+--dsnb
+Content-Type: text/plain; charset=us-ascii
+
+This is the mail system. Your message could not be delivered.
+
+--dsnb
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mail.example.org
+X-Queue-ID: 4ABC
+Arrival-Date: Tue, 27 Oct 2026 22:00:00 +0000
+
+Final-Recipient: rfc822; gone@example.com
+Original-Recipient: rfc822;gone@example.com
+Action: failed
+Status: 5.0.0
+Diagnostic-Code: X-Postfix; host mx.example.com said: 550 No such user
+
+--dsnb
+Content-Type: message/rfc822
+
+From: Desk <desk@agents.example>
+To: gone@example.com
+Subject: Booking
+Message-ID: <out-exim@agents.example>
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+
+Original body.
+
+--dsnb--

@@ -1,0 +1,12 @@
+id      = "b13_no_from"
+edge    = ["B13"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+from = ""
+flags = ["parse_degraded"]

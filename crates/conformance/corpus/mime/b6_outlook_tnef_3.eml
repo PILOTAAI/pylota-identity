@@ -1,0 +1,26 @@
+From: Desk <desk@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Report
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <057e1273@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="tnef_b"
+
+--tnef_b
+Content-Type: text/plain; charset=us-ascii
+
+See attached.
+--tnef_b
+Content-Type: application/ms-tnef; name="winmail.dat"
+Content-Disposition: attachment; filename="winmail.dat"
+Content-Transfer-Encoding: base64
+
+eJ8+IgIBAQaQCAAEAAAAAAABAAEAAgKQBgAOAAAAAAAAAAAAAAAAAAAAAAAAAAIQgAEADAAAAGJ1
+ZGdldC54bHN4AHgEAg+ABgBkAQAAUEsDBBQAAAAIAAAAAACHzvvNZQAAAHMAAAATAAAAW0NvbnRl
+bnRfVHlwZXNdLnhtbCWNSwrCMBBAr1KyLSYXiN14ADdeYEgmOJD5kIxFb9+qqwcPHi8/PoZzy/cd
+x6CKy03FUfyrrwHMOhVwUkm71KiG8ubedDD4vGhrVLBqefGZxGkDoc4nonOPP0YGkvVMQtpy+r8O
+UEsDBBQAAAAIAAAAAADOnpgTDQAAAAsAAAAPAAAAeGwvd29ya2Jvb2sueG1ssynPL8pOys/P1rcD
+AFBLAQIUABQAAAAIAAAAAACHzvvNZQAAAHMAAAATAAAAAAAAAAAAAAAAAAAAAABbQ29udGVudF9U
+eXBlc10ueG1sUEsBAhQAFAAAAAgAAAAAAM6emBMNAAAACwAAAA8AAAAAAAAAAAAAAAAAlgAAAHhs
+L3dvcmtib29rLnhtbFBLBQYAAAAAAgACAH4AAADQAAAAAAATZA==
+--tnef_b--

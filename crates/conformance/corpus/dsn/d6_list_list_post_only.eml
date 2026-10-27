@@ -1,0 +1,9 @@
+From: Ops List <ops@lists.example.org>
+To: bookings.acme@agents.example
+Subject: [ops] Weekly list_post_only
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <1a14e70b@brightwell.example>
+MIME-Version: 1.0
+List-Post: <mailto:team@lists.example.org>
+
+This week's update.
