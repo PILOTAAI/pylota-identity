@@ -661,9 +661,10 @@ reaches `402` and step 15 crosses 80% within a few sends.
 **Secrets.** Live tests read credentials only from the GitHub Environment `staging`, which requires the
 owner's approval (the owner may approve their own runs: there is no second person, [ADR 0015](../adr/0015-solo-operator.md))
 and is limited to `main` and release tags; forks never receive them. The environment holds: a
-Cloudflare API token scoped to the staging account, a staging platform key with a 90-day expiry, OAuth
-credentials limited to the two dedicated test mailboxes (Google Workspace and Microsoft 365, holding only
-synthetic mail), AWS credentials for the staging SES resources, and an API token for the external DNS
+Cloudflare deploy token for the staging deployment `pylota-identity-staging`
+([ADR 0023](../adr/0023-staging-in-the-existing-account-and-ses-through-oidc.md)), a staging platform key with a 90-day
+expiry, OAuth credentials limited to the two dedicated test mailboxes (Google Workspace and Microsoft 365, holding
+only synthetic mail), the staging AWS role assumed through OIDC (no stored AWS key), and an API token for the external DNS
 provider that hosts the `dns_records` test domain. The secret names are listed in
 [Build plan › Human prerequisites](../build-plan.md#human-prerequisites) (`STAGING_*`). The harness never prints secrets,
 redacts them from failure output, deletes test messages from the mailboxes after each run, and the

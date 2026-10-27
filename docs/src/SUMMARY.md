@@ -100,3 +100,4 @@
   - [0020 Phone numbers for agents](project/adr/0020-phone-numbers.md)
   - [0021 Agent credential vault](project/adr/0021-agent-vault.md)
   - [0022 SDK languages: Python and Go join Rust and TypeScript](project/adr/0022-sdk-languages.md)
+  - [0023 Staging in the existing account; SES through OIDC](project/adr/0023-staging-in-the-existing-account-and-ses-through-oidc.md)

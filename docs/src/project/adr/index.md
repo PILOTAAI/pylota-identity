@@ -31,6 +31,7 @@ ADR supersedes it (AGENTS.md).
 | [0020](0020-phone-numbers.md) | Phone numbers for agents, through Telnyx, approved by people (amended 2026-10-26: standing budget, one-call purchase, onboarding once per country, sole traders open) | Proposed | 2026-10-25 |
 | [0021](0021-agent-vault.md) | An agent credential vault inside Pylota Identity, used without reveal | Proposed | 2026-10-26 |
 | [0022](0022-sdk-languages.md) | SDK languages: Python and Go join Rust and TypeScript | Proposed | 2026-10-26 |
+| [0023](0023-staging-in-the-existing-account-and-ses-through-oidc.md) | Staging and the spikes in the existing Cloudflare account; SES through OIDC | Accepted | 2026-10-27 |
 
 ## When to write one
 

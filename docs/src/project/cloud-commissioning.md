@@ -90,9 +90,12 @@ The setup token's D1, R2, Queues and Vectorize permissions, and the production d
 Queues permissions, are account-wide for those products, because those products have no per-resource
 roles for this use; that is why both tokens live for one session or one rollout only. Whether a deploy
 needs Queues Edit, or only D1 Edit, is checked on staging at M20 with a token that lacks it; the
-permission is dropped if the deploy succeeds without it. Staging lives in a separate account, so
-`STAGING_CLOUDFLARE_API_TOKEN` (for `release-publish.yml`'s `staging` job) is standing and holds the
-setup token's permissions on that account only.
+permission is dropped if the deploy succeeds without it. Staging lives in this same account as the named
+deployment `pylota-identity-staging` ([ADR 0023](adr/0023-staging-in-the-existing-account-and-ses-through-oidc.md)),
+so `STAGING_CLOUDFLARE_API_TOKEN` (for `release-publish.yml`'s `staging` job) is a deploy token, never a setup
+token: the per-Worker Editor role on `pylota-identity-staging`, D1 Edit and Queues Edit (account-wide, the
+accepted risk of ADR 0023), and zone permissions on the staging zones only, with no Workers Admin, R2 or
+Vectorize permission; it expires after 30 days and the owner replaces it.
 No token holds token management, billing, members or Email Routing destination addresses
 ([Deploy › step 2](../self-hosting.md#2-create-a-cloudflare-api-token) lists what each permission is for).
 
