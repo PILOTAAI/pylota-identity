@@ -6,12 +6,19 @@
 #![forbid(unsafe_code)]
 
 pub mod address;
+pub mod attach;
+pub mod classify;
 pub mod httpsig;
 pub mod ids;
 pub mod jwk;
+pub mod mime;
+pub mod policy;
+pub mod quote;
 pub mod reply;
+pub mod sanitize;
 pub mod ses;
 pub mod sns;
+pub mod text;
 pub mod thread;
 pub mod thread_token;
 

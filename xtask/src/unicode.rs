@@ -11,7 +11,7 @@ use std::path::Path;
 use sha2::{Digest as _, Sha256};
 
 /// The files and their SHA-256, as downloaded from `https://www.unicode.org/Public/18.0.0/` on 2026-10-27.
-const FILES: [(&str, &str); 7] = [
+const FILES: [(&str, &str); 8] = [
     (
         "confusables.txt",
         "6ed3ee967c9dfdf6677d563c9985182fbc50a2efb7d6059cd57b2e2ce18f5b92",
@@ -39,6 +39,10 @@ const FILES: [(&str, &str); 7] = [
     (
         "PropertyValueAliases.txt",
         "06c4c8eaf7b0bf34abe73b113da1215bd784ac254d4c223600b90267caa4bbbd",
+    ),
+    (
+        "emoji-data.txt",
+        "80d00f8e616a0ef27fd6b8de3b758c06383b5d917e2977709578e68baf733bf1",
     ),
 ];
 
@@ -134,6 +138,13 @@ fn generate(t: &BTreeMap<&str, String>) -> Result<String, String> {
     for r in rows(&t["DerivedCoreProperties.txt"]) {
         if r[1] == "Default_Ignorable_Code_Point" {
             ignorable.push(range(r[0])?);
+        }
+    }
+
+    let mut pictographic = Vec::new();
+    for r in rows(&t["emoji-data.txt"]) {
+        if r[1] == "Extended_Pictographic" {
+            pictographic.push(range(r[0])?);
         }
     }
 
@@ -260,6 +271,12 @@ fn generate(t: &BTreeMap<&str, String>) -> Result<String, String> {
         ignorable,
     );
     ranges(&mut o, "STRONG_RTL", "Bidi classes R and AL.", rtl);
+    ranges(
+        &mut o,
+        "EXTENDED_PICTOGRAPHIC",
+        "`Extended_Pictographic` (emoji sequences keep their U+200D).",
+        pictographic,
+    );
     writeln!(
         o,
         "/// Script codes referenced by `SCRIPT_SETS` (tests and diagnostics)."

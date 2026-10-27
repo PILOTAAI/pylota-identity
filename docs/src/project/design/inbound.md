@@ -725,9 +725,9 @@ is derived from what precedes it: `div.gmail_quote`, `blockquote[type=cite]`, `d
    | Dutch | `^Op .{1,200} schreef .{1,200}:$` · `^-{2,} ?Oorspronkelijk bericht ?-{2,}$` |
    | Portuguese | `^Em .{1,200} escreveu:$` |
    | Swedish, Danish, Norwegian | `^Den .{1,200} skrev .{1,200}:$` · `^.{1,200} skrev:$` |
-   | Polish | `^.{1,200} napisał(a)?:$` |
-   | Russian | `^.{1,200} писал(а)?:$` |
-   | Japanese | `^.{1,200}(さんは書きました|wrote)[:：]$` |
+   | Polish | `^.{1,200} napisał(?:a\|\(a\))?:$` (Gmail writes the parentheses literally: `napisał(a):`) |
+   | Russian | `^.{1,200} писал(?:а\|\(а\))?:$` (likewise `писал(а):`) |
+   | Japanese | `^.{1,200}(さんは書きました\|wrote)[:：]$` |
    | Chinese | `^.{1,200}写道[:：]$` |
    | Arabic | None yet. A pattern is added only with a reply-attribution sample from real clients in `crates/conformance` (GAP-21 of the [gap register](../agentmail-gap-analysis.md)); a pattern is never guessed |
 

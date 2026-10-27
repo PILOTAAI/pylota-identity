@@ -5,7 +5,7 @@
 //! [Inbound › Steps]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/inbound.md
 
 #[rustfmt::skip]
-mod confusables_table;
+pub(crate) mod confusables_table;
 
 use unicode_normalization::UnicodeNormalization as _;
 
