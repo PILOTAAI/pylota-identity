@@ -1,0 +1,22 @@
+# Spike S6's throwaway Worker (build plan M1): S1's spike Worker with the AI and Vectorize bindings; its
+# `/s6/*` routes call them through platform::cf::externs. Build it first with `worker-build --release` in
+# spikes/s1-bindings. Deleted when the spike ends, with the index `pi-spike-6` and the gateway `pi-spike-6`.
+name = "pi-spike-6"
+main = "../s1-bindings/build/index.js"
+compatibility_date = "2026-09-22"
+workers_dev = true
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORS"
+index_name = "pi-spike-6"
+
+[[durable_objects.bindings]]
+name = "SPIKE_OBJECT"
+class_name = "SpikeObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SpikeObject"]

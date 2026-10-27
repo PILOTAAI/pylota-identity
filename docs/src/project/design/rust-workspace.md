@@ -142,7 +142,7 @@ mail-parser  = { version = "=0.11.9", features = ["full_encoding"] }   # encodin
 mail-auth    = { version = "=0.13.3", default-features = false,
                  features = ["dns-doh", "rust-crypto", "arc"] }        # arc is needed for verify_arc
 mail-builder = { version = "=1.0.0", default-features = false }       # drops gethostname
-ammonia      = "=4.2.0"                                               # 4.2.1 is newer than two weeks
+ammonia      = "=4.2.4"                                               # security fixes; see below
 
 # Serialisation, IDs, crypto
 serde      = { version = "=1.0.229", features = ["derive"] }
@@ -229,6 +229,16 @@ Notes on specific crates (all read 2026-10-09):
   resolver pre-fills them (see [Inbound › Authentication verdict](inbound.md#authentication-verdict)).
   `verify_spf` needs the client IP, which Email Workers do not expose, so SPF comes from the trusted
   `Authentication-Results` header only.
+  **Spike S4 (2026-10-27): this configuration does not resolve.** For non-wasm targets `dns-doh` asks for
+  `reqwest ^0.13` with the feature `webpki-roots`, which no `reqwest` 0.13 release has (0.13.0 to 0.13.5
+  offer `rustls`, `rustls-no-provider` and the private `__rustls*` features; crates.io sparse index, read
+  2026-10-27). Cargo resolves every target's dependencies, so any workspace naming `mail-auth` with
+  `dns-doh` fails to lock, on wasm32 too; 0.14.0 and 0.14.1 declare the same. Without `dns-doh` or
+  `dns-hickory` the crate does not compile (`compile_error!`). M2 therefore takes `mail-auth` 0.13.3 as a
+  patched copy under `vendor/mail-auth` (`[patch.crates-io]`), changed only so that `dns-doh` asks for
+  `reqwest`'s `rustls` feature instead of `webpki-roots`, with the change and its upstream issue recorded
+  in `vendor/mail-auth/PATCH.md`; `cargo deny` checks the copy's licence like any crate. The DKIM and
+  DMARC parity half of S4 runs against that copy in M2.
 - **`mail-builder` 1.0.0** calls `std::time::SystemTime::now()` when a `Date` or `Message-ID` header
   is missing and when generating MIME boundaries; on `wasm32-unknown-unknown` that panics. Every
   builder call in wasm code sets `Date` and `Message-ID` explicitly and builds multiparts through
@@ -240,9 +250,12 @@ Notes on specific crates (all read 2026-10-09):
 - **`ulid` 3.0.0** renamed `Ulid::new()` to `Ulid::generate()`. With default features off it has no
   `rand` dependency; IDs are built with `Ulid::from_parts(timestamp_ms, random)`.
 - **`hmac` 0.13.0** needs `use hmac::{Hmac, KeyInit, Mac};` for `new_from_slice`.
-- **`ammonia` 4.2.0** (crates.io sparse index, read 2026-10-10: published 2026-09-17; 4.2.1, published
-  2026-10-03, is newer than the two-week rule allows) already carries the fixes for RUSTSEC-2026-0193 and
-  RUSTSEC-2026-0213. It panics in `clean()` if `link_rel` is set while `rel` is an allowed attribute, if a
+- **`ammonia` 4.2.4** (published 2026-10-17, MIT OR Apache-2.0; crates.io API, read 2026-10-27). 4.2.0,
+  the earlier pin, fails `cargo deny` with RUSTSEC-2021-0157 and RUSTSEC-2021-0158 (fixed in 4.2.3) and
+  RUSTSEC-2026-0373 (fixed in 4.2.4): CSS `url()` escaping and SVG animation tags that allow XSS (found by
+  `cargo deny` during spike S4, 2026-10-27). A security fix overrides the two-week rule; 4.2.4 has the same
+  dependencies as 4.2.0 (`cssparser ^0.38`, `html5ever ^0.40`). It still carries the fixes for
+  RUSTSEC-2026-0193 and RUSTSEC-2026-0213. It panics in `clean()` if `link_rel` is set while `rel` is an allowed attribute, if a
   tag is in both `clean_content_tags` and `tags`, or if `attribute_filter` is set twice. The sanitiser
   builder in `core::sanitize` is constructed once and covered by a test that calls `clean("")`.
 - **`maud` 0.27.0** (published 2025-02-02, MIT OR Apache-2.0) has no default features; its `actix-web`
@@ -808,7 +821,8 @@ extern "C" {
   ([Search § 6.6](search.md#66-nightly-reconciliation)); S6 confirms the field names on the V2 binding.
 - **`AI.toMarkdown`** receives `[{ name, blob }]`, where `blob` is a `web_sys::Blob` built from the bytes
   with the sniffed MIME type. Each result has `name`, `format` (`markdown`, `text` or `error`),
-  `mimetype`, `tokens`, `data` and `error`
+  `mimeType` (so spelled by the binding as well as the REST API, S6), `tokens`, `data`, `error` and an `id`;
+  PDF output marks each page with a `### Page N` heading (S6, 2026-10-27)
   ([toMarkdown binding](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/usage/binding/),
   read 2026-10-09).
 

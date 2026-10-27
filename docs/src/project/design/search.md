@@ -1156,9 +1156,9 @@ re-embed costs roughly that rate times the token volume of the indexed text.
 5. **Normalise reranker scores.** The model page says the score "can be mapped to a float value in
    [0,1] by sigmoid function" but does not say whether the returned value is already mapped. The
    adapter treats a batch as logits if any score lies outside `[0, 1]` and applies
-   `p = 1 / (1 + e^(−score))` to the whole batch; otherwise `p = score`. Spike S6 records which form
-   the model returns and pins `RerankScore::Logit` or `RerankScore::Probability`, so the check is only
-   a guard.
+   `p = 1 / (1 + e^(−score))` to the whole batch; otherwise `p = score`. Spike S6 (2026-10-27) found
+   probabilities (`0.375` for a relevant context, `0.00008` for an unrelated one), so the adapter pins
+   `RerankScore::Probability` and the check is only a guard.
 6. **Final score.**
 
    ```text

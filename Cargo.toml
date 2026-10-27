@@ -10,6 +10,8 @@ members = [
     "crates/conformance",
     "xtask",
     "spikes/s1-bindings",
+    "spikes/s4-wasm-budget",
+    "spikes/s5-mcp",
     "spikes/s13-web-bot-auth",
 ]
 
@@ -39,7 +41,7 @@ mail-parser  = { version = "=0.11.9", features = ["full_encoding"] }   # encodin
 mail-auth    = { version = "=0.13.3", default-features = false,
                  features = ["dns-doh", "rust-crypto", "arc"] }        # arc is needed for verify_arc
 mail-builder = { version = "=1.0.0", default-features = false }       # drops gethostname
-ammonia      = "=4.2.0"                                               # 4.2.1 is newer than two weeks
+ammonia      = "=4.2.4"                                               # security fixes; see Rust workspace § 3
 
 # Serialisation, IDs, crypto
 serde      = { version = "=1.0.229", features = ["derive"] }

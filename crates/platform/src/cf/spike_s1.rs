@@ -1,4 +1,4 @@
-//! Spike S1 (build plan M1): every binding the design relies on, called from Rust through the entry glue
+//! Spikes S1, S2, S3 and S6 (build plan M1): every binding the design relies on, called from Rust through the entry glue
 //! of [`export_worker!`](crate::export_worker). Not shipped: `crates/worker` never enables `spike-s1`,
 //! and M4 deletes this module once its findings are in the platform traits.
 //!
@@ -51,7 +51,8 @@ impl WorkerApp for SpikeApp {
             ("POST", "/send/raw") => self.send_raw(&body).await,
             ("POST", "/queue/send") => self.queue_send(&body).await,
             ("POST", "/d1/batch") => self.d1_batch().await,
-            ("POST", "/do/txn") | ("POST", "/do/alarm") | ("GET", "/log") => {
+            ("POST", path) if path.starts_with("/s6/") => self.s6(path, &body, &req.body).await,
+            ("POST", "/do/txn") | ("POST", "/do/alarm") | ("POST", "/do/sql") | ("GET", "/log") => {
                 self.object(&req.method, &path, &req.body).await
             }
             _ => Err(format!("no route {} {path}", req.method)),
@@ -86,12 +87,14 @@ impl WorkerApp for SpikeApp {
             "local": local,
         });
         let _ = self.append("email", &entry).await;
-        match local.as_str() {
-            "reject" => EmailOutcome::Reject {
+        if local.starts_with("reject") {
+            EmailOutcome::Reject {
                 smtp: "spike s1 reject".to_owned(),
-            },
-            "tempfail" => EmailOutcome::TempFail,
-            _ => EmailOutcome::Accept,
+            }
+        } else if local.starts_with("tempfail") {
+            EmailOutcome::TempFail
+        } else {
+            EmailOutcome::Accept
         }
     }
 
@@ -293,6 +296,132 @@ impl SpikeApp {
             .await
     }
 
+    /// Spike S6: Vectorize, `AI.run` with the `gateway` option and `AI.toMarkdown` through
+    /// `platform::cf::externs`, and Durable Object IDs in the EU jurisdiction.
+    async fn s6(&self, path: &str, body: &Value, raw: &[u8]) -> Result<Value, String> {
+        use super::externs::{AiBinding, VectorizeIndex, binding};
+        let env = self.platform.env();
+        let gateway =
+            json!({ "gateway": { "id": "pi-spike-6", "collectLog": false, "skipCache": true } });
+        let js = |v: &Value| js_sys::JSON::parse(&v.to_string()).map_err(js_err);
+        let back = |v: JsValue| -> Result<Value, String> {
+            let text = js_sys::JSON::stringify(&v)
+                .map_err(js_err)?
+                .as_string()
+                .unwrap_or_default();
+            serde_json::from_str(&text).map_err(|e| e.to_string())
+        };
+        let wait = |p: Result<js_sys::Promise, JsValue>| async move {
+            wasm_bindgen_futures::JsFuture::from(p.map_err(js_err)?)
+                .await
+                .map_err(js_err)
+        };
+        match path {
+            "/s6/ai" => {
+                let ai: AiBinding = binding(env, "AI")?;
+                let model = str_field(body, "model")?;
+                let options = if body["no_gateway"] == true {
+                    json!({})
+                } else {
+                    gateway
+                };
+                let out =
+                    wait(ai.run_with_options(&model, &js(&body["input"])?, &js(&options)?)).await?;
+                back(out)
+            }
+            "/s6/upsert" => {
+                let index: VectorizeIndex = binding(env, "VECTORS")?;
+                let vectors = js_sys::Array::new();
+                for v in body["vectors"].as_array().into_iter().flatten() {
+                    let item = js(v)?;
+                    let values: Vec<f32> = v["values"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|x| x.as_f64())
+                        .map(|x| x as f32)
+                        .collect();
+                    js_sys::Reflect::set(
+                        &item,
+                        &"values".into(),
+                        &js_sys::Float32Array::from(values.as_slice()),
+                    )
+                    .map_err(js_err)?;
+                    vectors.push(&item);
+                }
+                back(wait(index.upsert(&vectors)).await?)
+            }
+            "/s6/query" => {
+                let index: VectorizeIndex = binding(env, "VECTORS")?;
+                let values: Vec<f32> = body["vector"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|x| x.as_f64())
+                    .map(|x| x as f32)
+                    .collect();
+                let out = wait(index.query(
+                    &js_sys::Float32Array::from(values.as_slice()),
+                    &js(&body["options"])?,
+                ))
+                .await?;
+                back(out)
+            }
+            "/s6/get" | "/s6/delete" => {
+                let index: VectorizeIndex = binding(env, "VECTORS")?;
+                let ids = js(&body["ids"])?.unchecked_into::<js_sys::Array>();
+                let out = if path == "/s6/get" {
+                    wait(index.get_by_ids(&ids)).await?
+                } else {
+                    wait(index.delete_by_ids(&ids)).await?
+                };
+                back(out)
+            }
+            "/s6/describe" => {
+                let index: VectorizeIndex = binding(env, "VECTORS")?;
+                back(wait(index.describe()).await?)
+            }
+            "/s6/markdown" => {
+                let ai: AiBinding = binding(env, "AI")?;
+                let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(raw));
+                let options = web_sys_blob_options("application/pdf")?;
+                let blob = js_sys::Reflect::construct(
+                    &js_sys::Reflect::get(&js_sys::global(), &"Blob".into())
+                        .map_err(js_err)?
+                        .unchecked_into::<js_sys::Function>(),
+                    &js_sys::Array::of2(&parts, &options),
+                )
+                .map_err(js_err)?;
+                let file = js(&json!({ "name": "spike.pdf" }))?;
+                js_sys::Reflect::set(&file, &"blob".into(), &blob).map_err(js_err)?;
+                back(wait(ai.to_markdown(&js_sys::Array::of1(&file), &JsValue::UNDEFINED)).await?)
+            }
+            "/s6/jurisdiction" => {
+                let ns = env.durable_object("SPIKE_OBJECT").map_err(err)?;
+                let eu = ns
+                    .unique_id_with_jurisdiction("eu")
+                    .map_err(err)?
+                    .to_string();
+                let plain = ns.unique_id().map_err(err)?.to_string();
+                let mut out = json!({ "eu_id": eu, "plain_id": plain });
+                for (key, id) in [("eu", eu), ("plain", plain)] {
+                    let stub = ns
+                        .id_from_string(&id)
+                        .map_err(err)?
+                        .get_stub()
+                        .map_err(err)?;
+                    let mut response = stub
+                        .fetch_with_str("https://object/do/whoami")
+                        .await
+                        .map_err(err)?;
+                    out[key] = response.json().await.map_err(err)?;
+                }
+                Ok(out)
+            }
+            other => Err(format!("no route {other}")),
+        }
+    }
+
     fn binding(&self) -> Result<worker::SendEmail, String> {
         self.platform
             .env()
@@ -323,6 +452,8 @@ impl ObjectApp for SpikeObject {
             "/append" => self.append(&req.body),
             "/log" => self.read_log(),
             "/do/txn" => self.txn(),
+            "/do/sql" => self.sql_script(&req.body),
+            "/do/whoami" => self.whoami(),
             "/do/alarm" => self.set_alarm().await,
             other => Err(format!("object: no route {other}")),
         };
@@ -358,6 +489,34 @@ impl SpikeObject {
             )
             .map_err(err)?;
         Ok(json!({ "ok": true }))
+    }
+
+    /// Runs `{"statements": [...]}` one by one in the object's SQLite and reports each result or error,
+    /// so the SQL checks of spikes S3 and S4 can be driven from outside the Worker.
+    fn sql_script(&self, body: &[u8]) -> Result<Value, String> {
+        let script: Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+        let sql = self.state.state().storage().sql();
+        let mut out = Vec::new();
+        for statement in script["statements"].as_array().into_iter().flatten() {
+            let text = statement.as_str().unwrap_or_default();
+            let result = sql
+                .exec(text, None)
+                .and_then(|cursor| cursor.to_array::<Value>());
+            out.push(match result {
+                Ok(rows) => json!({ "sql": text, "rows": rows }),
+                Err(e) => json!({ "sql": text, "error": e.to_string() }),
+            });
+        }
+        Ok(Value::Array(out))
+    }
+
+    /// The object's own ID and `ctx.id.jurisdiction` (S6).
+    fn whoami(&self) -> Result<Value, String> {
+        let id: JsValue = self.state.state().as_raw().id().map_err(js_err)?.into();
+        let jurisdiction = js_sys::Reflect::get(&id, &"jurisdiction".into())
+            .ok()
+            .and_then(|j| j.as_string());
+        Ok(json!({ "id": self.state.state().id().to_string(), "jurisdiction": jurisdiction }))
     }
 
     fn read_log(&self) -> Result<Value, String> {
@@ -413,6 +572,12 @@ impl SpikeObject {
             .map_err(err)?;
         Ok(json!({ "alarm_at_ms": at }))
     }
+}
+
+fn web_sys_blob_options(mime: &str) -> Result<JsValue, String> {
+    let options = js_sys::Object::new();
+    js_sys::Reflect::set(&options, &"type".into(), &mime.into()).map_err(js_err)?;
+    Ok(options.into())
 }
 
 fn count(sql: &worker::SqlStorage) -> Result<i64, String> {
@@ -474,4 +639,14 @@ fn js_err(e: JsValue) -> String {
         Some(code) => format!("{code}: {message}"),
         None => message,
     }
+}
+
+/// The current size of the wasm linear memory, in bytes (spike S4's peak-memory measure: linear memory
+/// only grows, so its size after a request is that request's peak or an earlier one's).
+pub fn wasm_memory_bytes() -> f64 {
+    wasm_bindgen::memory()
+        .unchecked_into::<js_sys::WebAssembly::Memory>()
+        .buffer()
+        .unchecked_into::<js_sys::ArrayBuffer>()
+        .byte_length() as f64
 }

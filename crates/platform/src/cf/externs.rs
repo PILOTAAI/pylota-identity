@@ -56,3 +56,61 @@ where
             .unwrap_or_else(|| "transaction failed".to_owned())),
     }
 }
+
+#[wasm_bindgen]
+extern "C" {
+    /// A Vectorize V2 index binding (`env.VECTORS`).
+    #[wasm_bindgen(extends = js_sys::Object)]
+    pub type VectorizeIndex;
+    #[wasm_bindgen(method, catch)]
+    pub fn upsert(
+        this: &VectorizeIndex,
+        vectors: &js_sys::Array,
+    ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(method, catch)]
+    pub fn query(
+        this: &VectorizeIndex,
+        vector: &js_sys::Float32Array,
+        options: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = deleteByIds)]
+    pub fn delete_by_ids(
+        this: &VectorizeIndex,
+        ids: &js_sys::Array,
+    ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = getByIds)]
+    pub fn get_by_ids(
+        this: &VectorizeIndex,
+        ids: &js_sys::Array,
+    ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(method, catch)]
+    pub fn describe(this: &VectorizeIndex) -> Result<js_sys::Promise, JsValue>;
+
+    /// The Workers AI binding (`env.AI`), with the options and `toMarkdown` that `worker` 0.8.7 lacks.
+    #[wasm_bindgen(extends = js_sys::Object)]
+    pub type AiBinding;
+    #[wasm_bindgen(method, catch, js_name = run)]
+    pub fn run_with_options(
+        this: &AiBinding,
+        model: &str,
+        inputs: &JsValue,
+        options: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = toMarkdown)]
+    pub fn to_markdown(
+        this: &AiBinding,
+        files: &js_sys::Array,
+        options: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
+}
+
+/// A binding from the `Env` JS object, unchecked: the runtime's binding objects have no constructor name
+/// to check against.
+pub fn binding<T: wasm_bindgen::JsCast>(env: &worker::Env, name: &str) -> Result<T, String> {
+    let value =
+        js_sys::Reflect::get(env, &name.into()).map_err(|_| format!("no binding {name}"))?;
+    if value.is_undefined() {
+        return Err(format!("binding {name} is undefined"));
+    }
+    Ok(value.unchecked_into())
+}

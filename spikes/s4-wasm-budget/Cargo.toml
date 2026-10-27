@@ -1,0 +1,24 @@
+[package]
+name = "pylota-identity-spike-s4"
+description = "Spike S4: wasm bundle size, cold start, CPU and memory for parsing large messages (not shipped)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The crates the Worker will link for inbound mail, so the bundle size is representative. mail-auth is
+# absent: no release of it resolves with reqwest 0.13 (see RESULT.md).
+[dependencies]
+pylota-identity-platform = { path = "../../crates/platform", features = ["spike-s1"] }
+mail-parser = { workspace = true }
+mail-builder = { workspace = true }
+ammonia = { workspace = true }
+sha2 = { workspace = true }
+rsa = { workspace = true, features = ["sha2"] }
+ed25519-dalek = { workspace = true }
+serde_json = { workspace = true }

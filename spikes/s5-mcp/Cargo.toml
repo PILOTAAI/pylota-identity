@@ -1,0 +1,16 @@
+[package]
+name = "pylota-identity-spike-s5"
+description = "Spike S5: MCP Streamable HTTP from a Worker with local JSON-RPC types, no tokio (not shipped)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pylota-identity-platform = { path = "../../crates/platform" }
+serde_json = { workspace = true }
