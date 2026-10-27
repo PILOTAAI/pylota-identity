@@ -50,6 +50,7 @@ exceptions = [
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-cli" },
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-conformance" },
     { allow = ["FSL-1.1-ALv2"], crate = "xtask" },
+    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-spike-s13" },
 ]
 
 [bans]

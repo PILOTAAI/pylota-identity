@@ -1,0 +1,16 @@
+[package]
+name = "pylota-identity-spike-s13"
+description = "Spike S13: the Web Bot Auth request format against Cloudflare's crawltest endpoint (not shipped)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+pylota-identity-core = { path = "../../crates/core" }
+base64 = { workspace = true }
+ed25519-dalek = { workspace = true }
+getrandom = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
