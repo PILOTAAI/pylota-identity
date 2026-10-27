@@ -1,2 +1,2 @@
-setup
-run 6: retired rule moved to exercise (needs a verified sender)
+exercise
+run 7: DKIM and MX published for pi-spike-11.pylotamail.com
