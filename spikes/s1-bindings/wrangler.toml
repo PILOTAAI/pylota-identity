@@ -24,3 +24,8 @@ max_retries = 5
 
 [[send_email]]
 name = "SEND"
+
+[[d1_databases]]
+binding = "SPIKE_DB"
+database_name = "pi-spike-1"
+database_id = "dcaa3617-6e60-4b7b-987e-0af033f01379"

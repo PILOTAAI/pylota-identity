@@ -14,3 +14,4 @@ deploy/.secrets*
 *.eml.local
 fuzz/artifacts/
 fuzz/corpus/*/.cache
+**/.wrangler/

@@ -15,6 +15,10 @@ come from `platform::export_worker!` and `platform::cf::glue`, which S1 wrote; t
 | Queues: produce with `delay_seconds` | **Pass.** A message sent with a 3 s delay was first delivered 5.1 s later |
 | Queues: `retry` with `delaySeconds` | **Pass**, with a timing note. Attempt 2 came 2.5 s after attempt 1 (delay 2 s); attempt 3 came 61 s after attempt 2 for the same 2 s delay. The design must not rely on a retry arriving at its delay; it is a lower bound |
 | Queues: `Message::timestamp()` across retries | **Pass.** The same value (`1793130068478`) on attempts 1, 2 and 3, and `attempts` counts 1, 2, 3 |
+| D1 `batch` | **Pass.** One transaction: a batch whose second statement violates the primary key leaves neither of its rows, and the error reaches Rust |
+| D1 query API, `POST /accounts/{a}/d1/database/{id}/query` | **Pass, atomic.** `INSERT p; INSERT q; INSERT p` in one `sql` string fails on the third statement and leaves no row; so does the `batch` array form. A statement naming a missing table fails before anything runs. **The fallback (re-runnable migrations and a lint, [CLI and setup §8.5](../../docs/src/project/design/cli.md#85-d1-migrations)) is not needed** |
+| Email event through the glue (local `workerd`, `wrangler dev` 4.139.0) | **Pass.** `from`, `to`, every header, the raw stream and `rawSize` reach Rust |
+| Local email endpoint, `POST /cdn-cgi/local/email` | Accept: `200 Worker successfully processed email`. `setReject("spike s1 reject")`: `400 Worker rejected email with the following reason: spike s1 reject`. A rejected promise (`TempFail`): `500` with the error and its stack. [Testing §6.4](../../docs/src/project/design/testing.md#64-injecting-inbound-mail) asserts these three statuses |
 | Email Sending onboarding of a subdomain through the API (also part of S9) | **Pass.** `POST /zones/{zone_id}/email/sending/subdomains` with `{"name": "pi-spike-1.pylotamail.com"}` returned it enabled with `return_path_domain = cf-bounce.pi-spike-1.pylotamail.com` and created the bounce MX, SPF, DKIM and DMARC records itself (the token holds no DNS permission) |
 
 ## Finding for M4
@@ -26,13 +30,12 @@ its test must assert that a nested object survives the round trip.
 
 ## Not yet run
 
-Blocked on the spike token: D1 · Edit, and on `pylotamail.com` DNS · Edit, Zone Settings · Edit and Email
-Routing Rules · Edit all answer `Authentication error`.
+Blocked on the spike token: on `pylotamail.com`, DNS · Edit and Email Routing Rules · Edit still answer
+`Authentication error` (Zone Settings now reads).
 
-- Receive an email event (`from`, `to`, headers, raw stream); `setReject`; a throwing handler.
+- Receive real mail through Email Routing: the deployed email event, `setReject` and a throwing handler as a
+  sending MTA sees them (the latter two are S2's subject too).
 - The structured `send()` with `replyTo`, `headers`, an `attachment` and an `inline` part with `contentId`,
   and the raw `EmailMessage` calendar send to two recipients (whether one message takes several envelope
   recipients, whether `text/calendar; method=REQUEST` and the composed `Message-ID` arrive unchanged). Mail is
   sent to `pi-spike-1.pylotamail.com`, routed back to the Worker, so what arrives can be read.
-- D1 `batch` atomicity and a multi-statement request to the D1 query API.
-- The local `wrangler dev` email endpoint's answer to `setReject`.
