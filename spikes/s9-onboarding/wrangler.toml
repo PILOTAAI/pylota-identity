@@ -1,0 +1,27 @@
+# Spike S9's throwaway Worker (build plan M1): S1's spike Worker, which logs every email it receives and
+# every message of its queue (the delivery events). Build it first with `worker-build --release` in
+# spikes/s1-bindings. Deleted when the spike ends, with the queue and every domain S9 onboards.
+name = "pi-spike-9"
+main = "../s1-bindings/build/index.js"
+compatibility_date = "2026-09-22"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "SPIKE_OBJECT"
+class_name = "SpikeObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SpikeObject"]
+
+[[queues.producers]]
+binding = "SPIKE_QUEUE"
+queue = "pi-spike-9-events"
+
+[[queues.consumers]]
+queue = "pi-spike-9-events"
+max_batch_size = 10
+max_batch_timeout = 1
+
+[[send_email]]
+name = "SEND"

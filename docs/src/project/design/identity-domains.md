@@ -642,11 +642,13 @@ The `cloudflare_zone` method. Needs `PM_CF_API_TOKEN` (`422 cf_token_required` w
    - Read first: `GET /zones/{zone_id}/dns_records?name.exact={domain}&type=MX`. Routing MX records
      (the hosts the routing API lists) already at the name mean Email Routing is on for it: refused or
      adopted as in [No adoption](#no-adoption-of-provider-objects).
-   - Otherwise `POST /zones/{zone_id}/email/routing/dns` with `{ "name": "{domain}" }` ("Enables Email
-     Routing for the zone and adds and locks the required MX and SPF DNS records", API reference read
-     2026-10-10), then read the records Cloudflare added at the name back by name and store their IDs in
-     `routing.record_ids`. For a subdomain the reference does not confirm that this call enables routing on
-     the subdomain only and leaves the apex's MX records alone; S9 verifies both.
+   - Otherwise `POST /zones/{zone_id}/email/routing/dns` ("Enables Email Routing for the zone and adds and
+     locks the required MX and SPF DNS records", API reference read 2026-10-10), then read the records
+     Cloudflare added at the name back by name and store their IDs in `routing.record_ids`. For a
+     subdomain the body is `{ "name": "{domain}" }`; for the **apex** it is `{}`, because the apex as
+     `name` is refused with `2007 Invalid Input: must be a subdomains of {zone}` (S9, 2026-10-27). S9 also
+     showed that enabling a subdomain leaves the apex's MX records and catch-all unchanged, and that a
+     zone whose apex routes enters `misconfigured` while the apex has no MX.
    - `PATCH /zones/{zone_id}/email/routing` with `{ "support_subaddress": true }`, so `user+token@`
      matches `user@` and the `+token` stays in `message.to`.
    - Apex: read `GET /zones/{zone_id}/email/routing/rules/catch_all` first (an enabled catch-all with
@@ -659,6 +661,7 @@ The `cloudflare_zone` method. Needs `PM_CF_API_TOKEN` (`422 cf_token_required` w
    [No adoption](#no-adoption-of-provider-objects). Otherwise
    `POST /zones/{zone_id}/email/sending/subdomains` with `{ "name": "{domain}" }` (the response holds `tag`, `dkim_selector` and `return_path_domain`; whether
    an apex can be onboarded through this endpoint is verified by S9), then
+   (S9: the apex onboards through this endpoint too, with `{ "name": "{zone}" }`.)
    `PATCH /zones/{zone_id}/email/sending/subdomains/{tag}` with
    `{ "drop_suppressed_recipients": false, "preview_enabled": false }`
    ([Outbound › G4](outbound.md#provider-suppressions-and-resending-g4); Email preview keeps a copy of
@@ -1118,11 +1121,15 @@ cannot delete an object this deployment did not create for this tenant (FR-DOM-1
      routing only. `PATCH /zones/{zone_id}/email/routing/dns` with `{ "name": "{domain}" }` ("Unlock MX
      records previously locked by Email Routing", API reference read 2026-10-10), then
      `DELETE /zones/{zone_id}/dns_records/{id}` for each ID in `routing.record_ids`. Email Routing stays on
-     for the zone and for every other name in it. That the unlock covers a subdomain's records, and that
-     deleting them stops routing for that name only and frees its place among the zone's 30 mail domains,
-     is not documented; spike S9 verifies it. If S9 shows the subdomain stays configured, its routing is
-     left with no rules (Cloudflare then refuses its mail at SMTP time) and `idvy doctor` lists it under
-     `routing.leftover_subdomains` with the dashboard step (Email Routing › Settings › Subdomains).
+     for the zone and for every other name in it. **Spike S9 (2026-10-27):** the unlock covers the
+     subdomain's records, and deleting them stops mail to that name only (senders get
+     `no available upstream`; the apex catch-all and another subdomain keep receiving). But the subdomain
+     **stays registered**: `GET /zones/{zone_id}/email/routing/dns?subdomain={domain}` still answers with
+     `mx.missing` errors, and it keeps its place among the zone's 30 mail domains. No API call removes it:
+     `DELETE /zones/{zone_id}/email/routing/dns?subdomain=…` ignores the parameter and disables routing for
+     the whole zone. So removal also deletes the name's rules, and `idvy doctor` lists the name under
+     `routing.leftover_subdomains` with the dashboard step (Email Routing › Settings › Subdomains), which
+     frees the place.
    - A zone this deployment created (`zone.created`) skips this step: `delete_zone` removes everything.
 4. `disable_sending` (when `sending.created`): `DELETE /zones/{zone_id}/email/sending/subdomains/{tag}`
    (this also removes its DNS records, which stay locked for as long as the sending domain exists: Email
