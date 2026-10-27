@@ -245,6 +245,7 @@ pub(crate) mod tests {
         s
     }
 
+    /// Covers: B6
     #[test]
     fn b6_tnef_unpacked() {
         let files = extract(&sample()).unwrap();
@@ -263,6 +264,7 @@ pub(crate) mod tests {
         );
     }
 
+    /// Covers: B6
     #[test]
     fn b6_tnef_malformed() {
         assert_eq!(extract(b"PK\x03\x04"), Err(TnefError::NotTnef));

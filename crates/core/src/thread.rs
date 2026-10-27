@@ -466,6 +466,7 @@ mod tests {
         db
     }
 
+    /// Covers: C1
     #[test]
     fn c1_token_only() {
         let r = resolve_inbound(&inputs(valid(3), None, &[]), &db());
@@ -498,6 +499,7 @@ mod tests {
         assert!(!resolve_inbound(&i, &db()).join_unverified);
     }
 
+    /// Covers: C1
     #[test]
     fn c1_no_headers_new_thread() {
         let r = resolve_inbound(&inputs(TokenCheck::Absent, None, &[]), &db());
@@ -510,6 +512,7 @@ mod tests {
         assert!(!r.join_unverified);
     }
 
+    /// Covers: C1
     #[test]
     fn c1_subject_never_joins() {
         // There is no subject input at all: identical subjects cannot merge threads.
@@ -520,6 +523,7 @@ mod tests {
         assert_eq!(r.decision, ThreadDecision::New);
     }
 
+    /// Covers: C9
     #[test]
     fn c9_header_join_non_participant() {
         let r = resolve_inbound(&inputs(TokenCheck::Absent, Some("a@x.example"), &[]), &db());
@@ -538,6 +542,7 @@ mod tests {
         assert!(resolve_inbound(&i, &db()).join_unverified);
     }
 
+    /// Covers: C10
     #[test]
     fn c10_forged_participant() {
         let mut i = inputs(TokenCheck::Absent, Some("a@x.example"), &[]);
@@ -627,6 +632,7 @@ mod tests {
         assert_eq!(split_references(&long).len(), 200);
     }
 
+    /// Covers: C2
     #[test]
     fn c2_trim_references() {
         let refs: Vec<String> = (0..150).map(|i| format!("{i}@x.example")).collect();
@@ -646,6 +652,7 @@ mod tests {
         );
     }
 
+    /// Covers: C2
     #[test]
     fn c2_rfc5322_parent_rules() {
         assert_eq!(
@@ -663,6 +670,7 @@ mod tests {
         );
     }
 
+    /// Covers: C8
     #[test]
     fn c8_prefixes() {
         for (input, want) in [

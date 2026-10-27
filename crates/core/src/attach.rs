@@ -688,6 +688,7 @@ pub(crate) mod tests {
 
     const DOCX_TYPES: &[u8] = br#"<Types><Override ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
 
+    /// Covers: B10
     #[test]
     fn b10_executables() {
         assert_eq!(
@@ -757,6 +758,7 @@ pub(crate) mod tests {
         );
     }
 
+    /// Covers: B10
     #[test]
     fn b10_macros() {
         let docm = zip(
@@ -800,6 +802,7 @@ pub(crate) mod tests {
         );
     }
 
+    /// Covers: B10
     #[test]
     fn b10_archive_bombs() {
         let big = vec![0u8; 1_000_000];
@@ -835,6 +838,7 @@ pub(crate) mod tests {
         assert_eq!(risk(&ok, "a.zip", "application/zip"), None);
     }
 
+    /// Covers: B10
     #[test]
     fn b10_encrypted() {
         let enc = zip(&[("secret.pdf", b"%PDF")], false, true);
@@ -894,6 +898,7 @@ pub(crate) mod tests {
         c.into_inner().into_inner()
     }
 
+    /// Covers: B10
     #[test]
     fn b10_ole() {
         let doc = ole(&["/WordDocument"], &[]);
@@ -919,6 +924,7 @@ pub(crate) mod tests {
         );
     }
 
+    /// Covers: B10
     #[test]
     fn b10_type_mismatch() {
         let z = zip(&[("a.txt", b"x")], false, false);

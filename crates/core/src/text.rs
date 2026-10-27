@@ -340,6 +340,7 @@ mod tests {
         derive_text(&doc.body())
     }
 
+    /// Covers: B4
     #[test]
     fn b4_html_only() {
         let html = r#"<h1>Booking  confirmed</h1><p>Hello <b>Ana</b>,<br>your car is

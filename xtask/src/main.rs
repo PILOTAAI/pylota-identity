@@ -1,8 +1,9 @@
 //! `cargo xtask <command>` (Rust workspace § 9). M0 has `build-worker`, `check-layering`
-//! and `trace`; M2 adds `gen-unicode`.
+//! and `trace`; M2 adds `gen-unicode` and `fuzz`.
 #![forbid(unsafe_code)]
 
 mod build_worker;
+mod fuzz;
 mod layering;
 mod size;
 mod trace;
@@ -11,8 +12,7 @@ mod unicode;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str =
-    "usage: cargo xtask <build-worker | check-layering | trace | gen-unicode [--check]>";
+const USAGE: &str = "usage: cargo xtask <build-worker | check-layering | trace | gen-unicode [--check] | fuzz --target <t> --time <s>>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -21,6 +21,7 @@ fn main() -> ExitCode {
         Some("build-worker") => build_worker::run(&root),
         Some("check-layering") => layering::run(&root),
         Some("trace") => trace::run(&root),
+        Some("fuzz") => fuzz::run(&root, &args[1..]),
         Some("gen-unicode") => unicode::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         _ => {
             eprintln!("{USAGE}");

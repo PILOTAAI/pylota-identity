@@ -763,6 +763,7 @@ mod tests {
         assert_eq!(builder().clean("").to_string(), "");
     }
 
+    /// Covers: B7
     #[test]
     fn b7_no_remote_fetch() {
         let html = r##"<html><head><style>body{background:url(https://t.example/a.png)}</style></head>
@@ -808,6 +809,7 @@ mod tests {
         }
     }
 
+    /// Covers: B11
     #[test]
     fn b11_hidden_elements() {
         let html = r##"<html><head><style>
@@ -858,6 +860,7 @@ mod tests {
         assert!(!parse("<p>plain</p><!-- a comment -->").hidden_text);
     }
 
+    /// Covers: B11
     #[test]
     fn b11_hidden_characters() {
         let (s, st) = strip_hidden_chars("pa\u{200b}y\u{feff}me\u{00ad}nt");

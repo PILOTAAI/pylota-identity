@@ -53,6 +53,7 @@ mod tests {
         }
     }
 
+    /// Covers: D3
     #[test]
     fn d3_reply_target() {
         let none = Written(&[]);

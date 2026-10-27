@@ -172,6 +172,7 @@ mod tests {
         }
     }
 
+    /// Covers: A2
     #[test]
     fn a2_layout_vectors() {
         let input = mac_input(b'0', IDN, 115);
@@ -210,6 +211,7 @@ mod tests {
         );
     }
 
+    /// Covers: A2
     #[test]
     fn a2_non_token_tags() {
         let r = ring(&[]);
@@ -241,6 +243,7 @@ mod tests {
         ));
     }
 
+    /// Covers: A2
     #[test]
     fn a2_rotated_kid() {
         let old = [ThreadKey {
@@ -268,6 +271,7 @@ mod tests {
         assert_eq!(verify(&ring(&old), IDN, &unknown), TokenCheck::Invalid);
     }
 
+    /// Covers: A12
     #[test]
     fn a12_budget() {
         let local = "a".repeat(40);
@@ -276,6 +280,7 @@ mod tests {
     }
 
     proptest! {
+        /// Covers: A2
         #[test]
         fn a2_round_trip(random in any::<u128>(), seq in 1u64..MAX_SEQ, kid in 0usize..32,
                          key in any::<[u8; 32]>(), bit in any::<prop::sample::Index>()) {

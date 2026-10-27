@@ -8,9 +8,14 @@
 pub mod address;
 pub mod attach;
 pub mod auth;
+pub mod citations;
 pub mod classify;
+pub mod dns;
+pub mod domain_fsm;
+pub mod fuzz;
 pub mod httpsig;
 pub mod ids;
+pub mod injection;
 pub mod jwk;
 pub mod mime;
 pub mod policy;
@@ -22,6 +27,8 @@ pub mod sns;
 pub mod text;
 pub mod thread;
 pub mod thread_token;
+pub mod triage_rules;
+pub mod trust;
 
 #[cfg(test)]
 mod tests {

@@ -1115,15 +1115,15 @@ dataset = "pylota_identity_metrics"
 | `cargo xtask release-gate --version <v>` | The security pre-release checklist as a gate ([Security §16](security.md#16-pre-release-checklist)). Fails unless `release-gates/v{version}.md` has every checklist item ticked, each with a link to its evidence (for `1.0.0`, the external penetration test report and its retest), and names its candidate (`candidate: v{version}-rc.N`), and unless the facts it can check itself hold: the tagged tree equals the candidate's except the workspace `version` and the gate file; the candidate's `release.yml` `gate` job and its `release-publish.yml` `staging` and `live` jobs passed, and so did this run's; the SBOMs, `SHA256SUMS`, `SHA256SUMS.sig` and attestations exist on both releases; no open issue carries the label `fuzz-crash`; CodeQL reports no open alert of high severity or above (read with `gh api`, read-only); the 24-hour fuzz record named in the file covers the candidate's commit. A manual `live --manual` run of the candidate is recorded in the same file with its date. With `--pre-release` (any `-rc.N` tag) it checks only this run's jobs and artefacts, the `fuzz-crash` label and CodeQL |
 | `cargo xtask stripe-setup [--live] --api-host <h> --out <file> [--catalog <file>] [--vat-from <date>]` | Sets up the Stripe account of a deployment that sells plans and writes the plan catalog with every Stripe ID filled in ([Billing › Stripe account setup](billing.md#stripe-account-setup)). Uses `STRIPE_SETUP_KEY`, never a Worker secret |
 
-Fuzz targets (each a `fuzz_target!` over `&[u8]` calling one `core` entry point):
+Fuzz targets (each a `fuzz_target!` over `&[u8]` calling one harness of `core::fuzz`, which calls the entry points below and asserts the invariants of [Testing § 8](testing.md); `core::fuzz_regressions::replay_all` runs the same harnesses over committed crash inputs and the corpus):
 
 | Target | Entry point |
 |---|---|
-| `mime_parse` | `core::mime::parse` with caps |
+| `mime_parse` | `core::mime::parse` with caps, and `parse_headers_only` |
 | `query_parse` | `core::query::parse` |
-| `address_parse` | `core::address::{parse, validate_username}` |
-| `sanitize` | `core::sanitize::{sanitize_html, derive_text, strip_hidden}` |
-| `dsn_parse` | `core::classify::parse_dsn` and `parse_mdn` |
+| `address_parse` | `core::address::{parse_envelope, validate_username, fold}` |
+| `sanitize` | `core::sanitize::{sanitize, strip_hidden_chars}` and `core::text::derive_text` |
+| `dsn_parse` | `core::mime::dsn::parse` and `core::classify::classify` (which reads DSNs and MDNs) |
 | `quote_strip` | `core::quote::extract_new_content` |
 | `refs_extract` | `core::refs::extract` with every pack |
 | `thread_token` | `core::thread_token::verify` |

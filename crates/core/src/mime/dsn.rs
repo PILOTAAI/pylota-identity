@@ -13,7 +13,8 @@ pub const MAX_DIAGNOSTIC: usize = 512;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct DsnRecipient {
-    /// The address of `Final-Recipient` (its `rfc822;` type removed), lower case.
+    /// The address of `Final-Recipient` (its `rfc822;` type removed), normalised; `None` when it is not
+    /// an address.
     pub final_recipient: Option<String>,
     /// `failed`, `delayed`, `delivered`, `relayed` or `expanded`, lower case.
     pub action: Option<String>,
@@ -79,9 +80,11 @@ pub fn parse(body: &str) -> Dsn {
         let mut r = DsnRecipient::default();
         for (name, value) in fields(block) {
             match name.as_str() {
-                "final-recipient" => r.final_recipient = Some(typed(&value).to_lowercase()),
+                "final-recipient" => {
+                    r.final_recipient = crate::mime::normalise_address(&typed(&value))
+                }
                 "original-recipient" if r.final_recipient.is_none() => {
-                    r.final_recipient = Some(typed(&value).to_lowercase());
+                    r.final_recipient = crate::mime::normalise_address(&typed(&value));
                 }
                 "action" => r.action = Some(value.to_ascii_lowercase()),
                 "status" => {
@@ -147,5 +150,8 @@ mod tests {
         assert_eq!(d.recipients[0].diagnostic_code.as_ref().unwrap().len(), 512);
         assert_eq!(parse(""), Dsn::default());
         assert_eq!(parse("\n\n\n:::\n\n \n").recipients.len(), 0);
+        let junk =
+            parse("Reporting-MTA: x\n\nFinal-Recipient: rfc822; not an address\nAction: failed\n");
+        assert_eq!(junk.recipients[0].final_recipient, None);
     }
 }

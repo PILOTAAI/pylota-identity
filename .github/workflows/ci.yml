@@ -1,6 +1,6 @@
 # The pull-request gate (Rust workspace § 10, Testing § 12). Build plan M0 starts it with these jobs:
 # fmt, clippy, test, layering, wasm (with the NFR-SEC-2 size budget), deny, docs and trace. Later
-# milestones add itest, browser, fuzz-smoke, audit, openapi and skills.
+# milestones add itest, browser, audit, openapi and skills; M2 adds fuzz-smoke.
 #
 # Every action is pinned to a full commit SHA, read from the action's releases on 2026-10-19. The
 # toolchain comes from rust-toolchain.toml; the tools are exact versions installed with --locked. No
@@ -24,6 +24,7 @@ env:
   WORKER_BUILD_VERSION: "0.8.7" # matches worker 0.8.7 (ADR 0001)
   CARGO_DENY_VERSION: "0.20.2" # crates.io, 2026-07-09
   MDBOOK_VERSION: "0.5.4" # as in site.yml
+  CARGO_FUZZ_VERSION: "0.13.2" # crates.io, 2026-06-09
 
 jobs:
   fmt:
@@ -70,6 +71,34 @@ jobs:
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
       - run: cargo test --locked --workspace
+
+  fuzz-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build plan M2; query_parse joins with core::query, ical_parse with M32.
+        target: [mime_parse, address_parse, sanitize, dsn_parse]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchains (workspace and fuzz/rust-toolchain.toml)
+        run: |
+          rustup toolchain install --no-self-update
+          cd fuzz && rustup toolchain install --no-self-update
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+      - run: cargo xtask fuzz --target ${{ matrix.target }} --time 60
+      - name: Keep the crash input
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
 
   layering:
     runs-on: ubuntu-24.04

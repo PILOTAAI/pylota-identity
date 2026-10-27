@@ -163,6 +163,7 @@ pub(crate) mod tests {
         )
     }
 
+    /// Covers: B9
     #[test]
     fn b9_opaque_signed_content() {
         let content = b"Content-Type: text/plain\r\n\r\nSigned body\r\n";
@@ -183,6 +184,7 @@ pub(crate) mod tests {
         assert_eq!(signed_content(&info).as_deref(), Some(&b"x"[..]));
     }
 
+    /// Covers: B9
     #[test]
     fn b9_malformed_is_none() {
         assert_eq!(signed_content(b""), None);

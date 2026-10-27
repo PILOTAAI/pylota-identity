@@ -815,6 +815,7 @@ mod tests {
         assert_eq!(aar.authserv_id, "mx.google.com");
     }
 
+    /// Covers: D9
     #[test]
     fn d9_forged_ar_ignored() {
         let forged =
@@ -893,6 +894,7 @@ mod tests {
         })
     }
 
+    /// Covers: D1
     #[test]
     fn d1_no_dmarc_record() {
         let a = answers(&[("_dmarc.mail.x.example", "NX"), ("_dmarc.x.example", "NX")]);
@@ -922,6 +924,7 @@ mod tests {
         assert_eq!((d.aligned_by, d.spf_aligned), (Some(AlignedBy::Spf), true));
     }
 
+    /// Covers: D1
     #[test]
     fn d1_p_none_unaligned() {
         let a = answers(&[(
@@ -944,6 +947,7 @@ mod tests {
         assert!(!Verdict::Unaligned.may_quarantine());
     }
 
+    /// Covers: D1
     #[test]
     fn d1_verdict_table() {
         let reject = answers(&[("_dmarc.x.example", "v=DMARC1; p=reject")]);
@@ -1020,6 +1024,7 @@ mod tests {
         assert!(parse_dmarc("v=spf1 -all").is_none());
     }
 
+    /// Covers: D1
     #[test]
     fn d1_strict_alignment() {
         let a = answers(&[("_dmarc.x.example", "v=DMARC1; p=reject; adkim=s; aspf=s")]);

@@ -286,6 +286,7 @@ mod tests {
 
     const PLAIN: &str = "From: Ana <ana@example.com>\r\nSubject: Booking\r\n\r\nHello";
 
+    /// Covers: B8
     #[test]
     fn b8_mdn_request_ignored() {
         let with_request = format!("Disposition-Notification-To: ana@example.com\r\n{PLAIN}");
@@ -308,6 +309,7 @@ mod tests {
         );
     }
 
+    /// Covers: D6
     #[test]
     fn d6_dsn() {
         let raw = "From: Mail Delivery System <MAILER-DAEMON@mx.example.net>\r\nSubject: Undelivered Mail Returned to Sender\r\n\
@@ -334,6 +336,7 @@ mod tests {
         assert_eq!(d.original_from.as_deref(), Some("desk@agents.example"));
     }
 
+    /// Covers: D6
     #[test]
     fn d6_lists_and_auto_replies() {
         let list = format!("List-Id: <ops.example.com>\r\nPrecedence: bulk\r\n{PLAIN}");
@@ -391,6 +394,7 @@ mod tests {
         assert_eq!(Kind::List.with_calendar(), Kind::List);
     }
 
+    /// Covers: D6
     #[test]
     fn d6_send_rules() {
         assert!(auto_reply_allowed(Kind::Normal, 0, 2));

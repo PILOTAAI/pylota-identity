@@ -1,0 +1,52 @@
+# cargo-fuzz project (Testing § 8, Rust workspace § 9): outside the workspace, nightly only. Each target
+# calls one harness of `pylota_identity_core::fuzz`. Run with `cargo xtask fuzz --target <t> --time <s>`.
+[package]
+name = "pylota-identity-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "FSL-1.1-ALv2"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13" # crates.io, 2026-06-04
+pylota-identity-core = { path = "../crates/core" }
+
+# Its own workspace, so the main workspace's members and lockfile are untouched.
+[workspace]
+
+[patch.crates-io]
+mail-auth = { path = "../vendor/mail-auth" }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "mime_parse"
+path = "fuzz_targets/mime_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "address_parse"
+path = "fuzz_targets/address_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sanitize"
+path = "fuzz_targets/sanitize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dsn_parse"
+path = "fuzz_targets/dsn_parse.rs"
+test = false
+doc = false
+bench = false

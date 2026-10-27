@@ -689,6 +689,7 @@ mod tests {
         s.into_bytes()
     }
 
+    /// Covers: B2
     #[test]
     fn b2_caps() {
         let shallow = parse(&nested_multiparts(10), &Caps::default());
@@ -724,6 +725,7 @@ mod tests {
         assert!(empty.message_id.ends_with("@synthetic.invalid"));
     }
 
+    /// Covers: B9
     #[test]
     fn b9_signed_and_encrypted() {
         use base64::Engine as _;
@@ -756,6 +758,7 @@ mod tests {
         assert_eq!(p.text, None);
     }
 
+    /// Covers: B13
     #[test]
     fn b13_first_from_header_wins() {
         let raw =

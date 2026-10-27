@@ -396,6 +396,7 @@ mod tests {
         validate_username(input, DomainClass::Tenant, LOCAL_PART_MAX, "", &[])
     }
 
+    /// Covers: A1
     #[test]
     fn a1_case_and_dots() {
         assert_eq!(platform("Bookings.Acme").unwrap(), "bookings.acme");
@@ -431,6 +432,7 @@ mod tests {
         }
     }
 
+    /// Covers: A1
     #[test]
     fn a1_syntax() {
         for bad in [
@@ -451,6 +453,7 @@ mod tests {
         assert!(platform("a-b_c.d9").is_ok());
     }
 
+    /// Covers: A3
     #[test]
     fn a3_smtputf8_refused() {
         assert_eq!(platform("josé"), Err(AddressError::Unsupported));
@@ -461,6 +464,7 @@ mod tests {
         );
     }
 
+    /// Covers: A4
     #[test]
     fn a4_reserved_and_confusable() {
         for name in [
@@ -514,6 +518,7 @@ mod tests {
         );
     }
 
+    /// Covers: A4
     #[test]
     fn a4_role_names_by_domain() {
         for name in [
@@ -552,6 +557,7 @@ mod tests {
         );
     }
 
+    /// Covers: A12
     #[test]
     fn a12_local_part_budget() {
         let name = "a".repeat(24);

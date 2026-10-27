@@ -1,0 +1,4 @@
+# cargo-fuzz needs nightly (-Z sanitizer). Pinned to a nightly at least two weeks old (rustup, 2026-10-27).
+[toolchain]
+channel = "nightly-2026-10-12"
+profile = "minimal"
