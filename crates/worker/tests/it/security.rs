@@ -306,6 +306,135 @@ const CASES: &[(&str, Case)] = &[
             Some(json!({ "since": "2026-01-01T00:00:00Z" })),
         )
     }),
+    // Sending, suppressions and lists (M9).
+    ("sendMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages", t.identity),
+            Some(json!({ "to": ["jo@example.net"], "subject": "x", "text": "x" })),
+        )
+    }),
+    ("replyToMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/reply", t.identity),
+            Some(json!({ "text": "x" })),
+        )
+    }),
+    ("replyAllToMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/reply-all", t.identity),
+            Some(json!({ "text": "x" })),
+        )
+    }),
+    ("forwardMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/forward", t.identity),
+            Some(json!({ "to": ["jo@example.net"] })),
+        )
+    }),
+    ("cancelMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/cancel", t.identity),
+            None,
+        )
+    }),
+    ("resolveMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/resolve", t.identity),
+            Some(json!({ "outcome": "sent" })),
+        )
+    }),
+    ("listSuppressions", |t| {
+        (
+            "GET",
+            format!("/v1/tenants/{}/suppressions", t.tenant),
+            None,
+        )
+    }),
+    ("createSuppression", |t| {
+        (
+            "POST",
+            format!("/v1/tenants/{}/suppressions", t.tenant),
+            Some(json!({ "address": "jo@example.net" })),
+        )
+    }),
+    ("deleteSuppression", |t| {
+        (
+            "DELETE",
+            format!("/v1/tenants/{}/suppressions/jo%40example.net", t.tenant),
+            None,
+        )
+    }),
+    ("listListEntries", |t| {
+        (
+            "GET",
+            format!("/v1/tenants/{}/lists/send/block", t.tenant),
+            None,
+        )
+    }),
+    ("getListEntry", |t| {
+        (
+            "GET",
+            format!("/v1/tenants/{}/lists/send/block/%40example.net", t.tenant),
+            None,
+        )
+    }),
+    ("putListEntry", |t| {
+        (
+            "PUT",
+            format!("/v1/tenants/{}/lists/send/block/%40example.net", t.tenant),
+            Some(json!({})),
+        )
+    }),
+    ("deleteListEntry", |t| {
+        (
+            "DELETE",
+            format!("/v1/tenants/{}/lists/send/block/%40example.net", t.tenant),
+            None,
+        )
+    }),
+    ("listIdentityListEntries", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/lists/send/block", t.identity),
+            None,
+        )
+    }),
+    ("getIdentityListEntry", |t| {
+        (
+            "GET",
+            format!(
+                "/v1/identities/{}/lists/send/block/%40example.net",
+                t.identity
+            ),
+            None,
+        )
+    }),
+    ("putIdentityListEntry", |t| {
+        (
+            "PUT",
+            format!(
+                "/v1/identities/{}/lists/send/block/%40example.net",
+                t.identity
+            ),
+            Some(json!({})),
+        )
+    }),
+    ("deleteIdentityListEntry", |t| {
+        (
+            "DELETE",
+            format!(
+                "/v1/identities/{}/lists/send/block/%40example.net",
+                t.identity
+            ),
+            None,
+        )
+    }),
 ];
 
 const MISSING_WEBHOOK: &str = "whk_01ARYZ6S41TSV4RRFFQ69G5FAV";
@@ -407,6 +536,8 @@ fn cross_tenant_matrix() {
         "attachments:read",
         "search:read",
         "webhooks:manage",
+        "messages:send",
+        "suppressions:manage",
     ];
     let (victim_partner, vk) = partner("victim", &all);
     let vt = tenant(&vk, "victim");
@@ -450,7 +581,7 @@ fn cross_tenant_matrix() {
     let at = tenant(&p, "attacker");
     let (_, tenant_attacker) = mint(
         &p,
-        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage"] }),
+        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage", "messages:send", "suppressions:manage"] }),
     );
     let (_, partner_attacker) = partner("attacker", &all);
     tenant(&partner_attacker, "attacker_own");

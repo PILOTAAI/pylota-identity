@@ -888,6 +888,11 @@ fn g4_suppressed_after_submit() {
     let _f = fakes::Reset;
     fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let mid = send_ok(&s, &["late@example.net"], "g4 late");
+    // Held at transport whatever else takes the queue fault: the tenant's sending is paused.
+    d1w(
+        "UPDATE tenants SET sending_paused_at = 1, sending_pause_reason = 'abuse_threshold' WHERE id = ?1",
+        json!([s.tid]),
+    );
     assert_eq!(
         post(
             &format!("/v1/tenants/{}/suppressions", s.tid),
@@ -896,6 +901,10 @@ fn g4_suppressed_after_submit() {
         )
         .status,
         201
+    );
+    d1w(
+        "UPDATE tenants SET sending_paused_at = NULL, sending_pause_reason = NULL WHERE id = ?1",
+        json!([s.tid]),
     );
     crate::queue_send(
         "pm-outbound",
