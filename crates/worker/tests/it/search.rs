@@ -511,3 +511,77 @@ fn related_excludes_thread() {
     );
     assert_eq!(missing.code(), "message_not_found");
 }
+
+/// Agentic searches count once each against the tenant's daily cap, whatever their steps; a request
+/// refused before Init never counts; a partner key searches its own tenant on the tenant route and gets
+/// `404 tenant_not_found` for another partner's.
+#[test]
+fn agentic_counted_once() {
+    let _reset = fakes::Reset;
+    let (_, pk) = partner(
+        "agentic count",
+        &[
+            "tenants:manage",
+            "search:read",
+            "search:agentic",
+            "policy:write",
+        ],
+    );
+    let own = tenant(&pk, "agentic count own");
+    let tid = own["id"].as_str().unwrap().to_owned();
+    identity(&pk, &tid, "countme");
+    let (_, other) = partner("agentic count other", &["tenants:manage"]);
+    let theirs = tenant(&other, "agentic count theirs");
+    let p = platform();
+    assert_eq!(
+        crate::patch(
+            &format!("/v1/tenants/{tid}/policy"),
+            &p,
+            json!({ "search": { "agentic_daily_cap": 2 } })
+        )
+        .status,
+        200
+    );
+    let path = format!("/v1/tenants/{tid}/search");
+    let step = |id: &str, q: &str| {
+        crate::agentic::completion(
+            &[(id, "search", json!({ "q": q, "mode": "keyword" }))],
+            None,
+        )
+    };
+    // Invalid bodies: never counted.
+    for body in [
+        json!({ "q": "", "mode": "agentic" }),
+        json!({ "q": "x", "mode": "agentic", "budget": { "max_steps": 11 } }),
+        json!({ "q": "\u{0}", "mode": "agentic", "limit": 3 }),
+    ] {
+        assert_eq!(post(&path, &pk, body).status, 400);
+    }
+    // Two valid runs of several model calls each.
+    for _ in 0..2 {
+        fakes::ai_script(
+            "qwen",
+            vec![
+                step("a", "one"),
+                step("b", "two"),
+                crate::agentic::completion(&[], Some("READY")),
+                crate::agentic::answer(&[], "insufficient_evidence"),
+            ],
+        );
+        let r = post(&path, &pk, json!({ "q": "anything", "mode": "agentic" }));
+        assert_eq!(r.status, 200, "{}", r.body);
+    }
+    let r = post(&path, &pk, json!({ "q": "anything", "mode": "agentic" }));
+    assert_eq!(
+        (r.status, r.code()),
+        (429, "agentic_budget_exhausted"),
+        "{}",
+        r.body
+    );
+    let r = post(
+        &format!("/v1/tenants/{}/search", theirs["id"].as_str().unwrap()),
+        &pk,
+        json!({ "q": "anything", "mode": "agentic" }),
+    );
+    assert_eq!(r.code(), "tenant_not_found");
+}

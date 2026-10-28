@@ -170,3 +170,55 @@ fn tenant_fanout_p95() {
         1_000,
     );
 }
+
+/// NFR-PERF-6: agentic search, total p95 and time to the first `evidence` event, against 8 s and
+/// 1.5 s, with a scripted planner (two searches, a read, an answer) over a seeded mailbox.
+#[test]
+#[ignore = "nightly: seeds a mailbox (Testing § 6.9)"]
+fn agentic_p95() {
+    use crate::agentic::{answer, completion};
+    let (tid, idn, _, _) = crate::mailbox_fixture("bench agentic");
+    seed(&tid, &idn, scale(5_000), 21);
+    let p = crate::platform();
+    let (_, key) = crate::mint(
+        &p,
+        json!({ "name": "agentic", "level": "tenant", "tenant_id": tid, "permissions": ["search:read", "search:agentic"] }),
+    );
+    let path = format!("/v1/identities/{idn}/search");
+    let (mut total, mut first) = (Vec::new(), Vec::new());
+    for q in QUERIES.iter().take(6) {
+        crate::fakes::ai_script(
+            "qwen",
+            vec![
+                completion(
+                    &[("a", "search", json!({ "q": q, "mode": "keyword" }))],
+                    None,
+                ),
+                completion(
+                    &[("b", "search", json!({ "q": "invoice", "mode": "hybrid" }))],
+                    None,
+                ),
+                completion(&[], Some("READY")),
+                answer(&[], "insufficient_evidence"),
+            ],
+        );
+        let t = Instant::now();
+        let mut seen: Option<u128> = None;
+        let (status, _, _) = crate::stream_post(
+            &path,
+            &key,
+            json!({ "q": q, "mode": "agentic", "stream": true }),
+            |text| {
+                if seen.is_none() && text.contains("event: evidence") {
+                    seen = Some(t.elapsed().as_millis());
+                }
+                false
+            },
+        );
+        assert_eq!(status, 200);
+        total.push(t.elapsed().as_millis());
+        first.push(seen.unwrap_or(u128::MAX));
+    }
+    report("NFR-PERF-6", "agentic search", p95(total), 8_000);
+    report("NFR-PERF-6", "agentic first evidence", p95(first), 1_500);
+}

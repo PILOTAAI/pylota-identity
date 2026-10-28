@@ -805,7 +805,7 @@ request ([Testing § 6.9](design/testing.md#69-benchmarks)).
 
 **Acceptance:**
 
-- E1 (fenced, and `core::injection::e1_fact_refs_normalised` for the `why=` line), F10–F13, F17
+- E1 (`it::agentic::e1_fenced`, and `core::injection::e1_fact_refs_normalised` for the `why=` line; its triage part in M12), F10–F13, F17
   (`core::citations::f17_untrusted_sources_removed`, `it::agentic::f17_answer_untrusted`), F18
   (`core::citations::f18_refs_from_authenticated_sources`).
 - The `contacts` tool at tenant scope (`it::agentic::contacts_tenant_merge`), and one count per validated

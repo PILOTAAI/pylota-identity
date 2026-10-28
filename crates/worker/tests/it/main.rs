@@ -2,6 +2,7 @@
 //! `PM_ITEST_URL`, `PM_ITEST_CA`, `PM_ITEST_KEY` (a platform key with every platform permission),
 //! `PM_ITEST_TOKEN`, and the local D1 location for the few fixtures only setup writes directly.
 
+mod agentic;
 mod auth;
 mod bench;
 mod conformance;
@@ -266,6 +267,42 @@ pub fn owner_key(tenant_id: &str, permissions: &[&str]) -> String {
         serde_json::to_string(permissions).unwrap()
     ));
     token
+}
+
+/// An event-stream request read until `stop` holds for the text so far (or the stream ends); the
+/// connection is then dropped. Answers the status and the text read, and when the stream ended by
+/// itself.
+pub fn stream_post(
+    path: &str,
+    key: &str,
+    body: Value,
+    mut stop: impl FnMut(&str) -> bool,
+) -> (u16, String, bool) {
+    use std::io::Read as _;
+    fakes::start();
+    let mut r = client()
+        .post(format!("{}{path}", env("PM_ITEST_URL")))
+        .bearer_auth(key)
+        .header("accept", "text/event-stream")
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .expect("the Worker answers");
+    let status = r.status().as_u16();
+    let mut text = String::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match r.read(&mut buf) {
+            Ok(0) => return (status, text, true),
+            Ok(n) => {
+                text.push_str(&String::from_utf8_lossy(&buf[..n]));
+                if stop(&text) {
+                    return (status, text, false);
+                }
+            }
+            Err(_) => return (status, text, true),
+        }
+    }
 }
 
 /// Triggers a cron through wrangler's scheduled-event endpoint.
