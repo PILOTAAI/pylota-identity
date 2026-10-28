@@ -37,7 +37,8 @@ fn b12_extraction_failure() {
     assert_eq!(t.body["status"], "unavailable");
 }
 
-/// `Triage` acks without work until M12: triage stays `pending`, nothing is dead-lettered.
+/// Every job kind has its arm since M12 (the M7 build acked `Triage` without work): a delivered
+/// message's triage ends `done`, and nothing is dead-lettered.
 #[test]
 fn job_kinds_before_milestone() {
     let (_, idn, addr, key) = mailbox_fixture("kinds");
@@ -50,15 +51,11 @@ fn job_kinds_before_milestone() {
         200
     );
     let m = wait_stored(&idn, &key, "received", 1);
-    std::thread::sleep(Duration::from_secs(6));
-    let full = get(
-        &format!(
-            "/v1/identities/{idn}/messages/{}",
-            m[0]["id"].as_str().unwrap()
-        ),
-        &key,
-    );
-    assert_eq!(full.body["triage"]["status"], "pending", "{}", full.body);
+    let id = m[0]["id"].as_str().unwrap().to_owned();
+    crate::eventually(30, "triage done", || {
+        let full = get(&format!("/v1/identities/{idn}/messages/{id}"), &key);
+        (full.body["triage"]["status"] == "done").then_some(())
+    });
     // Only this test's jobs: an earlier test's fault can dead-letter its own.
     assert!(
         !crate::fakes::queued("pm-index-dlq")

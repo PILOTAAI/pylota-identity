@@ -65,7 +65,8 @@ fn release_transaction() {
     let types: Vec<String> = crate::indexed(&idn)
         .into_iter()
         .map(|(t, _)| t)
-        .filter(|t| t.starts_with("message."))
+        // `message.triaged` follows the release asynchronously (M12).
+        .filter(|t| t.starts_with("message.") && t != "message.triaged")
         .collect();
     assert_eq!(
         types,

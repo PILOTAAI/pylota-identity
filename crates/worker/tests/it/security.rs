@@ -237,6 +237,13 @@ const CASES: &[(&str, Case)] = &[
             None,
         )
     }),
+    ("rerunTriage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/triage", t.identity),
+            Some(json!({})),
+        )
+    }),
     ("releaseMessage", |t| {
         (
             "POST",

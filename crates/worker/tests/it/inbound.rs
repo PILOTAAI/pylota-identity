@@ -404,7 +404,8 @@ fn d13_unsolicited_flood_caps() {
     crate::alarm(&idn);
     let evented = crate::indexed(&idn)
         .into_iter()
-        .filter(|(t, _)| t.starts_with("message."))
+        // `message.triaged` follows asynchronously (M12) and is not what this counts.
+        .filter(|(t, _)| t.starts_with("message.") && t != "message.triaged")
         .count();
     assert_eq!(evented, 122);
 }

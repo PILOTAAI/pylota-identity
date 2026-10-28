@@ -217,24 +217,36 @@ pub fn partner(name: &str, permissions: &[&str]) -> (String, String) {
     (id, secret)
 }
 
-/// Runs SQL on the local D1 (for fixtures only `idvy setup` or the console writes).
+/// Runs SQL on the local D1 (for fixtures only `idvy setup` or the console writes). The file is the
+/// running workerd's, so a busy database is tried again.
 pub fn d1(sql: &str) -> Value {
-    let out = Command::new(env("PM_ITEST_WRANGLER"))
-        .args([
-            "d1",
-            "execute",
-            "pylota-identity",
-            "--local",
-            "--json",
-            "--persist-to",
-        ])
-        .arg(env("PM_ITEST_STATE"))
-        .arg("--config")
-        .arg(env("PM_ITEST_CONFIG"))
-        .args(["--command", sql])
-        .env("CI", "1")
-        .output()
-        .expect("wrangler d1 execute");
+    let mut tries = 0;
+    let out = loop {
+        let out = Command::new(env("PM_ITEST_WRANGLER"))
+            .args([
+                "d1",
+                "execute",
+                "pylota-identity",
+                "--local",
+                "--json",
+                "--persist-to",
+            ])
+            .arg(env("PM_ITEST_STATE"))
+            .arg("--config")
+            .arg(env("PM_ITEST_CONFIG"))
+            .args(["--command", sql])
+            .env("CI", "1")
+            .output()
+            .expect("wrangler d1 execute");
+        tries += 1;
+        if out.status.success()
+            || tries == 5
+            || !String::from_utf8_lossy(&out.stderr).contains("SQLITE_BUSY")
+        {
+            break out;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    };
     assert!(
         out.status.success(),
         "{}",
