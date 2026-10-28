@@ -212,7 +212,7 @@ fn g1_in_flight() {
     let s = open_sender("g1 flight", "live");
     let m0 = receive(&s, "jo@example.net", "Flight");
     let _f = fakes::Reset;
-    fakes::fault_any("queue.send", "error", 2);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let first = submit(
         &format!("/v1/identities/{}/messages/{m0}/reply", s.iid),
         &s.key,
@@ -241,7 +241,7 @@ fn c4_thread_lock() {
     let s = open_sender("c4 lock", "live");
     let m0 = receive(&s, "jo@example.net", "Lock");
     let _f = fakes::Reset;
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let path = format!("/v1/identities/{}/messages/{m0}/reply", s.iid);
     let a = submit(&path, &s.key, "c4-a", json!({ "text": "first" }));
     assert_eq!(a.status, 202, "{}", a.body);
@@ -263,7 +263,7 @@ fn c4_thread_lock() {
 fn cancel_queued() {
     let s = open_sender("cancel q", "live");
     let _f = fakes::Reset;
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let mid = send_ok(&s, &["jo@example.net"], "Cancel me");
     let r = post(
         &format!("/v1/identities/{}/messages/{mid}/cancel", s.iid),
@@ -304,7 +304,7 @@ fn cancel_queued() {
         "cancel ps",
         json!({ "require_known_recipient": false }),
     );
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let pm = send_ok(&ps, &["jo@example.net"], "Partner held");
     assert_eq!(
         patch(
@@ -319,7 +319,14 @@ fn cancel_queued() {
         "pm-outbound",
         json!({ "kind": "send", "v": 1, "tenant_id": ps.tid, "identity_id": ps.iid, "message_id": pm, "request_id": "req_y" }),
     );
-    let m = wait_status(&ps, &pm, "canceled");
+    // The partner's keys are refused while it is suspended: read the mailbox directly.
+    let m = eventually(40, "the system cancel", || {
+        let r = mailbox_query(
+            &ps.iid,
+            &format!("SELECT status FROM messages WHERE id = '{pm}'"),
+        );
+        (r[0]["status"] == "canceled").then(|| r[0].clone())
+    });
     assert_eq!(m["status"], "canceled");
     let _ = patch(
         &format!("/v1/partners/{pid}"),
@@ -531,6 +538,13 @@ fn list_filters() {
         .status,
         200
     );
+    assert_eq!(
+        put(&format!(
+            "/v1/tenants/{}/lists/send/allow/%40friends.example",
+            s.tid
+        )),
+        201
+    );
     let d = call(
         "POST",
         &format!("/v1/identities/{}/messages?dry_run=true", s.iid),
@@ -541,14 +555,8 @@ fn list_filters() {
         &[],
     );
     assert_eq!(d.status, 200, "{}", d.body);
+    assert_eq!(d.body["recipients"][1]["status"], "queued");
     assert_eq!(d.body["recipients"][0]["reason"], "not_on_allowlist");
-    assert_eq!(
-        put(&format!(
-            "/v1/tenants/{}/lists/send/allow/%40friends.example",
-            s.tid
-        )),
-        201
-    );
     let r = send(
         &s,
         json!({ "to": ["kim@friends.example", "jo@example.net"], "subject": "lf2", "text": "x" }),
@@ -878,7 +886,7 @@ fn g4_partial_suppression() {
 fn g4_suppressed_after_submit() {
     let s = open_sender("g4 after", "live");
     let _f = fakes::Reset;
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let mid = send_ok(&s, &["late@example.net"], "g4 late");
     assert_eq!(
         post(
@@ -1058,7 +1066,7 @@ fn g9_marketing_transport_recheck() {
         ]),
     );
     let _f = fakes::Reset;
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let r = send(
         &s,
         json!({ "to": ["m@example.net"], "subject": "Offer", "text": "x", "kind": "marketing", "from_address": addr,
@@ -1367,7 +1375,7 @@ fn sending_paused_refuses() {
 fn stale_claim_outcome() {
     let s = open_sender("stale claim", "live");
     let _f = fakes::Reset;
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let mid = send_ok(&s, &["stale@example.net"], "Stale");
     // A claim taken by a consumer that died: resolved to uncertain by the claim alarm.
     let rpc = |req: Value| {

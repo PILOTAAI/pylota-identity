@@ -114,7 +114,7 @@ fn g8_race() {
     let s = open_sender("g8 race", "live");
     let _f = fakes::Reset;
     // An event before the provider ID is stored is retried, then applies.
-    fakes::fault_any("queue.send", "error", 1);
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
     let mid = send_ok(&s, &["race@example.net"], "g8 race");
     let pid = format!(
         "<race-{}@{}>",
