@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+aes-gcm = { workspace = true }
 ammonia = { workspace = true }
 pylota-identity-api-types = { path = "../api-types" }
 base64 = { workspace = true }
