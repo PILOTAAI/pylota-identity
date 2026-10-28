@@ -1,6 +1,7 @@
 //! The `pm-index` consumer ([Search § 6]). M7 builds the `AttachmentText` arm
-//! ([Inbound › Attachment text extraction]); the other kinds ack without work until their milestones
-//! (M10 `Embed`, `DeleteVectors`, `Reconcile`; M12 `Triage`) and count `index_job_unimplemented_total`.
+//! ([Inbound › Attachment text extraction]); M10 the `Embed`, `DeleteVectors` and `Reconcile` arms
+//! (`consumers::embed`). `Triage` acks without work until M12 and counts
+//! `index_job_unimplemented_total`.
 //!
 //! Retries are counted in the job body: a known transient failure re-enqueues the job with
 //! `attempt + 1` and a delay, then acks this delivery.
@@ -63,22 +64,26 @@ async fn run<P: Platform>(p: &P, job: IndexJob) -> Done {
             message_id,
             attempt,
         } => attachment_text(p, &tenant_id, &identity_id, &message_id, attempt).await,
-        other => {
-            let tenant = match &other {
-                IndexJob::Embed { tenant_id, .. }
-                | IndexJob::Triage { tenant_id, .. }
-                | IndexJob::DeleteVectors { tenant_id, .. }
-                | IndexJob::Reconcile { tenant_id, .. } => tenant_id.clone(),
-                IndexJob::AttachmentText { .. } => String::new(),
-            };
+        job @ IndexJob::Embed { .. } => super::embed::embed(p, job).await,
+        IndexJob::DeleteVectors {
+            vector_ids,
+            also_next,
+            ..
+        } => super::embed::delete_vectors(p, &vector_ids, also_next).await,
+        IndexJob::Reconcile {
+            tenant_id,
+            identity_id,
+            run_date,
+        } => super::embed::reconcile(p, &tenant_id, &identity_id, &run_date).await,
+        IndexJob::Triage { tenant_id, .. } => {
             crate::log::info(
                 "index_job",
                 &[
-                    ("kind", other.kind().into()),
+                    ("kind", "triage".into()),
                     ("result", "unimplemented".into()),
                 ],
             );
-            crate::metrics::count(p, "index_job_unimplemented_total", Some(&tenant), 1);
+            crate::metrics::count(p, "index_job_unimplemented_total", Some(&tenant_id), 1);
             Done::Ack
         }
     }

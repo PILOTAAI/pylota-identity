@@ -519,9 +519,37 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                     .transaction_sync(|s| deliveries::apply(self.p, s, owner, &e, now))?;
                 Ok(serde_json::to_value(r).unwrap_or(Value::Null))
             }
-            MailboxRequest::Cancel { message_id } => self
-                .sql
-                .transaction_sync(|s| deliveries::cancel(self.p, s, owner, &message_id, now)),
+            MailboxRequest::Cancel { message_id } => {
+                let (out, ids) = self.sql.transaction_sync(|s| -> Result<_, ApiError> {
+                    let out = deliveries::cancel(self.p, s, owner, &message_id, now)?;
+                    // A canceled message leaves the semantic index (Search § 6.1).
+                    let ids = search::vector_ids(s, &message_id)?;
+                    s.exec(
+                        "DELETE FROM chunks WHERE message_rowid = (SELECT rowid FROM messages WHERE id = ?1)",
+                        &[message_id.clone().into()],
+                    )?;
+                    Ok((out, ids))
+                })?;
+                if !ids.is_empty() {
+                    use pylota_identity_platform::QueueProducer as _;
+                    let jobs: Vec<_> = ids
+                        .chunks(500)
+                        .map(
+                            |c| pylota_identity_api_types::internal::IndexJob::DeleteVectors {
+                                tenant_id: owner.tenant_id.to_owned(),
+                                vector_ids: c.to_vec(),
+                                also_next: self.p.vectors_next().is_some(),
+                            },
+                        )
+                        .collect();
+                    let _ = self
+                        .p
+                        .queues()
+                        .send_batch(pylota_identity_platform::queues::QueueName::Index, &jobs, 0)
+                        .await;
+                }
+                Ok(out)
+            }
             MailboxRequest::Resolve {
                 message_id,
                 outcome,

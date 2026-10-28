@@ -68,6 +68,7 @@ fn bool_v(b: bool) -> SqlValue {
 
 /// The statement `head … WHERE where_ VISIBLE filter) tail` with `?1`, as_of, include and the filter
 /// parameters bound.
+#[allow(clippy::too_many_arguments)]
 fn run<S: Sql>(
     s: &S,
     head: &str,
@@ -634,7 +635,7 @@ pub fn coverage<S: Sql>(s: &S, as_of: i64, model: &str) -> PResult<Coverage> {
         covered: Option<i64>,
     }
     let r: Option<R> = s.first(
-        "SELECT COUNT(*) AS eligible, SUM(CASE WHEN EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid AND c.status <> 'deleting') AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid AND (c.status IN ('pending','failed') OR (c.status = 'embedded' AND c.model <> ?2))) THEN 1 WHEN NOT EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid) AND COALESCE(length(m.extracted_text), 0) = 0 AND COALESCE(length(m.subject), 0) = 0 THEN 1 ELSE 0 END) AS covered FROM messages m WHERE m.status NOT IN ('hidden','throttled','quarantined','screening') AND m.received_at <= ?1",
+        "SELECT COUNT(*) AS eligible, SUM(CASE WHEN EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid AND c.status <> 'deleting') AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid AND (c.status IN ('pending','failed') OR (c.status = 'embedded' AND c.model <> ?2))) THEN 1 WHEN NOT EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid) AND COALESCE(length(m.extracted_text), 0) = 0 AND COALESCE(length(m.subject), 0) = 0 THEN 1 ELSE 0 END) AS covered FROM messages m WHERE m.status NOT IN ('hidden','throttled','quarantined','screening','canceled') AND m.received_at <= ?1",
         &[as_of.into(), model.into()],
     )?;
     Ok(r.map_or_else(Coverage::default, |r| Coverage {
@@ -733,7 +734,7 @@ pub fn index_source<S: Sql>(s: &S, message_id: &str) -> PResult<IndexSource> {
         erased.is_none()
             && !matches!(
                 m.status.as_str(),
-                "quarantined" | "screening" | "hidden" | "throttled"
+                "quarantined" | "screening" | "hidden" | "throttled" | "canceled"
             )
     }) else {
         return Ok(IndexSource {
@@ -948,7 +949,7 @@ pub fn reconcile<S: Sql>(s: &S, now: i64) -> PResult<ReconcileOut> {
         &[hour.into()],
     )?;
     let missing: Vec<I> = s.query(
-        "SELECT m.id FROM messages m WHERE m.status NOT IN ('hidden','throttled','quarantined','screening') AND m.received_at < ?1 AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid) AND (COALESCE(length(m.extracted_text), 0) > 0 OR COALESCE(length(m.subject), 0) > 0) LIMIT 500",
+        "SELECT m.id FROM messages m WHERE m.status NOT IN ('hidden','throttled','quarantined','screening','canceled') AND m.received_at < ?1 AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.message_rowid = m.rowid) AND (COALESCE(length(m.extracted_text), 0) > 0 OR COALESCE(length(m.subject), 0) > 0) LIMIT 500",
         &[hour.into()],
     )?;
     let sample: Vec<Sm> = s.query(

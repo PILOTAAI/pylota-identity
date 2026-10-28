@@ -1,8 +1,10 @@
 //! Cron triggers (Configuration › Cron triggers). Every minute: mint the mailboxes setup left to the
 //! Worker (the system identity's, Identities and domains › The system identity), then re-send the
-//! `rpc_intents` rows (Design conventions § 9), then the webhook sweep (`outbox_sweep`). The other
-//! steps arrive with their milestones.
+//! `rpc_intents` rows (Design conventions § 9), then the webhook sweep (`outbox_sweep`). Every 15
+//! minutes: the semantic index's nightly reconciliation (`index_reconcile`). The other steps arrive
+//! with their milestones.
 
+pub mod index_reconcile;
 pub mod outbox_sweep;
 
 use pylota_identity_platform::d1::Stmt;
@@ -19,6 +21,9 @@ pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
         mint_mailboxes(p, request_id).await;
         crate::intents::resend(p, request_id).await;
         outbox_sweep::run(p).await;
+    }
+    if cron == "*/15 * * * *" {
+        index_reconcile::run(p).await;
     }
 }
 

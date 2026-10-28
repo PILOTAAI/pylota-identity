@@ -439,6 +439,21 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             )
             .await;
         }
+        // The sent copy is searchable semantically too (Search § 6.1); never the system mailbox's (A15).
+        if !inp.ctx.identity.is_system {
+            use pylota_identity_platform::QueueProducer as _;
+            let job = pylota_identity_api_types::internal::IndexJob::embed(
+                owner.tenant_id,
+                owner.identity_id,
+                &plan.message_id,
+                pylota_identity_api_types::internal::EmbedReason::New,
+            );
+            let _ = self
+                .p
+                .queues()
+                .send(pylota_identity_platform::queues::QueueName::Index, &job, 0)
+                .await;
+        }
         Ok(response)
     }
 

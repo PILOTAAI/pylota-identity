@@ -4,6 +4,7 @@
 //! [Design conventions § 7]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/index.md
 
 pub mod delivery;
+pub mod embed;
 pub mod inbound;
 pub mod index;
 pub mod outbound;

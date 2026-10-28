@@ -113,14 +113,13 @@ async fn embed_query<P: Platform>(p: &P, tenant_id: &str, text: &str) -> Result<
     let v = vectors_of(&out, 1).and_then(|mut v| v.pop()).ok_or(())?;
     QUERY_VECTORS.with(|c| {
         let mut c = c.borrow_mut();
-        if c.len() >= CACHE_SIZE {
-            if let Some(oldest) = c
+        if c.len() >= CACHE_SIZE
+            && let Some(oldest) = c
                 .iter()
                 .min_by_key(|(_, (at, _))| *at)
                 .map(|(k, _)| k.clone())
-            {
-                c.remove(&oldest);
-            }
+        {
+            c.remove(&oldest);
         }
         c.insert(key, (now, v.clone()));
     });
