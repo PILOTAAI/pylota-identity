@@ -1914,6 +1914,17 @@ that need more:
   mailbox rebuilds the keyword row with `core::search::fts_doc`, and the consumer queues the
   `Embed { reason: AttachmentText }` job after the mailbox answers. The steering scan of each text
   arrives with screening (M31).
+
+**As built (M13).** [Role mail relay](#role-mail-relay) holds, in `inbound/role_mail.rs`, with these
+settlements:
+
+- The deployment-domain list that decides whether a destination routes back is the `email()` handler's
+  staging list (5 minutes per isolate, not 60 seconds); the platform domain is always compared directly.
+- Attachments are classified with `core::attach::assess` only; the virus verdict (`infected`) arrives
+  with M31's screening, so until then only `risk` keeps the original from being attached.
+- `role_mail_failed_total` and `role_mail_relayed_total` are counters without labels; the reason is in
+  the `role_mail_failed` log line.
+- The SES source of role mail arrives with M23.
 - The isolate's 60-second directory cache holds hits as well as misses, so for up to a minute after an
   identity is deleted an isolate that saw its address live still accepts mail to it; the consumer then
   drops it (the identity is `deleting`), and from the next lookup the reply gets `550 5.1.1` (A13;

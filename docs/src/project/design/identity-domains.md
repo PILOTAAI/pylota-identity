@@ -1271,6 +1271,32 @@ Neither token needs an Email Routing Addresses permission, because nothing regis
 address (role mail, under [Username validation](#username-validation), is sent as new messages, never
 forwarded).
 
+**As built (M13).** Domains, addresses on them and the health checks hold as designed for the
+`cloudflare_zone` method, with these settlements until the milestones that need more:
+
+- `POST …/domains` with any other method answers `422 transport_unavailable` with `details.reason =
+  "method_not_available"`; those methods arrive with M23, and so does the alignment probe (`POST
+  …/probe` answers `422` for every domain until then).
+- Domain events are written to D1 `event_index` with `owner_kind = 'domain'` and the payload kept in
+  the index row; the webhook fan-out reads them as it reads platform events, and the outbox sweep
+  re-fans any that were not fanned out.
+- A literal routing rule that failed is retried at each check of the domain (every 15 minutes while
+  healthy), not on the 1/5/15/60-minute schedule; its issue `routing_rule_failed` is informational.
+- The removal job of `DELETE` and of an eviction waits for M14's `JobRunner`; until then the domain stays
+  `removing`.
+- Alerts (`domain_remove_failed`, `delivery_events_manual`, `platform_domain_failing`) are a `warn`
+  log line `alert` and the metric `domain_alert_total`; M17's evaluator turns them into alerts.
+- The SES account's identity limit (10,000) is not checked before `CreateEmailIdentity`.
+- The daily SES identity check runs at its offset and keeps the DKIM status in the monitor's storage;
+  acting on it (`ses_dkim_failed`, N10) arrives with M23.
+- `SesControl` treats a stored `next_free_ms` more than 61 seconds ahead (more than the longest wait
+  plus one token) as a clock that moved back, and restarts the queue from now.
+- The Cloudflare API shapes (zones, Email Routing, Email Sending subdomains, event subscriptions) follow
+  this design and spike S9's notes; the vendor's reference pages could not be reached from the build
+  environment, so the live tests of M20 are where they are confirmed.
+- `idvy domains subscribe` lands with the CLI in M16; until then a `manual` domain's subscription ID is
+  recorded through D1 by hand.
+
 ## Tests
 
 | Test | Covers |

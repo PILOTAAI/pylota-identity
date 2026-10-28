@@ -333,6 +333,17 @@ triage call are recorded for `fakes::ai_inputs`. A `do.call` fault armed for `MA
 applies to that one mailbox, so a background job of an earlier test cannot take it
 (`it::search::f15_partial`).
 
+**As built (M13).** The fake server answers the Cloudflare API (zones, DNS records, Email Routing,
+Email Sending subdomains, event subscriptions), SES v2 identities and RDAP, and its DoH answers come from
+the fake zones (`cloud::hide`, `cloud::extra`, `cloud::dns_fail`, `cloud::dnssec_bogus`).
+`cloud::ses_throttle(n)` makes the next `n` SES calls answer `ThrottlingException`, and
+`cloud::ses_times()` records when each call arrived. New hooks: `/__test/domain-alarm` runs a domain's
+monitor and answers its next SES check; `/__test/ses-acquire` and `/__test/ses-reset` take a token from,
+or empty, the `SesControl` bucket; `/__test/security-contact` overrides `PM_SECURITY_CONTACT` (`null`
+unsets it, `{}` restores it). `/__test/inbound` now passes the message's headers to `email()` as
+workerd's `message.headers` does. The harness's `PM_SECURITY_CONTACT` is `security@operator.example`, an
+address outside the deployment.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

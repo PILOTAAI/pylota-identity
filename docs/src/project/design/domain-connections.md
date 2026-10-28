@@ -492,6 +492,12 @@ and the bucket's queue stays short.
 
 Test: `it::ses::control_plane_rate` (below).
 
+**As built (M13).** The daily check is the monitor's alarm at `ses_check_at` (the earlier of it and the
+next DNS check), set at `Init` for a domain with an SES identity; a `Busy` bucket moves the check to its
+retry time. The spread of 1,000 domains through the bucket is the native test
+`worker::domains::monitor::tests::ses_daily_checks_spread`; the itest checks one domain's offset through
+workerd.
+
 ## 5. `smtp_relay`: the customer's own sending provider
 
 For customers who already send through Microsoft 365, Google Workspace, Postmark, Mailgun, SendGrid or
