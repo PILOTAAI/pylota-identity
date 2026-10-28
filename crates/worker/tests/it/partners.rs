@@ -63,7 +63,7 @@ fn routes_and_audit() {
 /// A partner key may lower a lower-only field to its ceiling, never above, and never a platform-only one.
 #[test]
 fn policy_caps_lower_only() {
-    let (_, pk) = partner("caps", &["tenants:manage"]);
+    let (_, pk) = partner("caps", &["tenants:manage", "identities:write"]);
     let t = tenant(&pk, "caps");
     let path = format!("/v1/tenants/{}", t["id"].as_str().unwrap());
     assert_eq!(
@@ -101,6 +101,38 @@ fn policy_caps_lower_only() {
         )
         .status,
         200
+    );
+    // An identity's send_policy.daily_cap: a partner key up to the tenant's identity_daily_send_cap,
+    // a platform key above it.
+    let ids = format!("/v1/tenants/{}/identities", t["id"].as_str().unwrap());
+    let r = crate::post(
+        &ids,
+        &pk,
+        json!({ "username": "a", "display_name": "a", "send_policy": { "daily_cap": 501 } }),
+    );
+    assert_eq!(
+        (r.code(), r.details()["field"].as_str()),
+        ("scope_denied", Some("send_policy.daily_cap"))
+    );
+    let ok = crate::post(
+        &ids,
+        &pk,
+        json!({ "username": "a", "display_name": "a", "send_policy": { "daily_cap": 500 } }),
+    );
+    assert_eq!(ok.status, 201, "{}", ok.body);
+    let path_a = format!("/v1/identities/{}", ok.body["id"].as_str().unwrap());
+    assert_eq!(
+        patch(&path_a, &pk, json!({ "send_policy": { "daily_cap": 501 } })).code(),
+        "scope_denied"
+    );
+    assert_eq!(
+        patch(
+            &path_a,
+            &platform(),
+            json!({ "send_policy": { "daily_cap": 5000 } })
+        )
+        .body["send_policy"]["daily_cap"],
+        5000
     );
 }
 

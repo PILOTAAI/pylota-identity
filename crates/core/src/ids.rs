@@ -45,9 +45,54 @@ pub fn is_id(id: &str, prefix: IdPrefix) -> bool {
     parse(id).is_some_and(|p| p.prefix == prefix)
 }
 
+/// A deterministic ID (Webhooks › Platform events, Design conventions § 9): the ULID time is `time_ms`
+/// and its random part the first 10 bytes of `HMAC-SHA256(key, label)`, so every retry of the same
+/// change gets the same ID.
+pub fn derived(prefix: IdPrefix, time_ms: i64, key: &[u8; 32], label: &str) -> String {
+    let mac = crate::keys::mac(key, label);
+    let random = mac[..10]
+        .iter()
+        .fold(0u128, |acc, b| (acc << 8) | u128::from(*b));
+    format(prefix, u64::try_from(time_ms).unwrap_or(0), random)
+}
+
+/// The event ID of an `rpc_intents` row: [`derived`] over `"intent:" + intent_id`.
+pub fn intent_event_id(key: &[u8; 32], intent_id: &str, occurred_at: i64) -> String {
+    derived(
+        IdPrefix::Event,
+        occurred_at,
+        key,
+        &format!("intent:{intent_id}"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derived_is_stable_and_keyed() {
+        let k = [7u8; 32];
+        let a = intent_event_id(&k, "req_1:idn_1:identity.updated", 1_469_918_176_385);
+        assert_eq!(
+            a,
+            intent_event_id(&k, "req_1:idn_1:identity.updated", 1_469_918_176_385)
+        );
+        assert!(a.starts_with("evt_01ARYZ6S41"));
+        assert_ne!(
+            a,
+            intent_event_id(
+                &[8u8; 32],
+                "req_1:idn_1:identity.updated",
+                1_469_918_176_385
+            )
+        );
+        assert_ne!(
+            a,
+            intent_event_id(&k, "req_2:idn_1:identity.updated", 1_469_918_176_385)
+        );
+        assert!(parse(&a).is_some());
+    }
 
     #[test]
     fn ulid_spec_vector() {

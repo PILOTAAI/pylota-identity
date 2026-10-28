@@ -1,7 +1,8 @@
-//! Worker-logic tests on `platform::fakes`: the app over a migrated fake D1, with `TenantQuota` calls
-//! routed to the quota logic over one fake SQLite per object.
+//! Worker-logic tests on `platform::fakes`: the app over a migrated fake D1, with `TenantQuota`,
+//! `IdentityMailbox` and `JobRunner` calls routed to their logic over one fake SQLite per object.
 
 mod flows;
+mod identities;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,16 +13,18 @@ use pylota_identity_platform::app::{HttpRequestIn, HttpResponseOut};
 use pylota_identity_platform::buffer::JsBuffer;
 use pylota_identity_platform::d1::Stmt;
 use pylota_identity_platform::durable::DoClass;
-use pylota_identity_platform::fakes::{FakePlatform, FakeSql, block_on};
+use pylota_identity_platform::fakes::{FakePlatform, FakeSql, FakeState, block_on};
 use pylota_identity_platform::{ControlDb as _, Platform as _};
 use serde_json::{Value, json};
 
 use crate::app::App;
+use crate::mailbox::Mailbox;
 use crate::quota::Quota;
 
 pub struct Harness {
     pub app: App<FakePlatform>,
     pub objects: Rc<RefCell<HashMap<String, FakeSql>>>,
+    pub mailboxes: Rc<RefCell<HashMap<String, FakeState>>>,
 }
 
 pub struct Resp {
@@ -67,7 +70,64 @@ impl Harness {
                 .handle(&env))
             }
         });
-        Self { app, objects }
+        let mailboxes: Rc<RefCell<HashMap<String, FakeState>>> = Rc::default();
+        let boxes = mailboxes.clone();
+        let weak = Rc::downgrade(&app.p);
+        app.p.objects.on(DoClass::Mailbox, move |id, env| {
+            let state = boxes.borrow_mut().entry(id.clone()).or_default().clone();
+            let p = weak.upgrade().expect("the platform outlives the call");
+            async move {
+                Ok(Mailbox {
+                    p: p.as_ref(),
+                    sql: &state.sql,
+                    state: &state,
+                    object_id: &id,
+                }
+                .handle(&env)
+                .await)
+            }
+        });
+        app.p.objects.on(DoClass::Job, |_id, env| async move {
+            Ok(match crate::jobs::stub(&env) {
+                Ok(v) => json!({ "ok": v }),
+                Err(_) => json!({ "err": { "error": { "code": "unavailable", "message": "", "retryable": true, "fix": "", "docs": "", "request_id": "" } } }),
+            })
+        });
+        Self {
+            app,
+            objects,
+            mailboxes,
+        }
+    }
+
+    /// Runs one mailbox's alarm now.
+    pub fn mailbox_alarm(&self, object_id: &str) {
+        let state = self
+            .mailboxes
+            .borrow()
+            .get(object_id)
+            .cloned()
+            .expect("a mailbox");
+        block_on(
+            Mailbox {
+                p: self.app.p.as_ref(),
+                sql: &state.sql,
+                state: &state,
+                object_id,
+            }
+            .alarm(),
+        );
+    }
+
+    /// Rows from one mailbox's SQLite.
+    pub fn mailbox_sql(&self, object_id: &str, sql: &str) -> Vec<Value> {
+        let state = self
+            .mailboxes
+            .borrow()
+            .get(object_id)
+            .cloned()
+            .expect("a mailbox");
+        pylota_identity_platform::durable::Sql::query(&state.sql, sql, &[]).unwrap()
     }
 
     pub fn call(
@@ -171,6 +231,9 @@ impl Harness {
                 "platform:ops",
                 "policy:write",
                 "identities:read",
+                "identities:write",
+                "erasure:manage",
+                "domains:read",
             ],
             None,
             None,

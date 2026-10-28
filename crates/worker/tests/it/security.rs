@@ -1,4 +1,4 @@
-//! The cross-tenant attack suite and the security checks of M5 (Security § 5, § 8.5, § 15).
+//! The cross-tenant attack suite and the security checks (Security § 5, § 8.5, § 15).
 
 use serde_json::{Value, json};
 
@@ -7,12 +7,17 @@ use crate::{Resp, call, d1, get, hook, mint, partner, platform, post, tenant};
 const MISSING_TENANT: &str = "ten_01ARYZ6S410000000000000000";
 const MISSING_KEY: &str = "key_01ARYZ6S410000000000000000";
 const MISSING_PARTNER: &str = "ptn_01ARYZ6S410000000000000000";
+const MISSING_IDENTITY: &str = "idn_01ARYZ6S410000000000000000";
+const MISSING_DOMAIN: &str = "dom_01ARYZ6S410000000000000000";
 
 /// The victim's IDs, or the missing ones of the control call.
 struct Target {
     tenant: String,
     key: String,
     partner: String,
+    identity: String,
+    address: String,
+    domain: String,
 }
 
 /// One request of the matrix: method, path and body for a target.
@@ -101,6 +106,56 @@ const CASES: &[(&str, Case)] = &[
     ("rotateSigningKey", |_| {
         ("POST", "/v1/platform/keys/thread/rotate".into(), None)
     }),
+    ("createIdentity", |t| {
+        (
+            "POST",
+            format!("/v1/tenants/{}/identities", t.tenant),
+            Some(json!({ "username": "intruder", "display_name": "x" })),
+        )
+    }),
+    ("listTenantIdentities", |t| {
+        ("GET", format!("/v1/tenants/{}/identities", t.tenant), None)
+    }),
+    ("listIdentities", |t| {
+        (
+            "GET",
+            format!("/v1/identities?tenant_id={}", t.tenant),
+            None,
+        )
+    }),
+    ("lookupIdentity", |t| {
+        (
+            "GET",
+            format!("/v1/identities/lookup?address={}", t.address),
+            None,
+        )
+    }),
+    ("getIdentity", |t| {
+        ("GET", format!("/v1/identities/{}", t.identity), None)
+    }),
+    ("updateIdentity", |t| {
+        (
+            "PATCH",
+            format!("/v1/identities/{}", t.identity),
+            Some(json!({ "status": "paused" })),
+        )
+    }),
+    ("deleteIdentity", |t| {
+        ("DELETE", format!("/v1/identities/{}", t.identity), None)
+    }),
+    ("listAddresses", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/addresses", t.identity),
+            None,
+        )
+    }),
+    ("listTenantDomains", |t| {
+        ("GET", format!("/v1/tenants/{}/domains", t.tenant), None)
+    }),
+    ("getDomain", |t| {
+        ("GET", format!("/v1/domains/{}", t.domain), None)
+    }),
 ];
 
 /// Operations whose request names no other scope: the foreign key gets what it gets on its own scope,
@@ -128,7 +183,15 @@ fn victim_state(t: &Target) -> Value {
         "SELECT COUNT(*) AS n FROM api_keys WHERE tenant_id = '{}'",
         t.tenant
     ));
-    json!([ten, key, ptn, keys])
+    let idn = d1(&format!(
+        "SELECT status, pause_reason, display_name, updated_at FROM identities WHERE tenant_id = '{}' ORDER BY id",
+        t.tenant
+    ));
+    let adr = d1(&format!(
+        "SELECT COUNT(*) AS n FROM addresses WHERE tenant_id = '{}'",
+        t.tenant
+    ));
+    json!([ten, key, ptn, keys, idn, adr])
 }
 
 #[test]
@@ -173,28 +236,45 @@ fn cross_tenant_matrix() {
         "policy:write",
         "audit:read",
         "identities:read",
+        "identities:write",
+        "erasure:manage",
+        "domains:read",
     ];
     let (victim_partner, vk) = partner("victim", &all);
     let vt = tenant(&vk, "victim");
+    let vtid = vt["id"].as_str().unwrap().to_owned();
     let (vkey, _) = mint(
         &vk,
-        json!({ "name": "v", "level": "tenant", "tenant_id": vt["id"], "permissions": ["identities:read"] }),
+        json!({ "name": "v", "level": "tenant", "tenant_id": vtid, "permissions": ["identities:read"] }),
     );
+    let vidn = crate::identity(&vk, &vtid, "victim");
+    // A tenant domain of the victim, written as M13 will write one.
+    let vdom = format!("dom_{}", &vtid[4..]);
+    d1(&format!(
+        "INSERT INTO domains (id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, monitor_do_id, created_at, updated_at) VALUES ('{vdom}', '{vtid}', '{}.example', 'zone', 'cloudflare_zone', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', 1, 'x', 1, 1)",
+        vtid.to_ascii_lowercase()
+    ));
     let victim = Target {
-        tenant: vt["id"].as_str().unwrap().into(),
+        tenant: vtid.clone(),
         key: vkey,
         partner: victim_partner,
+        identity: vidn["id"].as_str().unwrap().into(),
+        address: vidn["primary_address"].as_str().unwrap().into(),
+        domain: vdom,
     };
     let missing = Target {
         tenant: MISSING_TENANT.into(),
         key: MISSING_KEY.into(),
         partner: MISSING_PARTNER.into(),
+        identity: MISSING_IDENTITY.into(),
+        address: "nobody.nowhere@agents.example".into(),
+        domain: MISSING_DOMAIN.into(),
     };
     // Attackers: a tenant key of another tenant, and a partner key of another partner.
     let at = tenant(&p, "attacker");
     let (_, tenant_attacker) = mint(
         &p,
-        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read"] }),
+        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read"] }),
     );
     let (_, partner_attacker) = partner("attacker", &all);
     tenant(&partner_attacker, "attacker_own");
@@ -215,7 +295,7 @@ fn cross_tenant_matrix() {
                 foreign.status,
                 foreign.body
             );
-            if *op == "listTenants" || *op == "createTenant" {
+            if matches!(*op, "listTenants" | "createTenant") {
                 // No victim ID in the response; the partner filter is ignored for a partner key.
                 assert!(
                     !foreign.body.to_string().contains(&victim.tenant),
@@ -233,10 +313,17 @@ fn cross_tenant_matrix() {
     assert_eq!(victim_state(&victim), before, "no side effect");
     // The own-scope listings never show the victim.
     for key in [&tenant_attacker, &partner_attacker] {
-        for path in ["/v1/keys", "/v1/audit-events", "/v1/tenants"] {
+        for path in [
+            "/v1/keys",
+            "/v1/audit-events",
+            "/v1/tenants",
+            "/v1/identities",
+        ] {
             let body = get(path, key).body.to_string();
             assert!(
-                !body.contains(&victim.tenant) && !body.contains(&victim.key),
+                !body.contains(&victim.tenant)
+                    && !body.contains(&victim.key)
+                    && !body.contains(&victim.identity),
                 "{path} leaked the victim"
             );
         }

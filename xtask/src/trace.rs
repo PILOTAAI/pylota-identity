@@ -406,6 +406,22 @@ fn is_test_name(s: &str) -> bool {
         && !rest.ends_with(':')
 }
 
+/// Drops the sentence that hands rows to later milestones ("Rows that need a later milestone are
+/// accepted there: A7 in M9 (…), A13 in M7 …"): its rows and tests are required where it sends them.
+fn drop_accepted_there(acceptance: &str) -> String {
+    let text = acceptance.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(start) = text.find("are accepted there:") else {
+        return acceptance.to_owned();
+    };
+    let start = text[..start].rfind(". ").map_or(0, |i| i + 2);
+    let rest = &text[start..];
+    let end = rest
+        .match_indices(". ")
+        .find(|(i, _)| rest[i + 2..].starts_with(|c: char| c.is_ascii_uppercase()))
+        .map_or(rest.len(), |(i, _)| i + 2);
+    format!("{}{}", &text[..start], &rest[end..])
+}
+
 /// Whether `text` assigns the acceptance of row `id` to a milestone other than `own`.
 fn deferred(text: &str, id: &str, own: &str) -> bool {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -461,6 +477,7 @@ fn code_spans(text: &str) -> Vec<&str> {
 /// tests and rows elsewhere. Outside code spans, `D1` and `R2` alone are Cloudflare's database and
 /// object store; they count as rows only inside a range such as `D1–D3`.
 fn named_in(acceptance: &str, own: &str, row_ids: &BTreeSet<&str>) -> Named {
+    let acceptance = &drop_accepted_there(acceptance);
     let text = drop_other_milestone_parens(&drop_link_targets(acceptance), own);
     let mut named = Named::default();
     for (i, _) in text.match_indices("every `") {
@@ -1283,6 +1300,12 @@ mod tests {
         assert_eq!(n.rows, ["J20"]);
         assert!(n.tests.contains(&"it::partners::j13_x".to_owned()));
         assert!(deferred("J13 is accepted in M9", "J13", "M5"));
+        assert_eq!(
+            drop_accepted_there(
+                "Tests `a::b`. Rows that need a later milestone are accepted there: A7 in M9\n  (`it::send::a7`, needs the send path), and A11 in M13. The pause ships here."
+            ),
+            "Tests `a::b`. The pause ships here."
+        );
         assert!(!deferred("J13 is accepted in M5", "J13", "M5"));
         assert!(deferred("W35 is\n  accepted in M21", "W35", "M5"));
     }

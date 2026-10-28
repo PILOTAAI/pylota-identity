@@ -4,9 +4,11 @@
 
 mod auth;
 mod fakes;
+mod identities;
 mod intents;
 mod keyring;
 mod keys;
+mod mailbox;
 mod partners;
 mod policy;
 mod routes;
@@ -275,4 +277,51 @@ pub fn fresh_minute(need: u64) {
     if into + need * 1000 > 59_000 {
         std::thread::sleep(std::time::Duration::from_millis(60_000 - into + 200));
     }
+}
+
+/// Creates an identity in `tenant_id` and returns it.
+pub fn identity(key: &str, tenant_id: &str, username: &str) -> Value {
+    let r = post(
+        &format!("/v1/tenants/{tenant_id}/identities"),
+        key,
+        json!({ "username": username, "display_name": username }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    r.body
+}
+
+/// The default tenant (`address_suffix = ''`), created by the harness as setup does.
+pub fn default_tenant() -> String {
+    d1("SELECT id FROM tenants WHERE address_suffix = ''")[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The system identity's ID, seeded by the harness as setup step 22 does.
+pub fn system_identity() -> String {
+    d1("SELECT id FROM identities WHERE is_system = 1")[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// Runs an identity's mailbox alarm now (`/__test/alarm`).
+pub fn alarm(identity_id: &str) {
+    let r = hook(
+        "POST",
+        "/__test/alarm",
+        Some(json!({ "identity_id": identity_id })),
+    );
+    assert!(r.body.get("ok").is_some(), "{}", r.body);
+}
+
+/// The `event_index` rows of an identity, oldest first: `(type, id)`.
+pub fn indexed(identity_id: &str) -> Vec<(String, String)> {
+    d1(&format!("SELECT type, id FROM event_index WHERE identity_id = '{identity_id}' ORDER BY occurred_at, id"))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["type"].as_str().unwrap().to_owned(), r["id"].as_str().unwrap().to_owned()))
+        .collect()
 }

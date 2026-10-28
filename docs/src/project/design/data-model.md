@@ -2388,7 +2388,7 @@ CREATE TABLE IF NOT EXISTS rate_windows (                  -- inbound volume cap
 
 ```sql
 -- crates/worker/src/mailbox/schema/00NN_sms.sql (M39)
-CREATE TABLE sms_conversations (
+CREATE TABLE IF NOT EXISTS sms_conversations (
   id                TEXT PRIMARY KEY,                      -- smc_
   number_id         TEXT NOT NULL,                         -- pnm_ of this identity
   counterparty      TEXT NOT NULL,                         -- E.164, short code or alphanumeric sender
@@ -2398,7 +2398,7 @@ CREATE TABLE sms_conversations (
   UNIQUE (number_id, counterparty)
 );
 
-CREATE TABLE sms_messages (
+CREATE TABLE IF NOT EXISTS sms_messages (
   id                  TEXT PRIMARY KEY,                    -- sms_
   conversation_id     TEXT NOT NULL REFERENCES sms_conversations(id),
   number_id           TEXT NOT NULL,
@@ -2427,10 +2427,10 @@ CREATE TABLE sms_messages (
   last_event_at       INTEGER,
   created_at          INTEGER NOT NULL
 );
-CREATE INDEX sms_messages_conversation ON sms_messages(conversation_id, created_at);
-CREATE INDEX sms_messages_status ON sms_messages(status, created_at);
+CREATE INDEX IF NOT EXISTS sms_messages_conversation ON sms_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS sms_messages_status ON sms_messages(status, created_at);
 
-CREATE TABLE sms_media (
+CREATE TABLE IF NOT EXISTS sms_media (
   sms_id       TEXT NOT NULL REFERENCES sms_messages(id),
   n            INTEGER NOT NULL,
   content_type TEXT,
@@ -2440,7 +2440,7 @@ CREATE TABLE sms_media (
   PRIMARY KEY (sms_id, n)
 );
 
-CREATE TABLE sms_verifications (
+CREATE TABLE IF NOT EXISTS sms_verifications (
   sms_id            TEXT PRIMARY KEY REFERENCES sms_messages(id),
   number_id         TEXT NOT NULL,
   sender            TEXT NOT NULL,
@@ -2456,7 +2456,7 @@ CREATE TABLE sms_verifications (
   expires_at        INTEGER NOT NULL                       -- received_at + 24 h
 );
 
-CREATE TABLE sms_waits (
+CREATE TABLE IF NOT EXISTS sms_waits (
   id          TEXT PRIMARY KEY,
   number_id   TEXT NOT NULL,
   from_party  TEXT,
@@ -2465,7 +2465,7 @@ CREATE TABLE sms_waits (
 );
 
 -- crates/worker/src/mailbox/schema/00NN_calls.sql (M40)
-CREATE TABLE calls (
+CREATE TABLE IF NOT EXISTS calls (
   id                 TEXT PRIMARY KEY,                     -- cal_
   number_id          TEXT NOT NULL,
   direction          TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
@@ -2484,7 +2484,7 @@ CREATE TABLE calls (
   source             TEXT NOT NULL DEFAULT 'webhook' CHECK (source IN ('webhook','cdr')),
   created_at         INTEGER NOT NULL
 );
-CREATE INDEX calls_number ON calls(number_id, created_at);
+CREATE INDEX IF NOT EXISTS calls_number ON calls(number_id, created_at);
 ```
 
 The mailbox `idempotency` table gains `sms_id TEXT` (nullable), the SMS a send key produced.

@@ -279,6 +279,12 @@ pub fn has_strong_rtl(s: &str) -> bool {
     s.chars().any(|c| in_ranges(c, STRONG_RTL))
 }
 
+/// The tombstone and log form of an address: lower-case hex of `HMAC-SHA256(PM_HASH_KEY, address)`
+/// (Identities and domains › Tombstones, Design conventions § 8).
+pub fn address_hash(hash_key: &[u8; 32], address: &str) -> String {
+    crate::keys::hash(hash_key, address)
+}
+
 /// Validates a username or alias local part and returns its stored (lower-case) form, steps 1–7 of
 /// Identities › Username validation. `existing` are the tenant's other non-deleted usernames.
 pub fn validate_username(

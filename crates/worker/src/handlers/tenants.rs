@@ -42,7 +42,7 @@ fn email(s: &str) -> Option<String> {
 }
 
 /// Sends `QuotaRequest::Init` for a tenant whose intent row is in D1; deletes the row on success. A
-/// failure leaves it for `crons::intents`.
+/// failure leaves it for the every-minute cron (`intents::resend`).
 pub async fn send_quota_init<P: Platform>(
     c: &Ctx<P>,
     tenant_id: &str,
@@ -461,6 +461,13 @@ pub async fn update<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         return Err(ApiError::invalid("timezone", "Unknown IANA time zone."));
     }
     let status = str_field(&body, "status")?;
+    // A17: the default tenant holds the system identity; no key suspends it.
+    if status == Some("suspended") && t.address_suffix.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::SystemProtected,
+            "The default tenant cannot be suspended.",
+        ));
+    }
     let by = if key.level == Level::Platform {
         "platform"
     } else {
@@ -511,21 +518,36 @@ pub async fn update<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     if let Some(patch) = &patch {
         policy::check(c, &t, patch)?;
     }
-    c.p.db()
-        .execute(Stmt::new(
-            "UPDATE tenants SET name = ?2, timezone = ?3, status = ?4, suspended_by = ?5, suspended_at = ?6, sending_paused_at = ?7, sending_pause_reason = CASE WHEN ?7 IS NULL THEN NULL ELSE sending_pause_reason END, updated_at = ?8 WHERE id = ?1 AND status NOT IN ('erasing','erased')",
-            vec![
-                t.id.clone().into(),
-                name.unwrap_or(&t.name).into(),
-                timezone.unwrap_or(&t.timezone).into(),
-                status_new.into(),
-                suspended_by.into(),
-                suspended_at.into(),
-                sending_paused_at.into(),
-                c.now.into(),
-            ],
-        ))
-        .await?;
+    let suspending = t.status != "suspended" && status_new == "suspended";
+    let resuming = t.status == "suspended" && status_new == "active";
+    let mut batch = vec![Stmt::new(
+        "UPDATE tenants SET name = ?2, timezone = ?3, status = ?4, suspended_by = ?5, suspended_at = ?6, sending_paused_at = ?7, sending_pause_reason = CASE WHEN ?7 IS NULL THEN NULL ELSE sending_pause_reason END, updated_at = ?8 WHERE id = ?1 AND status NOT IN ('erasing','erased')",
+        vec![
+            t.id.clone().into(),
+            name.unwrap_or(&t.name).into(),
+            timezone.unwrap_or(&t.timezone).into(),
+            status_new.into(),
+            suspended_by.into(),
+            suspended_at.into(),
+            sending_paused_at.into(),
+            c.now.into(),
+        ],
+    )];
+    if suspending {
+        batch.extend(tdb::pause_identities(&t.id, &c.request_id, c.now));
+    } else if resuming {
+        batch.extend(tdb::resume_identities(&t.id, &c.request_id, c.now));
+    }
+    c.p.db().batch(batch).await?;
+    if suspending || resuming {
+        let objects: Vec<intents::Object> =
+            c.p.db()
+                .query(intents::objects_of_request(&c.request_id))
+                .await?;
+        for o in objects {
+            crate::intents::flush_object(c.p.as_ref(), &c.request_id, &o.object_id).await;
+        }
+    }
     if let Some(patch) = &patch {
         policy::write(c, &t.id, patch).await?;
     }

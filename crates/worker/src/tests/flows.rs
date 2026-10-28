@@ -345,6 +345,14 @@ fn j21_quota_init_retried_by_the_cron() {
             }
         },
     );
+    // Not yet due: an intent waits 60 seconds before the cron re-sends it (Design conventions § 9).
+    pylota_identity_platform::fakes::block_on(crate::crons::run(
+        h.app.p.as_ref(),
+        "* * * * *",
+        "req_cron",
+    ));
+    assert_eq!(h.sql("SELECT id FROM rpc_intents", vec![]).len(), 1);
+    h.app.p.clock.advance(60_000);
     pylota_identity_platform::fakes::block_on(crate::crons::run(
         h.app.p.as_ref(),
         "* * * * *",

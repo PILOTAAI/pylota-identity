@@ -155,6 +155,21 @@ normal outbound pipeline.
    harmless.
 9. `201` with the Identity object.
 
+**As built (M6).** The steps above hold, with these settlements until the milestones that need more:
+
+- Step 3: tenant domains arrive with M13, so a `domain_id` naming one of the tenant's domains gets
+  `409 domain_not_ready`, and one naming the platform domain is the same as none.
+- Step 4 does not yet check the agent sign-up human addresses (`human_hash`); that table is written from
+  M34 (agent self-sign-up), which adds the check.
+- Step 6 holds against M5's `TenantQuota` stub, and `DELETE` sends its `Adjust −1` to it.
+- `DELETE` writes the job and the erasure request; the `JobRunner` stub accepts `Start` and runs nothing
+  until M14, so the identity stays `deleting` and a second `DELETE` answers the same request.
+- `PATCH` stores `retention.message_hours` and writes `identity.retention_update`; the mailbox's
+  `set_retention` intent arrives with M37.
+- The A18 check runs before the tenant scope check, so a partner key of another partner also gets
+  `403 scope_denied` (`default_tenant`) on the default tenant rather than `404`: the default tenant is no
+  secret.
+
 ### Updates, pause and tenant suspension
 
 `PATCH /v1/identities/{id}` updates D1 and, in the same batch, writes an `rpc_intents` row for the event:

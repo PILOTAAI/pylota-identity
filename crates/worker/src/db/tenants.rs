@@ -69,6 +69,44 @@ pub fn count_live_of_partner(partner_id: &str) -> Stmt {
     )
 }
 
+/// D1 binds a number from the Worker as a REAL, which `json_object` would write as `1793184352843.0`:
+/// every time in a JSON body is cast to INTEGER (`it::intents::j21_identity_event_retried`).
+///
+/// A suspension's pause of every `active` identity (Identities and domains › Updates, pause and tenant
+/// suspension): one `identity.paused` intent per identity, written before the update that pauses them.
+pub fn pause_identities(tenant_id: &str, request_id: &str, now: i64) -> Vec<Stmt> {
+    vec![
+        Stmt::new(
+            "INSERT OR IGNORE INTO rpc_intents (id, class, object_id, tenant_id, identity_id, op, body_json, occurred_at, attempts, next_at, created_at) \
+             SELECT ?2 || ':' || id || ':identity.paused', 'mailbox', mailbox_do_id, tenant_id, id, 'emit_event', \
+             json_object('op', 'emit_event', 'event_id', '', 'event_type', 'identity.paused', 'occurred_at', CAST(?3 AS INTEGER), 'data', json_object('identity_id', id, 'reason', 'tenant_suspended', 'metrics', NULL)), \
+             ?3, 0, ?3 + 60000, ?3 FROM identities WHERE tenant_id = ?1 AND status = 'active' AND mailbox_do_id <> ''",
+            vec![tenant_id.into(), request_id.into(), now.into()],
+        ),
+        Stmt::new(
+            "UPDATE identities SET status = 'paused', pause_reason = 'tenant_suspended', updated_at = ?2 WHERE tenant_id = ?1 AND status = 'active'",
+            vec![tenant_id.into(), now.into()],
+        ),
+    ]
+}
+
+/// The resume of a suspension: only the identities the suspension paused.
+pub fn resume_identities(tenant_id: &str, request_id: &str, now: i64) -> Vec<Stmt> {
+    vec![
+        Stmt::new(
+            "INSERT OR IGNORE INTO rpc_intents (id, class, object_id, tenant_id, identity_id, op, body_json, occurred_at, attempts, next_at, created_at) \
+             SELECT ?2 || ':' || id || ':identity.resumed', 'mailbox', mailbox_do_id, tenant_id, id, 'emit_event', \
+             json_object('op', 'emit_event', 'event_id', '', 'event_type', 'identity.resumed', 'occurred_at', CAST(?3 AS INTEGER), 'data', json_object('identity_id', id)), \
+             ?3, 0, ?3 + 60000, ?3 FROM identities WHERE tenant_id = ?1 AND status = 'paused' AND pause_reason = 'tenant_suspended' AND mailbox_do_id <> ''",
+            vec![tenant_id.into(), request_id.into(), now.into()],
+        ),
+        Stmt::new(
+            "UPDATE identities SET status = 'active', pause_reason = NULL, updated_at = ?2 WHERE tenant_id = ?1 AND status = 'paused' AND pause_reason = 'tenant_suspended'",
+            vec![tenant_id.into(), now.into()],
+        ),
+    ]
+}
+
 impl Row {
     pub fn stored_policy(&self) -> Value {
         serde_json::from_str(&self.policy_json).unwrap_or_else(|_| json!({}))

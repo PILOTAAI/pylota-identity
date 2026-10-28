@@ -1,6 +1,6 @@
 //! The fake server on `127.0.0.1:8798` (Testing § 6.3–6.6), hosted by the test process: the fake clock
-//! and the fault plan the Worker reads at each invocation. A blocking server on `std::net`, enough for
-//! the M5 hooks.
+//! and the fault plan the Worker reads at each invocation, and the queue messages the itest build hands
+//! over. A blocking server on `std::net`, enough for the hooks so far.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpListener;
@@ -11,11 +11,14 @@ use serde_json::{Value, json};
 struct State {
     offset: i64,
     faults: Vec<Value>,
+    /// Messages the itest build's queue consumer handed over: `(queue, body)`.
+    queued: Vec<(String, Value)>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     offset: 0,
     faults: Vec::new(),
+    queued: Vec::new(),
 });
 
 pub fn start() {
@@ -75,8 +78,25 @@ fn handle(path: &str, body: &Value) -> Value {
                 None => json!({}),
             }
         }
+        q if q.starts_with("/queues/") => {
+            s.queued
+                .push((q["/queues/".len()..].to_owned(), body.clone()));
+            json!({})
+        }
         _ => json!({}),
     }
+}
+
+/// The messages of `queue` the Worker has consumed so far.
+pub fn queued(queue: &str) -> Vec<Value> {
+    STATE
+        .lock()
+        .unwrap()
+        .queued
+        .iter()
+        .filter(|(q, _)| q == queue)
+        .map(|(_, b)| b.clone())
+        .collect()
 }
 
 /// Moves the Worker's clock forward.

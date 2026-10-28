@@ -242,6 +242,8 @@ pub struct InitMailbox {
     pub created_at: i64,               // identities.created_at; written to meta.created_at
     pub created_event: EmitEvent,      // identity.created, built by the handler from the rows its D1 batch wrote
     pub message_hours: Option<u32>,    // retention.message_hours of an identity created with it (parity-additions.md § 7.2)
+    #[serde(default)] pub is_system: bool, // written to meta.is_system; true only from the cron that mints the
+                                       // system identity's mailbox
 }
 pub struct EmitEvent {
     pub event_id: String,              // evt_…, derived from the rpc_intents row (section 9), so a re-sent call
@@ -359,6 +361,10 @@ Each such call is therefore written down first, in the D1 table `rpc_intents`
    from it like the platform events' IDs ([Webhooks › Platform events](webhooks.md#platform-events)): a
    ULID whose time is `occurred_at` and whose random part is the first 10 bytes of
    `HMAC-SHA256(PM_HASH_KEY, "intent:" + id)`. So every attempt sends the same `event_id`.
+   The intent's `body_json` carries the event with `event_id: ""`; the sender fills in the derived ID
+   (for `init`, in `created_event`), so a batch that writes intents with `INSERT … SELECT` (a tenant
+   suspension) needs no keyed hash in SQL. D1 binds a number from the Worker as a REAL, so a time put into
+   `body_json` with `json_object` is written `CAST(? AS INTEGER)`, or it would read `1793184352843.0` and fail to decode.
 2. **Call.** After the commit the handler makes the calls and deletes each intent whose call succeeded.
    Before its own call to an object, it sends that object's older intents still pending, oldest first,
    so a mailbox appends an identity's events in the order of their D1 changes and a later

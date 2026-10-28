@@ -244,9 +244,16 @@ the rest:
   process outlives a failed run.
 - The bootstrap key and the suite's key hold the same set: every permission a platform key can hold but
   `tenants:erase` (`xtask::itest::tests::platform_permissions_match_auth`).
-- Step 5 seeds the bootstrap key and the default tenant. The platform domain row (M6, `pending` from M13)
-  and the system identity (M6) follow their milestones; no fake beyond the clock and the fault plan
-  exists yet (section 6.3), and Durable Objects do not yet read the fake clock.
+- Step 5 seeds the bootstrap key, the default tenant, the platform domain row (`healthy`, `records_json =
+  '[]'` until M13 adds the DNS fake) and the system identity with its address, then runs the every-minute
+  cron once, which mints the system mailbox (M6). No fake beyond the clock, the fault plan and the queue
+  capture below exists yet (section 6.3), and Durable Objects do not yet read the fake clock.
+- `POST /__test/alarm` and `POST /__test/mailbox-schema` take `{ "identity_id" }` and reach that
+  identity's mailbox, the only object class with an alarm so far; the other classes join with their
+  milestones.
+- **Queue capture** (itest build only): until M8 consumes `pm-webhooks`, the Worker's queue handler posts
+  each message to `POST {fakes}/queues/{queue}` and acks it, so `it::mailbox::outbox_reaches_event_index_and_queue`
+  sees the `Fanout` the outbox sent. The release build leaves the messages in the queue.
 - The fake server is hosted by the test process (`crates/worker/tests/it/fakes.rs`).
 - workerd's local rate limiter counts in fixed one-minute windows, so a test whose burst must land in
   one window waits for the top of a minute first (`it::fresh_minute`).

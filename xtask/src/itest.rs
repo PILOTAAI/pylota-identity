@@ -143,6 +143,10 @@ fn run_ok(cmd: &mut Command, what: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `PM_PLATFORM_DOMAIN` of the rendered file, and the Cloudflare zone its row names.
+const PLATFORM_DOMAIN: &str = "agents.example";
+const ZONE: &str = "00000000000000000000000000000001";
+
 /// Every permission a platform key can hold but `tenants:erase` (owner-only): the bootstrap key and the
 /// suite's key hold the same set (Testing § 6.1 step 5). `itest::tests::platform_permissions_match_auth`
 /// checks it against `worker::auth`.
@@ -354,6 +358,58 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
     )?;
     if code != 201 {
         return Err(format!("creating the default tenant: {code} {body}"));
+    }
+    let default_tenant = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v["id"].as_str().map(str::to_owned))
+        .ok_or("no tenant id")?;
+    // Setup steps 20 and 22: the platform domain row (`healthy` until M13 builds the DomainMonitor)
+    // and the system identity with its primary address, in one batch; the cron mints its mailbox.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis() as u64;
+    let id = |prefix| -> Result<String, String> {
+        let r: [u8; 16] = random()?;
+        Ok(pylota_identity_core::ids::format(
+            prefix,
+            now,
+            u128::from_be_bytes(r),
+        ))
+    };
+    use pylota_identity_core::ids::IdPrefix;
+    let (dom, idn, adr) = (
+        id(IdPrefix::Domain)?,
+        id(IdPrefix::Identity)?,
+        id(IdPrefix::Address)?,
+    );
+    let seed = format!(
+        "INSERT INTO domains (id, tenant_id, name, kind, method, zone_id, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, records_json, monitor_do_id, created_at, updated_at) VALUES ('{dom}', NULL, '{PLATFORM_DOMAIN}', 'platform', 'platform', '{ZONE}', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', {now}, '[]', '', {now}, {now}); \
+         INSERT INTO identities (id, tenant_id, username, display_name, owner_name, owner_email, send_policy_json, mailbox_do_id, is_system, created_at, updated_at) VALUES ('{idn}', '{default_tenant}', 'no-reply', 'Pylota Identity', 'Operator', 'postmaster@{PLATFORM_DOMAIN}', '{{\"daily_cap\":50000,\"require_known_recipient\":false}}', '', 1, {now}, {now}); \
+         INSERT INTO addresses (id, address, local_part, domain_id, tenant_id, identity_id, role, status, created_at, updated_at) VALUES ('{adr}', 'no-reply@{PLATFORM_DOMAIN}', 'no-reply', '{dom}', '{default_tenant}', '{idn}', 'primary', 'active', {now}, {now});"
+    );
+    run_ok(
+        Command::new(&w)
+            .args([
+                "d1",
+                "execute",
+                "pylota-identity",
+                "--local",
+                "--persist-to",
+            ])
+            .arg(&state)
+            .arg("--config")
+            .arg(&config)
+            .args(["--command", &seed])
+            .env("CI", "1"),
+        "seeding the platform domain and the system identity",
+    )?;
+    let (code, body) = curl(
+        &dir,
+        &[&format!("{base}/cdn-cgi/handler/scheduled?cron=*+*+*+*+*")],
+    )?;
+    if code >= 300 {
+        return Err(format!("running the every-minute cron: {code} {body}"));
     }
 
     // 6. The suite.

@@ -17,8 +17,11 @@ pub mod errors;
 pub mod handlers;
 #[cfg(feature = "itest-hooks")]
 pub mod hooks;
+pub mod intents;
+pub mod jobs;
 pub mod keyring;
 pub mod log;
+pub mod mailbox;
 pub mod metrics;
 pub mod objects;
 pub mod policy;
@@ -27,6 +30,7 @@ pub mod ratelimit;
 pub mod request_id;
 pub mod router;
 pub mod rpc;
+pub mod webhooks;
 
 #[cfg(test)]
 mod tests;
@@ -55,6 +59,18 @@ mod entry {
 
         async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
             self.0.fetch(req).await
+        }
+
+        /// Until M8 consumes `pm-webhooks`, its messages wait in the queue. The itest build hands
+        /// them to the fake server instead, so the suite can see them (Testing § 6.2).
+        #[cfg(feature = "itest-hooks")]
+        async fn queue(
+            &self,
+            queue: pylota_identity_platform::queues::QueueName,
+            _dead_letter: bool,
+            batch: Vec<pylota_identity_platform::queues::Incoming<serde_json::Value>>,
+        ) {
+            crate::hooks::capture_queue(self.0.p.as_ref(), queue, batch).await;
         }
 
         async fn scheduled(&self, ev: ScheduledIn) {

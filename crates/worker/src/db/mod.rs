@@ -2,9 +2,13 @@
 //! (`worker::db::no_formatted_sql`); tenant data is read with the tenant ID as a required parameter, and
 //! list filters are written `(?n IS NULL OR column = ?n)` so the SQL never changes shape.
 
+pub mod addresses;
 pub mod audit;
+pub mod domains;
 pub mod idempotency;
+pub mod identities;
 pub mod intents;
+pub mod jobs;
 pub mod keys;
 pub mod partners;
 pub mod tenants;

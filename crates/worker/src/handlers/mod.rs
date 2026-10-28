@@ -2,7 +2,10 @@
 //! has already matched the route, authenticated the key, rate-limited it and checked the route's
 //! permissions and levels.
 
+pub mod addresses;
 pub mod audit;
+pub mod domains;
+pub mod identities;
 pub mod keys;
 pub mod meta;
 pub mod partners;
@@ -15,6 +18,7 @@ use pylota_identity_platform::{ControlDb as _, Platform};
 
 use crate::auth::Level;
 use crate::ctx::{Ctx, Reply};
+use crate::db::identities as idb;
 use crate::db::tenants as tdb;
 use crate::errors::ApiError;
 use crate::router::Handler;
@@ -43,6 +47,16 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::KeyRotate => keys::rotate(c).await,
         Handler::AuditList => audit::list(c).await,
         Handler::SigningKeyRotate => platform::rotate_signing_key(c).await,
+        Handler::IdentityCreate => identities::create(c).await,
+        Handler::TenantIdentityList => identities::list_tenant(c).await,
+        Handler::IdentityList => identities::list(c).await,
+        Handler::IdentityLookup => identities::lookup(c).await,
+        Handler::IdentityGet => identities::get(c).await,
+        Handler::IdentityUpdate => identities::update(c).await,
+        Handler::IdentityDelete => identities::delete(c).await,
+        Handler::AddressList => addresses::list(c).await,
+        Handler::DomainGet => domains::get(c).await,
+        Handler::TenantDomainList => domains::list_tenant(c).await,
     }
 }
 
@@ -73,6 +87,45 @@ pub async fn tenant_in_scope<P: Platform>(
         }
         _ => Err(ApiError::not_found(ErrorCode::TenantNotFound)),
     }
+}
+
+/// Step 4 of Security § 5.2 for an identity: out of scope is the same `404 identity_not_found` as
+/// missing. Only a platform key reaches the system identity. A write needs a live identity (`active` or
+/// `paused`, else `404`) and, for a non-platform key, a tenant that is not being erased.
+pub async fn identity_in_scope<P: Platform>(
+    c: &Ctx<P>,
+    identity_id: &str,
+    write: bool,
+) -> Result<(idb::Row, tdb::Row), ApiError> {
+    let not_found = || ApiError::not_found(ErrorCode::IdentityNotFound);
+    let row: idb::Row =
+        c.p.db()
+            .first(idb::get(identity_id))
+            .await?
+            .ok_or_else(not_found)?;
+    let t: tdb::Row =
+        c.p.db()
+            .first(tdb::get(&row.tenant_id))
+            .await?
+            .ok_or_else(not_found)?;
+    let key = c.key();
+    let visible = match key.level {
+        Level::Platform => true,
+        _ if row.is_system == 1 => false,
+        Level::Partner => key.partner_id.is_some() && t.partner_id == key.partner_id,
+        Level::Tenant => key.tenant_id.as_deref() == Some(t.id.as_str()),
+        Level::Identity => key.identity_id.as_deref() == Some(row.id.as_str()),
+    };
+    if !visible {
+        return Err(not_found());
+    }
+    if write
+        && (!row.live()
+            || (key.level != Level::Platform && matches!(t.status.as_str(), "erasing" | "erased")))
+    {
+        return Err(not_found());
+    }
+    Ok((row, t))
 }
 
 /// `n` from `SELECT COUNT(*) AS n`.
