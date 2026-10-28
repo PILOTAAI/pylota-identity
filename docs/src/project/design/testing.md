@@ -324,6 +324,13 @@ fences in `it::agentic::e1_fenced`). An unscripted chat model answers `READY` to
 until a test-chosen event and reports whether the stream ended. The native harness reads a streamed
 body to its end; there the keep-alive is off because the fake clock would spin it.
 
+**As built (M12).** An unscripted triage model (`gpt-oss`) answers a valid classification
+(`fakes::TRIAGE_DEFAULT`, category `other`) in the JSON Mode shape, so every test that receives mail
+gets a `done` triage. A script or failure key may be `model@@marker`: it then applies only to calls whose
+input contains the marker, so a late job of another test cannot take a scripted answer
+(`fakes::ai_script("gpt-oss@@MARK", …)`, `fakes::ai_fail("gpt-oss@@MARK", …)`). The inputs of every
+triage call are recorded for `fakes::ai_inputs`.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

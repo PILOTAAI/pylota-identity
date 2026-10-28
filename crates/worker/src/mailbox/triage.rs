@@ -88,7 +88,7 @@ pub struct Loaded {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "load", rename_all = "snake_case")]
 pub enum LoadOut {
     Skip,
     Triage(Box<Loaded>),

@@ -738,6 +738,38 @@ WHERE seq = ?1
 Pull-request CI runs the pipeline with a scripted fake model to check prompts, fencing, schema
 validation and failure handling without network access.
 
+**As built (M12).** The design above holds, with these settlements:
+
+- **Neurons are not metered yet.** `triage/model.rs` holds the neurons-per-token table empty: the
+  Workers AI pricing page could not be reached from the build environment on 2026-10-28, and rates are
+  added only from that page. Until then a model call records no `ai_neurons` and logs
+  `ai_usage_unmetered` with its token counts; the agentic planner records nothing either.
+- **Response shape.** The adapter accepts all four shapes of § 6.4. Which one `gpt-oss-20b` returns is
+  recorded by the first nightly run against the real model (M18), not here.
+- The job reads the tenant's policy with the tenant row it already loads, once per job, instead of a
+  60-second isolate cache. It reads the policy and runs the built-in rules before the hold, so a denied
+  hold keeps the built-in flags without a second read. `billing.limit_reached` on `first_in_period` waits
+  for M22, whose holds can be denied.
+- `automated.class` comes from inbound's evidence: `X-Autoreply`, `X-Autorespond` or `Precedence:
+  auto_reply|junk` give `auto_reply`, an out-of-office subject gives `out_of_office`. `Auto-Submitted`
+  alone gives a notification, because inbound does not keep the header's value and `auto-generated`
+  (RFC 3834) is not a reply.
+- Rule values are folded when the policy is written and again when a job reads them, so a rule stored
+  before the fold still matches. Tenant rules and custom categories are checked on every policy write
+  (`triage::rules::validate`), with `details.errors[].path` as in § 4.
+- The re-run debounce keeps the time of the last due re-run in the mailbox's `meta`
+  (`triage_rerun:{message_id}`), deleted by the commit. `run` grows on `done` and `failed` commits; a
+  `skipped` record (allowance, AI unavailable) keeps the count it had.
+- `TenantQuota` keeps the `tm:{ref}` markers with the local day they counted and deletes those older
+  than two days at most once a UTC day.
+- A pending message shows `{ "status": "pending" }` with every other field `null` (and `run` from the
+  last record), whatever an earlier run stored.
+- An outbound message sets the thread's `needs_reply` to 0 when the submit is accepted, not when the
+  transport reports `submitted`; the roll-up's `CASE` keeps a late triage from undoing it either way.
+- A release of a DSN or MDN stores `skipped` with reason `not_eligible` (it stored `policy_disabled`
+  before M12).
+- Pull-request CI scripts the model through the fake server (see [Testing § 6.1](testing.md)).
+
 ## Tests
 
 | Test | Proves | Covers |

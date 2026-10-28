@@ -181,6 +181,11 @@ impl<P: Platform> Job<'_, P> {
     }
 }
 
+/// A rule's `f32` score as the record stores it: three decimals, so `0.9` stays `0.9`.
+fn score(n: f32) -> f64 {
+    (f64::from(n) * 1000.0).round() / 1000.0
+}
+
 fn flag_names(flags: &BTreeSet<RiskFlag>) -> Value {
     serde_json::to_value(flags).unwrap_or_else(|_| json!([]))
 }
@@ -202,7 +207,7 @@ fn unfinished(status: &str, reason: &str, flags: &BTreeSet<RiskFlag>, matched: &
 fn rules_only(i: &TriageInput, o: &RuleOutcome, c: &Categories) -> Option<Value> {
     let r = triage_rules::rules_only(i, o, c)?;
     let mut v = json!({
-        "status": "done", "category": r.category, "needs_reply": r.needs_reply, "urgency": r.urgency,
+        "status": "done", "category": r.category, "needs_reply": score(r.needs_reply), "urgency": r.urgency,
         "summary": r.summary, "language": triage_rules::language(&i.extracted_text),
         "risk_flags": r.risk_flags, "model": "rules", "version": TRIAGE_VERSION,
     });
@@ -219,7 +224,7 @@ fn merge(o: &RuleOutcome, m: &schema::ModelOut, model: &str) -> Value {
     let mut v = json!({
         "status": "done",
         "category": o.category.as_ref().map_or(m.category.clone(), |(c, _)| c.clone()),
-        "needs_reply": o.needs_reply.as_ref().map_or(m.needs_reply, |(n, _)| f64::from(*n)),
+        "needs_reply": o.needs_reply.as_ref().map_or(m.needs_reply, |(n, _)| score(*n)),
         "urgency": m.urgency.max(o.urgency_min),
         "summary": m.summary, "language": m.language,
         "risk_flags": flag_names(&flags), "model": model, "version": TRIAGE_VERSION,

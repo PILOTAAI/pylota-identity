@@ -462,22 +462,31 @@ pub fn embed_text(text: &str) -> Vec<f64> {
 
 fn ai_run(s: &mut State, body: &Value) -> Value {
     let model = body["model"].as_str().unwrap_or("").to_owned();
-    if let Some((_, statuses)) = s
-        .ai_fail
-        .iter_mut()
-        .find(|(m, st)| model.contains(m.as_str()) && !st.is_empty())
-    {
+    let raw_input = body["input"].to_string();
+    if let Some((_, statuses)) = s.ai_fail.iter_mut().find(|(m, st)| {
+        let (m, marker) = m.split_once("@@").unwrap_or((m, ""));
+        model.contains(m) && raw_input.contains(marker) && !st.is_empty()
+    }) {
         let st = statuses.remove(0);
         return json!({ "__status": st });
     }
     let input = &body["input"];
-    if model.contains("qwen") || s.ai_script.iter().any(|(m, _)| model.contains(m.as_str())) {
+    let text = input.to_string();
+    // A script key is a model substring, or `model@@marker`: then only inputs containing the marker.
+    let applies = |key: &str| {
+        let (m, marker) = key.split_once("@@").unwrap_or((key, ""));
+        model.contains(m) && text.contains(marker)
+    };
+    if model.contains("qwen")
+        || model.contains("gpt-oss")
+        || s.ai_script.iter().any(|(m, _)| applies(m))
+    {
         s.ai_inputs.push((model.clone(), input.clone()));
     }
     if let Some((_, answers)) = s
         .ai_script
         .iter_mut()
-        .find(|(m, a)| model.contains(m.as_str()) && !a.is_empty())
+        .find(|(m, a)| applies(m) && !a.is_empty())
     {
         let mut answer = answers.remove(0);
         if let Some(ms) = answer["__delay_ms"].as_u64() {
@@ -496,6 +505,10 @@ fn ai_run(s: &mut State, body: &Value) -> Value {
             "READY".to_owned()
         };
         return json!({ "choices": [ { "message": { "role": "assistant", "content": content }, "finish_reason": "stop" } ] });
+    }
+    if model.contains("gpt-oss") {
+        // Unscripted triage model: a valid classification in the JSON Mode shape.
+        return json!({ "response": TRIAGE_DEFAULT.clone(), "usage": { "prompt_tokens": 900, "completion_tokens": 60 } });
     }
     if model.contains("rerank") {
         let q = tokens(input["query"].as_str().unwrap_or(""));
@@ -651,6 +664,12 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
         _ => json!({}),
     }
 }
+
+/// What the unscripted triage model answers.
+pub static TRIAGE_DEFAULT: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+    json!({ "category": "other", "needs_reply": 0.5, "urgency": 1,
+        "summary": "Someone writes about a matter.", "language": "en", "risk_flags": [] })
+});
 
 /// Workers AI answers `statuses` (in order) to the next calls of models containing `model`.
 pub fn ai_fail(model: &str, statuses: &[u16]) {
