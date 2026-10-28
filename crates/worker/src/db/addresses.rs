@@ -50,6 +50,13 @@ pub fn of_identities(ids: &str) -> Stmt {
     )
 }
 
+pub fn get(id: &str) -> Stmt {
+    Stmt::new(
+        "SELECT id, address, local_part, domain_id, tenant_id, identity_id, role, status, routing_rule_id, retire_at, retired_at, ses_bounce_rule, forwarding, forwarding_checked_at, created_at FROM addresses WHERE id = ?1",
+        vec![id.into()],
+    )
+}
+
 pub fn by_address(address: &str) -> Stmt {
     Stmt::new(
         "SELECT id, address, local_part, domain_id, tenant_id, identity_id, role, status, routing_rule_id, retire_at, retired_at, ses_bounce_rule, forwarding, forwarding_checked_at, created_at FROM addresses WHERE address = ?1",

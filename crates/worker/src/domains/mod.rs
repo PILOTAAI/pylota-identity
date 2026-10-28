@@ -144,6 +144,28 @@ pub fn listed_zones(policy: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Checks `domains.cloudflare_zones` of the policy a write would leave: each entry a DNS name, or `=`
+/// and a DNS name (H18).
+pub fn validate_policy(policy: &Value) -> Result<(), ApiError> {
+    let Some(list) = get_path(policy, "domains.cloudflare_zones").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for (i, z) in list.iter().enumerate() {
+        let ok = z.as_str().is_some_and(|z| {
+            let host = z.strip_prefix('=').unwrap_or(z);
+            host.contains('.')
+                && pylota_identity_core::address::normalise_domain(host).as_deref() == Some(host)
+        });
+        if !ok {
+            return Err(ApiError::invalid(
+                &format!("policy.domains.cloudflare_zones[{i}]"),
+                "A zone name, or = and an exact host name.",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The zone permission by name (§ Zone permission, check 1), before any Cloudflare call.
 pub fn check_name(
     name: &str,

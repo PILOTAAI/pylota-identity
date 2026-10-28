@@ -4,6 +4,7 @@
 //! minutes: the semantic index's nightly reconciliation (`index_reconcile`). The other steps arrive
 //! with their milestones.
 
+pub mod domains;
 pub mod index_reconcile;
 pub mod outbox_sweep;
 
@@ -19,11 +20,17 @@ use crate::webhooks::envelope as ev;
 pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
     if cron == "* * * * *" {
         mint_mailboxes(p, request_id).await;
+        domains::mint_monitors(p).await;
         crate::intents::resend(p, request_id).await;
+        domains::retire(p).await;
         outbox_sweep::run(p).await;
     }
     if cron == "*/15 * * * *" {
         index_reconcile::run(p).await;
+        let minute = (p.clock().now_ms() / 60_000) % 60;
+        if minute < 15 {
+            domains::cleanup_failed_adds(p).await;
+        }
     }
 }
 

@@ -9,6 +9,7 @@ mod cloud;
 mod conformance;
 mod delivery;
 mod dkim;
+mod domains;
 mod erasure;
 mod fakes;
 mod idempotency;

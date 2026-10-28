@@ -52,6 +52,8 @@ struct Cloud {
     subscriptions: Vec<(String, String)>,
     /// `(method, path substring, status, count)`.
     fail: Vec<(String, String, u16, u32)>,
+    /// When a failure is answered: fill this zone with foreign sending domains up to this count.
+    fill: Option<(String, usize)>,
     calls: Vec<(String, String)>,
     /// DNS view: records hidden by `(name, type)`, extra `(name, type, data)`, names failing on a
     /// resolver (`None`: both) with a DoH status, and names that answer with `cd=1`.
@@ -184,6 +186,12 @@ pub fn dnssec_bogus(name: &str) {
 /// `status`.
 pub fn fail(method: &str, contains: &str, status: u16, count: u32) {
     with(|c| c.fail.push((method.into(), contains.into(), status, count)));
+}
+
+/// With the next injected failure, the zone fills up to `n` mail domains (a limit reached meanwhile).
+pub fn fill_on_failure(zone_name: &str, n: usize) {
+    let zid = zone(zone_name);
+    with(|c| c.fill = Some((zid, n)));
 }
 
 /// The calls so far: `(method, path)`.
@@ -406,7 +414,15 @@ pub fn cf(method: &str, full: &str, body: &Value) -> Option<(u16, Value)> {
             .find(|(m, s, _, n)| m == method && path.contains(s.as_str()) && *n > 0)
         {
             f.3 -= 1;
-            return error(f.2, 1000);
+            let status = f.2;
+            if let Some((zone, n)) = c.fill.take() {
+                while c.sending.iter().filter(|(z, _, _)| *z == zone).count() < n {
+                    let tag = id(c);
+                    let name = format!("filler-{tag}.example");
+                    c.sending.push((zone.clone(), tag, name));
+                }
+            }
+            return error(status, 1000);
         }
         let (p, q) = query(path);
         let parts: Vec<&str> = p.trim_matches('/').split('/').collect();
@@ -675,6 +691,12 @@ fn code(t: &str) -> u64 {
 /// A DoH answer from the account, or `None` when `name` is under no fake zone and has no override.
 pub fn dns(resolver: &str, name: &str, rtype: &str, cd: bool) -> Option<Value> {
     with(|c| {
+        if name == "_spf.mx.cloudflare.net" && rtype == "TXT" {
+            return Some(
+                json!({ "Status": 0, "Answer": [{ "name": name, "type": 16, "TTL": 300,
+                "data": txt_data("v=spf1 ip4:104.30.0.0/20 ~all") }] }),
+            );
+        }
         let under = c
             .zones
             .iter()

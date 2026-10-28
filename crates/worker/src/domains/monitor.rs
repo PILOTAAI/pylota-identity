@@ -362,8 +362,13 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
                     "SELECT resolver, outcome, results_json, at FROM checks ORDER BY id DESC LIMIT 2",
                     &[],
                 )?;
+                let status: Value = checks
+                    .iter()
+                    .find(|c| c.resolver == "first")
+                    .and_then(|c| serde_json::from_str::<ResolverResult>(&c.results_json).ok())
+                    .map_or_else(|| json!([]), |r| json!(r.status));
                 Ok(
-                    json!({ "issues": issues, "checks": checks.iter().map(|c| json!({
+                    json!({ "issues": issues, "status": status, "checks": checks.iter().map(|c| json!({
                     "resolver": c.resolver, "outcome": c.outcome, "at": pylota_identity_core::days::rfc3339(c.at),
                 })).collect::<Vec<_>>() }),
                 )

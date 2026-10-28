@@ -343,7 +343,14 @@ pub async fn check<D: Dns>(
                                 };
                                 answers.insert((t, RrType::Txt), a);
                             }
-                            if !count_spf_lookups(&rec, d, &answers).ok() {
+                            let count = count_spf_lookups(&rec, d, &answers);
+                            if matches!(
+                                count.error,
+                                Some(
+                                    dns::SpfError::TooManyLookups
+                                        | dns::SpfError::TooManyVoidLookups
+                                )
+                            ) {
                                 out.issues
                                     .push(issue("spf_too_many_lookups", "degraded", Some(d)));
                             }

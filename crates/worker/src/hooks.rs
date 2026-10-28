@@ -155,6 +155,26 @@ pub async fn serve<P: Platform>(
                 serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
+        ("POST", "/__test/domain-alarm") => {
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let id = body["domain_id"].as_str().unwrap_or("").to_owned();
+            let row: crate::db::domains::Row = p
+                .db()
+                .first(crate::db::domains::get(&id))
+                .await?
+                .ok_or_else(|| ApiError::not_found(ErrorCode::DomainNotFound))?;
+            let out = crate::domains::monitor::call(
+                p.as_ref(),
+                &row.monitor_do_id,
+                crate::domains::monitor::DomainRequest::TestAlarm { domain_id: id },
+            )
+            .await?;
+            Ok(Reply::json(200, out))
+        }
         ("POST", "/__test/queue-send") => {
             let body: Value = req
                 .body
