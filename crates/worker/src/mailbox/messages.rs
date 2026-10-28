@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 /// Every column a reader needs, with the thread's ID.
-pub const SELECT: &str = "SELECT m.rowid AS rowid, m.id, t.id AS thread_id, m.thread_seq, m.direction, m.status, m.rfc_message_id, m.in_reply_to, m.raw_r2_key, m.raw_sha256, m.from_address, m.from_name, m.sender_domain, m.reply_to_json, m.to_json, m.cc_json, m.bcc_json, m.delivered_to, m.is_bcc, m.is_primary_recipient, m.subject, m.text, m.html_sanitized, m.extracted_text, m.snippet, m.sent_at, m.received_at, m.received_evented_at, m.kind, m.automated_json, m.auth_json, m.verdict, m.spam_score, m.known_sender, m.quarantine_reason, m.flags_json, m.read, m.triage_status, m.triage_json, m.provider_message_id, m.draft_id, m.metadata_json FROM messages m JOIN threads t ON t.seq = m.thread_seq";
+pub const SELECT: &str = "SELECT m.rowid AS rowid, m.id, t.id AS thread_id, m.thread_seq, m.direction, m.status, m.rfc_message_id, m.in_reply_to, m.references_json, m.raw_r2_key, m.raw_sha256, m.from_address, m.from_name, m.sender_domain, m.reply_to_json, m.to_json, m.cc_json, m.bcc_json, m.delivered_to, m.is_bcc, m.is_primary_recipient, m.subject, m.text, m.html_sanitized, m.extracted_text, m.snippet, m.sent_at, m.received_at, m.received_evented_at, m.kind, m.automated_json, m.auth_json, m.verdict, m.spam_score, m.known_sender, m.quarantine_reason, m.flags_json, m.read, m.triage_status, m.triage_json, m.provider, m.provider_message_id, m.draft_id, m.metadata_json FROM messages m JOIN threads t ON t.seq = m.thread_seq";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Row {
@@ -21,6 +21,7 @@ pub struct Row {
     pub status: String,
     pub rfc_message_id: Option<String>,
     pub in_reply_to: Option<String>,
+    pub references_json: String,
     pub raw_r2_key: Option<String>,
     pub raw_sha256: Option<String>,
     pub from_address: Option<String>,
@@ -52,6 +53,7 @@ pub struct Row {
     pub read: i64,
     pub triage_status: Option<String>,
     pub triage_json: Option<String>,
+    pub provider: Option<String>,
     pub provider_message_id: Option<String>,
     pub draft_id: Option<String>,
     pub metadata_json: String,

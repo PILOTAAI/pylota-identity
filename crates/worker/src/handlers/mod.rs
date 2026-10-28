@@ -7,12 +7,16 @@ pub mod audit;
 pub mod domains;
 pub mod identities;
 pub mod keys;
+pub mod links;
+pub mod lists;
 pub mod messages;
 pub mod meta;
 pub mod partners;
 pub mod platform;
 pub mod policy;
 pub mod quarantine;
+pub mod send;
+pub mod suppressions;
 pub mod tenants;
 pub mod threads;
 pub mod wait;
@@ -27,6 +31,7 @@ use crate::db::identities as idb;
 use crate::db::tenants as tdb;
 use crate::errors::ApiError;
 use crate::router::Handler;
+use pylota_identity_core::policy::SendOp;
 
 pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     match c.route.spec.handler {
@@ -84,6 +89,20 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::WebhookTest => webhooks::test(c).await,
         Handler::WebhookDeliveries => webhooks::deliveries(c).await,
         Handler::WebhookReplay => webhooks::replay(c).await,
+        Handler::Send => send::send(c, SendOp::Send).await,
+        Handler::Reply => send::send(c, SendOp::Reply).await,
+        Handler::ReplyAll => send::send(c, SendOp::ReplyAll).await,
+        Handler::Forward => send::send(c, SendOp::Forward).await,
+        Handler::Cancel => send::cancel(c).await,
+        Handler::Resolve => send::resolve(c).await,
+        Handler::SuppressionList => suppressions::list(c).await,
+        Handler::SuppressionCreate => suppressions::create(c).await,
+        Handler::SuppressionDelete => suppressions::delete(c).await,
+        Handler::ListEntries => lists::list(c).await,
+        Handler::ListEntryGet => lists::get(c).await,
+        Handler::ListEntryPut => lists::put(c).await,
+        Handler::ListEntryDelete => lists::delete(c).await,
+        Handler::SignedLink => links::get(c).await,
     }
 }
 

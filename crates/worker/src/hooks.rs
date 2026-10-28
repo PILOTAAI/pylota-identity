@@ -148,6 +148,75 @@ pub async fn serve<P: Platform>(
             };
             Ok(Reply::json(200, out))
         }
+        ("POST", "/__test/d1") => {
+            // One statement on D1 with JSON parameters; the SQL is leaked into a static string,
+            // which only the test build does.
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let sql: &'static str = Box::leak(
+                body["sql"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_owned()
+                    .into_boxed_str(),
+            );
+            let params: Vec<pylota_identity_platform::d1::SqlValue> = body["params"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|v| match v {
+                    Value::Null => pylota_identity_platform::d1::SqlValue::Null,
+                    Value::Number(n) => n.as_i64().unwrap_or(0).into(),
+                    Value::String(s) => s.into(),
+                    other => other.to_string().into(),
+                })
+                .collect();
+            let rows: Vec<Value> = p
+                .db()
+                .query(pylota_identity_platform::d1::Stmt::new(sql, params))
+                .await?;
+            Ok(Reply::json(200, json!({ "rows": rows })))
+        }
+        ("POST", "/__test/r2") => {
+            use pylota_identity_platform::BlobStore as _;
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let key = body["key"].as_str().unwrap_or("").to_owned();
+            match body["op"].as_str() {
+                Some("put") => {
+                    let bytes = pylota_identity_platform::base64::decode(
+                        body["body_base64"].as_str().unwrap_or(""),
+                    )
+                    .unwrap_or_default();
+                    p.blobs()
+                        .put(
+                            &key,
+                            pylota_identity_platform::r2::BlobBody::Bytes(bytes),
+                            &Default::default(),
+                        )
+                        .await?;
+                    Ok(Reply::json(200, json!({})))
+                }
+                Some("list") => {
+                    let page = p.blobs().list(&key, None, 1000).await?;
+                    Ok(Reply::json(
+                        200,
+                        json!({ "keys": page.keys.iter().map(|(k, _)| k).collect::<Vec<_>>() }),
+                    ))
+                }
+                _ => Ok(Reply::json(
+                    200,
+                    json!({ "size": p.blobs().head(&key).await? }),
+                )),
+            }
+        }
         _ => Err(not_found()),
     }
 }

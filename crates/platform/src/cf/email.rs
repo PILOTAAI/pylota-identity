@@ -48,6 +48,10 @@ impl CfMail {
 
 impl MailSender for CfMail {
     async fn send(&self, msg: &StructuredEmail, deadline_ms: u32) -> Result<String, SendError> {
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = super::itest::mail_send(msg).await {
+            return r;
+        }
         let builder =
             worker::SendEmailBuilder::new_with_str_and_slice(&msg.from.0, &msg.to, &msg.subject);
         if !msg.from.1.is_empty() {

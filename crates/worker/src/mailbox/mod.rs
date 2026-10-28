@@ -5,11 +5,16 @@
 //! The logic is generic over `platform::durable::{Sql, ObjectState}`, so native tests run it on
 //! `platform::fakes`; `objects::stubs::MailboxObject` wires it to the runtime.
 
+pub mod alarms;
 pub mod attachments;
+pub mod deliveries;
+pub mod idempotency;
 pub mod ingest;
+pub mod locks;
 pub mod messages;
 pub mod outbox;
 pub mod read;
+pub mod submit;
 pub mod threads;
 
 use pylota_identity_api_types::ErrorCode;
@@ -76,6 +81,38 @@ pub enum MailboxRequest {
     /// Reads, label changes and release (Inbound › Read path and release), and `wait`; the request
     /// is tagged `q` inside (`{"op": "read", "q": "list_threads", …}`).
     Read(read::ReadRequest),
+    /// A send, reply, reply-all or forward (Outbound › The submit path).
+    Submit(Box<submit::SubmitInput>),
+    /// What the outbound consumer reads before D1: status, From and the queued recipients.
+    OutboundFacts {
+        message_id: String,
+    },
+    BeginTransport(Box<deliveries::BeginInput>),
+    ClaimTransport {
+        message_id: String,
+    },
+    /// G4: deliveries the provider suppressed; answers the recipients left.
+    MarkSuppressed {
+        message_id: String,
+        items: Vec<(String, String)>,
+    },
+    AllSuppressed {
+        message_id: String,
+    },
+    RecordTransportOutcome {
+        message_id: String,
+        claim_token: String,
+        provider: String,
+        result: crate::transport::TransportResult,
+    },
+    ApplyDeliveryEvent(Box<crate::consumers::delivery::DeliveryEvent>),
+    Cancel {
+        message_id: String,
+    },
+    Resolve {
+        message_id: String,
+        outcome: String,
+    },
     /// `POST /__test/mailbox-schema` (Testing § 6.2): `schema_version` back by one.
     #[cfg(feature = "itest-hooks")]
     TestSchemaBack,
@@ -399,6 +436,94 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                 })?;
                 Ok(serde_json::json!({ "sequence": seq }))
             }
+            MailboxRequest::Submit(inp) => {
+                let mut inp = *inp;
+                inp.ctx.identity.is_system |= is_system;
+                self.submit(owner, inp, now).await
+            }
+            MailboxRequest::OutboundFacts { message_id } => {
+                Ok(deliveries::facts(self.sql, &message_id)?)
+            }
+            MailboxRequest::BeginTransport(inp) => {
+                let test = self.is_test_tenant().await;
+                let mut answer = self
+                    .sql
+                    .transaction_sync(|s| deliveries::begin(self.p, s, owner, &inp, test, now))?;
+                if let deliveries::BeginAnswer::Go(g) = &mut answer
+                    && g.reply_from_platform
+                {
+                    let row = deliveries::by_id(self.sql, &inp.message_id)?;
+                    let seq = row.map_or(0, |r| r.thread_seq);
+                    let platform = crate::send::AddressCtx {
+                        address: g.from.0.clone(),
+                        status: "active".into(),
+                        role: "alias".into(),
+                        domain_id: String::new(),
+                        domain: pylota_identity_core::address::domain_of(&g.from.0).to_owned(),
+                        domain_kind: "platform".into(),
+                        state: "healthy".into(),
+                        transport: "cloudflare".into(),
+                        reply_token: "subaddress".into(),
+                        sending_paused_at: None,
+                        delivery_events: None,
+                    };
+                    g.reply_to = self.reply_to(owner, &platform, seq).await;
+                }
+                Ok(serde_json::to_value(answer).unwrap_or(Value::Null))
+            }
+            MailboxRequest::ClaimTransport { message_id } => {
+                let t = self
+                    .sql
+                    .transaction_sync(|s| deliveries::claim(self.p, s, &message_id, now))?;
+                Ok(serde_json::to_value(t).unwrap_or(Value::Null))
+            }
+            MailboxRequest::MarkSuppressed { message_id, items } => {
+                let left = self.sql.transaction_sync(|s| {
+                    deliveries::mark_suppressed(s, &message_id, &items, now)
+                })?;
+                Ok(serde_json::to_value(left).unwrap_or(Value::Null))
+            }
+            MailboxRequest::AllSuppressed { message_id } => {
+                self.sql.transaction_sync(|s| {
+                    deliveries::all_suppressed(self.p, s, owner, &message_id, now)
+                })?;
+                Ok(Value::Null)
+            }
+            MailboxRequest::RecordTransportOutcome {
+                message_id,
+                claim_token,
+                provider,
+                result,
+            } => {
+                let r = self.sql.transaction_sync(|s| {
+                    deliveries::record(
+                        self.p,
+                        s,
+                        owner,
+                        &message_id,
+                        &claim_token,
+                        &provider,
+                        &result,
+                        now,
+                    )
+                })?;
+                Ok(serde_json::to_value(r).unwrap_or(Value::Null))
+            }
+            MailboxRequest::ApplyDeliveryEvent(e) => {
+                let r = self
+                    .sql
+                    .transaction_sync(|s| deliveries::apply(self.p, s, owner, &e, now))?;
+                Ok(serde_json::to_value(r).unwrap_or(Value::Null))
+            }
+            MailboxRequest::Cancel { message_id } => self
+                .sql
+                .transaction_sync(|s| deliveries::cancel(self.p, s, owner, &message_id, now)),
+            MailboxRequest::Resolve {
+                message_id,
+                outcome,
+            } => self.sql.transaction_sync(|s| {
+                deliveries::resolve(self.p, s, owner, &message_id, &outcome, now)
+            }),
             #[cfg(feature = "itest-hooks")]
             MailboxRequest::TestSchemaBack => {
                 self.sql.exec(
@@ -443,17 +568,31 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             return Ok(());
         };
         let now = self.p.clock().now_ms();
-        let due: Option<Kv> = self.sql.first(
-            "SELECT k, v FROM meta WHERE k = 'alarm:outbox' AND CAST(v AS INTEGER) <= ?1",
-            &[now.into()],
-        )?;
-        if due.is_none() {
-            return Ok(());
-        }
         let owner = outbox::Owner {
             tenant_id: &tenant_id,
             identity_id: &identity_id,
         };
+        let due = |purpose: &str| -> PResult<bool> {
+            Ok(self
+                .sql
+                .first::<Kv>(
+                    "SELECT k, v FROM meta WHERE k = ?1 AND CAST(v AS INTEGER) <= ?2",
+                    &[format!("alarm:{purpose}").into(), now.into()],
+                )?
+                .is_some())
+        };
+        if due("claim")? {
+            alarms::claims(self.p, self.sql, &owner, now)?;
+        }
+        if due("dispatch")? {
+            alarms::dispatch(self.p, self.sql, &owner, now).await?;
+        }
+        if due("maintenance")? {
+            alarms::maintenance(self.p, self.sql, &owner, now).await?;
+        }
+        if !due("outbox")? {
+            return Ok(());
+        }
         let done = outbox::dispatch(self.p, self.sql, &owner, self.object_id, now).await?;
         self.sql.transaction_sync(|s| -> PResult<()> {
             match done {
@@ -487,6 +626,28 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
 }
 
 impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
+    /// Whether the owner tenant is a test tenant (`mode = 'test'`), read from D1.
+    async fn is_test_tenant(&self) -> bool {
+        use pylota_identity_platform::ControlDb as _;
+        let Ok(Some(t)) = self.meta().map(|m| m.tenant_id) else {
+            return false;
+        };
+        #[derive(Deserialize)]
+        struct M {
+            mode: String,
+        }
+        self.p
+            .db()
+            .first::<M>(pylota_identity_platform::d1::Stmt::new(
+                "SELECT mode FROM tenants WHERE id = ?1",
+                vec![t.into()],
+            ))
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.mode == "test")
+    }
+
     /// Threading § 2.3: the envelope detail checked against the thread keyring before the ingest
     /// transaction (its brute-force limits are applied inside it).
     async fn check_token(&self, identity_id: &str, detail: Option<&str>) -> ingest::TokenCheckWire {

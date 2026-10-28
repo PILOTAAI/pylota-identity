@@ -382,6 +382,34 @@ CREATE TABLE IF NOT EXISTS holds (id TEXT PRIMARY KEY, feature TEXT NOT NULL, un
 CREATE TABLE IF NOT EXISTS outcomes (identity_id TEXT NOT NULL, seq INTEGER NOT NULL, outcome TEXT NOT NULL CHECK (outcome IN ('delivered','bounced','complained','other')), at INTEGER NOT NULL, PRIMARY KEY (identity_id, seq));
 INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', '1');";
 
+/// The default abuse thresholds of tenant policy: identity complaint and bounce rates, tenant
+/// complaint and bounce rates (Configuration › Tenant policy).
+const ABUSE: (f64, f64, f64, f64) = (0.003, 0.05, 0.001, 0.05);
+
+/// One request to a tenant's `TenantQuota`; an object that does not answer is `503 unavailable`.
+pub async fn call<P: Platform>(
+    p: &P,
+    quota_do_id: &str,
+    tenant_id: &str,
+    request_id: &str,
+    req: QuotaRequest,
+) -> Result<Value, ApiError> {
+    use pylota_identity_platform::ObjectClient as _;
+    use pylota_identity_platform::durable::DoClass;
+    let env = crate::rpc::envelope_for(p, Some(tenant_id), None, request_id, None, req);
+    match p
+        .objects()
+        .call::<_, Value>(DoClass::Quota, quota_do_id, &env)
+        .await
+    {
+        Ok(crate::rpc::RpcResult::Ok(v)) => Ok(v),
+        _ => Err(ApiError::new(
+            ErrorCode::Unavailable,
+            "The tenant's quota did not answer; retry.",
+        )),
+    }
+}
+
 /// How long a stub hold lives before the M22 expiry would release it.
 const HOLD_MS: i64 = 86_400_000;
 
@@ -466,6 +494,162 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
         })
     }
 
+    fn counter_in(s: &S, metric: &str, window: &str) -> Result<i64, PlatformError> {
+        Ok(s.first::<N>(
+            "SELECT value AS n FROM counters WHERE metric = ?1 AND window = ?2",
+            &[metric.into(), window.into()],
+        )?
+        .map_or(0, |r| r.n))
+    }
+
+    fn sum_since(s: &S, metric: &str, from_window: &str) -> Result<i64, PlatformError> {
+        Ok(s.first::<N>(
+            "SELECT COALESCE(SUM(value), 0) AS n FROM counters WHERE metric = ?1 AND window >= ?2",
+            &[metric.into(), from_window.into()],
+        )?
+        .map_or(0, |r| r.n))
+    }
+
+    /// The day of the daily caps (Day boundaries): `meta.tz`, switching to `tz_next` at its `from`; a
+    /// request with another zone records `tz_next` for the next local midnight of the current zone.
+    fn cap_day(&self, s: &S, now: i64, tz: &str) -> Result<(String, String), PlatformError> {
+        let get = |k: &str| -> Result<Option<String>, PlatformError> {
+            Ok(
+                s.first::<V>("SELECT v FROM meta WHERE k = ?1", &[k.into()])?
+                    .map(|r| r.v),
+            )
+        };
+        let set = |k: &str, v: &str| {
+            s.exec(
+                "INSERT INTO meta (k, v) VALUES (?1, ?2) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+                &[k.into(), v.into()],
+            )
+        };
+        let mut zone = match get("tz")? {
+            Some(z) => z,
+            None => {
+                set("tz", tz)?;
+                tz.to_owned()
+            }
+        };
+        if let Some(next) = get("tz_next")?
+            && let Some((z, from)) = next.split_once('|')
+            && from.parse::<i64>().is_ok_and(|f| now >= f)
+        {
+            set("tz", z)?;
+            s.exec("DELETE FROM meta WHERE k = 'tz_next'", &[])?;
+            zone = z.to_owned();
+        }
+        if tz != zone {
+            let pending = get("tz_next")?;
+            if pending
+                .as_deref()
+                .and_then(|p| p.split_once('|'))
+                .map(|(z, _)| z)
+                != Some(tz)
+            {
+                let from = days::next_local_midnight(now, &zone);
+                set("tz_next", &format!("{tz}|{from}"))?;
+            }
+        }
+        Ok((days::local_day(now, &zone), zone))
+    }
+
+    /// A `quota.warning` the first time `used` reaches 80% and 100% of `cap` on `day`.
+    fn warn(
+        s: &S,
+        out: &mut Vec<QuotaWarning>,
+        scope: CapScope,
+        metric: &str,
+        day: &str,
+        used: i64,
+        cap: u32,
+    ) -> Result<(), PlatformError> {
+        for threshold in [80u8, 100] {
+            if used * 100 >= i64::from(cap) * i64::from(threshold) {
+                let first = s.exec(
+                    "INSERT OR IGNORE INTO counters (metric, window, value) VALUES (?1, ?2, 1)",
+                    &[format!("warned:{metric}:{threshold}").into(), day.into()],
+                )?;
+                if first.changes > 0 {
+                    out.push(QuotaWarning {
+                        scope,
+                        threshold,
+                        used: used as u32,
+                        cap,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The abuse rules (Outbound › Abuse auto-pause, G12, Per-domain outcome counters), with the
+    /// default thresholds of tenant policy until `RecordOutcome.thresholds` arrives (M35).
+    fn evaluate(
+        &self,
+        s: &S,
+        identity_id: &str,
+        domain_id: Option<&str>,
+        now: i64,
+    ) -> Result<OutcomeDecision, PlatformError> {
+        let count = |sql: &str| -> Result<i64, PlatformError> {
+            Ok(s.first::<N>(sql, &[identity_id.into()])?.map_or(0, |r| r.n))
+        };
+        let complaints = count(
+            "SELECT COUNT(*) AS n FROM (SELECT outcome FROM outcomes WHERE identity_id = ?1 ORDER BY seq DESC LIMIT 1000) WHERE outcome = 'complained'",
+        )?;
+        let bounces = count(
+            "SELECT COUNT(*) AS n FROM (SELECT outcome FROM outcomes WHERE identity_id = ?1 ORDER BY seq DESC LIMIT 200) WHERE outcome = 'bounced'",
+        )?;
+        let mut d = OutcomeDecision {
+            pause_identity: complaints as f64 / 1000.0 > ABUSE.0
+                || bounces as f64 / 200.0 > ABUSE.1,
+            ..OutcomeDecision::default()
+        };
+        let week = days::utc_day(now - 6 * 86_400_000);
+        let rates = |outcomes: i64, bounced: i64, complained: i64| {
+            outcomes >= 500
+                && (complained as f64 / outcomes as f64 >= ABUSE.2
+                    || bounced as f64 / outcomes as f64 >= ABUSE.3)
+        };
+        if rates(
+            Self::sum_since(s, "outcomes", &week)?,
+            Self::sum_since(s, "bounced", &week)?,
+            Self::sum_since(s, "complained", &week)?,
+        ) {
+            d.pause_tenant = Some(PauseCause::AbuseThreshold);
+        }
+        if let Some(dom) = domain_id {
+            let m = |k: &str| format!("{k}:dom:{dom}");
+            let week_h = format!("{week}T00");
+            d.pause_domain = rates(
+                Self::sum_since(s, &m("outcomes"), &week_h)?,
+                Self::sum_since(s, &m("bounced"), &week_h)?,
+                Self::sum_since(s, &m("complained"), &week_h)?,
+            );
+            let hour = days::utc_hour(now);
+            let day_h = days::utc_hour(now - 23 * 3_600_000);
+            let (ho, hb) = (
+                Self::counter_in(s, &m("outcomes"), &hour)?,
+                Self::counter_in(s, &m("bounced"), &hour)?,
+            );
+            let (dayo, dayc) = (
+                Self::sum_since(s, &m("outcomes"), &day_h)?,
+                Self::sum_since(s, &m("complained"), &day_h)?,
+            );
+            d.bounce_alert = ho >= 50 && hb as f64 / ho as f64 > 0.02;
+            d.complaint_alert = dayo >= 200 && dayc as f64 / dayo as f64 > 0.001;
+            if d.pause_tenant.is_none()
+                && ((ho >= 200 && hb as f64 / ho as f64 > 0.10)
+                    || (dayo >= 1000 && dayc as f64 / dayo as f64 > 0.006))
+            {
+                d.pause_tenant = Some(PauseCause::AbuseBurst);
+            }
+        }
+        Ok(d)
+    }
+
     /// Answers one envelope (already decoded as JSON); never panics on a bad body.
     pub fn handle(&self, envelope: &Value) -> Value {
         let request_id = envelope["request_id"].as_str().unwrap_or("").to_owned();
@@ -525,31 +709,81 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
             QuotaRequest::Reserve {
                 identity_id,
                 tz,
+                identity_cap,
                 tenant_cap,
                 hold,
-                ..
+                stop,
             } => {
-                let day = days::local_day(now, &tz);
-                let held = self
+                if let Some(stop) = stop {
+                    return Ok(to_v(&match stop {
+                        SendStop::BillingDispute => ReserveAnswer::CapReached {
+                            scope: CapReachedScope::BillingDispute,
+                            resets_at: None,
+                        },
+                        SendStop::SharedDomain { resets_at } => ReserveAnswer::CapReached {
+                            scope: CapReachedScope::SharedDomain,
+                            resets_at: Some(resets_at),
+                        },
+                    }));
+                }
+                let answer = self
                     .sql
-                    .transaction_sync(|s| -> Result<Option<Held>, ApiError> {
+                    .transaction_sync(|s| -> Result<ReserveAnswer, ApiError> {
+                        let (day, zone) = self.cap_day(s, now, &tz)?;
+                        let resets_at = Some(days::next_local_midnight(now, &zone));
+                        let ikey = format!("sends:{identity_id}");
+                        let iused = Self::counter_in(s, &ikey, &day)?;
+                        let tused = Self::counter_in(s, "sends", &day)?;
+                        if iused + 1 > i64::from(identity_cap) {
+                            return Ok(ReserveAnswer::CapReached {
+                                scope: CapReachedScope::Identity,
+                                resets_at,
+                            });
+                        }
+                        if let Some(cap) = tenant_cap
+                            && tused + 1 > i64::from(cap)
+                        {
+                            return Ok(ReserveAnswer::CapReached {
+                                scope: CapReachedScope::Tenant,
+                                resets_at,
+                            });
+                        }
                         let held = match &hold {
                             Some(h) => Some(self.hold(s, Feature::Sends, h.units, &h.r#ref)?),
                             None => None,
                         };
-                        Self::add(s, &format!("sends:{identity_id}"), &day, 1)?;
-                        if tenant_cap.is_some() {
+                        Self::add(s, &ikey, &day, 1)?;
+                        let mut warnings = Vec::new();
+                        Self::warn(
+                            s,
+                            &mut warnings,
+                            CapScope::Identity,
+                            &ikey,
+                            &day,
+                            iused + 1,
+                            identity_cap,
+                        )?;
+                        if let Some(cap) = tenant_cap {
                             Self::add(s, "sends", &day, 1)?;
+                            Self::warn(
+                                s,
+                                &mut warnings,
+                                CapScope::Tenant,
+                                "sends",
+                                &day,
+                                tused + 1,
+                                cap,
+                            )?;
                         }
-                        Ok(held)
+                        Ok(ReserveAnswer::Ok {
+                            identity_used: (iused + 1) as u32,
+                            tenant_used: (tused + i64::from(tenant_cap.is_some())) as u32,
+                            day,
+                            warnings,
+                            held,
+                        })
                     })?;
-                to_v(&ReserveAnswer::Ok {
-                    identity_used: self.counter(&format!("sends:{identity_id}"), &day)? as u32,
-                    tenant_used: self.counter("sends", &day)? as u32,
-                    day,
-                    warnings: Vec::new(),
-                    held,
-                })
+                to_v(&answer)
             }
             QuotaRequest::Release {
                 identity_id,
@@ -568,37 +802,55 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
             }
             QuotaRequest::RecordOutcome {
                 identity_id,
+                domain_id,
                 outcome,
                 at,
                 event_id,
                 counted,
-                ..
             } => {
-                if counted {
-                    self.sql.transaction_sync(|s| -> Result<(), PlatformError> {
-                        let new = s.exec("INSERT OR IGNORE INTO outcome_events (event_id, at) VALUES (?1, ?2)", &[event_id.clone().into(), at.into()])?;
-                        if new.changes == 0 {
-                            return Ok(());
-                        }
-                        let outcome_s = match outcome {
-                            Outcome::Delivered => "delivered",
-                            Outcome::Bounced => "bounced",
-                            Outcome::Complained => "complained",
-                            Outcome::Other => "other",
-                        };
+                if !counted {
+                    return Ok(to_v(&OutcomeDecision::default()));
+                }
+                let decision = self.sql.transaction_sync(|s| -> Result<OutcomeDecision, PlatformError> {
+                    let new = s.exec(
+                        "INSERT OR IGNORE INTO outcome_events (event_id, at) VALUES (?1, ?2)",
+                        &[event_id.clone().into(), at.into()],
+                    )?;
+                    let outcome_s = match outcome {
+                        Outcome::Delivered => "delivered",
+                        Outcome::Bounced => "bounced",
+                        Outcome::Complained => "complained",
+                        Outcome::Other => "other",
+                    };
+                    if new.changes > 0 {
                         s.exec(
                             "INSERT INTO outcomes (identity_id, seq, outcome, at) VALUES (?1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM outcomes WHERE identity_id = ?1), ?2, ?3)",
                             &[identity_id.clone().into(), outcome_s.into(), at.into()],
+                        )?;
+                        s.exec(
+                            "DELETE FROM outcomes WHERE identity_id = ?1 AND seq <= (SELECT MAX(seq) FROM outcomes WHERE identity_id = ?1) - 1000",
+                            &[identity_id.clone().into()],
                         )?;
                         let day = days::utc_day(at);
                         Self::add(s, "outcomes", &day, 1)?;
                         if matches!(outcome, Outcome::Bounced | Outcome::Complained) {
                             Self::add(s, outcome_s, &day, 1)?;
                         }
-                        Ok(())
-                    })?;
-                }
-                to_v(&OutcomeDecision::default())
+                        if let Some(d) = &domain_id {
+                            let hour = days::utc_hour(at);
+                            Self::add(s, &format!("outcomes:dom:{d}"), &hour, 1)?;
+                            if matches!(outcome, Outcome::Bounced | Outcome::Complained) {
+                                Self::add(s, &format!("{outcome_s}:dom:{d}"), &hour, 1)?;
+                            }
+                            s.exec(
+                                "DELETE FROM counters WHERE metric LIKE ?1 AND window < ?2",
+                                &[format!("%:dom:{d}").into(), days::utc_hour(now - 8 * 86_400_000).into()],
+                            )?;
+                        }
+                    }
+                    self.evaluate(s, &identity_id, domain_id.as_deref(), now)
+                })?;
+                to_v(&decision)
             }
             // The per-tenant inbound cap (Inbound › Inbound volume caps, D13): one counter per UTC hour.
             QuotaRequest::AdmitInbound { at, cap, .. } => {
@@ -713,19 +965,48 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
                 feature,
                 r#ref,
                 consume,
-                ..
+                keep,
             } => {
                 self.sql.transaction_sync(|s| -> Result<(), PlatformError> {
                     let units: Option<N> = s.first("SELECT units AS n FROM holds WHERE feature = ?1 AND ref = ?2", &[feature.as_str().into(), r#ref.clone().into()])?;
-                    let Some(units) = units else { return Ok(()) };
-                    let consume = i64::from(consume).min(units.n);
+                    let consume = i64::from(consume);
+                    let Some(units) = units else {
+                        // No hold (an uncertain send resolved later): consume without one (W5).
+                        if consume > 0 {
+                            s.exec(
+                                "INSERT INTO allowances (feature, granted, used, held) VALUES (?1, NULL, ?2, 0) ON CONFLICT (feature) DO UPDATE SET used = used + ?2",
+                                &[feature.as_str().into(), consume.into()],
+                            )?;
+                        }
+                        return Ok(());
+                    };
+                    let consume = consume.min(units.n);
+                    let keep = i64::from(keep).min(units.n - consume);
                     s.exec(
                         "UPDATE allowances SET used = used + ?2, held = MAX(held - ?3, 0) WHERE feature = ?1",
-                        &[feature.as_str().into(), consume.into(), units.n.into()],
+                        &[feature.as_str().into(), consume.into(), (units.n - keep).into()],
                     )?;
-                    s.exec("DELETE FROM holds WHERE feature = ?1 AND ref = ?2", &[feature.as_str().into(), r#ref.clone().into()])?;
+                    if keep > 0 {
+                        s.exec("UPDATE holds SET units = ?3 WHERE feature = ?1 AND ref = ?2", &[feature.as_str().into(), r#ref.clone().into(), keep.into()])?;
+                    } else {
+                        s.exec("DELETE FROM holds WHERE feature = ?1 AND ref = ?2", &[feature.as_str().into(), r#ref.clone().into()])?;
+                    }
+                    if feature == Feature::Sends && consume > 0 {
+                        Self::add(s, "usage:sends", &utc, consume)?;
+                    }
                     Ok(())
                 })?;
+                Value::Null
+            }
+            QuotaRequest::Extend {
+                feature,
+                r#ref,
+                until,
+            } => {
+                self.sql.exec(
+                    "UPDATE holds SET expires_at = MAX(expires_at, ?3) WHERE feature = ?1 AND ref = ?2",
+                    &[feature.as_str().into(), r#ref.into(), until.into()],
+                )?;
                 Value::Null
             }
             QuotaRequest::Adjust { feature, delta, .. } => {
@@ -738,8 +1019,7 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
                 })?;
                 Value::Null
             }
-            QuotaRequest::Extend { .. }
-            | QuotaRequest::SetPlan { .. }
+            QuotaRequest::SetPlan { .. }
             | QuotaRequest::SetMeasured { .. }
             | QuotaRequest::Reconcile { .. } => Value::Null,
             QuotaRequest::GetUsage => {
@@ -838,10 +1118,19 @@ mod tests {
             ),
             (json!("ok"), json!(1), json!(1))
         );
-        // No cap is enforced in M5: a second reserve over the cap is still ok.
+        // From M9 the caps hold: over the identity cap is `cap_reached`, within it is ok.
         let r = ok(q.handle(&env(
             t,
             json!({ "op": "reserve", "identity_id": "idn_1", "tz": "UTC", "identity_cap": 1,
+            "tenant_cap": null, "hold": null, "stop": null }),
+        )));
+        assert_eq!(
+            (r["kind"].clone(), r["scope"].clone()),
+            (json!("cap_reached"), json!("identity"))
+        );
+        let r = ok(q.handle(&env(
+            t,
+            json!({ "op": "reserve", "identity_id": "idn_1", "tz": "UTC", "identity_cap": 2,
             "tenant_cap": null, "hold": null, "stop": null }),
         )));
         assert_eq!(

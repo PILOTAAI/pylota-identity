@@ -239,7 +239,27 @@ pub fn message_json<S: Sql>(
     if row.direction == "inbound" {
         m["deliveries"] = Value::Null;
     } else {
-        m["deliveries"] = json!([]);
+        #[derive(serde::Deserialize)]
+        struct D {
+            address: String,
+            field: String,
+            status: String,
+            smtp_code: Option<String>,
+            enhanced_code: Option<String>,
+            bounce_type: Option<String>,
+            updated_at: i64,
+        }
+        let ds: Vec<D> = s.query(
+            "SELECT address, field, status, smtp_code, enhanced_code, bounce_type, updated_at FROM deliveries WHERE message_rowid = ?1 ORDER BY rowid",
+            &[row.rowid.into()],
+        )?;
+        m["deliveries"] = Value::Array(
+            ds.into_iter()
+                .map(|d| json!({ "address": d.address, "field": d.field, "status": d.status, "smtp_code": d.smtp_code,
+                    "enhanced_code": d.enhanced_code, "bounce_type": d.bounce_type,
+                    "updated_at": pylota_identity_core::days::rfc3339(d.updated_at) }))
+                .collect(),
+        );
     }
     if include.headers {
         m["headers"] = Value::Null;

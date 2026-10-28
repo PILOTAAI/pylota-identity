@@ -80,3 +80,51 @@ pub fn reroute(url: &str) -> String {
 pub fn fault_error(binding: &'static str) -> crate::PlatformError {
     crate::PlatformError::unavailable(binding, "fault injected by the test")
 }
+
+/// Testing § 6.3: the Email Sending binding goes to the fake server, `POST {fakes}/__mail/send` with
+/// the structured message; the server answers `{messageId}`, `{code, message}`, `{exception}` or
+/// `{timeout: true}` from the test's script. `None` without a fake server.
+pub async fn mail_send(
+    msg: &crate::email::StructuredEmail,
+) -> Option<Result<String, crate::email::SendError>> {
+    use crate::email::SendError;
+    let url = FAKES.with(|f| f.borrow().clone())?;
+    let mut req = HttpRequest::get(format!("{url}/__mail/send"));
+    req.method = "POST";
+    req.timeout_ms = 5_000;
+    req.headers
+        .push(("content-type".into(), "application/json".into()));
+    let attachments: Vec<Value> = msg
+        .attachments
+        .iter()
+        .map(|a| json!({ "filename": a.filename, "content_type": a.content_type, "size": a.bytes.len(), "content_id": a.inline_content_id }))
+        .collect();
+    req.body = Some(
+        json!({
+            "from": msg.from.0, "from_name": msg.from.1, "to": msg.to, "cc": msg.cc, "bcc": msg.bcc,
+            "reply_to": msg.reply_to, "subject": msg.subject, "text": msg.text, "html": msg.html,
+            "headers": msg.headers, "attachments": attachments,
+        })
+        .to_string()
+        .into_bytes(),
+    );
+    let r = match CfHttp.send(req).await {
+        Ok(r) => r,
+        Err(_) => return Some(Err(SendError::Timeout)),
+    };
+    let v: Value = serde_json::from_slice(&r.body).unwrap_or(Value::Null);
+    Some(if let Some(id) = v["messageId"].as_str() {
+        Ok(id.to_owned())
+    } else if let Some(code) = v["code"].as_str() {
+        Err(SendError::Coded {
+            code: code.to_owned(),
+            message: v["message"].as_str().unwrap_or("").to_owned(),
+        })
+    } else if v["timeout"].as_bool() == Some(true) {
+        Err(SendError::Timeout)
+    } else {
+        Err(SendError::Exception {
+            message: v["exception"].as_str().unwrap_or("no answer").to_owned(),
+        })
+    })
+}

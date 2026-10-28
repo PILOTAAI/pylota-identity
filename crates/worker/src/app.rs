@@ -15,7 +15,7 @@ use crate::auth::{self, Level};
 use crate::ctx::{Ctx, Reply};
 use crate::db::idempotency as idb;
 use crate::errors::{ApiError, envelope};
-use crate::router::{self, Idempotency, Scope};
+use crate::router::{self, Handler, Idempotency, Scope};
 use crate::{handlers, ratelimit, request_id};
 
 /// The Worker logic, generic over the platform so native tests run it on `platform::fakes`.
@@ -258,6 +258,13 @@ impl<P: Platform> App<P> {
         auth::check_route(&key, spec, foreign)?;
         c.key = Some(key);
 
+        // The send routes keep their ledger in the mailbox (Outbound › Reservation inside the mailbox).
+        if matches!(
+            spec.handler,
+            Handler::Send | Handler::Reply | Handler::ReplyAll | Handler::Forward
+        ) {
+            return handlers::dispatch(&c).await;
+        }
         let idem = match (spec.idempotency, c.header("idempotency-key")) {
             (Idempotency::None, _) | (Idempotency::Optional, None) => None,
             (Idempotency::Required, None) => {

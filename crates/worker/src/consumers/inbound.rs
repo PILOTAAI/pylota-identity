@@ -587,11 +587,39 @@ pub async fn message<P: Platform>(p: &P, ptr: InboundPointer) -> Done {
             vec![identity_id.clone().into()],
         ))
         .await;
-    let (Ok(suppressed), Ok(domains), Ok(tenant_addrs), Ok(own)) =
-        (suppressed, domains, tenant_addrs, own)
+    #[derive(Deserialize)]
+    struct ListHit {
+        identity_id: String,
+        kind: String,
+        entry: String,
+    }
+    let entries: Vec<String> = from_address
+        .as_deref()
+        .map(|a| pylota_identity_core::lists::candidates(a).to_vec())
+        .unwrap_or_default();
+    let lists: Result<Vec<ListHit>, _> = p
+        .db()
+        .query(Stmt::new(
+            "SELECT identity_id, kind, entry FROM sender_lists WHERE tenant_id = ?1 AND direction = 'receive' AND identity_id IN ('', ?2) AND entry IN (SELECT value FROM json_each(?3))",
+            vec![tenant_id.clone().into(), identity_id.clone().into(), serde_json::to_string(&entries).unwrap_or_default().into()],
+        ))
+        .await;
+    let (Ok(suppressed), Ok(domains), Ok(tenant_addrs), Ok(own), Ok(lists)) =
+        (suppressed, domains, tenant_addrs, own, lists)
     else {
         return Done::Retry;
     };
+    let receive_decision = pylota_identity_core::lists::decide(
+        &lists
+            .into_iter()
+            .map(|l| pylota_identity_core::lists::ListRow {
+                identity: !l.identity_id.is_empty(),
+                block: l.kind == "block",
+                entry: l.entry,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .map(|d| if d.block { "block" } else { "allow" }.to_owned());
 
     // A9: the primary recipient, A10: the BCC flag, Threading § 5: reply_from_address.
     let delivered_to = address::parse_envelope(&ptr.envelope_to)
@@ -734,7 +762,7 @@ pub async fn message<P: Platform>(p: &P, ptr: InboundPointer) -> Done {
         attachments,
         verification,
         sender_suppressed: suppressed.is_some(),
-        receive_decision: None,
+        receive_decision,
         tenant_domains: domains
             .into_iter()
             .map(|d| (d.name, d.kind == "platform"))

@@ -14,6 +14,7 @@ pub mod consumers;
 pub mod crons;
 pub mod ctx;
 pub mod db;
+pub mod domains;
 pub mod email;
 pub mod errors;
 pub mod handlers;
@@ -33,6 +34,8 @@ pub mod ratelimit;
 pub mod request_id;
 pub mod router;
 pub mod rpc;
+pub mod send;
+pub mod transport;
 pub mod webhooks;
 
 #[cfg(test)]
