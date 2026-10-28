@@ -3,8 +3,11 @@
 //! `PM_ITEST_TOKEN`, and the local D1 location for the few fixtures only setup writes directly.
 
 mod auth;
+mod bench;
 mod conformance;
+mod delivery;
 mod dkim;
+mod erasure;
 mod fakes;
 mod idempotency;
 mod identities;
@@ -13,6 +16,7 @@ mod index;
 mod intents;
 mod keyring;
 mod keys;
+mod lists;
 mod mailbox;
 mod messages;
 mod partners;
@@ -20,7 +24,9 @@ mod policy;
 mod quarantine;
 mod routes;
 mod security;
+mod send;
 mod tenants;
+mod testmode;
 mod thread;
 mod wait;
 mod webhooks;

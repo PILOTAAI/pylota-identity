@@ -54,3 +54,26 @@ fn seq_never_reused() {
         .unwrap();
     assert!(newest > max, "{newest} > {max}");
 }
+
+/// C7: a reply that drops our `Reply-To` token still joins through `In-Reply-To`, matched against the
+/// Message-ID Cloudflare returned (strategy A).
+#[test]
+fn c7_reply_to_cloudflare_message_id() {
+    let s = crate::send::open_sender("c7 cf id", "live");
+    let mid = crate::send::send_ok(&s, &["jo@c7.example"], "Booking BK-77");
+    let m = crate::send::wait_status(&s, &mid, "submitted");
+    let rfc = m["rfc_message_id"].as_str().unwrap().to_owned();
+    assert!(rfc.ends_with(s.addr.rsplit('@').next().unwrap()), "{rfc}");
+    let raw = format!(
+        "From: jo@c7.example\r\nTo: {}\r\nSubject: Re: Booking BK-77\r\nMessage-ID: <c7-{}@c7.example>\r\nIn-Reply-To: <{rfc}>\r\nDate: Mon, 26 Oct 2026 10:00:00 +0000\r\n\r\nThanks\r\n",
+        s.addr,
+        crate::slug("c7")
+    );
+    crate::inbound("jo@c7.example", &s.addr, &raw);
+    let got = crate::eventually(30, "the reply", || {
+        crate::messages_of(&s.iid, &s.key, "&direction=inbound")
+            .into_iter()
+            .next()
+    });
+    assert_eq!(got["thread_id"], m["thread_id"]);
+}

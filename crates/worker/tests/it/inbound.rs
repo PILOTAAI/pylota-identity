@@ -670,3 +670,106 @@ fn a16_dictionary_guard() {
     // The guard counts per second: the next tests start in a fresh one.
     std::thread::sleep(std::time::Duration::from_millis(1100));
 }
+
+/// D7: a receive-blocked sender's mail is stored `hidden` with `blocked_sender`; a suppressed sender's
+/// mail is stored as usual with the flag `sender_suppressed`.
+#[test]
+fn d7_blocked_hidden() {
+    let s = crate::send::open_sender("d7 blocked", "live");
+    let r = crate::call(
+        "PUT",
+        &format!(
+            "/v1/tenants/{}/lists/receive/block/spammer%40d7.example",
+            s.tid
+        ),
+        Some(&s.key),
+        Some(serde_json::json!({})),
+        &[],
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    crate::inbound(
+        "spammer@d7.example",
+        &s.addr,
+        &crate::mail("spammer@d7.example", &s.addr, "Blocked", "x"),
+    );
+    let rows = crate::eventually(30, "the hidden copy", || {
+        let r = crate::mailbox_query(
+            &s.iid,
+            "SELECT status, quarantine_reason FROM messages WHERE direction = 'inbound'",
+        );
+        (!r.is_empty()).then_some(r)
+    });
+    assert_eq!(
+        (
+            rows[0]["status"].as_str(),
+            rows[0]["quarantine_reason"].as_str()
+        ),
+        (Some("hidden"), Some("blocked_sender"))
+    );
+    assert!(
+        crate::messages_of(&s.iid, &s.key, "").is_empty(),
+        "never shown"
+    );
+    let r = crate::post(
+        &format!("/v1/tenants/{}/suppressions", s.tid),
+        &s.key,
+        serde_json::json!({ "address": "gone@d7.example" }),
+    );
+    assert_eq!(r.status, 201);
+    crate::inbound(
+        "gone@d7.example",
+        &s.addr,
+        &crate::mail("gone@d7.example", &s.addr, "Suppressed", "x"),
+    );
+    let m = crate::wait_stored(&s.iid, &s.key, "received", 1);
+    assert!(
+        m[0]["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "sender_suppressed")
+    );
+}
+
+/// A receive-allow entry skips the spam rule.
+#[test]
+fn receive_allow_skips_spam() {
+    let s = crate::send::open_sender("allow spam", "live");
+    let r = crate::patch(
+        &format!("/v1/tenants/{}/policy", s.tid),
+        &crate::platform(),
+        serde_json::json!({ "quarantine": { "spam_threshold": 0.0 } }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    crate::inbound(
+        "a@spam.example",
+        &s.addr,
+        &crate::mail("a@spam.example", &s.addr, "Spammy", "x"),
+    );
+    crate::eventually(30, "the quarantined copy", || {
+        (!crate::mailbox_query(
+            &s.iid,
+            "SELECT id FROM messages WHERE quarantine_reason = 'spam'",
+        )
+        .is_empty())
+        .then_some(())
+    });
+    let r = crate::call(
+        "PUT",
+        &format!(
+            "/v1/tenants/{}/lists/receive/allow/%40friend.example",
+            s.tid
+        ),
+        Some(&s.key),
+        Some(serde_json::json!({})),
+        &[],
+    );
+    assert_eq!(r.status, 201);
+    crate::inbound(
+        "b@friend.example",
+        &s.addr,
+        &crate::mail("b@friend.example", &s.addr, "Friendly", "x"),
+    );
+    let m = crate::wait_stored(&s.iid, &s.key, "received", 1);
+    assert_eq!(m[0]["subject"], "Friendly");
+}

@@ -21,6 +21,12 @@ struct State {
     received: Vec<Received>,
     /// Scripted statuses per receiver path, taken in order; the last one repeats.
     statuses: BTreeMap<String, Vec<u16>>,
+    /// Scripted answers of the Email Sending binding by recipient; the last one repeats.
+    mail_script: Vec<(String, Vec<Value>)>,
+    /// Every structured send the binding got.
+    mail_sent: Vec<Value>,
+    /// Email Sending suppressions by address (`result` items of the API).
+    cf_suppressions: BTreeMap<String, Vec<Value>>,
 }
 
 /// One request a fake webhook receiver got.
@@ -54,6 +60,9 @@ static STATE: Mutex<State> = Mutex::new(State {
     txt: BTreeMap::new(),
     received: Vec::new(),
     statuses: BTreeMap::new(),
+    mail_script: Vec::new(),
+    mail_sent: Vec::new(),
+    cf_suppressions: BTreeMap::new(),
 });
 
 /// The corpus zones, loaded once.
@@ -202,6 +211,41 @@ fn handle(path: &str, body: &Value) -> Value {
         {
             doh(&s, q.split_once('?').map_or("", |(_, q)| q))
         }
+        "/__mail/send" => {
+            s.mail_sent.push(body.clone());
+            let rcpts: Vec<String> = ["to", "cc", "bcc"]
+                .iter()
+                .flat_map(|f| body[*f].as_array().cloned().unwrap_or_default())
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect();
+            let hit = s
+                .mail_script
+                .iter_mut()
+                .find(|(r, _)| rcpts.iter().any(|a| a == r));
+            match hit {
+                Some((_, answers)) if answers.len() > 1 => answers.remove(0),
+                Some((_, answers)) if !answers.is_empty() => answers[0].clone(),
+                _ => {
+                    let domain = body["from"]
+                        .as_str()
+                        .unwrap_or("")
+                        .rsplit('@')
+                        .next()
+                        .unwrap_or("")
+                        .to_owned();
+                    json!({ "messageId": format!("<cf{}@{domain}>", s.mail_sent.len()) })
+                }
+            }
+        }
+        q if q.starts_with("/__http/api.cloudflare.com/") => {
+            let email = q
+                .split("email=")
+                .nth(1)
+                .unwrap_or("")
+                .replace("%40", "@")
+                .replace("%2B", "+");
+            json!({ "success": true, "result": s.cf_suppressions.get(&email).cloned().unwrap_or_default() })
+        }
         q if q.starts_with("/queues/") => {
             s.queued
                 .push((q["/queues/".len()..].to_owned(), body.clone()));
@@ -301,4 +345,49 @@ impl Drop for Reset {
     fn drop(&mut self) {
         reset();
     }
+}
+
+/// Scripts the Email Sending binding for sends that include `recipient`: `{messageId}`,
+/// `{code, message}`, `{exception}` or `{timeout: true}`, in order; the last repeats.
+pub fn mail_script(recipient: &str, answers: Vec<Value>) {
+    start();
+    let mut s = STATE.lock().unwrap();
+    s.mail_script.retain(|(r, _)| r != recipient);
+    s.mail_script.push((recipient.to_owned(), answers));
+}
+
+/// The structured sends that included `recipient`.
+pub fn mail_sent(recipient: &str) -> Vec<Value> {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .mail_sent
+        .iter()
+        .filter(|m| {
+            ["to", "cc", "bcc"].iter().any(|f| {
+                m[*f]
+                    .as_array()
+                    .is_some_and(|a| a.iter().any(|v| v == recipient))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// An Email Sending suppression of `address` with `scope` (`account` or a sending domain).
+pub fn cf_suppress(address: &str, scope: &str) {
+    start();
+    let item = if scope == "account" {
+        json!({ "email": address, "scope": "account", "reason": "hard_bounce" })
+    } else {
+        json!({ "email": address, "scope": "sending_domain", "domain": scope, "reason": "hard_bounce" })
+    };
+    STATE
+        .lock()
+        .unwrap()
+        .cf_suppressions
+        .entry(address.to_owned())
+        .or_default()
+        .push(item);
 }

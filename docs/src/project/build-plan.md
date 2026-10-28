@@ -765,8 +765,7 @@ guard of N13 (`it::send::n13_loop_guard`; the forwarding part in M23) and the re
 (`it::partners::j13_suspended_partner`, whose authentication part runs from M5): no send is accepted for
 a suspended partner's tenants, their inbound mail is stored, and with M8's held deliveries the row is
 accepted here. J17 (`it::partners::j17_operator_enforcement`): with the abuse auto-pause, resuming an
-identity paused for `abuse_threshold` on a partner's tenant needs a platform key. G3's `it::ops::provider_quota_80` fires through M17 Foundation's evaluator,
-which merges first. G7 needs domain states and is accepted in M13. Also: the allow and block lists
+identity paused for `abuse_threshold` on a partner's tenant needs a platform key. G3 (`it::send::g3_quota_backoff`; its `provider_quota_80` alert part in M17, whose evaluator fires it). G7 needs domain states and is accepted in M13. Also: the allow and block lists
 (`it::lists::entries_crud`) and their effect on sends and on inbound mail (`it::send::list_filters`,
 `it::inbound::receive_allow_skips_spam`; D7 covers receive-block), the custom-header rules checked at the
 API (`it::send::header_rules`), the simulator matrix drives every status, an uncertain send is reconciled by a

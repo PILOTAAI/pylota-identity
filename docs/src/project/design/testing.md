@@ -290,6 +290,18 @@ public address that is never contacted, and names starting `private.` with `10.0
 consumed for real now; the itest build taps each message to `{fakes}/queues/pm-webhooks` before the
 consumer handles it, which `it::mailbox::outbox_reaches_event_index_and_queue` reads.
 
+**As built (M9).** The Email Sending binding joins the fake server: in the itest build `MailSender::send`
+posts the structured message to `{fakes}/__mail/send`, which records it (`fakes::mail_sent`) and answers
+from the script a test set for one of its recipients (`fakes::mail_script`: a `messageId`, an error
+`code`, an exception or a timeout, in order, the last one repeating), or with a fresh `<cf{n}@{from
+domain}>` ID. `api.cloudflare.com` is answered there too, with the Email Sending suppressions a test
+listed (`fakes::cf_suppress`); the harness's `.dev.vars` carries a dummy `PM_CF_API_TOKEN` for it. Three
+hooks are added: `POST /__test/d1` runs one statement with JSON parameters (tenant domain rows and
+other fixtures only setup or M13 writes), `POST /__test/r2` heads, lists or puts one object, and the
+fault target `submit.after_put` ends a submit after its sent copy, as a killed instance would. Back-offs
+of `pm-outbound` and delivery-event retries are queued after one second while the fake clock decides the
+24-hour end, so `it::send::g3_quota_backoff` ends after an `advance` of 25 hours.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

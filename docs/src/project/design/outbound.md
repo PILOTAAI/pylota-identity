@@ -1606,6 +1606,28 @@ Agent        API handler      IdentityMailbox     pm-outbound consumer   Cloudfl
   │◀════════════ webhooks: message.uncertain, message.reconciled {status: delivered}, message.delivered
 ```
 
+**As built (M9).** The design above holds, with these settlements until the milestones that need more:
+
+- Transports: Cloudflare, the simulator and loopback. A domain with `transport` `ses` or `smtp` holds its
+  queued mail with the `Paused` back-off until M13 builds those transports (and `ses_not_configured` is
+  refused at step 15 as designed). Calendar payloads are refused with `422 transport_unavailable`
+  (`calendar_needs_raw_mime`) until spike S1's raw send and M32; uploads (`upload_id`, M33), drafts and
+  approval (step 16a, M29), the agent sign-up steps (7a, 17a, M34), the billing stops of step 18 (M22)
+  and `DeploymentReserve` (M17) are not consulted yet.
+- The handler loads the identity, tenant and address context (`send::context::load`); the mailbox loads
+  the recipients' suppressions, send-list entries and, for a test tenant, directory rows once it has
+  computed the recipients, because a reply's recipients come from the message it answers.
+- `RecordOutcome` evaluates the identity, tenant and domain windows with the default thresholds of
+  tenant policy; `RecordOutcome.thresholds` arrives with M35. Alerts are log lines (`sending_pause`,
+  `transport_breaker_open`, `provider_quota`, `deliverability_alert`) until M17's evaluator.
+- The outbound `Message-ID` is `<{message ulid}@{from domain}>` in the sent copy; Cloudflare's returned ID
+  replaces it as `rfc_message_id` when it has the `<…@{from domain}>` form (strategy A); the simulator and
+  loopback keep the composed one.
+- The orphan sweep reads a key's age from the `msg_` ULID in its path, because the platform's R2 listing
+  carries no upload time; keys without one are never swept.
+- `PATCH /v1/domains/{domain_id}` with `sending_paused: false` is M13's (the domain routes); until then a
+  domain pause is cleared by the operator in D1.
+
 ## Tests
 
 | Test | Covers |

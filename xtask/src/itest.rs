@@ -171,7 +171,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
     std::fs::write(
         dir.join(".dev.vars"),
         format!(
-            "PM_MASTER_KEY={}\nPM_KEY_PEPPER={}\nPM_HASH_KEY={}\n",
+            "PM_MASTER_KEY={}\nPM_KEY_PEPPER={}\nPM_HASH_KEY={}\nPM_CF_API_TOKEN=itest-cf-token\n",
             STANDARD.encode(random::<32>()?),
             STANDARD.encode(pepper),
             STANDARD.encode(random::<32>()?)
