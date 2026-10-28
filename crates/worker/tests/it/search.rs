@@ -522,6 +522,7 @@ fn agentic_counted_once() {
         "agentic count",
         &[
             "tenants:manage",
+            "identities:write",
             "search:read",
             "search:agentic",
             "policy:write",

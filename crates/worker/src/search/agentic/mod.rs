@@ -585,6 +585,10 @@ impl<P: Platform> Agent<P> {
                 text
             }
         };
+        // A refused ID has its `scope_probe` entry already; the ID the model made up is not echoed.
+        if text.starts_with("UNKNOWN_ID") {
+            return (text, Value::Null);
+        }
         entry["ms"] = json!(ms(self.p.as_ref()) - started);
         (text, entry)
     }
@@ -979,7 +983,9 @@ impl<P: Platform> Agent<P> {
                             None => {
                                 self.done_calls.insert(args.canonical(), step);
                                 let (text, entry) = self.act(step, &c.id, args).await;
-                                self.step(entry).await;
+                                if !entry.is_null() {
+                                    self.step(entry).await;
+                                }
                                 text
                             }
                         },

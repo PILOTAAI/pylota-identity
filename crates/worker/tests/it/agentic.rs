@@ -138,7 +138,7 @@ fn scripted_loop() {
             answer(
                 &[
                     ("The van hire claim was \"accepted in full\".", &[&mid]),
-                    ("A refund of 400 pounds follows.", &[&mid]),
+                    ("Invoice 88213 was paid.", &[&mid]),
                 ],
                 "answered",
             ),
@@ -289,6 +289,7 @@ fn f10_steering() {
                         "search",
                         json!({ "q": "booking", "identity_id": other_idn }),
                     ),
+                    ("c3", "read_message", json!({ "message_id": evil })),
                 ],
                 None,
             ),
@@ -339,10 +340,9 @@ fn f12_budget_steps() {
     };
     fakes::ai_script(
         AGENT,
+        // With three steps, one planning step leaves only the answer step: the judge forces it.
         vec![
-            search("a", "mileage"),
-            search("b", "log"),
-            search("c", "miles"),
+            search("a", "mileage log"),
             answer(&[], "insufficient_evidence"),
         ],
     );
@@ -353,8 +353,8 @@ fn f12_budget_steps() {
     );
     assert_eq!(r.body["status"], "budget_exhausted", "{}", r.body);
     assert!(!r.body["evidence"].as_array().unwrap().is_empty());
-    // Three steps: two plans, then the answer.
-    assert_eq!(r.body["usage"]["steps"], 3, "{}", r.body);
+    assert_eq!(r.body["usage"]["steps"], 2, "{}", r.body);
+    assert_eq!(actions(&r), ["search", "search", "answer"]);
 }
 
 /// F12 by time: a slow planner leaves no time for another step; the answer is forced.
@@ -369,16 +369,25 @@ fn f12_budget_time() {
         "Tyre change",
         "Winter tyres were fitted.",
     );
-    let mut slow = completion(
+    // The first plan takes 2.7 s of 6; the second gets what is left and runs out.
+    let mut first = completion(
         &[("a", "search", json!({ "q": "tyres", "mode": "keyword" }))],
         None,
     );
-    slow["__delay_ms"] = json!(2_000);
-    fakes::ai_script(AGENT, vec![slow, answer(&[], "insufficient_evidence")]);
+    first["__delay_ms"] = json!(2_700);
+    let mut second = completion(
+        &[("b", "search", json!({ "q": "winter", "mode": "keyword" }))],
+        None,
+    );
+    second["__delay_ms"] = json!(1_000);
+    fakes::ai_script(
+        AGENT,
+        vec![first, second, answer(&[], "insufficient_evidence")],
+    );
     let r = agentic(
         &idn,
         &key,
-        json!({ "q": "tyres", "budget": { "max_seconds": 4 } }),
+        json!({ "q": "tyres", "budget": { "max_seconds": 6 } }),
     );
     assert_eq!(r.body["status"], "budget_exhausted", "{}", r.body);
     assert!(!r.body["evidence"].as_array().unwrap().is_empty());
@@ -425,24 +434,14 @@ fn f13_insufficient() {
     let before = fakes::ai_inputs(AGENT).len();
     fakes::ai_script(
         AGENT,
-        vec![
-            completion(
-                &[(
-                    "a",
-                    "search",
-                    json!({ "q": "unicorn invoice", "mode": "keyword" }),
-                )],
-                None,
-            ),
-            completion(
-                &[(
-                    "b",
-                    "search",
-                    json!({ "q": "dragon receipt", "mode": "keyword" }),
-                )],
-                None,
-            ),
-        ],
+        vec![completion(
+            &[(
+                "a",
+                "search",
+                json!({ "q": "unicorn invoice", "mode": "keyword" }),
+            )],
+            None,
+        )],
     );
     let r = agentic(&idn, &key, json!({ "q": "what did the unicorn cost" }));
     assert_eq!(r.body["status"], "insufficient_evidence", "{}", r.body);
@@ -453,16 +452,9 @@ fn f13_insufficient() {
         .iter()
         .filter_map(|t| t["q"].as_str())
         .collect();
-    assert_eq!(
-        qs,
-        [
-            "what did the unicorn cost",
-            "unicorn invoice",
-            "dragon receipt"
-        ]
-    );
-    // Two planning calls, no answer call.
-    assert_eq!(fakes::ai_inputs(AGENT).len() - before, 2);
+    assert_eq!(qs, ["what did the unicorn cost", "unicorn invoice"]);
+    // The seed is the first empty search: one planning call, no answer call.
+    assert_eq!(fakes::ai_inputs(AGENT).len() - before, 1);
 }
 
 /// At tenant scope `contacts` merges one address across identities, and its `last_thread_id` opens;
