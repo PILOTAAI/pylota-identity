@@ -142,7 +142,10 @@ pub fn d1w(sql: &str, params: Value) -> Vec<Value> {
 
 /// Stores an inbound message from `from` to the sender and waits for it; answers its ID.
 pub fn receive(s: &Sender, from: &str, subject: &str) -> String {
-    let raw = crate::mail(from, &s.addr, subject, "Can you confirm?");
+    let mut raw = crate::mail(from, &s.addr, subject, "Can you confirm?");
+    if from.ends_with("@brightwell.example") {
+        raw = crate::dkim::sign(&raw);
+    }
     crate::inbound(from, &s.addr, &raw);
     eventually(30, "the inbound message", || {
         crate::messages_of(&s.iid, &s.key, "&direction=inbound")
