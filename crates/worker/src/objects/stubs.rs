@@ -58,6 +58,41 @@ fn body_of(req: &HttpRequestIn) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// `DomainMonitor`.
+pub struct MonitorObject {
+    platform: CfPlatform,
+    sql: CfSql,
+    storage: CfStorage,
+}
+
+impl MonitorObject {
+    fn monitor(&self) -> crate::domains::monitor::Monitor<'_, CfPlatform, CfSql, CfStorage> {
+        crate::domains::monitor::Monitor {
+            p: &self.platform,
+            sql: &self.sql,
+            state: &self.storage,
+        }
+    }
+}
+
+impl ObjectApp for MonitorObject {
+    fn new(state: CfObjectState, platform: CfPlatform) -> Self {
+        Self {
+            sql: state.sql(),
+            storage: state.storage(),
+            platform,
+        }
+    }
+
+    async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
+        json(200, &self.monitor().handle(&body_of(&req)).await)
+    }
+
+    async fn alarm(&self) {
+        self.monitor().alarm().await;
+    }
+}
+
 /// `SesControl`: the deployment's SES token bucket.
 pub struct SesControlObject {
     platform: CfPlatform,
@@ -174,6 +209,5 @@ macro_rules! shell {
     };
 }
 
-shell!(MonitorObject, "DomainMonitor");
 shell!(NotifierObject, "Notifier");
 shell!(EventsObject, "TenantEvents");

@@ -385,7 +385,7 @@ async fn fanout<P: Platform>(
             return Done::Retry;
         }
     }
-    if owner_kind == OwnerKind::Platform
+    if matches!(owner_kind, OwnerKind::Platform | OwnerKind::Domain)
         && p.db()
             .execute(Stmt::new(
                 "UPDATE event_index SET fanned_out_at = ?2 WHERE id = ?1 AND fanned_out_at IS NULL",
@@ -509,7 +509,8 @@ async fn deliver<P: Platform>(p: &P, job: WebhookJob, payloads: &HashMap<String,
     }
     // 3. The payload.
     let payload = match owner_kind {
-        OwnerKind::Platform => match index_row(p, &event_id).await {
+        // Domain events keep their payload in the index too (a removed domain's monitor keeps nothing).
+        OwnerKind::Platform | OwnerKind::Domain => match index_row(p, &event_id).await {
             Ok(Some(IndexRow {
                 payload_json: Some(b),
                 occurred_at,
@@ -522,8 +523,8 @@ async fn deliver<P: Platform>(p: &P, job: WebhookJob, payloads: &HashMap<String,
             Some(Payload::Found(f)) => Some(f.clone()),
             _ => None,
         },
-        // Domain and job owners arrive with M13 and M14.
-        OwnerKind::Domain | OwnerKind::Job => None,
+        // Job owners arrive with M14.
+        OwnerKind::Job => None,
     };
     let Some((body, occurred_at)) = payload else {
         crate::metrics::count(p, "webhook_dead_total", tenant_id.as_deref(), 1);
