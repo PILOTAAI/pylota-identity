@@ -19152,6 +19152,16 @@ components:
         - partner_tenant_limit
         - test_mode_recipient
         - invalid_signature
+        - recipient_opted_out
+        - consent_required
+        - a2p_not_registered
+        - destination_blocked
+        - consumer_unauthenticated
+        - vault_not_granted
+        - vault_refused
+        - consumer_not_active
+        - vault_unlock_required
+        - vault_unlock_invalid
         - policy_denied
         - approval_required
         - signup_closed
@@ -19179,6 +19189,7 @@ components:
         - calendar_too_large
         - upload_size_mismatch
         - upload_checksum_mismatch
+        - phone_number_invalid
         - query_range_too_wide
         - upgrade_required
         # Resources and state
@@ -19206,6 +19217,18 @@ components:
         - draft_not_found
         - event_consumer_not_found
         - signup_not_found
+        - phone_number_not_found
+        - phone_request_not_found
+        - sms_not_found
+        - call_not_found
+        - phone_document_not_found
+        - port_out_not_found
+        - voice_connector_not_found
+        - vault_item_not_found
+        - vault_grant_not_found
+        - vault_use_not_found
+        - vault_consumer_not_found
+        - vault_ticket_not_found
         - upload_not_found
         - idempotency_conflict
         - request_in_progress
@@ -19260,12 +19283,29 @@ components:
         - signup_not_pending
         - signup_cannot_verify
         - signup_human_unreachable
+        - phone_number_not_ready
+        - phone_number_taken
+        - phone_request_not_pending
+        - phone_request_digest_mismatch
+        - compliance_not_approved
+        - quiet_hours
+        - identity_has_phone_numbers
+        - voice_route_unsupported
+        - phone_document_in_use
+        - port_in_not_cancelable
+        - port_out_closed
+        - vault_grant_exists
+        - vault_not_pending
+        - vault_phase_spent
+        - vault_totp_step_used
         - loop_detected
         - sending_paused
         - triage_not_eligible
         - raw_expired
         - message_expired
         - upload_expired
+        - phone_quote_expired
+        - vault_ticket_expired
         - cursor_expired
         - legal_hold
         - not_frozen
@@ -19295,7 +19335,21 @@ components:
         - webhook_header_limit_reached
         - key_limit_reached
         - web_bot_auth_disabled
+        - country_not_offered
+        - local_presence_required
+        - compliance_incomplete
+        - phone_registration_otp_invalid
+        - phone_number_limit_reached
+        - phone_request_limit_reached
+        - compliance_address_invalid
+        - vault_disabled
+        - vault_kind_refused
+        - vault_item_limit_reached
+        - vault_grant_limit_reached
+        - vault_consumer_limit_reached
+        - vault_session_too_large
         - billing_limit
+        - spend_cap_reached
         - rate_limited
         - daily_cap_reached
         - agentic_budget_exhausted

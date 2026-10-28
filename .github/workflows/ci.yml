@@ -1,6 +1,6 @@
 # The pull-request gate (Rust workspace § 10, Testing § 12). Build plan M0 starts it with these jobs:
 # fmt, clippy, test, layering, wasm (with the NFR-SEC-2 size budget), deny, docs and trace. Later
-# milestones add itest, browser, audit, openapi and skills; M2 adds fuzz-smoke.
+# milestones add itest, browser, audit and skills; M2 adds fuzz-smoke, M3 openapi.
 #
 # Every action is pinned to a full commit SHA, read from the action's releases on 2026-10-19. The
 # toolchain comes from rust-toolchain.toml; the tools are exact versions installed with --locked. No
@@ -99,6 +99,20 @@ jobs:
         with:
           name: fuzz-${{ matrix.target }}
           path: fuzz/artifacts/${{ matrix.target }}
+
+  openapi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - run: cargo xtask openapi
 
   layering:
     runs-on: ubuntu-24.04

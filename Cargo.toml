@@ -93,6 +93,7 @@ idna                  = { version = "=1.1.0", default-features = false, features
 html5ever             = "=0.40.1"                                          # 2026-09-14; the version ammonia 4.2.4 resolves
 psl                   = { version = "=2.1.241", default-features = false, features = ["helpers"] }  # 2026-10-08; organisational domains (D2, D3)
 web-time              = "=1.1.0"                                           # the version mail-auth resolves; names its Instant type only
+yaml_serde            = "=0.10.7"                                          # 2026-08-18; dev-dependency (api-types) and xtask: reads openapi.yaml
 proptest              = "=1.12.0"                                           # native dev-dependency; 2026-10-10
 
 # Native only, chosen at build time (the newest release at least two weeks old; crates.io, read 2026-10-19)

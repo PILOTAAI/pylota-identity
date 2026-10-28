@@ -69,7 +69,7 @@ pipeline; this page adds what they must contain.
   fake (`BlobStore`) also implements `put_stream`, `head_checksum` and `copy`, and can fail them with R2's
   error codes `10013`, `10037` and `10058` ([Uploads](uploads.md)).
 - Error-code tests compare `ErrorCode::http_status()` and `retryable()` with every row of
-  [Errors](../../reference/errors.md) (`core::errors::catalogue_matches_reference`), and every
+  [Errors](../../reference/errors.md) (`api_types::errors::catalogue_matches_reference`), and every
   `ErrorCode` variant with the catalogue in both directions.
 - Snapshot-style assertions compare JSON structurally (`serde_json::Value`), never as strings.
 
