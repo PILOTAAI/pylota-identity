@@ -719,18 +719,19 @@ temporarily failed mail.
   `messages:read` (and `quarantine:review` for `message.quarantined`) to create, change or replay, and a
   changed URL waits for a passing test.
 - The system identity's events reach platform endpoints only, by fan-out and replay
-  (`it::webhooks::system_identity_events_platform_only`, part of A15), and an event whose identity was
+  (`it::webhooks::system_identity_events_platform_only`; A15 is accepted in M14), and an event whose identity was
   deleted is recorded `dead` with `event_unavailable` at once (`it::webhooks::deleted_identity_event_unavailable`,
   with the mailbox's `erased` flag set through the itest hooks).
 - J19 (`it::idempotency::j19_per_key_no_secret`): replays are per key, and a replay of key creation and
   rotation, webhook creation and webhook secret rotation returns no secret (`"secret_replayed": false`).
-- The delivery hold of J13 (`it::webhooks::j13_held_while_partner_suspended`): deliveries to a suspended
+- The delivery hold of J13 (`it::webhooks::j13_held_while_partner_suspended`; its send part in M9): deliveries to a suspended
   partner's endpoints and its tenants' endpoints are parked in `webhook_held` and released by the
   every-minute cron on reactivation.
 - NFR-REL-4: the retry schedule reaches 24 hours within its 13 attempts, and `webhook_delivery_latency_ms`
   and `webhook_dead_total` are emitted for the SLI.
 - `webhook_endpoints.secret_enc` and `prev_secret_enc` are registered in `crates/core/src/sealed.rs`
-  (M17 Foundation's registry), with their case in `it::secrets::master_key_rotation`.
+  (the registry; their case in `it::secrets::master_key_rotation` runs from M17 Foundation, which
+  builds the rotation).
 
 ---
 

@@ -25,6 +25,7 @@ pub mod keyring;
 pub mod log;
 pub mod mailbox;
 pub mod metrics;
+pub mod net;
 pub mod objects;
 pub mod policy;
 pub mod quota;
@@ -70,9 +71,8 @@ mod entry {
             crate::email::handle(self.0.p.as_ref(), &msg).await
         }
 
-        /// Until M8 consumes `pm-webhooks`, its messages wait in the queue. The itest build hands
-        /// them, and those of two dead-letter queues, to the fake server instead, so the suite can see them
-        /// (Testing § 6.2).
+        /// The itest build hands the messages of two dead-letter queues to the fake server, so the
+        /// suite can redrive a dead-lettered pointer and see that nothing was dead-lettered.
         async fn queue(
             &self,
             queue: pylota_identity_platform::queues::QueueName,
@@ -80,15 +80,12 @@ mod entry {
             batch: Vec<pylota_identity_platform::queues::Incoming<serde_json::Value>>,
         ) {
             #[cfg(feature = "itest-hooks")]
-            // `pm-inbound-dlq` and `pm-index-dlq` too: J7's test redrives a dead-lettered pointer,
-            // and the index tests check that nothing was dead-lettered.
-            if (queue == pylota_identity_platform::queues::QueueName::Webhooks && !dead_letter)
-                || (dead_letter
-                    && matches!(
-                        queue,
-                        pylota_identity_platform::queues::QueueName::Inbound
-                            | pylota_identity_platform::queues::QueueName::Index
-                    ))
+            if dead_letter
+                && matches!(
+                    queue,
+                    pylota_identity_platform::queues::QueueName::Inbound
+                        | pylota_identity_platform::queues::QueueName::Index
+                )
             {
                 crate::hooks::capture_queue(self.0.p.as_ref(), queue, dead_letter, batch).await;
                 return;

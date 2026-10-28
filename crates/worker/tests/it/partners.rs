@@ -140,8 +140,16 @@ fn policy_caps_lower_only() {
 #[test]
 fn j10_foreign_partner_not_found() {
     let p = platform();
-    let (_, a) = partner("j10a", &["tenants:manage", "keys:manage", "audit:read"]);
-    let (_, b) = partner("j10b", &["tenants:manage"]);
+    let (_, a) = partner(
+        "j10a",
+        &[
+            "tenants:manage",
+            "keys:manage",
+            "audit:read",
+            "webhooks:manage",
+        ],
+    );
+    let (_, b) = partner("j10b", &["tenants:manage", "webhooks:manage"]);
     let theirs = tenant(&b, "j10_theirs");
     let direct = tenant(&p, "j10_direct");
     let missing = get("/v1/tenants/ten_01ARYZ6S410000000000000000", &a);
@@ -159,6 +167,22 @@ fn j10_foreign_partner_not_found() {
             "tenant_not_found"
         );
     }
+    // Another partner's endpoint by ID is the same 404 as a missing one (M8).
+    let theirs_whk = post(
+        "/v1/webhooks",
+        &b,
+        json!({ "url": "https://j10.hooks.example.com/b", "events": ["identity.created"] }),
+    );
+    assert_eq!(theirs_whk.status, 201, "{}", theirs_whk.body);
+    let missing_whk = get("/v1/webhooks/whk_01ARYZ6S410000000000000000", &a);
+    let found = get(
+        &format!("/v1/webhooks/{}", theirs_whk.body["id"].as_str().unwrap()),
+        &a,
+    );
+    assert_eq!(
+        (found.status, found.without_request_id()),
+        (404, missing_whk.without_request_id())
+    );
     assert!(
         get("/v1/tenants", &a).body["data"]
             .as_array()

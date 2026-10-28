@@ -561,6 +561,26 @@ pub enum WebhookJob {
 
 The queue is configured with batch size 20 and `max_retries` 13 ([Configuration](../../reference/configuration.md#bindings)).
 
+**As built (M8).** The design above holds, with these settlements until the milestones that need more:
+
+- The `Fanout` consumer has no event-log append yet (step 0 is M30's) and no Notifier hand-off (M26).
+  Events of `DomainMonitor` and `JobRunner` owners have no producer before M13 and M14; a `Deliver` for
+  one is recorded `dead` with `event_unavailable`.
+- The signing primitives are pure functions in `core::standard_webhooks` (HMAC and base64 live in
+  `core`); `webhooks/sign.rs` re-exports them and builds the request headers. The test vector is the
+  Standard Webhooks reference library's (`libraries/rust/src/lib.rs`, `test_sign`, read 2026-10-28).
+- `core::ssrf` refuses the whole IPv4-mapped, NAT64 and 6to4 ranges rather than checking the embedded
+  IPv4 address: no webhook needs one, and the refusal covers every embedded range the table lists.
+- `headers` on create is validated, sealed and sent as [Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)
+  specifies; `PATCH …/headers` is M37's.
+- Metrics without labels until M17's catalogue: `webhook_attempts_total` (the result is in the
+  `webhook_attempt` log line), `webhook_dead_total`, `webhook_disabled_total`,
+  `webhook_ssrf_blocked_total`, and `webhook_delivery_latency_ms` as a `metric` log line with
+  `event_class`, written for a first attempt that succeeded.
+- In the itest build a retry is queued after one second, while `next_attempt_at` records the scheduled
+  time, so `it::webhooks::j4_retry_schedule` checks all 13 attempts against the schedule without
+  waiting 72 hours ([Testing § 6](testing.md#6-integration-tests-against-workerd-it)).
+
 ## Metrics
 
 `webhook_attempts_total{result}`, `webhook_dead_total{event_class}`, `webhook_disabled_total{reason}`,
@@ -584,7 +604,7 @@ event and endpoint IDs, status codes and durations, never payloads or URLs' quer
 |---|---|
 | `it::webhooks::outbox_at_least_once` | A crash after queue send and before `dispatched_at` delivers the event again with the same `webhook-id`; nothing is lost |
 | `it::webhooks::sequence_strictly_increases` | Per-identity `sequence` strictly increases across event types ([C5](../edge-cases.md)) |
-| `webhooks::sign::standard_webhooks_vectors` | The specification's test vectors verify (build plan M8, FR-WH-2) |
+| `core::standard_webhooks::standard_webhooks_vectors` | The specification's test vectors verify (build plan M8, FR-WH-2); `webhooks/sign.rs` re-exports these pure functions |
 | `it::webhooks::rotation_two_signatures` | During an overlap both signatures are sent, new first; after it only one (FR-WH-2) |
 | `core::crypto::aes_gcm_round_trip_and_aad` | Seal/unseal round trip in the Security § 7.2 envelope; a ciphertext moved to another row or column fails |
 | `core::ssrf::*` (owned by [Security](security.md)) | Loopback, RFC 1918, link-local, CGNAT, `::1`, `fc00::/7`, `169.254.169.254`, IPv4-mapped and NAT64 forms, integer IPv4 literals (FR-WH-5) |

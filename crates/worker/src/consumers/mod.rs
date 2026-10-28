@@ -5,6 +5,7 @@
 
 pub mod inbound;
 pub mod index;
+pub mod webhooks;
 
 use pylota_identity_platform::Platform;
 use pylota_identity_platform::queues::{Incoming, QueueName};
@@ -20,6 +21,7 @@ pub async fn run<P: Platform>(
     match (queue, dead_letter) {
         (QueueName::Inbound, false) => inbound::batch(p, batch).await,
         (QueueName::Index, false) => index::batch(p, batch).await,
+        (QueueName::Webhooks, false) => webhooks::batch(p, batch).await,
         // The other queues are consumed from their milestones; until then a message waits.
         _ => {
             for m in &batch {

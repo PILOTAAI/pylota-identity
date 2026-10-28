@@ -30,6 +30,16 @@ impl OwnerKind {
             Self::Platform => "platform",
         }
     }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "mailbox" => Self::Mailbox,
+            "domain" => Self::Domain,
+            "job" => Self::Job,
+            "platform" => Self::Platform,
+            _ => return None,
+        })
+    }
 }
 
 /// The envelope, serialised once: these exact bytes are signed and sent on every attempt.

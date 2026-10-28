@@ -62,6 +62,11 @@ pub enum MailboxRequest {
     ConfirmStored {
         message_id: String,
     },
+    /// The stored envelopes of outbox events (Webhooks › Delivering an attempt, step 3); IDs no longer
+    /// in the outbox are left out.
+    GetEvents {
+        event_ids: Vec<String>,
+    },
     /// The attachments an `AttachmentText` job extracts.
     PendingAttachmentText {
         message_id: String,
@@ -357,6 +362,19 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                     &[message_id.into()],
                 )?;
                 Ok(serde_json::json!({ "stored": erased.is_none() && exists.is_some() }))
+            }
+            MailboxRequest::GetEvents { event_ids } => {
+                #[derive(Deserialize, Serialize)]
+                struct E {
+                    event_id: String,
+                    payload_json: String,
+                    occurred_at: i64,
+                }
+                let rows: Vec<E> = self.sql.query(
+                    "SELECT event_id, payload_json, occurred_at FROM outbox WHERE event_id IN (SELECT value FROM json_each(?1))",
+                    &[serde_json::to_string(&event_ids).unwrap_or_default().into()],
+                )?;
+                Ok(serde_json::json!({ "events": rows }))
             }
             MailboxRequest::PendingAttachmentText { message_id } => {
                 Ok(attachments::pending(self.sql, &message_id)?)

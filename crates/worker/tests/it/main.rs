@@ -6,6 +6,7 @@ mod auth;
 mod conformance;
 mod dkim;
 mod fakes;
+mod idempotency;
 mod identities;
 mod inbound;
 mod index;
@@ -22,6 +23,7 @@ mod security;
 mod tenants;
 mod thread;
 mod wait;
+mod webhooks;
 
 use std::process::Command;
 use std::sync::OnceLock;

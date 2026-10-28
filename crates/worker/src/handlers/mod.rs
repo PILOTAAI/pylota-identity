@@ -16,6 +16,7 @@ pub mod quarantine;
 pub mod tenants;
 pub mod threads;
 pub mod wait;
+pub mod webhooks;
 
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_platform::{ControlDb as _, Platform};
@@ -73,6 +74,16 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::QuarantineList => quarantine::list(c).await,
         Handler::QuarantineRelease => quarantine::release(c).await,
         Handler::Wait => wait::wait(c).await,
+        Handler::WebhookCreate => webhooks::create(c).await,
+        Handler::WebhookList => webhooks::list(c).await,
+        Handler::TenantWebhookList => webhooks::list_tenant(c).await,
+        Handler::WebhookGet => webhooks::get(c).await,
+        Handler::WebhookUpdate => webhooks::update(c).await,
+        Handler::WebhookDelete => webhooks::delete(c).await,
+        Handler::WebhookRotate => webhooks::rotate_secret(c).await,
+        Handler::WebhookTest => webhooks::test(c).await,
+        Handler::WebhookDeliveries => webhooks::deliveries(c).await,
+        Handler::WebhookReplay => webhooks::replay(c).await,
     }
 }
 

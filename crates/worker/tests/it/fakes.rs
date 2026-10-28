@@ -17,13 +17,43 @@ struct State {
     queued: Vec<(String, Value)>,
     /// TXT records by name; `None` answers SERVFAIL.
     txt: BTreeMap<String, Option<Vec<String>>>,
+    /// Requests the receivers got: `(host and path, headers, body)`.
+    received: Vec<Received>,
+    /// Scripted statuses per receiver path, taken in order; the last one repeats.
+    statuses: BTreeMap<String, Vec<u16>>,
 }
+
+/// One request a fake webhook receiver got.
+#[derive(Clone, Debug)]
+pub struct Received {
+    pub target: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Received {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
+    pub fn json(&self) -> Value {
+        serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    }
+}
+
+/// Receiver hosts: any name under this suffix resolves to a public address and answers here.
+pub const RECEIVERS: &str = ".hooks.example.com";
 
 static STATE: Mutex<State> = Mutex::new(State {
     offset: 0,
     faults: Vec::new(),
     queued: Vec::new(),
     txt: BTreeMap::new(),
+    received: Vec::new(),
+    statuses: BTreeMap::new(),
 });
 
 /// The corpus zones, loaded once.
@@ -68,6 +98,21 @@ fn doh(s: &State, query: &str) -> Value {
         }
     }
     let name = name.trim_end_matches('.').to_owned();
+    if name.ends_with(RECEIVERS) {
+        // A public address that is never contacted (the Worker's requests come here by host), or
+        // a private one for names starting `private.`, for the SSRF checks.
+        let a = if name.starts_with("private.") {
+            "10.0.0.5"
+        } else {
+            "93.184.216.34"
+        };
+        return match rtype.as_str() {
+            "A" => {
+                json!({ "Status": 0, "Answer": [{ "name": name, "type": 1, "TTL": 60, "data": a }] })
+            }
+            _ => json!({ "Status": 0, "Answer": [] }),
+        };
+    }
     match (rtype.as_str(), s.txt.get(&name)) {
         ("TXT", Some(None)) => json!({ "Status": 2, "Answer": [] }),
         ("TXT", Some(Some(records))) => json!({
@@ -97,23 +142,33 @@ pub fn start() {
                     continue;
                 }
                 let mut len = 0usize;
+                let mut headers = Vec::new();
                 loop {
                     let mut h = String::new();
                     if reader.read_line(&mut h).is_err() || h == "\r\n" || h.is_empty() {
                         break;
                     }
+                    if let Some((n, v)) = h.trim_end().split_once(':') {
+                        headers.push((n.trim().to_ascii_lowercase(), v.trim().to_owned()));
+                    }
                     if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
                         len = v.trim().parse().unwrap_or(0);
                     }
                 }
-                let mut body = vec![0u8; len];
-                let _ = reader.read_exact(&mut body);
-                let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                let mut raw = vec![0u8; len];
+                let _ = reader.read_exact(&mut raw);
                 let path = line.split_whitespace().nth(1).unwrap_or("/").to_owned();
-                let answer = handle(&path, &body);
-                let text = answer.to_string();
+                let (status, text) = match path.strip_prefix("/__http/").filter(|t| {
+                    t.split(['/', '?']).next().is_some_and(|h| h.ends_with(RECEIVERS))
+                }) {
+                    Some(target) => (receive(target, headers, raw), String::new()),
+                    None => {
+                        let body: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
+                        (200, handle(&path, &body).to_string())
+                    }
+                };
                 let mut out = stream;
-                let _ = write!(out, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len());
+                let _ = write!(out, "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len());
             }
         });
     });
@@ -182,6 +237,45 @@ pub fn fault(target: &str, binding: &str, mode: &str, count: u32) {
         .unwrap()
         .faults
         .push(json!({ "target": target, "binding": binding, "mode": mode, "count": count }));
+}
+
+/// A receiver's request: recorded, answered with its path's next scripted status (200 by default).
+fn receive(target: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> u16 {
+    let mut s = STATE.lock().unwrap();
+    let key = target.split('?').next().unwrap_or("").to_owned();
+    let status = match s.statuses.get_mut(&key) {
+        Some(list) if list.len() > 1 => list.remove(0),
+        Some(list) => list.first().copied().unwrap_or(200),
+        None => 200,
+    };
+    s.received.push(Received {
+        target: key,
+        headers,
+        body,
+    });
+    status
+}
+
+/// Scripts the statuses of a receiver path (`host/path`), in order; the last repeats.
+pub fn respond(target: &str, statuses: &[u16]) {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .statuses
+        .insert(target.to_owned(), statuses.to_vec());
+}
+
+/// The requests a receiver path (`host/path`) got so far.
+pub fn received(target: &str) -> Vec<Received> {
+    STATE
+        .lock()
+        .unwrap()
+        .received
+        .iter()
+        .filter(|r| r.target == target)
+        .cloned()
+        .collect()
 }
 
 /// Arms a fault on `target` for any binding.

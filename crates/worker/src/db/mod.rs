@@ -12,6 +12,7 @@ pub mod jobs;
 pub mod keys;
 pub mod partners;
 pub mod tenants;
+pub mod webhooks;
 
 #[cfg(test)]
 mod tests {

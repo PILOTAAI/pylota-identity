@@ -18,6 +18,7 @@ struct Target {
     identity: String,
     address: String,
     domain: String,
+    webhook: String,
 }
 
 /// One request of the matrix: method, path and body for a target.
@@ -26,6 +27,16 @@ type Case = fn(&Target) -> (&'static str, String, Option<Value>);
 /// Every operation of the route table but the public ones, with the request that names the target.
 const CASES: &[(&str, Case)] = &[
     ("getMe", |_| ("GET", "/v1/me".into(), None)),
+    ("createPlatformWebhook", |_| {
+        (
+            "POST",
+            "/v1/webhooks".into(),
+            Some(
+                json!({ "url": "https://own.hooks.example.com/a", "events": ["identity.created"] }),
+            ),
+        )
+    }),
+    ("listWebhooks", |_| ("GET", "/v1/webhooks".into(), None)),
     ("createTenant", |t| {
         (
             "POST",
@@ -247,15 +258,71 @@ const CASES: &[(&str, Case)] = &[
             None,
         )
     }),
+    // Webhook endpoints (M8): a tenant's endpoint by ID, and its tenant's list and create.
+    ("createTenantWebhook", |t| {
+        (
+            "POST",
+            format!("/v1/tenants/{}/webhooks", t.tenant),
+            Some(json!({ "url": "https://x.hooks.example.com/a", "events": ["identity.created"] })),
+        )
+    }),
+    ("listTenantWebhooks", |t| {
+        ("GET", format!("/v1/tenants/{}/webhooks", t.tenant), None)
+    }),
+    ("getWebhook", |t| {
+        ("GET", format!("/v1/webhooks/{}", t.webhook), None)
+    }),
+    ("updateWebhook", |t| {
+        (
+            "PATCH",
+            format!("/v1/webhooks/{}", t.webhook),
+            Some(json!({ "description": "x" })),
+        )
+    }),
+    ("deleteWebhook", |t| {
+        ("DELETE", format!("/v1/webhooks/{}", t.webhook), None)
+    }),
+    ("rotateWebhookSecret", |t| {
+        (
+            "POST",
+            format!("/v1/webhooks/{}/rotate-secret", t.webhook),
+            Some(json!({ "overlap_hours": 0 })),
+        )
+    }),
+    ("testWebhook", |t| {
+        ("POST", format!("/v1/webhooks/{}/test", t.webhook), None)
+    }),
+    ("listWebhookDeliveries", |t| {
+        (
+            "GET",
+            format!("/v1/webhooks/{}/deliveries", t.webhook),
+            None,
+        )
+    }),
+    ("replayWebhookEvents", |t| {
+        (
+            "POST",
+            format!("/v1/webhooks/{}/replay", t.webhook),
+            Some(json!({ "since": "2026-01-01T00:00:00Z" })),
+        )
+    }),
 ];
 
+const MISSING_WEBHOOK: &str = "whk_01ARYZ6S41TSV4RRFFQ69G5FAV";
 const THREAD: &str = "thr_01ARYZ6S41TSV4RRFFQ69G5FAV";
 const MESSAGE: &str = "msg_01ARYZ6S41TSV4RRFFQ69G5FAV";
 const ATTACHMENT: &str = "att_01ARYZ6S41TSV4RRFFQ69G5FAV";
 
 /// Operations whose request names no other scope: the foreign key gets what it gets on its own scope,
 /// checked by the listing assertions below instead.
-const OWN_SCOPE: &[&str] = &["getMe", "createPartner", "listPartners", "rotateSigningKey"];
+const OWN_SCOPE: &[&str] = &[
+    "getMe",
+    "createPartner",
+    "listPartners",
+    "rotateSigningKey",
+    "createPlatformWebhook",
+    "listWebhooks",
+];
 
 fn send(key: &str, (method, path, body): (&'static str, String, Option<Value>)) -> Resp {
     call(method, &path, Some(key), body, &[])
@@ -339,6 +406,7 @@ fn cross_tenant_matrix() {
         "quarantine:review",
         "attachments:read",
         "search:read",
+        "webhooks:manage",
     ];
     let (victim_partner, vk) = partner("victim", &all);
     let vt = tenant(&vk, "victim");
@@ -354,6 +422,12 @@ fn cross_tenant_matrix() {
         "INSERT INTO domains (id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, monitor_do_id, created_at, updated_at) VALUES ('{vdom}', '{vtid}', '{}.example', 'zone', 'cloudflare_zone', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', 1, 'x', 1, 1)",
         vtid.to_ascii_lowercase()
     ));
+    let vwhk = post(
+        &format!("/v1/tenants/{vtid}/webhooks"),
+        &vk,
+        json!({ "url": "https://victim.hooks.example.com/a", "events": ["identity.created"] }),
+    );
+    assert_eq!(vwhk.status, 201, "{}", vwhk.body);
     let victim = Target {
         tenant: vtid.clone(),
         key: vkey,
@@ -361,6 +435,7 @@ fn cross_tenant_matrix() {
         identity: vidn["id"].as_str().unwrap().into(),
         address: vidn["primary_address"].as_str().unwrap().into(),
         domain: vdom,
+        webhook: vwhk.body["id"].as_str().unwrap().into(),
     };
     let missing = Target {
         tenant: MISSING_TENANT.into(),
@@ -369,12 +444,13 @@ fn cross_tenant_matrix() {
         identity: MISSING_IDENTITY.into(),
         address: "nobody.nowhere@agents.example".into(),
         domain: MISSING_DOMAIN.into(),
+        webhook: MISSING_WEBHOOK.into(),
     };
     // Attackers: a tenant key of another tenant, and a partner key of another partner.
     let at = tenant(&p, "attacker");
     let (_, tenant_attacker) = mint(
         &p,
-        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read"] }),
+        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage"] }),
     );
     let (_, partner_attacker) = partner("attacker", &all);
     tenant(&partner_attacker, "attacker_own");

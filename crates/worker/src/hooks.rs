@@ -178,3 +178,26 @@ pub async fn capture_queue<P: Platform>(
         }
     }
 }
+
+/// The itest build's queue tap: each message body is posted to `{fakes}/queues/{name}` before the
+/// consumer handles it, so the suite sees what went through a queue.
+pub async fn tap_queue<P: Platform>(
+    p: &P,
+    name: &str,
+    batch: &[pylota_identity_platform::queues::Incoming<Value>],
+) {
+    use pylota_identity_platform::HttpClient as _;
+    use pylota_identity_platform::http::HttpRequest;
+    let Some(fakes) = p.config().itest_fakes_url.clone() else {
+        return;
+    };
+    for m in batch {
+        let mut req = HttpRequest::get(format!("{fakes}/queues/{name}"));
+        req.method = "POST";
+        req.timeout_ms = 2_000;
+        req.headers
+            .push(("content-type".into(), "application/json".into()));
+        req.body = Some(m.body.to_string().into_bytes());
+        let _ = p.http().send(req).await;
+    }
+}

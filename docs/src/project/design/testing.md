@@ -283,6 +283,13 @@ the rest:
   (`worker::tests::inbound::text_attachment_extracted_and_indexed`).
 - The fake clock: `Clock::sleep` advances it natively, so a polling loop such as `wait` ends on fakes.
 
+**As built (M8).** Webhook receivers join the fake server: a request the Worker sends to any host under
+`.hooks.example.com` is recorded (target, headers, body) and answered with the status a test scripted for
+its path (`fakes::respond`, `fakes::received`; 200 by default). The fake DoH answers those names with a
+public address that is never contacted, and names starting `private.` with `10.0.0.5`. `pm-webhooks` is
+consumed for real now; the itest build taps each message to `{fakes}/queues/pm-webhooks` before the
+consumer handles it, which `it::mailbox::outbox_reaches_event_index_and_queue` reads.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

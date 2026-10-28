@@ -156,8 +156,11 @@ pub struct KeyScope {
 }
 
 impl KeyScope {
+    /// Whether the key holds `permission`; `webhooks:manage` includes `webhooks:read`.
     pub fn has(&self, permission: &str) -> bool {
-        self.permissions.iter().any(|p| p == permission)
+        self.permissions
+            .iter()
+            .any(|p| p == permission || (permission == "webhooks:read" && p == "webhooks:manage"))
     }
 
     /// The partner a key acts for: its own (partner key) or its tenant's.

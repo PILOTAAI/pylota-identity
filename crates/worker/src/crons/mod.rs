@@ -1,6 +1,9 @@
 //! Cron triggers (Configuration › Cron triggers). Every minute: mint the mailboxes setup left to the
 //! Worker (the system identity's, Identities and domains › The system identity), then re-send the
-//! `rpc_intents` rows (Design conventions § 9). The other steps arrive with their milestones.
+//! `rpc_intents` rows (Design conventions § 9), then the webhook sweep (`outbox_sweep`). The other
+//! steps arrive with their milestones.
+
+pub mod outbox_sweep;
 
 use pylota_identity_platform::d1::Stmt;
 use pylota_identity_platform::durable::DoClass;
@@ -15,6 +18,7 @@ pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
     if cron == "* * * * *" {
         mint_mailboxes(p, request_id).await;
         crate::intents::resend(p, request_id).await;
+        outbox_sweep::run(p).await;
     }
 }
 
