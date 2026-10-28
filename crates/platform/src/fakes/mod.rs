@@ -73,10 +73,11 @@ impl Clock for FakeClock {
         self.0.get()
     }
 
-    /// Advances the clock instead of waiting, so a polling loop ends.
+    /// Advances the clock instead of waiting, so a polling loop ends. The clock moves when the sleep
+    /// is awaited, so a deadline raced against work that finishes first costs nothing.
     fn sleep(&self, ms: u32) -> impl std::future::Future<Output = ()> {
-        self.0.set(self.0.get() + i64::from(ms));
-        async {}
+        let clock = self.0.clone();
+        async move { clock.set(clock.get() + i64::from(ms)) }
     }
 }
 
