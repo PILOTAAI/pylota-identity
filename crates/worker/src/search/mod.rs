@@ -702,20 +702,24 @@ async fn assemble<P: Platform>(fan: &Fan<'_, P>, ranked: Ranked) -> Result<Value
     let hits: Vec<Value> = page
         .iter()
         .map(|e| {
-            let d = by.remove(&(e.item.idx, e.item.c.rowid)).unwrap_or_default();
-            let idn = &plan.scope.targets[e.item.idx];
-            let why = why(&e.item, &d, plan);
+            let mut d = by.remove(&(e.item.idx, e.item.c.rowid)).unwrap_or_default();
+            let mut item = e.item.clone();
+            if let Some(full) = d.cand.take() {
+                item.c.fill(full);
+            }
+            let idn = &plan.scope.targets[item.idx];
+            let why = why(&item, &d, plan);
             if plan.thread {
                 thread_hit(
                     plan,
                     idn,
-                    &e.item,
+                    &item,
                     &d,
                     why,
-                    threads.get(&(e.item.idx, e.item.c.thread_seq)),
+                    threads.get(&(item.idx, item.c.thread_seq)),
                 )
             } else {
-                message_hit(idn, &e.item, d, why)
+                message_hit(idn, &item, d, why)
             }
         })
         .collect();

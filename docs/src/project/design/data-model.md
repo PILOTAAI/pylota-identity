@@ -2216,6 +2216,7 @@ CREATE TABLE IF NOT EXISTS chunks (                        -- semantic index boo
   updated_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chunks_status ON chunks(status);
+CREATE INDEX IF NOT EXISTS chunks_message ON chunks(message_rowid);   -- coverage, read-back, deletes
 
 CREATE TABLE IF NOT EXISTS verifications (                 -- codes and links for wait / sign-ups
   message_rowid INTEGER NOT NULL REFERENCES messages(rowid) ON DELETE CASCADE,

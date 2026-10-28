@@ -92,6 +92,7 @@ fn f3_tenant_scope_denied() {
 /// and is `null` in keyword mode.
 #[test]
 fn f4_coverage() {
+    let _reset = fakes::Reset;
     let (_, idn, addr, key) = mailbox_fixture("f4cov");
     deliver(
         &idn,
@@ -115,11 +116,13 @@ fn f4_coverage() {
         .iter()
         .map(|r| r["rowid"].as_i64().unwrap())
         .collect();
+    // Each change waits out the mailbox's 60-second coverage cache.
     let set = |rowid: i64, sql: &str| {
         mailbox_query(
             &idn,
             &format!("UPDATE chunks SET {sql} WHERE message_rowid = {rowid}"),
         );
+        fakes::advance(61_000);
     };
     set(ids[0], "status = 'pending'");
     assert_eq!(cov("semantic"), json!(0.75));

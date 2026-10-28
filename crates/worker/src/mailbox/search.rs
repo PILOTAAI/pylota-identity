@@ -19,6 +19,8 @@ use crate::search::wire::{Cand, Compiled, Detail};
 
 /// The columns of a candidate; `m` is `messages`, `t` its thread.
 const CAND_COLS: &str = "m.rowid AS rowid, m.id AS id, t.id AS thread_id, m.thread_seq AS thread_seq, m.direction AS direction, m.status AS status, m.from_address AS from_address, m.from_name AS from_name, m.subject AS subject, m.sent_at AS sent_at, m.received_at AS received_at, MIN(COALESCE(m.sent_at, m.received_at), m.received_at + 300000) AS msg_date, m.verdict AS verdict, m.known_sender AS known_sender";
+/// The columns of a light candidate: what ranking, paging and grouping need.
+const LIGHT_COLS: &str = "m.rowid AS rowid, m.thread_seq AS thread_seq, MIN(COALESCE(m.sent_at, m.received_at), m.received_at + 300000) AS msg_date";
 /// The visibility predicate (F7) with `?2` as_of and `?3` include_quarantined.
 const VISIBLE: &str = " AND m.status NOT IN ('hidden','throttled') AND (m.status NOT IN ('quarantined','screening') OR ?3 = 1) AND m.received_at <= ?2 AND (";
 /// Candidates read for the facet set.
@@ -123,8 +125,8 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
     let textual = c.fts_match.is_some() || !c.ref_like.is_empty();
     let head_m = {
         let mut h = String::from("SELECT ");
-        h.push_str(CAND_COLS);
-        h.push_str(", 0.0 AS s FROM messages m JOIN threads t ON t.seq = m.thread_seq");
+        h.push_str(LIGHT_COLS);
+        h.push_str(", 0.0 AS s FROM messages m");
         h
     };
     let order = " ORDER BY s DESC, msg_date DESC, m.rowid DESC LIMIT 5000";
@@ -133,8 +135,8 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
     let refs_cover_text = !c.ref_like.is_empty() && c.ref_like.len() >= c.terms.len();
     if let Some(m) = c.fts_match.as_ref().filter(|_| !refs_cover_text) {
         let mut h = String::from("SELECT ");
-        h.push_str(CAND_COLS);
-        h.push_str(", -bm25(fts, 8.0, 4.0, 3.0, 1.0, 1.5, 10.0) AS s FROM fts JOIN messages m ON m.rowid = fts.rowid JOIN threads t ON t.seq = m.thread_seq");
+        h.push_str(LIGHT_COLS);
+        h.push_str(", -bm25(fts, 8.0, 4.0, 3.0, 1.0, 1.5, 10.0) AS s FROM fts JOIN messages m ON m.rowid = fts.rowid");
         for r in run(
             s,
             &h,
@@ -211,8 +213,8 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
         && let Some(tri) = &c.tri_match
     {
         let mut h = String::from("SELECT ");
-        h.push_str(CAND_COLS);
-        h.push_str(", -bm25(fts_tri, 8.0, 4.0, 10.0) AS s FROM fts_tri JOIN messages m ON m.rowid = fts_tri.rowid JOIN threads t ON t.seq = m.thread_seq");
+        h.push_str(LIGHT_COLS);
+        h.push_str(", -bm25(fts_tri, 8.0, 4.0, 10.0) AS s FROM fts_tri JOIN messages m ON m.rowid = fts_tri.rowid");
         let leaves: Vec<String> = c
             .terms
             .iter()
@@ -272,6 +274,9 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
 fn haystack<S: Sql>(s: &S, r: &Cand) -> PResult<String> {
     #[derive(Deserialize)]
     struct H {
+        subject: Option<String>,
+        from_address: Option<String>,
+        from_name: Option<String>,
         to_json: String,
         cc_json: String,
     }
@@ -280,7 +285,7 @@ fn haystack<S: Sql>(s: &S, r: &Cand) -> PResult<String> {
         value: String,
     }
     let h: Option<H> = s.first(
-        "SELECT to_json, cc_json FROM messages WHERE rowid = ?1",
+        "SELECT subject, from_address, from_name, to_json, cc_json FROM messages WHERE rowid = ?1",
         &[r.rowid.into()],
     )?;
     let refs: Vec<V> = s.query(
@@ -288,18 +293,14 @@ fn haystack<S: Sql>(s: &S, r: &Cand) -> PResult<String> {
         &[r.rowid.into()],
     )?;
     let mut out = String::new();
-    for part in [
-        r.subject.as_deref(),
-        r.from_address.as_deref(),
-        r.from_name.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        out.push_str(part);
-        out.push(' ');
-    }
     if let Some(h) = h {
+        for part in [h.subject, h.from_address, h.from_name]
+            .into_iter()
+            .flatten()
+        {
+            out.push_str(&part);
+            out.push(' ');
+        }
         out.push_str(&h.to_json);
         out.push(' ');
         out.push_str(&h.cc_json);
@@ -349,43 +350,69 @@ fn counts(rows: Vec<Vn>) -> Value {
     Value::Object(o)
 }
 
-/// The six facets over `rowids` ([Search § 5.7]).
+/// The top `n` of `counts` by count, ties by value ascending.
+fn top(counts: HashMap<String, i64>, n: usize) -> Value {
+    let mut rows: Vec<(String, i64)> = counts.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows.truncate(n);
+    Value::Object(rows.into_iter().map(|(v, n)| (v, n.into())).collect())
+}
+
+/// The six facets over `rowids` ([Search § 5.7]). Sender, domain, category and month come from one
+/// read of the rows, counted here (`months` are contiguous, newest first); labels and attachment
+/// types from their tables.
 pub fn facets<S: Sql>(s: &S, rowids: &[i64], months: &[(String, i64, i64)]) -> PResult<Value> {
+    #[derive(Deserialize)]
+    struct F {
+        a: Option<String>,
+        d: Option<String>,
+        c: Option<String>,
+        t: i64,
+    }
     let ids: SqlValue = serde_json::to_string(rowids).unwrap_or_default().into();
-    let q = |sql: &str, extra: Vec<SqlValue>| -> PResult<Value> {
-        let mut p = vec![ids.clone()];
-        p.extend(extra);
-        Ok(counts(s.query(sql, &p)?))
-    };
-    let sender = q(
-        "SELECT m.from_address AS v, COUNT(*) AS n FROM messages m WHERE m.rowid IN (SELECT value FROM json_each(?1)) AND m.from_address IS NOT NULL GROUP BY v ORDER BY n DESC, v ASC LIMIT 10",
-        vec![],
+    let rows: Vec<F> = s.query(
+        "SELECT from_address AS a, sender_domain AS d, json_extract(triage_json,'$.category') AS c, MIN(COALESCE(sent_at, received_at), received_at + 300000) AS t FROM messages WHERE rowid IN (SELECT value FROM json_each(?1))",
+        std::slice::from_ref(&ids),
     )?;
-    let domain = q(
-        "SELECT m.sender_domain AS v, COUNT(*) AS n FROM messages m WHERE m.rowid IN (SELECT value FROM json_each(?1)) AND m.sender_domain IS NOT NULL GROUP BY v ORDER BY n DESC, v ASC LIMIT 10",
-        vec![],
-    )?;
-    let category = q(
-        "SELECT json_extract(m.triage_json,'$.category') AS v, COUNT(*) AS n FROM messages m WHERE m.rowid IN (SELECT value FROM json_each(?1)) AND json_extract(m.triage_json,'$.category') IS NOT NULL GROUP BY v ORDER BY n DESC, v ASC LIMIT 10",
-        vec![],
-    )?;
-    let label = q(
+    let (mut sender, mut domain, mut category, mut month) = (
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+        HashMap::new(),
+    );
+    for r in rows {
+        for (map, v) in [(&mut sender, r.a), (&mut domain, r.d), (&mut category, r.c)] {
+            if let Some(v) = v {
+                *map.entry(v).or_insert(0i64) += 1;
+            }
+        }
+        // Newest first: the first bucket whose start is at or before t.
+        let k = months.partition_point(|(_, start, _)| *start > r.t);
+        if let Some((label, _, end)) = months.get(k)
+            && r.t < *end
+        {
+            *month.entry(label.clone()).or_insert(0i64) += 1;
+        }
+    }
+    let mut months_out: Vec<(String, i64)> = month.into_iter().collect();
+    months_out.sort_by(|a, b| b.0.cmp(&a.0));
+    months_out.truncate(24);
+    let label = counts(s.query(
         "SELECT l.label AS v, COUNT(DISTINCT l.message_rowid) AS n FROM labels l WHERE l.message_rowid IN (SELECT value FROM json_each(?1)) GROUP BY v ORDER BY n DESC, v ASC LIMIT 10",
-        vec![],
-    )?;
+        std::slice::from_ref(&ids),
+    )?);
     let mut att = String::from("SELECT ");
     att.push_str(&class_case("COALESCE(a.sniffed_type, a.content_type)"));
     att.push_str(" AS v, COUNT(DISTINCT a.message_rowid) AS n FROM attachments a WHERE a.message_rowid IN (SELECT value FROM json_each(?1)) AND COALESCE(a.disposition,'attachment') = 'attachment' GROUP BY v ORDER BY n DESC, v ASC LIMIT 10");
-    let attachment_type = q(&att, vec![])?;
-    let buckets: Vec<Value> = months.iter().map(|(l, a, b)| json!([l, a, b])).collect();
-    let month = q(
-        "SELECT json_extract(b.value,'$[0]') AS v, COUNT(*) AS n FROM messages m JOIN json_each(?2) b ON MIN(COALESCE(m.sent_at, m.received_at), m.received_at + 300000) >= json_extract(b.value,'$[1]') AND MIN(COALESCE(m.sent_at, m.received_at), m.received_at + 300000) < json_extract(b.value,'$[2]') WHERE m.rowid IN (SELECT value FROM json_each(?1)) GROUP BY v ORDER BY v DESC LIMIT 24",
-        vec![Value::Array(buckets).to_string().into()],
-    )?;
-    Ok(
-        json!({ "sender": sender, "sender_domain": domain, "month": month, "label": label,
-               "attachment_type": attachment_type, "category": category }),
-    )
+    let attachment_type = counts(s.query(&att, &[ids])?);
+    Ok(json!({
+        "sender": top(sender, 10),
+        "sender_domain": top(domain, 10),
+        "month": Value::Object(months_out.into_iter().map(|(v, n)| (v, n.into())).collect()),
+        "label": label,
+        "attachment_type": attachment_type,
+        "category": top(category, 10),
+    }))
 }
 
 /// The semantic read-back ([Search § 8] step 5): every filter, visibility, no text clause.
@@ -487,6 +514,10 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
         else {
             continue;
         };
+        let mut full = String::from("SELECT ");
+        full.push_str(CAND_COLS);
+        full.push_str(" FROM messages m JOIN threads t ON t.seq = m.thread_seq WHERE m.rowid = ?1");
+        let cand: Option<Cand> = s.first(&full, &[(*rowid).into()])?;
         let mut why: Vec<String> = Vec::new();
         let mut attachment_hits: Vec<Value> = Vec::new();
         let atts: Vec<Att> = s.query(
@@ -593,6 +624,7 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
             snippet: snip,
             why,
             attachment_hits,
+            cand,
         });
     }
     Ok(out)
@@ -1092,7 +1124,47 @@ fn to_value<T: Serialize>(t: &T) -> Value {
 /// answer empty and its index operations skip.
 ///
 /// [A15]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/edge-cases.md
-pub fn handle<S: Sql>(s: &S, op: SearchOp, now: i64, is_system: bool) -> PResult<Value> {
+/// Coverage pairs per `(identity, generation tag)`, kept 60 seconds ([Search § 6.5]).
+const COVERAGE_CACHE_MS: i64 = 60_000;
+
+thread_local! {
+    static COVERAGE: std::cell::RefCell<HashMap<(String, String), (i64, Coverage)>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+fn cached_coverage<S: Sql>(
+    s: &S,
+    identity_id: &str,
+    as_of: i64,
+    model: &str,
+    now: i64,
+) -> PResult<Coverage> {
+    let key = (identity_id.to_owned(), model.to_owned());
+    let hit = COVERAGE.with(|c| {
+        c.borrow()
+            .get(&key)
+            .filter(|(at, _)| now - at < COVERAGE_CACHE_MS)
+            .map(|(_, v)| v.clone())
+    });
+    if let Some(v) = hit {
+        return Ok(v);
+    }
+    let v = coverage(s, as_of, model)?;
+    COVERAGE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.retain(|_, (at, _)| now - *at < COVERAGE_CACHE_MS);
+        c.insert(key, (now, v.clone()));
+    });
+    Ok(v)
+}
+
+pub fn handle<S: Sql>(
+    s: &S,
+    op: SearchOp,
+    identity_id: &str,
+    now: i64,
+    is_system: bool,
+) -> PResult<Value> {
     if is_system {
         return Ok(match op {
             SearchOp::Keyword(_) => to_value(&KeywordOut::default()),
@@ -1116,7 +1188,9 @@ pub fn handle<S: Sql>(s: &S, op: SearchOp, now: i64, is_system: bool) -> PResult
         SearchOp::ReadBack(i) => to_value(&read_back(s, &i)?),
         SearchOp::Details(i) => to_value(&details(s, &i)?),
         SearchOp::Facets { rowids, months } => facets(s, &rowids, &months)?,
-        SearchOp::Coverage { as_of, model } => to_value(&coverage(s, as_of, &model)?),
+        SearchOp::Coverage { as_of, model } => {
+            to_value(&cached_coverage(s, identity_id, as_of, &model, now)?)
+        }
         SearchOp::Threads { seqs } => Value::Array(threads(s, &seqs)?),
         SearchOp::Contacts(i) => Value::Array(contacts(s, &i)?),
         SearchOp::RelatedSource {

@@ -32,8 +32,8 @@ struct State {
     cf_suppressions: BTreeMap<String, Vec<Value>>,
     /// Workers AI: statuses to answer instead, per model substring, taken in order.
     ai_fail: Vec<(String, Vec<u16>)>,
-    /// Vectorize by binding: `id → { namespace, values, metadata }`.
-    vectors: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Vectorize by binding, by vector ID.
+    vectors: BTreeMap<String, BTreeMap<String, Rec>>,
     /// `describe()` reports this count instead of the stored one.
     vec_count: Option<u64>,
     /// Vectorize operations to fail, by op name, with the number of failures left.
@@ -535,6 +535,14 @@ fn matches(meta: &Value, filter: &Value) -> bool {
     })
 }
 
+/// One stored vector, its values parsed once.
+#[derive(Clone)]
+struct Rec {
+    namespace: String,
+    values: Vec<f64>,
+    metadata: Value,
+}
+
 fn values(v: &Value) -> Vec<f64> {
     v.as_array()
         .map(|a| a.iter().filter_map(Value::as_f64).collect())
@@ -548,13 +556,13 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
     }
     let fixed = s.vec_count;
     let store = s.vectors.entry(binding.to_owned()).or_default();
-    let query = |store: &BTreeMap<String, Value>, vector: &[f64], options: &Value| {
+    let query = |store: &BTreeMap<String, Rec>, vector: &[f64], options: &Value| {
         let ns = options["namespace"].as_str().unwrap_or("");
         let k = options["topK"].as_u64().unwrap_or(10) as usize;
         let mut m: Vec<(String, f64)> = store
             .iter()
-            .filter(|(_, r)| r["namespace"] == ns && matches(&r["metadata"], &options["filter"]))
-            .map(|(id, r)| (id.clone(), cosine(vector, &values(&r["values"]))))
+            .filter(|(_, r)| r.namespace == ns && matches(&r.metadata, &options["filter"]))
+            .map(|(id, r)| (id.clone(), cosine(vector, &r.values)))
             .collect();
         m.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         m.truncate(k);
@@ -564,7 +572,14 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
         "upsert" => {
             for v in body["vectors"].as_array().cloned().unwrap_or_default() {
                 if let Some(id) = v["id"].as_str() {
-                    store.insert(id.to_owned(), v.clone());
+                    store.insert(
+                        id.to_owned(),
+                        Rec {
+                            namespace: v["namespace"].as_str().unwrap_or("").to_owned(),
+                            values: values(&v["values"]),
+                            metadata: v["metadata"].clone(),
+                        },
+                    );
                 }
             }
             json!({ "mutationId": "fake" })
@@ -572,7 +587,7 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
         "query" => query(store, &values(&body["vector"]), &body["options"]),
         "query_by_id" => match store.get(body["id"].as_str().unwrap_or("")) {
             Some(r) => {
-                let v = values(&r["values"]);
+                let v = r.values.clone();
                 query(store, &v, &body["options"])
             }
             None => json!({ "count": 0, "matches": [] }),
@@ -613,7 +628,7 @@ pub fn ai_fail(model: &str, statuses: &[u16]) {
         .push((model.to_owned(), statuses.to_vec()));
 }
 
-/// The stored vectors of `binding`: `id → { namespace, values, metadata }`.
+/// The stored vectors of `binding`: `id → { namespace, metadata }`.
 pub fn vectors(binding: &str) -> BTreeMap<String, Value> {
     start();
     STATE
@@ -621,7 +636,17 @@ pub fn vectors(binding: &str) -> BTreeMap<String, Value> {
         .unwrap()
         .vectors
         .get(binding)
-        .cloned()
+        .map(|store| {
+            store
+                .iter()
+                .map(|(id, r)| {
+                    (
+                        id.clone(),
+                        json!({ "namespace": r.namespace, "metadata": r.metadata }),
+                    )
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -654,15 +679,16 @@ pub fn seed_vectors(namespace: &str, identity_id: &str, rows: &[Value]) {
     for r in rows {
         let id = format!("{}:0", r["id"].as_str().unwrap_or(""));
         store.insert(
-            id.clone(),
-            json!({
-                "id": id, "namespace": namespace, "values": embed_text(r["text"].as_str().unwrap_or("")),
-                "metadata": {
+            id,
+            Rec {
+                namespace: namespace.to_owned(),
+                values: embed_text(r["text"].as_str().unwrap_or("")),
+                metadata: json!({
                     "identity_id": identity_id, "thread_id": r["thread_id"], "sent_at": r["sent_at"],
                     "sender_domain": "", "direction": "inbound", "has_attachment": false,
                     "verdict": "none", "kind": "body",
-                },
-            }),
+                }),
+            },
         );
     }
 }

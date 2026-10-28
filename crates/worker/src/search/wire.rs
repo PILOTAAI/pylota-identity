@@ -105,8 +105,10 @@ impl Compiled {
     }
 }
 
-/// One candidate message (keyword or read-back).
+/// One candidate message. A keyword candidate is light (row ID, thread, date and scores); its display
+/// fields arrive with the page's [`Detail`]. A read-back candidate is full.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Cand {
     pub rowid: i64,
     pub id: String,
@@ -143,4 +145,22 @@ pub struct Detail {
     pub snippet: String,
     pub why: Vec<String>,
     pub attachment_hits: Vec<serde_json::Value>,
+    /// The hit's display fields.
+    #[serde(default)]
+    pub cand: Option<Cand>,
+}
+
+impl Cand {
+    /// Takes the display fields of `full`, keeping this candidate's scores and chunk.
+    pub fn fill(&mut self, full: Cand) {
+        let keep = (
+            self.s,
+            self.kw,
+            self.ref_hit,
+            self.fuzzy,
+            self.vector_id.take(),
+        );
+        *self = full;
+        (self.s, self.kw, self.ref_hit, self.fuzzy, self.vector_id) = keep;
+    }
 }

@@ -9,7 +9,9 @@ use pylota_identity_api_types::ErrorCode;
 use pylota_identity_core::days::parse_rfc3339;
 use pylota_identity_platform::durable::DoClass;
 use pylota_identity_platform::ratelimit::RlBucket;
-use pylota_identity_platform::{Clock as _, ControlDb as _, ObjectClient as _, Platform};
+use pylota_identity_platform::{
+    Background as _, Clock as _, ControlDb as _, ObjectClient as _, Platform,
+};
 use serde_json::Value;
 
 use super::messages::{review, valid_label};
@@ -271,10 +273,14 @@ async fn search<P: Platform>(c: &Ctx<P>, scope: Scope, body: Value) -> Result<Re
             n: 1,
         },
     );
-    let _ =
-        c.p.objects()
+    // After the response: the search is answered whether or not the count lands.
+    let owner = c.p.clone();
+    c.p.background().wait_until(async move {
+        let _ = owner
+            .objects()
             .call::<_, Value>(DoClass::Quota, &quota_do, &env)
             .await;
+    });
     let hash = pylota_identity_core::search::cursor::query_hash(
         &c.p.secrets().hash_key,
         body["q"].as_str().unwrap_or(""),

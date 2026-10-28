@@ -113,11 +113,21 @@ fn mix(x: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// Filler words drawn besides the domain vocabulary.
+const FILLER: u64 = 3_000;
+
+/// `n` words: one in five from the domain vocabulary, the rest from 3,000 filler words, so a domain
+/// term appears in about one message in ten, as a real mailbox's subject-matter words do.
 fn words(state: &mut u64, n: usize) -> String {
     (0..n)
         .map(|_| {
             *state = mix(*state);
-            WORDS[(*state % WORDS.len() as u64) as usize]
+            if (*state).is_multiple_of(5) {
+                WORDS[((*state >> 8) % WORDS.len() as u64) as usize].to_owned()
+            } else {
+                let k = (*state >> 8) % FILLER;
+                format!("w{k:04x}")
+            }
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -146,7 +156,7 @@ pub fn bulk_seed<S: Sql>(
         let subject = words(&mut st, 5);
         let mut body = words(&mut st, 45);
         let invoice = 10_000 + (st % 90_000);
-        if i % 7 == 0 {
+        if i.is_multiple_of(7) {
             body.push_str(&format!(" invoice {invoice}"));
         }
         let from = format!("sender{}@vendor{}.example", st % 300, st % 40);
@@ -182,7 +192,7 @@ pub fn bulk_seed<S: Sql>(
             ],
         )?;
         let rowid = row.map_or(0, |r| r.rowid);
-        let refs: Vec<String> = if i % 7 == 0 {
+        let refs: Vec<String> = if i.is_multiple_of(7) {
             vec![invoice.to_string()]
         } else {
             Vec::new()

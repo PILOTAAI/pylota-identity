@@ -434,7 +434,13 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             MailboxRequest::Read(r) => {
                 read::handle(self.p, self.sql, owner, r, now, is_system).await
             }
-            MailboxRequest::Search(op) => Ok(search::handle(self.sql, op, now, is_system)?),
+            MailboxRequest::Search(op) => Ok(search::handle(
+                self.sql,
+                op,
+                owner.identity_id,
+                now,
+                is_system,
+            )?),
             MailboxRequest::EmitEvent(ev) => {
                 let seq = self.sql.transaction_sync(|s| {
                     outbox::append(

@@ -265,11 +265,15 @@ fn semantic_and_hybrid_with_coverage() {
         "{}",
         r.body
     );
-    // A pending row lowers coverage (F4).
+    // A pending row lowers coverage (F4), once the 60-second cache has expired.
     h.mailbox_sql(
         &mb,
         "UPDATE chunks SET status = 'pending' WHERE rowid = (SELECT MIN(rowid) FROM chunks)",
     );
+    {
+        use pylota_identity_platform::{Clock as _, Platform as _};
+        pylota_identity_platform::fakes::block_on(h.app.p.as_ref().clock().sleep(61_000));
+    }
     h.app
         .p
         .ai

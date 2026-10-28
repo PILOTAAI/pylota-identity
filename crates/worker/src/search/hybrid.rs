@@ -165,20 +165,21 @@ async fn rerank<P: Platform>(
         })
         .collect();
     let details: Vec<Option<Vec<Detail>>> = fan.each(ops).await?;
-    let mut passage: HashMap<(usize, i64), String> = HashMap::new();
+    // `(subject, passage)`: keyword candidates are light, so the subject comes with the details.
+    let mut passage: HashMap<(usize, i64), (String, String)> = HashMap::new();
     for (idx, d) in details.into_iter().enumerate() {
         for d in d.unwrap_or_default() {
-            passage.insert((idx, d.rowid), d.snippet);
+            let subject = d.cand.and_then(|c| c.subject).unwrap_or_default();
+            passage.insert((idx, d.rowid), (subject, d.snippet));
         }
     }
     let contexts: Vec<Value> = top
         .iter()
         .map(|i| {
-            let text = format!(
-                "{}\n{}",
-                i.c.subject.as_deref().unwrap_or(""),
-                passage.get(&(i.idx, i.c.rowid)).map_or("", String::as_str)
-            );
+            let (subject, text) = passage
+                .get(&(i.idx, i.c.rowid))
+                .map_or(("", ""), |(s, t)| (s.as_str(), t.as_str()));
+            let text = format!("{subject}\n{text}");
             json!({ "text": text.chars().take(CONTEXT_CHARS).collect::<String>() })
         })
         .collect();
