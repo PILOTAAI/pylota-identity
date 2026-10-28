@@ -510,6 +510,32 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
         .map_or(0, |r| r.n))
     }
 
+    /// Deletes the once-per-day markers (`tm:{ref}`, `sm:{ref}`) older than two days, at most once a
+    /// UTC day.
+    fn prune_refs(s: &S, prefix: &str, now: i64) -> Result<(), PlatformError> {
+        let today = days::utc_day(now);
+        let mark = format!("pruned:{prefix}");
+        let done = s
+            .first::<V>("SELECT v FROM meta WHERE k = ?1", &[mark.clone().into()])?
+            .is_some_and(|r| r.v == today);
+        if done {
+            return Ok(());
+        }
+        s.exec(
+            "DELETE FROM meta WHERE k >= ?1 AND k < ?2 AND v < ?3",
+            &[
+                prefix.into(),
+                format!("{prefix}\u{10ffff}").into(),
+                days::utc_day(now - 2 * 86_400_000).into(),
+            ],
+        )?;
+        s.exec(
+            "INSERT INTO meta (k, v) VALUES (?1, ?2) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+            &[mark.into(), today.into()],
+        )?;
+        Ok(())
+    }
+
     /// The day of the daily caps (Day boundaries): `meta.tz`, switching to `tz_next` at its `from`; a
     /// request with another zone records `tz_next` for the next local midnight of the current zone.
     fn cap_day(&self, s: &S, now: i64, tz: &str) -> Result<(String, String), PlatformError> {
@@ -868,20 +894,31 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
                     AdmitAnswer::Admit
                 })
             }
-            QuotaRequest::CountTriageModel { tz, r#ref, .. } => {
-                let day = days::local_day(now, &tz);
-                self.sql
-                    .transaction_sync(|s| -> Result<(), PlatformError> {
-                        let first = s.exec(
-                            "INSERT OR IGNORE INTO meta (k, v) VALUES (?1, ?2)",
-                            &[format!("tm:{ref}").into(), day.clone().into()],
-                        )?;
-                        if first.changes > 0 {
-                            Self::add(s, "triage_model", &day, 1)?;
+            QuotaRequest::CountTriageModel { tz, cap, r#ref } => {
+                let answer = self
+                    .sql
+                    .transaction_sync(|s| -> Result<CountAnswer, PlatformError> {
+                        let (day, _) = self.cap_day(s, now, &tz)?;
+                        Self::prune_refs(s, "tm:", now)?;
+                        let key = format!("tm:{ref}");
+                        // A redelivered or deferred job of a counted message is not counted again.
+                        let seen = s
+                            .first::<V>("SELECT v FROM meta WHERE k = ?1", &[key.clone().into()])?
+                            .is_some_and(|r| r.v == day);
+                        if seen {
+                            return Ok(CountAnswer::Ok);
                         }
-                        Ok(())
+                        if Self::counter_in(s, "triage_model", &day)? >= i64::from(cap) {
+                            return Ok(CountAnswer::CapReached);
+                        }
+                        s.exec(
+                            "INSERT INTO meta (k, v) VALUES (?1, ?2) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+                            &[key.into(), day.clone().into()],
+                        )?;
+                        Self::add(s, "triage_model", &day, 1)?;
+                        Ok(CountAnswer::Ok)
                     })?;
-                to_v(&CountAnswer::Ok)
+                to_v(&answer)
             }
             QuotaRequest::CountScreenModel { tz, r#ref, .. } => {
                 let day = days::local_day(now, &tz);
@@ -1178,6 +1215,18 @@ mod tests {
                 json!({ "op": "count_triage_model", "tz": "UTC", "cap": 1, "ref": "msg_1" })
             )))["kind"],
             "ok"
+        );
+        // From M12 the cap holds: a counted ref is not counted again, a new one past the cap is refused.
+        let tm = |r: &str| {
+            ok(q.handle(&env(
+                t,
+                json!({ "op": "count_triage_model", "tz": "UTC", "cap": 1, "ref": r }),
+            )))["kind"]
+                .clone()
+        };
+        assert_eq!(
+            (tm("msg_1"), tm("msg_2")),
+            (json!("ok"), json!("cap_reached"))
         );
         assert_eq!(
             ok(q.handle(&env(t, json!({ "op": "outcome_rates", "since": 0 })))),

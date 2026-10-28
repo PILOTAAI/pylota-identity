@@ -222,8 +222,8 @@ pub fn validate_categories(list: &[CustomCategory]) -> Result<(), CategoryError>
     Ok(())
 }
 
-/// NFKC and lower case, the fold text rules match against.
-fn fold(s: &str) -> String {
+/// NFKC and lower case, the fold text rules match against (and rule values are stored in).
+pub fn fold(s: &str) -> String {
     s.nfkc().collect::<String>().to_lowercase()
 }
 
@@ -606,6 +606,101 @@ pub fn summary(category: &str, from: &Mailbox, subject: Option<&str>) -> String 
         _ => with_subject(format!("Message from {who}")),
     };
     cut(&s, SUMMARY_MAX)
+}
+
+/// ISO 639-3 codes `whatlang` detects with an ISO 639-1 code (`cmn` is written `zh`, `pes` `fa`).
+const ISO_639_1: &[(&str, &str)] = &[
+    ("epo", "eo"),
+    ("eng", "en"),
+    ("rus", "ru"),
+    ("cmn", "zh"),
+    ("spa", "es"),
+    ("por", "pt"),
+    ("ita", "it"),
+    ("ben", "bn"),
+    ("fra", "fr"),
+    ("deu", "de"),
+    ("ukr", "uk"),
+    ("kat", "ka"),
+    ("ara", "ar"),
+    ("hin", "hi"),
+    ("jpn", "ja"),
+    ("heb", "he"),
+    ("yid", "yi"),
+    ("pol", "pl"),
+    ("amh", "am"),
+    ("jav", "jv"),
+    ("kor", "ko"),
+    ("nob", "nb"),
+    ("dan", "da"),
+    ("swe", "sv"),
+    ("fin", "fi"),
+    ("tur", "tr"),
+    ("nld", "nl"),
+    ("hun", "hu"),
+    ("ces", "cs"),
+    ("ell", "el"),
+    ("bul", "bg"),
+    ("bel", "be"),
+    ("mar", "mr"),
+    ("kan", "kn"),
+    ("ron", "ro"),
+    ("slv", "sl"),
+    ("hrv", "hr"),
+    ("srp", "sr"),
+    ("mkd", "mk"),
+    ("lit", "lt"),
+    ("lav", "lv"),
+    ("est", "et"),
+    ("tam", "ta"),
+    ("vie", "vi"),
+    ("urd", "ur"),
+    ("tha", "th"),
+    ("guj", "gu"),
+    ("uzb", "uz"),
+    ("pan", "pa"),
+    ("aze", "az"),
+    ("ind", "id"),
+    ("tel", "te"),
+    ("pes", "fa"),
+    ("mal", "ml"),
+    ("ori", "or"),
+    ("mya", "my"),
+    ("nep", "ne"),
+    ("sin", "si"),
+    ("khm", "km"),
+    ("tuk", "tk"),
+    ("aka", "ak"),
+    ("zul", "zu"),
+    ("sna", "sn"),
+    ("afr", "af"),
+    ("lat", "la"),
+    ("slk", "sk"),
+    ("cat", "ca"),
+    ("tgl", "tl"),
+    ("hye", "hy"),
+    ("cym", "cy"),
+];
+
+/// The BCP 47 primary tag of the language `text` is written in (§ 5.1): the ISO 639-1 code where one
+/// exists, else the ISO 639-3 code; `und` when the text is under 40 characters or the confidence is
+/// below 0.5.
+pub fn language(text: &str) -> String {
+    let text = head(text, TEXT_CAP);
+    if text.trim().chars().count() < 40 {
+        return "und".to_owned();
+    }
+    match whatlang::detect(text) {
+        Some(info) if info.confidence() >= 0.5 => {
+            let code = info.lang().code();
+            ISO_639_1
+                .iter()
+                .find(|(three, _)| *three == code)
+                .map_or(code, |(_, two)| *two)
+                .to_owned()
+        }
+        _ => "und".to_owned(),
+    }
 }
 
 /// At most `max` characters, cut at a word boundary with `…`.
@@ -1121,5 +1216,22 @@ mod tests {
             ..rescued
         };
         assert!(flags(&failed).contains(&RiskFlag::AuthFailed));
+    }
+
+    #[test]
+    fn language_detection() {
+        assert_eq!(language("Hello"), "und");
+        assert_eq!(
+            language(
+                "Please find attached the invoice for the brake pads and discs we fitted last week."
+            ),
+            "en"
+        );
+        assert_eq!(
+            language(
+                "Bitte überweisen Sie den Betrag bis Freitag auf das bekannte Konto, vielen Dank für Ihre Geduld."
+            ),
+            "de"
+        );
     }
 }

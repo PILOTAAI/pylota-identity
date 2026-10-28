@@ -206,11 +206,12 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     };
 
     // Policy: checked field by field for the creating key (platform or partner).
-    let patch = body
+    let mut patch = body
         .get("policy")
         .cloned()
         .filter(|p| !p.is_null())
         .unwrap_or_else(|| json!({}));
+    crate::triage::rules::fold_rules(&mut patch);
     let dep = policy::deployment_defaults(c.p.as_ref());
     let writer = if key.level == Level::Platform {
         cpolicy::Writer::Platform

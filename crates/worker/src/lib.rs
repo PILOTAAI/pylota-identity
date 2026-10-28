@@ -37,6 +37,7 @@ pub mod rpc;
 pub mod search;
 pub mod send;
 pub mod transport;
+pub mod triage;
 pub mod webhooks;
 
 #[cfg(test)]

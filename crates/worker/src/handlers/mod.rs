@@ -20,6 +20,7 @@ pub mod send;
 pub mod suppressions;
 pub mod tenants;
 pub mod threads;
+pub mod triage;
 pub mod wait;
 pub mod webhooks;
 
@@ -79,6 +80,7 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::AttachmentText => messages::attachment_text(c).await,
         Handler::QuarantineList => quarantine::list(c).await,
         Handler::QuarantineRelease => quarantine::release(c).await,
+        Handler::RerunTriage => triage::rerun(c).await,
         Handler::Wait => wait::wait(c).await,
         Handler::WebhookCreate => webhooks::create(c).await,
         Handler::WebhookList => webhooks::list(c).await,

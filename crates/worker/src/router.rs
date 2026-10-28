@@ -77,6 +77,7 @@ pub enum Handler {
     AttachmentText,
     QuarantineList,
     QuarantineRelease,
+    RerunTriage,
     Wait,
     WebhookCreate,
     WebhookList,
@@ -646,6 +647,19 @@ pub static ROUTES: &[RouteSpec] = &[
         I::None,
         ALL,
         Handler::AttachmentText,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/messages/{message_id}/triage",
+        "rerunTriage",
+        &["messages:write"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::Optional,
+        ALL,
+        Handler::RerunTriage,
     ),
     route(
         M::Post,

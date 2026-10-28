@@ -77,17 +77,7 @@ async fn run<P: Platform>(p: &P, job: IndexJob) -> Done {
             identity_id,
             run_date,
         } => super::embed::reconcile(p, &tenant_id, &identity_id, &run_date).await,
-        IndexJob::Triage { tenant_id, .. } => {
-            crate::log::info(
-                "index_job",
-                &[
-                    ("kind", "triage".into()),
-                    ("result", "unimplemented".into()),
-                ],
-            );
-            crate::metrics::count(p, "index_job_unimplemented_total", Some(&tenant_id), 1);
-            Done::Ack
-        }
+        job @ IndexJob::Triage { .. } => crate::triage::run(p, job).await,
     }
 }
 

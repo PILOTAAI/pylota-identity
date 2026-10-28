@@ -19,6 +19,7 @@ pub mod search;
 pub mod seed;
 pub mod submit;
 pub mod threads;
+pub mod triage;
 
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_platform::durable::{ObjectState, RpcEnvelope, Sql};
@@ -86,6 +87,8 @@ pub enum MailboxRequest {
     Read(read::ReadRequest),
     /// Search and index operations ([Search]); tagged `sq` inside.
     Search(search::SearchOp),
+    /// Triage load, re-run and commit (Triage § 1.1, § 10); tagged `tq` inside.
+    Triage(triage::TriageOp),
     /// A send, reply, reply-all or forward (Outbound › The submit path).
     Submit(Box<submit::SubmitInput>),
     /// What the outbound consumer reads before D1: status, From and the queued recipients.
@@ -433,6 +436,9 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                 .transaction_sync(|s| attachments::ready(s, &r, is_system))?),
             MailboxRequest::Read(r) => {
                 read::handle(self.p, self.sql, owner, r, now, is_system).await
+            }
+            MailboxRequest::Triage(op) => {
+                triage::handle(self.p, self.sql, owner, op, now, is_system)
             }
             MailboxRequest::Search(op) => Ok(search::handle(
                 self.sql,

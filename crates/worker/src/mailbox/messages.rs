@@ -205,11 +205,7 @@ impl Row {
         with_html: bool,
     ) -> Value {
         let inbound = self.direction == "inbound";
-        let triage = match (&self.triage_status, &self.triage_json) {
-            (Some(_), Some(t)) => serde_json::from_str::<Value>(t).unwrap_or(Value::Null),
-            (Some(s), None) => json!({ "status": s }),
-            _ => Value::Null,
-        };
+        let triage = super::triage::api(self.triage_status.as_deref(), self.triage_json.as_deref());
         let mut m = json!({
             "id": self.id, "thread_id": self.thread_id, "identity_id": identity_id,
             "direction": self.direction, "status": self.status, "from": self.from(),

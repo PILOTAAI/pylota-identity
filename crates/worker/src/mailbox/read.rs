@@ -734,7 +734,8 @@ fn release<P: Platform, S: Sql>(
         // 2. Status and triage.
         let triage = triage_enabled && !matches!(row.kind.as_str(), "dsn" | "mdn");
         let triage_json = (!triage).then(|| {
-            json!({ "status": "skipped", "reason": "policy_disabled", "risk_flags": [], "model": null, "version": 1, "run": 0 }).to_string()
+            let reason = if triage_enabled { "not_eligible" } else { "policy_disabled" };
+            json!({ "status": "skipped", "reason": reason, "risk_flags": [], "model": null, "version": crate::triage::TRIAGE_VERSION, "run": 0 }).to_string()
         });
         s.exec(
             "UPDATE messages SET status = 'received', quarantine_reason = NULL, triage_status = ?2, triage_json = ?3 WHERE rowid = ?1",

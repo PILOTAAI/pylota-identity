@@ -31,13 +31,22 @@ pub async fn mailbox<P: Platform>(
     idn: &idb::Row,
     req: ReadRequest,
 ) -> Result<Value, ApiError> {
+    call_mailbox(c, idn, MailboxRequest::Read(req)).await
+}
+
+/// One request to the identity's mailbox; its error answer becomes the API error.
+pub async fn call_mailbox<P: Platform>(
+    c: &Ctx<P>,
+    idn: &idb::Row,
+    req: MailboxRequest,
+) -> Result<Value, ApiError> {
     let env = envelope_for(
         c.p.as_ref(),
         Some(&idn.tenant_id),
         Some(&idn.id),
         &c.request_id,
         None,
-        MailboxRequest::Read(req),
+        req,
     );
     match c
         .p

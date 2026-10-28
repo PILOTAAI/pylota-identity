@@ -89,6 +89,7 @@ pub fn validate(patch: &Value, defaults: &Value, stored: &Value) -> Result<(), A
     let mut stored = stored.clone();
     policy::merge(&mut stored, patch);
     let after = policy::effective(defaults, &stored);
+    crate::triage::rules::validate(&after)?;
     serde_json::from_value::<pylota_identity_api_types::TenantPolicy>(after)
         .map_err(|e| ApiError::invalid("policy", e.to_string()))?;
     Ok(())
@@ -128,6 +129,9 @@ pub async fn write<P: Platform>(
     tenant_id: &str,
     patch: &Value,
 ) -> Result<tdb::Row, ApiError> {
+    let mut folded = patch.clone();
+    crate::triage::rules::fold_rules(&mut folded);
+    let patch = &folded;
     for _ in 0..3 {
         let t: tdb::Row =
             c.p.db()

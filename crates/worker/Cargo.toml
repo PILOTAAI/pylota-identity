@@ -19,6 +19,7 @@ pylota-identity-core = { path = "../core" }
 pylota-identity-platform = { path = "../platform" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+regex = { workspace = true }
 
 
 [dev-dependencies]

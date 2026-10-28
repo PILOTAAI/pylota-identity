@@ -1548,7 +1548,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             .collect();
         threads::recompute(tx, seq, &addresses, &own, None, false)?;
         tx.exec(
-            "UPDATE threads SET last_outbound_at = ?2, reply_from_address = COALESCE(reply_from_address, ?3) WHERE seq = ?1",
+            "UPDATE threads SET last_outbound_at = ?2, reply_from_address = COALESCE(reply_from_address, ?3), needs_reply = CASE WHEN needs_reply IS NULL THEN NULL ELSE 0 END WHERE seq = ?1",
             &[seq.into(), now.into(), plan.from.address.clone().into()],
         )?;
         tx.exec(

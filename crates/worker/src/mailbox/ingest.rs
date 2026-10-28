@@ -708,7 +708,7 @@ pub fn ingest<P: Platform, S: Sql>(
         "skipped"
     };
     let triage_json = (triage_status == "skipped").then(|| {
-        json!({ "status": "skipped", "reason": if is_system || !visible_kind || !visible { "not_eligible" } else { "policy_disabled" }, "risk_flags": [], "model": null, "version": 1, "run": 0 }).to_string()
+        json!({ "status": "skipped", "reason": if is_system || !visible_kind || !visible { "not_eligible" } else { "policy_disabled" }, "risk_flags": [], "model": null, "version": crate::triage::TRIAGE_VERSION, "run": 0 }).to_string()
     });
     let from = inp.from.clone().unwrap_or_default();
     // The verification match is kept with the message, so a release can insert its row (Read path).
