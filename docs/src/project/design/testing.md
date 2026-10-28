@@ -316,6 +316,14 @@ mailbox slow without failing it (F15). `POST /__test/bulk-seed` is built as desc
 settlement noted in [Search › As built](search.md#tests); `.github/workflows/nightly.yml` runs the
 `#[ignore]`d benchmarks with `cargo xtask itest --ignored --nocapture bench::`.
 
+**As built (M11).** `fakes::ai_script(model, replies)` queues the replies a chat model gives, in order;
+a reply may carry `__delay_ms` (answer late) or `__status` (answer that HTTP status), and
+`fakes::ai_inputs(model)` returns the inputs it was sent, so a test can check what the model saw (the
+fences in `it::agentic::e1_fenced`). An unscripted chat model answers `READY` to a planning call and an
+`insufficient_evidence` draft to the answer call. `it::main::stream_post` reads a server-sent event stream
+until a test-chosen event and reports whether the stream ended. The native harness reads a streamed
+body to its end; there the keep-alive is off because the fake clock would spin it.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

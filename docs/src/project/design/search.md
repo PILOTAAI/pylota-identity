@@ -1838,8 +1838,6 @@ AI models with an API token and records the figures in `quality.md` (build plan 
 **As built (M10).** The design above holds for keyword, semantic and hybrid search, tenant fan-out,
 contacts, find related and the index pipeline, with these settlements until the milestones that need more:
 
-- Agentic search is M11: `mode: "agentic"` is checked for `search:agentic` (`403 permission_denied`) and
-  then answers `422 agentic_disabled`.
 - The mailbox's search and index operations travel as one `MailboxRequest::Search` variant tagged `sq`
   inside (`mailbox/search.rs`); the front Worker's legs are in `search/` and run their mailbox calls
   through one fan-out (`search::Fan`) that applies the 900 ms deadline at tenant scope only.
@@ -1879,6 +1877,29 @@ contacts, find related and the index pipeline, with these settlements until the 
   fake Vectorize scanning all 50,000 vectors), tenant search over 10 identities p95 936 ms (NFR-PERF-5,
   1 s). The keyword figure sits at its target, so the nightly run's warning is expected to flicker
   until the per-request overhead is measured on Cloudflare (M20).
+
+**As built (M11).** Agentic search (§ 11) runs as designed, with these settlements:
+
+- The request is checked in this order: `search:agentic` (`403`), the policy's `agentic_enabled`
+  (`422 agentic_disabled`), `RL_AGENTIC`, the request's fields, `q` and the budget (lowered to the
+  policy's limits), and only then the daily cap, so an invalid request is never counted. The cap is one
+  `QuotaRequest::CountAgentic { tz, cap }` that counts and refuses in one step; a refusal is
+  `429 agentic_budget_exhausted` with the next local midnight.
+- The seed search is step 1 of the trace. The planner's tool calls in one reply run one after another,
+  not in parallel, so a later call sees the conversation budget (48,000 characters) the earlier ones
+  left.
+- A refused tool call that names an ID outside the scope, or carries arguments the schema does not
+  have, adds a `scope_probe` entry; the call's own action entry is left out so the trace never echoes
+  the foreign ID. The `why` lines the agent sees name a located reference by its kind
+  (`core::injection::why_ref`), not its value.
+- The stream follows the OpenAPI contract: one `evidence` event per hit, then `step`, `answer` and
+  `done` with the whole response body. It streams only when `stream: true` and the request accepts
+  `text/event-stream`; otherwise the same run answers JSON. Keep-alive comments go out every 10 s
+  (1 s in the itest build). When the client goes away the loop stops at its next transition.
+- Pull-request CI scripts the model through the fake server (see [Testing § 6.1](testing.md)).
+- Measured in local workerd on 2026-10-28 with the scripted fake model over 5,000 messages
+  (`it::bench::agentic_p95`): total p95 510 ms, first evidence p95 228 ms (NFR-PERF-6: 8 s and 1.5 s).
+  The figures leave out the real model's latency, which the nightly evaluation records (M18).
 
 ## Tests
 
