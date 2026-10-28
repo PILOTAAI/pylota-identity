@@ -329,7 +329,9 @@ body to its end; there the keep-alive is off because the fake clock would spin i
 gets a `done` triage. A script or failure key may be `model@@marker`: it then applies only to calls whose
 input contains the marker, so a late job of another test cannot take a scripted answer
 (`fakes::ai_script("gpt-oss@@MARK", …)`, `fakes::ai_fail("gpt-oss@@MARK", …)`). The inputs of every
-triage call are recorded for `fakes::ai_inputs`.
+triage call are recorded for `fakes::ai_inputs`. A `do.call` fault armed for `MAILBOX:{object_id}`
+applies to that one mailbox, so a background job of an earlier test cannot take it
+(`it::search::f15_partial`).
 
 ### 6.2 Test hooks
 

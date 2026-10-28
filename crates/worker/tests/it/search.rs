@@ -362,8 +362,15 @@ fn f15_partial() {
         json!({ "q": "", "mode": "keyword", "facets": false }),
     );
     assert_eq!(ok.body["partial"], false, "{}", ok.body);
-    // The first mailbox call of the fan-out (identities are called in ID order) is slow.
-    fakes::fault("do.call", "MAILBOX", "delay:2000", 1);
+    // The first identity's mailbox is slow (scoped to its object, so a background job of an earlier
+    // test cannot take the fault).
+    let object = crate::d1(&format!(
+        "SELECT mailbox_do_id FROM identities WHERE id = '{first}'"
+    ))[0]["mailbox_do_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fakes::fault("do.call", &format!("MAILBOX:{object}"), "delay:2000", 1);
     let r = post(
         &path,
         &tk,

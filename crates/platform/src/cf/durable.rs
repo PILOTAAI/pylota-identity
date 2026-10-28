@@ -60,8 +60,16 @@ impl ObjectClient for CfObjects {
         envelope: &RpcEnvelope<Req>,
     ) -> PResult<RpcResult<Resp>> {
         let binding = class.binding();
+        // A fault armed for `{binding}:{object_id}` slows or fails that one object; one armed for the
+        // binding, any of its objects.
         #[cfg(feature = "itest-hooks")]
-        match super::itest::take_fault("do.call", binding).await {
+        let fault =
+            match super::itest::take_fault("do.call", &format!("{binding}:{object_id}")).await {
+                Some(m) => Some(m),
+                None => super::itest::take_fault("do.call", binding).await,
+            };
+        #[cfg(feature = "itest-hooks")]
+        match fault {
             // `delay:{ms}`: a slow object (F15), then the call as usual.
             Some(mode) if mode.starts_with("delay:") => {
                 let ms: u64 = mode["delay:".len()..].parse().unwrap_or(2_000);
