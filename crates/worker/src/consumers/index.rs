@@ -41,6 +41,8 @@ fn text_delay(next: u32) -> u32 {
 }
 
 pub async fn batch<P: Platform>(p: &P, batch: Vec<Incoming<Value>>) {
+    #[cfg(feature = "itest-hooks")]
+    crate::hooks::tap_queue(p, "pm-index", &batch).await;
     for m in batch {
         let done = match serde_json::from_value::<IndexJob>(m.body.clone()) {
             Ok(job) => run(p, job).await,

@@ -147,7 +147,8 @@ fn f5_trigram() {
             ("Unrelated", "Nothing here."),
         ],
     );
-    for q in ["brightwel", "brigthwell"] {
+    // A partial word, and a one-letter substitution.
+    for q in ["brightwel", "brightwall"] {
         let r = search(&idn, &key, json!({ "q": q, "mode": "keyword" }));
         assert_eq!(r.status, 200, "{}", r.body);
         let h = hits(&r);
@@ -228,6 +229,39 @@ fn f7_quarantine_hidden() {
     assert_eq!(quarantined(&r), 0);
 }
 
+/// `s` as RFC 2047 encoded words, folded, so a long non-ASCII subject survives the header limits.
+fn encoded_subject(s: &str) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let encode = |raw: &[u8]| {
+        let mut b64 = String::new();
+        for c in raw.chunks(3) {
+            let n = c
+                .iter()
+                .enumerate()
+                .fold(0u32, |a, (i, &b)| a | (u32::from(b) << (16 - 8 * i)));
+            for i in 0..4 {
+                b64.push(if i <= c.len() {
+                    char::from(T[((n >> (18 - 6 * i)) & 63) as usize])
+                } else {
+                    '='
+                });
+            }
+        }
+        b64
+    };
+    let chars: Vec<char> = s.chars().collect();
+    chars
+        .chunks(10)
+        .map(|c| {
+            format!(
+                "=?UTF-8?B?{}?=",
+                encode(c.iter().collect::<String>().as_bytes())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n ")
+}
+
 /// F8: the request bounds, `snippet_chars`, `group_by: thread`, and the 256 KB cap that sets
 /// `truncated` with a cursor continuing after the last hit kept.
 #[test]
@@ -244,15 +278,17 @@ fn f8_budget() {
         let r = search(&idn, &key, body);
         assert_eq!((r.status, r.code()), (400, "invalid_request"), "{path}");
     }
-    // Big hits: 4-byte characters in the subject and body.
+    // Big hits: 4-byte characters in the subject (as RFC 2047 encoded words) and the body.
     let wide = "𝐀".repeat(990);
-    let mut items = Vec::new();
-    for i in 0..60 {
-        items.push((
-            format!("{wide} {i}"),
-            format!("budget {}", "𝐁".repeat(1_500)),
-        ));
+    let words = vec!["𝐁𝐁𝐁𝐁𝐁𝐁"; 300];
+    let mut body = String::from("budget");
+    for line in words.chunks(10) {
+        body.push_str("\r\n");
+        body.push_str(&line.join(" "));
     }
+    let items: Vec<(String, String)> = (0..60)
+        .map(|i| (encoded_subject(&format!("{wide} {i}")), body.clone()))
+        .collect();
     let refs: Vec<(&str, &str)> = items
         .iter()
         .map(|(s, b)| (s.as_str(), b.as_str()))

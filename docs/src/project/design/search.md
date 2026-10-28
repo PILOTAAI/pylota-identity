@@ -1835,6 +1835,39 @@ Pull-request CI runs the loop with a scripted fake model (structure, budgets, ve
 job (`cargo xtask eval-search`, `cargo xtask eval-agentic`) runs the golden set against real Workers
 AI models with an API token and records the figures in `quality.md` (build plan M18).
 
+**As built (M10).** The design above holds for keyword, semantic and hybrid search, tenant fan-out,
+contacts, find related and the index pipeline, with these settlements until the milestones that need more:
+
+- Agentic search is M11: `mode: "agentic"` is checked for `search:agentic` (`403 permission_denied`) and
+  then answers `422 agentic_disabled`.
+- The mailbox's search and index operations travel as one `MailboxRequest::Search` variant tagged `sq`
+  inside (`mailbox/search.rs`); the front Worker's legs are in `search/` and run their mailbox calls
+  through one fan-out (`search::Fan`) that applies the 900 ms deadline at tenant scope only.
+- The request's structured `filters` (`direction`, `labels`, `after`, `before`) are ANDed onto the compiled
+  filter as bound SQL and onto the Vectorize pre-filter; `direction` and `labels` also add `in:` and
+  `label:` entries to `why`. A `ref:` operator's hit is located in `refs` like a free-text reference,
+  so its `why` entry carries the location.
+- `Embed` writes `VECTORS` only, and a re-embed's dual write and dual read land with the re-embed job
+  (M14); `DeleteVectors { also_next }` already deletes from `VECTORS_NEXT` when it is bound. The
+  per-request `RL_EMBED` check happens before each batch, so a deferred job leaves its new rows
+  `pending`.
+- A Workers AI rate-limit answer is recognised from its error text (HTTP 429, "rate limit", "too many
+  requests", or error 3040), because the binding reports no status (`platform::ai::is_rate_limited`).
+- A canceled outbound message leaves the index: its chunk rows are deleted with the cancel and a
+  `DeleteVectors` job removes its vectors. `canceled` is therefore outside `semantic_coverage`'s eligible
+  set and the reconciliation's missing list, like `hidden` and `throttled`.
+- The nightly reconciliation pages only identities that have a mailbox and are not the system identity;
+  a mailbox that answers an error (an identity erased meanwhile) reports zero rows instead of retrying, so
+  the night's evaluation does not wait for it. The `vector_drift` alert and `ai_backlog` are log lines and
+  counters (`vector_drift_alert_total`, `ai_deferred_total`, `ai_rate_limited_total`) until M17's alert
+  evaluator.
+- Find related answers `{ data }` without a `degraded` flag (the contract has none); the keyword
+  fallback logs nothing more than a normal search.
+- The benchmark seed (`POST /__test/bulk-seed`) generates its synthetic messages inside the itest build
+  (`mailbox/seed.rs`) rather than from `crates/conformance/src/gen/`, writes their chunk rows as
+  `embedded`, and the test process seeds the fake Vectorize with the same texts instead of queuing
+  50,000 `Embed` jobs.
+
 ## Tests
 
 Every row maps to a requirement or an edge-case row. Names in the edge-case register are used as

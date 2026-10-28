@@ -282,3 +282,84 @@ fn semantic_and_hybrid_with_coverage() {
     );
     assert_eq!(r.body["semantic_coverage"], 0.75, "{}", r.body);
 }
+
+/// `s` as RFC 2047 encoded words, folded, so a long non-ASCII subject survives the header limits.
+pub(super) fn encoded_subject(s: &str) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let encode = |raw: &[u8]| {
+        let mut b64 = String::new();
+        for c in raw.chunks(3) {
+            let n = c
+                .iter()
+                .enumerate()
+                .fold(0u32, |a, (i, &b)| a | (u32::from(b) << (16 - 8 * i)));
+            for i in 0..4 {
+                b64.push(if i <= c.len() {
+                    char::from(T[((n >> (18 - 6 * i)) & 63) as usize])
+                } else {
+                    '='
+                });
+            }
+        }
+        b64
+    };
+    let chars: Vec<char> = s.chars().collect();
+    chars
+        .chunks(10)
+        .map(|c| {
+            format!(
+                "=?UTF-8?B?{}?=",
+                encode(c.iter().collect::<String>().as_bytes())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n ")
+}
+
+#[test]
+fn byte_cap_truncates_with_a_continuing_cursor() {
+    let h = Harness::new();
+    let (tid, idn, address, _) = setup(&h);
+    let wide = "𝐀".repeat(990);
+    let words = vec!["𝐁𝐁𝐁𝐁𝐁𝐁"; 300];
+    let mut body = String::from("budget");
+    for line in words.chunks(10) {
+        body.push_str("\r\n");
+        body.push_str(&line.join(" "));
+    }
+    for i in 0..60 {
+        let subject = encoded_subject(&format!("{wide} {i}"));
+        email(
+            &h,
+            "alex@sender.example",
+            &address,
+            &plain(&address, &format!("w{i}@sender.example"), &subject, &body),
+        );
+    }
+    drain(&h, QueueName::Inbound);
+    let key = searcher(&h, &tid, &["search:read"]);
+    let q = json!({ "q": "budget", "mode": "keyword", "limit": 50, "snippet_chars": 1000 });
+    let r = search(&h, &key, &idn, q.clone());
+    assert_eq!(r.status, 200, "{}", r.body);
+    let bytes = r.body.to_string().len();
+    let first = r.body["hits"].as_array().unwrap().clone();
+    assert_eq!(
+        r.body["truncated"],
+        true,
+        "{bytes} bytes, {} hits",
+        first.len()
+    );
+    assert!(bytes <= 262_144, "{bytes}");
+    assert!(!first.is_empty() && first.len() < 50);
+    assert!(first[0]["subject"].as_str().unwrap().chars().count() >= 992);
+    let mut q2 = q.clone();
+    q2["cursor"] = r.body["next_cursor"].clone();
+    let r2 = search(&h, &key, &idn, q2);
+    let second = r2.body["hits"].as_array().unwrap();
+    assert!(!second.is_empty());
+    assert!(
+        second
+            .iter()
+            .all(|h| !first.iter().any(|f| f["message_id"] == h["message_id"]))
+    );
+}

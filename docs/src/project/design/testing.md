@@ -302,6 +302,20 @@ fault target `submit.after_put` ends a submit after its sent copy, as a killed i
 of `pm-outbound` and delivery-event retries are queued after one second while the fake clock decides the
 24-hour end, so `it::send::g3_quota_backoff` ends after an `advance` of 25 hours.
 
+**As built (M10).** Workers AI and Vectorize join the fake server. In the itest build `Ai::run` posts
+`{model, input}` to `{fakes}/__ai/run`: embedding models answer the feature-hashed vectors of the table
+above, the reranker the share of query tokens found in each context (a probability, as spike S6 found),
+and `fakes::ai_fail(model, statuses)` makes the next calls answer those HTTP statuses (a `429` is the
+rate-limit answer of F16). `VectorIndex` posts to `{fakes}/__vec/{binding}/{op}` (`upsert`, `query`,
+`query_by_id`, `delete`, `get`, `describe`): an in-memory store per binding with namespaces, cosine
+scores and the `$eq`, `$ne`, `$in`, `$nin` and range filters; `fakes::vector_fail(op, n)` fails the next
+calls, `fakes::vector_lose` drops a stored vector, and `fakes::vector_count` makes `describe()` report a
+chosen count for the drift check. A fault `rl.allow` on `{binding}:{key}` refuses that key at its rate
+limiter without spending the binding's budget (F16), and a `do.call` fault with mode `delay:{ms}` makes a
+mailbox slow without failing it (F15). `POST /__test/bulk-seed` is built as described above, with the
+settlement noted in [Search › As built](search.md#tests); `.github/workflows/nightly.yml` runs the
+`#[ignore]`d benchmarks with `cargo xtask itest --ignored --nocapture bench::`.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

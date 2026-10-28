@@ -1,7 +1,10 @@
 //! The fake server on `127.0.0.1:8798` (Testing § 6.3–6.6), hosted by the test process: the fake clock
 //! and the fault plan the Worker reads at each invocation, the queue messages the itest build hands
-//! over, and the hosts the Worker's outbound requests are rerouted to (`/__http/{host}/…`): so far the
-//! two DoH resolvers, answering from the corpus zones (`crates/conformance/corpus/dns/zones.toml`). A blocking server on `std::net`.
+//! over, the hosts the Worker's outbound requests are rerouted to (`/__http/{host}/…`: the two DoH
+//! resolvers, answering from the corpus zones in `crates/conformance/corpus/dns/zones.toml`, the
+//! Cloudflare API and the webhook receivers), and the bindings the itest build routes here: Email
+//! Sending (`/__mail/send`), Workers AI (`/__ai/run`) and Vectorize (`/__vec/{binding}/{op}`). A blocking
+//! server on `std::net`.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};

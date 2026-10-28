@@ -1,5 +1,5 @@
-//! The `pm-index` consumer in an M7 build (Search § 6): attachment text, and the kinds later
-//! milestones fill in.
+//! The `pm-index` consumer (Search § 6): attachment text (M7), and `Embed`, `Reconcile` and the
+//! Workers AI fair queue (M10).
 
 use std::time::Duration;
 
@@ -37,7 +37,7 @@ fn b12_extraction_failure() {
     assert_eq!(t.body["status"], "unavailable");
 }
 
-/// `Embed` and `Triage` ack without work in M7: triage stays `pending`, nothing is dead-lettered.
+/// `Triage` acks without work until M12: triage stays `pending`, nothing is dead-lettered.
 #[test]
 fn job_kinds_before_milestone() {
     let (_, idn, addr, key) = mailbox_fixture("kinds");
@@ -133,6 +133,12 @@ fn reported(run_date: &str) -> i64 {
     })
 }
 
+/// `pct` percent more vectors than `embedded`, at least one more.
+fn over(embedded: i64, pct: f64) -> u64 {
+    let n = embedded.max(0) as u64;
+    n + ((n as f64 * pct / 100.0).ceil() as u64).max(1)
+}
+
 fn summary(run_date: &str) -> serde_json::Value {
     crate::d1(&format!(
         "SELECT queued, index_count, embedded_rows, drift_pct FROM index_reconcile WHERE run_date = '{run_date}' AND identity_id = '*'"
@@ -214,7 +220,7 @@ fn f14_retry_and_reconcile() {
     assert_eq!(mine[0]["n"], 1);
     // 03:05: the index reports 2% more vectors than the rows say.
     let embedded1 = reported(&night1).max(embedded1);
-    crate::fakes::vector_count(Some((embedded1 as f64 * 1.02).round() as u64));
+    crate::fakes::vector_count(Some(over(embedded1, 2.0)));
     travel(0, 3, 5, 0, &mut offset);
     crate::cron("*/15 * * * *");
     let s1 = eventually(30, "night one evaluated", || {
@@ -227,7 +233,7 @@ fn f14_retry_and_reconcile() {
     let night2 = travel(0, 2, 5, 0, &mut offset);
     crate::cron("*/15 * * * *");
     let embedded2 = reported(&night2);
-    crate::fakes::vector_count(Some((embedded2 as f64 * 1.03).round() as u64));
+    crate::fakes::vector_count(Some(over(embedded2, 3.0)));
     travel(0, 3, 5, 0, &mut offset);
     crate::cron("*/15 * * * *");
     let s2 = eventually(30, "night two evaluated", || {
