@@ -1,0 +1,50 @@
+From: Bo Lind <bo@example.com>
+To: bookings.acme@agents.example
+Subject: Invitation: Handover
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <0170a934@brightwell.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="v1"
+
+--v1
+Content-Type: multipart/alternative; boundary="v1a"
+
+--v1a
+Content-Type: text/plain
+
+Invitation.
+--v1a
+Content-Type: text/calendar; method=REQUEST
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:dup-1@example.com
+DTSTAMP:20261027T220000Z
+DTSTART:20261030T100000Z
+SUMMARY:Handover
+ORGANIZER:mailto:bo@example.com
+ATTENDEE:mailto:bookings.acme@agents.example
+END:VEVENT
+END:VCALENDAR
+--v1a--
+--v1
+Content-Type: text/calendar; method=REQUEST; name=invite.ics
+Content-Disposition: attachment; filename=invite.ics
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:dup-1@example.com
+DTSTAMP:20261027T220000Z
+DTSTART:20261030T100000Z
+SUMMARY:Handover
+ORGANIZER:mailto:bo@example.com
+ATTENDEE:mailto:bookings.acme@agents.example
+END:VEVENT
+END:VCALENDAR
+--v1--

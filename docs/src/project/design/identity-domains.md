@@ -213,6 +213,7 @@ the default tenant, `Tenant` for any other username and for a local part on a te
 
 | # | Step | Error |
 |---|---|---|
+| 0 | Input longer than 256 characters (checked first: the fold's cost grows with the input) | `400 address_invalid` |
 | 1 | `fold(input)` (below) equals the fold of a name reserved on this domain class | `400 address_reserved` |
 | 2 | Input contains a non-ASCII character and is mixed-script (its resolved script set is empty), or contains a strong right-to-left character | `400 address_reserved` |
 | 3 | Input contains any other non-ASCII character (SMTPUTF8 local parts cannot be routed by Email Routing) | `400 address_unsupported` |

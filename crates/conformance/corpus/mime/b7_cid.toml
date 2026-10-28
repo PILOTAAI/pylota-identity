@@ -1,0 +1,15 @@
+id      = "b7_cid"
+edge    = ["B7"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+cids = ["logo@brightwell.example"]
+html_contains = ["src=\"cid:logo@brightwell.example\""]
+attachments = 1
+attachment_types = ["image/gif"]
+text_contains = ["[image: Brightwell]"]

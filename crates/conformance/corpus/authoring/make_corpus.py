@@ -797,6 +797,39 @@ def auth_cases():
     (CORPUS / "dns" / "zones.toml").write_text("\n".join(lines) + "\n")
 
 
+def register_named_cases():
+    """The corpus names the edge-case register spells out (B4, B7, B8, B13)."""
+    raw = hdr("Your booking", extra="Content-Type: text/html; charset=utf-8\n") + (
+        "\n<html><body><h2>Booking confirmed</h2><p>Car: <b>AB12 CDE</b><br>Pick-up: Friday 10:00</p>"
+        '<p><a href="https://brightwell.example/b/2291">Manage booking</a></p></body></html>\n')
+    case("mime", "b4_html_only", ["B4"], raw, {
+        "text_contains": ["Booking confirmed", "Car: AB12 CDE", "Pick-up: Friday 10:00",
+                          "Manage booking (https://brightwell.example/b/2291)"],
+        "extracted_contains": ["Booking confirmed"], "flags": [], "attachments": 0})
+    gif = b"GIF89a" + b"\x00" * 20
+    raw = hdr("Logo", extra='Content-Type: multipart/related; boundary="r"; type="text/html"\n') + (
+        '\n--r\nContent-Type: text/html\n\n<p>Our logo:</p><img src="cid:logo@brightwell.example" alt="Brightwell">\n'
+        "--r\nContent-Type: image/gif\nContent-ID: <logo@brightwell.example>\nContent-Disposition: inline\n"
+        "Content-Transfer-Encoding: base64\n\n" + b64(gif) + "\n--r--\n")
+    case("mime", "b7_cid", ["B7"], raw, {
+        "cids": ["logo@brightwell.example"], "html_contains": ['src="cid:logo@brightwell.example"'],
+        "attachments": 1, "attachment_types": ["image/gif"], "text_contains": ["[image: Brightwell]"]})
+    raw = (f"From: ana@brightwell.example, not-an-address, bo@example.com\nTo: {TO}\nSubject: anomalies\nDate: {DATE}\n"
+           "Message-ID: <anom@brightwell.example>\n\nx\n")
+    case("mime", "b13_from_anomalies", ["B13"], raw, {"from": "ana@brightwell.example", "from_count": 3,
+                                                    "flags": ["parse_degraded"]})
+    ics = ("BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Example//EN\nMETHOD:REQUEST\nBEGIN:VEVENT\nUID:dup-1@example.com\n"
+           "DTSTAMP:20261027T220000Z\nDTSTART:20261030T100000Z\nSUMMARY:Handover\nORGANIZER:mailto:bo@example.com\n"
+           f"ATTENDEE:mailto:{TO}\nEND:VEVENT\nEND:VCALENDAR\n")
+    raw = hdr("Invitation: Handover", frm="Bo Lind <bo@example.com>", extra='Content-Type: multipart/mixed; boundary="v1"\n') + (
+        '\n--v1\nContent-Type: multipart/alternative; boundary="v1a"\n\n--v1a\nContent-Type: text/plain\n\nInvitation.\n'
+        f"--v1a\nContent-Type: text/calendar; method=REQUEST\n\n{ics}--v1a--\n--v1\nContent-Type: text/calendar; method=REQUEST; name=invite.ics\n"
+        f"Content-Disposition: attachment; filename=invite.ics\n\n{ics}--v1--\n")
+    case("calendar", "v1_duplicate_parts", ["B8", "V1"], raw, {
+        "kind": "normal", "attachments": 2, "attachment_types": ["text/calendar", "text/calendar"]},
+        envelope_from="bo@example.com", note="the same calendar object twice; the reader keeps one (later milestone)")
+
+
 def main():
     gmail_cases()
     outlook_cases()
@@ -810,6 +843,7 @@ def main():
     attachment_cases()
     sanitize_cases()
     threading_cases()
+    register_named_cases()
     auth_cases()
     for d in ["mime", "auth", "dsn", "threading", "sanitize", "attachments", "calendar"]:
         p = CORPUS / d

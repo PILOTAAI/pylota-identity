@@ -1,0 +1,9 @@
+From: Ana Silva <ana@brightwell.example>
+To: bookings.acme@agents.example
+Subject: Your booking
+Date: Tue, 27 Oct 2026 22:00:00 +0000
+Message-ID: <c235c7f7@brightwell.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><h2>Booking confirmed</h2><p>Car: <b>AB12 CDE</b><br>Pick-up: Friday 10:00</p><p><a href="https://brightwell.example/b/2291">Manage booking</a></p></body></html>

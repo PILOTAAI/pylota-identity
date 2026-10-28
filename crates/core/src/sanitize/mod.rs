@@ -425,6 +425,10 @@ const BLACK: Rgb = Rgb(0, 0, 0);
 fn parse_color(v: &str) -> Option<Rgb> {
     let v = v.trim();
     if let Some(hex) = v.strip_prefix('#') {
+        // Byte slicing below needs ASCII (a non-ASCII value panicked; found by the sanitize fuzz target).
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         let h = |s: &str| u8::from_str_radix(s, 16).ok();
         return match hex.len() {
             3 => {
@@ -757,6 +761,24 @@ pub fn element(name: &str) -> QualName {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colours_parse_without_panicking() {
+        assert_eq!(parse_color("#fff"), Some(WHITE));
+        assert_eq!(parse_color("#0a141e"), Some(Rgb(10, 20, 30)));
+        assert_eq!(parse_color("rgb(10, 20, 30)"), Some(Rgb(10, 20, 30)));
+        for bad in [
+            "#\u{fffd}\u{fffd}",
+            "#é0",
+            "#ab\u{fffd}",
+            "#12345",
+            "#",
+            "rgb(",
+            "rgb(1)",
+        ] {
+            assert_eq!(parse_color(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn builder_does_not_panic() {

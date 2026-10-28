@@ -5,15 +5,18 @@ use std::path::Path;
 
 use pylota_identity_core::fuzz;
 
+type Harness = fn(&[u8]);
+
 /// Covers: B2
 #[test]
 fn replay_all() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fuzz_regressions");
-    let targets: [(&str, fn(&[u8])); 4] = [
+    let targets: [(&str, Harness); 5] = [
         ("mime_parse", fuzz::mime_parse),
         ("address_parse", fuzz::address_parse),
         ("sanitize", fuzz::sanitize),
         ("dsn_parse", fuzz::dsn_parse),
+        ("query_parse", fuzz::query_parse),
     ];
     for (name, harness) in targets {
         let Ok(entries) = std::fs::read_dir(root.join(name)) else {

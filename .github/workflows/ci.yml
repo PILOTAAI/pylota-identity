@@ -80,8 +80,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Build plan M2; query_parse joins with core::query, ical_parse with M32.
-        target: [mime_parse, address_parse, sanitize, dsn_parse]
+        # Build plan M2; ical_parse joins with M32.
+        target: [mime_parse, query_parse, address_parse, sanitize, dsn_parse]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
         with:

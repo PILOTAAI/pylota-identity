@@ -77,6 +77,17 @@ struct Row {
 struct Named {
     tests: Vec<String>,
     rows: Vec<String>,
+    /// Prefixes from "every `core::` row": the rows' tests required here are only those under one
+    /// of them, plus the rows' `conf::` corpus cases; the rest belong to the milestones that build
+    /// what they exercise.
+    row_prefixes: Vec<String>,
+}
+
+/// Whether a row's test is required by an acceptance whose row scope is `prefixes`.
+fn row_test_in_scope(test: &str, prefixes: &[String]) -> bool {
+    prefixes.is_empty()
+        || test.starts_with("conf::")
+        || prefixes.iter().any(|p| test.starts_with(p.as_str()))
 }
 
 #[derive(Default)]
@@ -128,7 +139,11 @@ pub fn check(root: &Path) -> Result<Report, String> {
             .iter()
             .filter(|r| n.rows.contains(&r.id) && r.owner != "I")
         {
-            for t in &row.tests {
+            for t in row
+                .tests
+                .iter()
+                .filter(|t| row_test_in_scope(t, &n.row_prefixes))
+            {
                 required
                     .entry(t.clone())
                     .or_insert_with(|| format!("{} acceptance, row {}", m.id, row.id));
@@ -412,6 +427,16 @@ fn code_spans(text: &str) -> Vec<&str> {
 fn named_in(acceptance: &str, own: &str, row_ids: &BTreeSet<&str>) -> Named {
     let text = drop_other_milestone_parens(&drop_link_targets(acceptance), own);
     let mut named = Named::default();
+    for (i, _) in text.match_indices("every `") {
+        let rest = &text[i + 7..];
+        if let Some(end) = rest.find('`')
+            && rest[..end].ends_with("::")
+            && is_test_name(&format!("{}x", &rest[..end]))
+            && rest[end + 1..].trim_start().starts_with("row")
+        {
+            named.row_prefixes.push(rest[..end].to_owned());
+        }
+    }
     for (i, chunk) in text.split('`').enumerate() {
         if i % 2 == 1 {
             if is_test_name(chunk) && !named.tests.iter().any(|t| t == chunk) {
@@ -1202,6 +1227,28 @@ mod tests {
         );
         assert_eq!(named.rows, ["A1", "A2", "A3", "B2", "D1", "D2", "J35"]);
         assert_eq!(named.tests, ["xtask::x_*"]);
+    }
+
+    /// "every `core::` row" limits the rows' required tests to `core::` and the corpus's `conf::`.
+    #[test]
+    fn trace_scopes_rows_to_a_prefix() {
+        let ids: BTreeSet<&str> = ["A2", "B4"].into_iter().collect();
+        let named = named_in("- Unit tests for every `core::` row: A2, B4.", "M2", &ids);
+        assert_eq!(named.rows, ["A2", "B4"]);
+        assert_eq!(named.row_prefixes, ["core::"]);
+        assert!(row_test_in_scope(
+            "core::thread_token::a2_x",
+            &named.row_prefixes
+        ));
+        assert!(row_test_in_scope(
+            "conf::mime::b4_html_only",
+            &named.row_prefixes
+        ));
+        assert!(!row_test_in_scope(
+            "it::inbound::a2_forged_token_ignored",
+            &named.row_prefixes
+        ));
+        assert!(row_test_in_scope("it::anything", &[]));
     }
 
     /// Rows on the `**Implements:**` line count; a named acceptance block is listed by its name and

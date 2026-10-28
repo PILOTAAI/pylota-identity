@@ -52,6 +52,8 @@ impl AddressError {
 pub const USERNAME_MAX: usize = 24;
 /// `max_len` for an alias local part on a tenant domain.
 pub const LOCAL_PART_MAX: usize = 40;
+/// Inputs longer than this are `address_invalid` before any other step.
+pub const MAX_INPUT_CHARS: usize = 256;
 /// Username plus tenant suffix, leaving room for a thread token in 64 octets (A12).
 pub const LOCAL_BUDGET: usize = 40;
 
@@ -228,6 +230,11 @@ pub fn validate_username(
     tenant_suffix: &str,
     existing: &[&str],
 ) -> Result<String, AddressError> {
+    // 0. Far longer than any local part: refused before the confusable fold, whose cost grows with the
+    // input (found by the address_parse fuzz target).
+    if input.chars().count() > MAX_INPUT_CHARS {
+        return Err(AddressError::Invalid);
+    }
     // 1. Confusable with a reserved name of this class.
     let folded = fold(input);
     if reserved_names(class).any(|n| fold(n) == folded) {
@@ -450,6 +457,9 @@ mod tests {
         }
         assert_eq!(platform(&"a".repeat(24)).unwrap().len(), 24);
         assert_eq!(tenant(&"a".repeat(40)).unwrap().len(), 40);
+        // Over-long input is refused before folding, even when it would fold to a reserved name.
+        let long = "\u{200b}".repeat(300) + "abuse";
+        assert_eq!(platform(&long), Err(AddressError::Invalid));
         assert!(platform("a-b_c.d9").is_ok());
     }
 

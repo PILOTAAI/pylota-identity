@@ -31,6 +31,8 @@ pub type RawObjectState = worker::worker_sys::DurableObjectState;
 
 /// The Cloudflare platform handed to the application for one invocation. M4 gives it the trait set.
 pub struct CfPlatform {
+    // Read only by the spike accessors until M4 builds the trait set on it.
+    #[cfg_attr(not(feature = "spike-s1"), allow(dead_code))]
     env: worker::Env,
 }
 
@@ -54,6 +56,7 @@ impl CfPlatform {
 
 /// A Durable Object's state, handed to [`ObjectApp::new`].
 pub struct CfObjectState {
+    #[cfg_attr(not(feature = "spike-s1"), allow(dead_code))]
     state: worker::State,
 }
 

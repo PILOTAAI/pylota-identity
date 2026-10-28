@@ -1,0 +1,14 @@
+id      = "v1_duplicate_parts"
+edge    = ["B8", "V1"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+note    = "the same calendar object twice; the reader keeps one (later milestone)"
+
+[envelope]
+from = "bo@example.com"
+to   = "bookings.acme@agents.example"
+
+[expect]
+kind = "normal"
+attachments = 2
+attachment_types = ["text/calendar", "text/calendar"]

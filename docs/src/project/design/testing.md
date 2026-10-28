@@ -714,7 +714,9 @@ lines from the source tree (including generated `conf::` names), and fails when:
 - a `Covers:` line names an unknown row or requirement.
 
 It also collects every test named in a design page's Tests table, and every test named in a milestone's
-acceptance. `ts::` tests live in the TypeScript SDK's own repository, which builds only from a product
+acceptance. A milestone acceptance that lists rows for "every `core::` row" (any prefix in that form) requires
+only those rows' tests under that prefix and their `conf::` corpus cases; the rows' other tests (`it::`,
+`live::`) are required by the milestone that builds what they exercise, and by the full check from M20. `ts::` tests live in the TypeScript SDK's own repository, which builds only from a product
 release's signed contract, so each repository gates its own side and neither waits for the other. Here,
 `trace` reads the `ts::` names and `Covers:` lines from `sdks/typescript-tests.json`, the inventory an SDK
 release produces and a pull request copies here: a listed name whose `Covers:` line names an unknown row

@@ -1,0 +1,13 @@
+id      = "b13_from_anomalies"
+edge    = ["B13"]
+source  = "authored"
+licence = "FSL-1.1-ALv2"
+
+[envelope]
+from = "sender@example.net"
+to   = "bookings.acme@agents.example"
+
+[expect]
+from = "ana@brightwell.example"
+from_count = 3
+flags = ["parse_degraded"]

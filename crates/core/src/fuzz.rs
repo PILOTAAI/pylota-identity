@@ -5,7 +5,7 @@
 //! [Testing § 8]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/testing.md
 #![doc(hidden)]
 
-use crate::{address, classify, mime, sanitize, text};
+use crate::{address, classify, mime, query, refs, sanitize, text};
 
 /// `mime_parse`: depth and part caps hold in the output.
 pub fn mime_parse(data: &[u8]) {
@@ -45,7 +45,8 @@ pub fn address_parse(data: &[u8]) {
             );
         }
     }
-    let _ = address::fold(&s);
+    // Display names and domains reach `fold` capped at 256 characters.
+    let _ = address::fold(&s.chars().take(256).collect::<String>());
 }
 
 /// The hidden code points of B11 that derived text must never contain.
@@ -102,5 +103,110 @@ pub fn dsn_parse(data: &[u8]) {
                 assert!(a.contains('@'), "{a}");
             }
         }
+    }
+}
+
+/// Whether an FTS5 expression holds only quoted strings (an optional ` *` after one), `AND`, `OR`,
+/// `NOT`, balanced parentheses and `{column} :` prefixes.
+fn fts_is_quoted(m: &str) -> bool {
+    let cs: Vec<char> = m.chars().collect();
+    let (mut i, mut depth) = (0usize, 0i32);
+    while i < cs.len() {
+        match cs[i] {
+            ' ' => i += 1,
+            '(' => {
+                depth += 1;
+                i += 1;
+            }
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+                i += 1;
+            }
+            '"' => {
+                i += 1;
+                loop {
+                    match cs.get(i) {
+                        None => return false,
+                        Some('"') if cs.get(i + 1) == Some(&'"') => i += 2,
+                        Some('"') => {
+                            i += 1;
+                            break;
+                        }
+                        Some(_) => i += 1,
+                    }
+                }
+                if cs.get(i..i + 2) == Some(&[' ', '*']) {
+                    i += 2;
+                }
+            }
+            '{' => {
+                let Some(end) = cs[i..].iter().position(|&c| c == '}') else {
+                    return false;
+                };
+                if !cs[i + 1..i + end]
+                    .iter()
+                    .all(|c| c.is_ascii_lowercase() || *c == '_' || *c == ' ')
+                {
+                    return false;
+                }
+                i += end + 1;
+                if cs.get(i..i + 2) == Some(&[' ', ':']) {
+                    i += 2;
+                } else if cs.get(i) == Some(&':') {
+                    i += 1;
+                } else {
+                    return false;
+                }
+            }
+            _ => {
+                let word: String = cs[i..]
+                    .iter()
+                    .take_while(|c| c.is_ascii_uppercase())
+                    .collect();
+                if !matches!(word.as_str(), "AND" | "OR" | "NOT") {
+                    return false;
+                }
+                i += word.len();
+            }
+        }
+    }
+    depth == 0
+}
+
+/// `query_parse`: every compiled FTS expression quotes every term; errors carry a position inside the
+/// input.
+pub fn query_parse(data: &[u8]) {
+    let q = String::from_utf8_lossy(data);
+    match query::parse(&q, &query::ParseCtx::default()) {
+        Ok(tree) => {
+            let ctx = query::CompileCtx {
+                tz: query::Tz::Europe__London,
+                now_ms: 1_793_138_400_000,
+                ref_packs: &[refs::Pack::Core, refs::Pack::UkVehicle],
+                custom_refs: &[],
+                quarantine_review: true,
+            };
+            let c = query::compile(&tree, &ctx);
+            let mut matches: Vec<&str> = [c.fts_match.as_deref(), c.tri_match.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect();
+            // And every `MATCH ?` parameter of the SQL filter.
+            let sql = &c.filter.sql;
+            for (idx, (at, _)) in sql.match_indices('?').enumerate() {
+                if sql[..at].ends_with("MATCH ")
+                    && let Some(query::SqlParam::Text(t)) = c.filter.params.get(idx)
+                {
+                    matches.push(t);
+                }
+            }
+            for m in matches {
+                assert!(fts_is_quoted(m), "{m:?} from {q:?}");
+            }
+        }
+        Err(e) => assert!(e.position as usize <= q.chars().count(), "{e:?}"),
     }
 }
