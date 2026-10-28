@@ -536,7 +536,10 @@ fn j7_staging_outlives_dlq() {
         200
     );
     let pointer = eventually(120, "the dead-lettered pointer", || {
-        crate::fakes::queued("pm-inbound-dlq").get(before).cloned()
+        crate::fakes::queued("pm-inbound-dlq")
+            .into_iter()
+            .skip(before)
+            .find(|p| p["envelope_to"] == addr.as_str())
     });
     assert_eq!(pointer["kind"], "staged", "{pointer}");
     crate::fakes::reset();
@@ -560,6 +563,8 @@ fn panic_to_degraded() {
         ),
         200
     );
+    // A panic ends every request in flight in the isolate: give the two panicking attempts time.
+    std::thread::sleep(std::time::Duration::from_secs(8));
     let m = eventually(90, "the degraded message", || {
         crate::messages_of(&idn, &key, "&status=received")
             .into_iter()
@@ -588,14 +593,20 @@ fn panic_to_degraded() {
 #[test]
 fn nfr_rel1_no_loss_canary() {
     let _reset = crate::fakes::Reset;
-    let (_, idn, addr, key) = mailbox_fixture("canary");
+    let (tid, idn, addr, key) = mailbox_fixture("canary");
     let send = |i: usize| {
         let raw = mail("a@canary.example", &addr, &format!("canary-{i}"), "x");
         inbound("a@canary.example", &addr, &raw).0
     };
     crate::fakes::fault_any("r2.put", "error", 1);
     assert_eq!(send(0), "accepted", "one failed put is retried in email()");
+    // An address this isolate has not looked up yet, so its lookup reaches D1 and the mail is staged.
+    let other = crate::identity(&crate::platform(), &tid, &crate::slug("canary2")[..8]);
+    let oid = other["id"].as_str().unwrap().to_owned();
+    let oaddr = other["primary_address"].as_str().unwrap().to_owned();
     crate::fakes::fault("d1", "DB", "error", 1);
+    let staged = mail("a@canary.example", &oaddr, "canary-staged", "x");
+    assert_eq!(inbound("a@canary.example", &oaddr, &staged).0, "accepted");
     assert_eq!(send(1), "accepted");
     crate::fakes::fault_any("inbound.after_ingest", "panic", 1);
     assert_eq!(send(2), "accepted");
@@ -612,6 +623,11 @@ fn nfr_rel1_no_loss_canary() {
             1
         );
     }
+    let s = wait_stored(&oid, &key, "received", 1);
+    assert_eq!(
+        (s.len(), s[0]["subject"].as_str()),
+        (1, Some("canary-staged"))
+    );
 }
 
 /// A16: misses are cached, and above 20 misses a second on one domain unknown addresses get a
@@ -619,6 +635,9 @@ fn nfr_rel1_no_loss_canary() {
 #[test]
 fn a16_dictionary_guard() {
     let (_, idn, addr, key) = mailbox_fixture("a16");
+    // The known address is looked up, and cached, before the flood.
+    let before = mail("x@a16.example", &addr, "A16 before", "x");
+    assert_eq!(inbound("x@a16.example", &addr, &before).0, "accepted");
     let mut outcomes = Vec::new();
     for i in 0..50 {
         let to = format!("guess{i}-{}@agents.example", crate::slug("a16"));
@@ -646,5 +665,7 @@ fn a16_dictionary_guard() {
         .0,
         "accepted"
     );
-    wait_stored(&idn, &key, "received", 1);
+    wait_stored(&idn, &key, "received", 2);
+    // The guard counts per second: the next tests start in a fresh one.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
 }

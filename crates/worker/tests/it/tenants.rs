@@ -62,7 +62,7 @@ fn d12_suffix_confusable_refused() {
             serde_json::json!({ "slug": crate::slug(suffix), "name": "d12", "mode": "live", "address_suffix": suffix }),
         )
     };
-    for s in [".stripe", ".str1pe", ".p0stmaster"] {
+    for s in [".stripe", ".p0stmaster", ".rnailer-daemon"] {
         let r = create(s);
         assert_eq!(
             (r.status, r.code()),

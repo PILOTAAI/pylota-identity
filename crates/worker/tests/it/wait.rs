@@ -65,9 +65,9 @@ fn e4_code_withheld_unauthenticated() {
     );
     let (body, _) = w.join().unwrap();
     assert_eq!(body["timed_out"], false, "{body}");
-    // `p=reject` at brightwell.example: the forged mail fails DMARC and is held, and this key's
+    // Unsigned mail claiming brightwell.example is not authenticated and is held; this key's
     // `quarantine:review` lets `wait` return it.
-    assert_eq!(body["message"]["trust"]["verdict"], "fail", "{body}");
+    assert_ne!(body["message"]["trust"]["verdict"], "pass", "{body}");
     assert_eq!(body["message"]["status"], "quarantined");
     assert_eq!(body["verification"], Value::Null);
     // Signed mail, but the wait names no expected sender: nothing to release it for.

@@ -370,11 +370,13 @@ pub fn inbound(from: &str, to: &str, raw: &str) -> (String, String) {
             });
         }
     }
-    let r = hook(
-        "POST",
-        "/__test/inbound",
-        Some(json!({ "mail_from": from, "rcpt_to": to, "raw_base64": b64 })),
-    );
+    let body = json!({ "mail_from": from, "rcpt_to": to, "raw_base64": b64 });
+    let mut r = hook("POST", "/__test/inbound", Some(body.clone()));
+    // Wrangler's dev proxy now and then drops a request before the Worker answers ("Network
+    // connection lost"); a redelivery is what a sending MTA would do, and ingest is idempotent.
+    if r.status == 500 && r.body.to_string().contains("Network connection lost") {
+        r = hook("POST", "/__test/inbound", Some(body));
+    }
     assert_eq!(r.status, 200, "{}", r.body);
     (
         r.body["outcome"].as_str().unwrap_or("").to_owned(),
@@ -416,7 +418,7 @@ pub fn mailbox_fixture(name: &str) -> (String, String, String, String) {
         &p,
         json!({ "name": name, "level": "tenant", "tenant_id": tid, "permissions": [
             "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read",
-            "identities:read", "identities:write"
+            "identities:read", "identities:write", "erasure:manage"
         ] }),
     );
     (
@@ -433,6 +435,10 @@ pub fn messages_of(identity_id: &str, key: &str, query: &str) -> Vec<Value> {
         &format!("/v1/identities/{identity_id}/messages?limit=100{query}"),
         key,
     );
+    // A request in flight when a fault hook panics the isolate dies with it: polling tries again.
+    if r.status >= 500 {
+        return Vec::new();
+    }
     assert_eq!(r.status, 200, "{}", r.body);
     r.body["data"].as_array().cloned().unwrap_or_default()
 }

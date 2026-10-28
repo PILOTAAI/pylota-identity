@@ -49,13 +49,14 @@ fn cases() -> Vec<Case> {
                 .and_then(|f| f.as_str())
                 .unwrap_or("sender@example.net")
                 .to_owned();
-            let message_id = raw
-                .split("\r\n\r\n")
-                .next()
-                .unwrap_or("")
-                .lines()
-                .find(|l| l.to_ascii_lowercase().starts_with("message-id:"))
-                .map(|l| l[11..].trim().trim_matches(['<', '>']).to_ascii_lowercase());
+            // The ID as the parser reads it (comments and folding removed, or the synthetic one).
+            let message_id = Some(
+                pylota_identity_core::mime::parse_headers_only(raw.as_bytes())
+                    .message_id
+                    .trim_matches(['<', '>'])
+                    .to_ascii_lowercase(),
+            )
+            .filter(|m| !m.is_empty());
             let expect = meta
                 .get("expect")
                 .and_then(|e| e.as_table())

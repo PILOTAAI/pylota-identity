@@ -243,6 +243,9 @@ fn a13_delete_then_reply_rejected() {
     crate::wait_stored(&idn, &key, "received", 1);
     let r = crate::delete(&format!("/v1/identities/{idn}"), &key);
     assert!(r.status < 300, "{}", r.body);
+    // Past the 60-second directory cache of the isolate that saw the address live.
+    let _reset = crate::fakes::Reset;
+    crate::fakes::advance(61_000);
     let (outcome, smtp) = crate::inbound(
         "a@r.example",
         &addr,

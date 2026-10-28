@@ -156,7 +156,102 @@ const CASES: &[(&str, Case)] = &[
     ("getDomain", |t| {
         ("GET", format!("/v1/domains/{}", t.domain), None)
     }),
+    // The mail routes of M7: the identity is checked first, so a message or thread ID never matters.
+    ("listThreads", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/threads", t.identity),
+            None,
+        )
+    }),
+    ("getThread", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/threads/{THREAD}", t.identity),
+            None,
+        )
+    }),
+    ("updateThread", |t| {
+        (
+            "PATCH",
+            format!("/v1/identities/{}/threads/{THREAD}", t.identity),
+            Some(json!({ "read": true })),
+        )
+    }),
+    ("listMessages", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/messages", t.identity),
+            None,
+        )
+    }),
+    ("getMessage", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/messages/{MESSAGE}", t.identity),
+            None,
+        )
+    }),
+    ("updateMessage", |t| {
+        (
+            "PATCH",
+            format!("/v1/identities/{}/messages/{MESSAGE}", t.identity),
+            Some(json!({ "read": true })),
+        )
+    }),
+    ("getMessageRaw", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/messages/{MESSAGE}/raw", t.identity),
+            None,
+        )
+    }),
+    ("getAttachment", |t| {
+        (
+            "GET",
+            format!(
+                "/v1/identities/{}/messages/{MESSAGE}/attachments/{ATTACHMENT}",
+                t.identity
+            ),
+            None,
+        )
+    }),
+    ("getAttachmentText", |t| {
+        (
+            "GET",
+            format!(
+                "/v1/identities/{}/messages/{MESSAGE}/attachments/{ATTACHMENT}/text",
+                t.identity
+            ),
+            None,
+        )
+    }),
+    ("releaseMessage", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/messages/{MESSAGE}/release", t.identity),
+            Some(json!({ "reason": "r" })),
+        )
+    }),
+    ("listQuarantine", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/quarantine", t.identity),
+            None,
+        )
+    }),
+    ("waitForMessage", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/wait?timeout=1", t.identity),
+            None,
+        )
+    }),
 ];
+
+const THREAD: &str = "thr_01ARYZ6S41TSV4RRFFQ69G5FAV";
+const MESSAGE: &str = "msg_01ARYZ6S41TSV4RRFFQ69G5FAV";
+const ATTACHMENT: &str = "att_01ARYZ6S41TSV4RRFFQ69G5FAV";
 
 /// Operations whose request names no other scope: the foreign key gets what it gets on its own scope,
 /// checked by the listing assertions below instead.
@@ -239,6 +334,11 @@ fn cross_tenant_matrix() {
         "identities:write",
         "erasure:manage",
         "domains:read",
+        "messages:read",
+        "messages:write",
+        "quarantine:review",
+        "attachments:read",
+        "search:read",
     ];
     let (victim_partner, vk) = partner("victim", &all);
     let vt = tenant(&vk, "victim");
@@ -274,7 +374,7 @@ fn cross_tenant_matrix() {
     let at = tenant(&p, "attacker");
     let (_, tenant_attacker) = mint(
         &p,
-        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read"] }),
+        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read"] }),
     );
     let (_, partner_attacker) = partner("attacker", &all);
     tenant(&partner_attacker, "attacker_own");
