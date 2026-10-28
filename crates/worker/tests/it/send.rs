@@ -918,7 +918,7 @@ fn g4_suppressed_after_submit() {
 #[test]
 fn g5_large_attachment() {
     let s = open_sender("g5 large", "live");
-    let big = "A".repeat(4_200_000);
+    let big = "A".repeat(5_200_000);
     let body = json!({ "to": ["big@example.net"], "subject": "Large", "text": "See attached",
         "attachments": [{ "filename": "report.txt", "content_type": "text/plain", "content_base64": big }] });
     let r = send(&s, body.clone());
