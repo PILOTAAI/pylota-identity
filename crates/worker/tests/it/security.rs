@@ -809,7 +809,7 @@ fn well_known_security_txt() {
     assert!(r.header("content-type").unwrap().starts_with("text/plain"));
     let text = r.body.as_str().unwrap();
     assert!(
-        text.contains("Contact: mailto:security@agents.example\n"),
+        text.contains("Contact: mailto:security@operator.example\n"),
         "{text}"
     );
     assert!(

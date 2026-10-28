@@ -84,6 +84,11 @@ pub fn verify(key: &[u8; 32], token: &str, now_s: i64) -> Option<AttLink> {
 }
 
 /// Standard base64 (an attachment's `content_base64`); whitespace is ignored.
+/// Standard padded base64.
+pub fn encode_base64(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
 pub fn decode_base64(s: &str) -> Option<Vec<u8>> {
     let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     base64::engine::general_purpose::STANDARD.decode(clean).ok()

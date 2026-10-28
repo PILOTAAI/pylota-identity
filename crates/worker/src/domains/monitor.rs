@@ -23,6 +23,8 @@ use serde_json::{Value, json};
 
 use super::cloudflare_api::Cf;
 use super::records::{self, Facts, Issue, ResolverResult};
+use super::ses_api::{Ses, SesError};
+use super::ses_control::SesCaller;
 use crate::db::domains as ddb;
 use crate::errors::ApiError;
 use crate::rpc::{envelope_for, error_body};
@@ -70,6 +72,12 @@ pub enum DomainRequest {
     Health {
         domain_id: String,
     },
+    /// Role mail relay, step 3: one role message to this domain from the sender with `sender_hash`.
+    AdmitRoleMail {
+        domain_id: String,
+        sender_hash: String,
+        now: i64,
+    },
     #[cfg(feature = "itest-hooks")]
     TestAlarm {
         domain_id: String,
@@ -87,7 +95,8 @@ impl DomainRequest {
             | DomainRequest::Evict { domain_id }
             | DomainRequest::JobCompleted { domain_id, .. }
             | DomainRequest::Retire { domain_id }
-            | DomainRequest::Health { domain_id } => domain_id,
+            | DomainRequest::Health { domain_id }
+            | DomainRequest::AdmitRoleMail { domain_id, .. } => domain_id,
             #[cfg(feature = "itest-hooks")]
             DomainRequest::TestAlarm { domain_id } => domain_id,
         }
@@ -107,6 +116,23 @@ struct CheckRow {
     results_json: String,
     at: i64,
 }
+
+/// The second of the day (UTC) of a domain's daily SES identity check: the first 8 bytes of
+/// SHA-256(`domain_id`), big-endian, modulo 86,400.
+pub fn ses_check_offset_s(domain_id: &str) -> i64 {
+    let h = pylota_identity_core::ses::sha256_hex(domain_id.as_bytes());
+    (u64::from_str_radix(&h[..16], 16).unwrap_or(0) % 86_400) as i64
+}
+
+/// The first daily check time of `domain_id` after `now`.
+pub fn next_ses_check(domain_id: &str, now: i64) -> i64 {
+    let at = now.div_euclid(86_400_000) * 86_400_000 + ses_check_offset_s(domain_id) * 1_000;
+    if at > now { at } else { at + 86_400_000 }
+}
+
+/// Role mail relay, step 3.
+pub const ROLE_PER_DOMAIN: u32 = 30;
+pub const ROLE_PER_SENDER: u32 = 5;
 
 pub struct Monitor<'a, P: Platform, S: Sql, St: ObjectState> {
     pub p: &'a P,
@@ -298,6 +324,9 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
                 d.state_changed_at_ms = row.state_changed_at;
                 let s = domain_fsm::step(&mut d, Input::Init { zone_active: true }, now);
                 self.save_fsm(&d)?;
+                if row.ses_identity.is_some() {
+                    self.set("ses_check_at", &next_ses_check(&domain_id, now).to_string())?;
+                }
                 self.apply(&row, &d, &s, now).await?;
                 self.state.set_alarm(now).await?;
                 Ok(Value::Null)
@@ -373,12 +402,48 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
                 })).collect::<Vec<_>>() }),
                 )
             }
+            DomainRequest::AdmitRoleMail {
+                sender_hash, now, ..
+            } => self.admit_role_mail(&sender_hash, now),
             #[cfg(feature = "itest-hooks")]
             DomainRequest::TestAlarm { .. } => {
                 self.alarm().await;
-                Ok(Value::Null)
+                Ok(
+                    json!({ "ses_check_at": self.get("ses_check_at")?.and_then(|v| v.parse::<i64>().ok()) }),
+                )
             }
         }
+    }
+
+    /// At most [`ROLE_PER_DOMAIN`] role messages an hour to the domain and [`ROLE_PER_SENDER`] from
+    /// one sender, in hourly windows kept for 48 hours.
+    fn admit_role_mail(&self, sender_hash: &str, now: i64) -> Result<Value, ApiError> {
+        let hour = now.div_euclid(3_600_000);
+        let count = |k: &str| -> PResult<u32> {
+            Ok(self.get(k)?.and_then(|v| v.parse().ok()).unwrap_or(0))
+        };
+        let dk = format!("role:{hour}");
+        let sk = format!("role:{hour}:{sender_hash}");
+        let (d, s) = (count(&dk)?, count(&sk)?);
+        if d >= ROLE_PER_DOMAIN || s >= ROLE_PER_SENDER {
+            return Ok(json!({ "admitted": false }));
+        }
+        self.set(&dk, &(d + 1).to_string())?;
+        self.set(&sk, &(s + 1).to_string())?;
+        // Windows older than 48 hours: keys sort as text, so compare the parsed hour.
+        let old: Vec<Kv> = self
+            .sql
+            .query("SELECT k AS v FROM meta WHERE k LIKE 'role:%'", &[])?;
+        for k in old {
+            let h = k.v[5..]
+                .split(':')
+                .next()
+                .and_then(|h| h.parse::<i64>().ok());
+            if h.is_some_and(|h| h < hour - 48) {
+                self.del(&k.v)?;
+            }
+        }
+        Ok(json!({ "admitted": true }))
     }
 
     async fn row(&self, domain_id: &str) -> Result<ddb::Row, ApiError> {
@@ -429,12 +494,13 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
             return Ok(());
         };
         let now = self.p.clock().now_ms();
+        self.ses_check(&domain_id, now).await?;
         let due = self
             .get("check_at")?
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
         if now < due {
-            self.state.set_alarm(due).await?;
+            self.arm(due).await?;
             return Ok(());
         }
         let row = self.row(&domain_id).await?;
@@ -482,7 +548,51 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
         self.apply_with_issues(&row, &d, &s, now, &issues).await?;
         let next = now + s.next_check_ms.unwrap_or(domain_fsm::CHECK_EVERY_MS);
         self.set("check_at", &next.to_string())?;
-        self.state.set_alarm(next).await?;
+        self.arm(next).await?;
+        Ok(())
+    }
+
+    /// The alarm at `at`, or at the daily SES check when that comes first.
+    async fn arm(&self, at: i64) -> Result<(), ApiError> {
+        let ses = self
+            .get("ses_check_at")?
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(i64::MAX);
+        self.state.set_alarm(at.min(ses)).await?;
+        Ok(())
+    }
+
+    /// `alarm:ses_check`: once a day at the domain's offset, `GetEmailIdentity` behind a token of
+    /// `SesControl`; its DKIM status is kept as `ses_dkim`. A busy bucket moves the check to its retry.
+    async fn ses_check(&self, domain_id: &str, now: i64) -> Result<(), ApiError> {
+        let Some(at) = self
+            .get("ses_check_at")?
+            .and_then(|v| v.parse::<i64>().ok())
+        else {
+            return Ok(());
+        };
+        if now < at {
+            return Ok(());
+        }
+        let row = self.row(domain_id).await?;
+        let (Some(identity), Some(ses)) = (
+            row.ses_identity.as_deref(),
+            Ses::new(self.p, SesCaller::DomainCheck),
+        ) else {
+            return self.del("ses_check_at").map_err(Into::into);
+        };
+        let next = match ses.get_identity(identity).await {
+            Ok(v) => {
+                self.set(
+                    "ses_dkim",
+                    v["DkimAttributes"]["Status"].as_str().unwrap_or(""),
+                )?;
+                next_ses_check(domain_id, now)
+            }
+            Err(SesError::Busy { retry_after_ms }) => now + retry_after_ms.max(1_000),
+            Err(_) => now + 3_600_000,
+        };
+        self.set("ses_check_at", &next.to_string())?;
         Ok(())
     }
 
@@ -1003,6 +1113,44 @@ pub async fn call<P: Platform>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The daily SES checks of 1,000 domains fall at their hash offsets and, through the bucket, are
+    /// granted at most one per second, each within its background wait (domain-connections § 4.8).
+    #[test]
+    fn ses_daily_checks_spread() {
+        use pylota_identity_platform::fakes::{FakePlatform, FakeSql};
+
+        use crate::domains::ses_control::{BACKGROUND_WAIT_MS, SesControl, TOKEN_MS};
+        let p = FakePlatform::new();
+        let sql = FakeSql::new();
+        let c = SesControl { p: &p, sql: &sql };
+        let day = p.clock().now_ms().div_euclid(86_400_000) * 86_400_000 + 86_400_000;
+        let mut due: Vec<i64> = (0..1000)
+            .map(|i| {
+                let id = format!("dom_{i:026}");
+                let at = next_ses_check(&id, day - 1);
+                assert_eq!(at, day + ses_check_offset_s(&id) * 1000);
+                at
+            })
+            .collect();
+        due.sort_unstable();
+        // Spread across the day, not bunched at midnight.
+        assert!(due.iter().filter(|&&d| d < day + 3_600_000).count() < 100);
+        let mut last = day - TOKEN_MS;
+        for at in due {
+            if p.clock().now_ms() < at {
+                p.clock.set(at);
+            }
+            let now = p.clock().now_ms();
+            let v = c.handle(&json!({ "v": 1, "tenant_id": null, "identity_id": null, "request_id": "r",
+                "actor_key_id": null, "deadline_ms": i64::MAX,
+                "req": { "op": "acquire", "caller": "domain_check", "deadline_ms": now + BACKGROUND_WAIT_MS } }));
+            let granted = v["ok"]["at_ms"].as_i64().expect("granted within the wait");
+            assert!(granted >= at && granted - at <= BACKGROUND_WAIT_MS);
+            assert!(granted - last >= TOKEN_MS);
+            last = granted;
+        }
+    }
 
     #[test]
     fn rdap_fingerprint_of_roles() {

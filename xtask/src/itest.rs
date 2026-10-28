@@ -94,7 +94,7 @@ pub fn render(template: &str, root: &Path, token: &str) -> String {
     s = s.replace(
         "[vars]\n",
         &format!(
-            "[vars]\nPM_TERMS_URL = \"https://agents.example/terms\"\nPM_PRIVACY_URL = \"https://agents.example/privacy\"\nPM_DPA_URL = \"https://agents.example/dpa\"\nPM_TERMS_VERSION = \"itest-1\"\nPM_ITEST_FAKES_URL = \"{FAKES}\"\nPM_ITEST_TOKEN = \"{token}\"\nPM_SECURITY_CONTACT = \"security@agents.example\"\nPM_QUARANTINE_KEY_RELEASE = \"off\"\nPM_SES_REGION = \"eu-west-2\"\nPM_SES_SNS_TOPIC_ARN = \"arn:aws:sns:eu-west-2:111122223333:pylota-identity-ses\"\n"
+            "[vars]\nPM_TERMS_URL = \"https://agents.example/terms\"\nPM_PRIVACY_URL = \"https://agents.example/privacy\"\nPM_DPA_URL = \"https://agents.example/dpa\"\nPM_TERMS_VERSION = \"itest-1\"\nPM_ITEST_FAKES_URL = \"{FAKES}\"\nPM_ITEST_TOKEN = \"{token}\"\nPM_SECURITY_CONTACT = \"security@operator.example\"\nPM_QUARANTINE_KEY_RELEASE = \"off\"\nPM_SES_REGION = \"eu-west-2\"\nPM_SES_SNS_TOPIC_ARN = \"arn:aws:sns:eu-west-2:111122223333:pylota-identity-ses\"\n"
         ),
     );
     s

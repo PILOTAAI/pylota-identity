@@ -212,6 +212,7 @@ pub async fn send<P: Platform>(c: &Ctx<P>, op: SendOp) -> Result<Reply, ApiError
         body: b,
         ctx,
         request_id: c.request_id.clone(),
+        role_relay: false,
     };
     let out = call(
         c,

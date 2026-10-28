@@ -20,6 +20,7 @@ pub mod errors;
 pub mod handlers;
 #[cfg(feature = "itest-hooks")]
 pub mod hooks;
+pub mod inbound;
 pub mod intents;
 pub mod jobs;
 pub mod keyring;

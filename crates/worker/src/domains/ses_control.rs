@@ -43,7 +43,13 @@ impl SesCaller {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum SesControlRequest {
     Init,
-    Acquire { caller: SesCaller, deadline_ms: i64 },
+    Acquire {
+        caller: SesCaller,
+        deadline_ms: i64,
+    },
+    /// The itest build's `/__test/ses-reset`: the queue starts from now.
+    #[cfg(feature = "itest-hooks")]
+    Reset,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +100,12 @@ impl<P: Platform, S: Sql> SesControl<'_, P, S> {
         let now = self.p.clock().now_ms();
         match req {
             SesControlRequest::Init => Ok(Value::Null),
+            #[cfg(feature = "itest-hooks")]
+            SesControlRequest::Reset => {
+                self.sql
+                    .exec("DELETE FROM meta WHERE k = 'next_free_ms'", &[])?;
+                Ok(Value::Null)
+            }
             SesControlRequest::Acquire { deadline_ms, .. } => {
                 let answer = self.sql.transaction_sync(|s| -> PResult<AcquireAnswer> {
                     let next = s

@@ -6,7 +6,7 @@ use std::rc::Rc;
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_platform::app::HttpRequestIn;
 use pylota_identity_platform::durable::DoClass;
-use pylota_identity_platform::{ControlDb as _, ObjectClient as _, Platform};
+use pylota_identity_platform::{Clock as _, ControlDb as _, ObjectClient as _, Platform};
 use serde_json::{Value, json};
 
 use crate::ctx::Reply;
@@ -197,10 +197,25 @@ pub async fn serve<P: Platform>(
             let raw =
                 pylota_identity_platform::base64::decode(body["raw_base64"].as_str().unwrap_or(""))
                     .ok_or_else(|| ApiError::invalid("raw_base64", "Base64 expected."))?;
+            // The header names and values workerd's `message.headers` would give.
+            let head_end = raw
+                .windows(4)
+                .position(|w| w == b"\r\n\r\n")
+                .unwrap_or(raw.len());
+            let mut headers: Vec<(String, String)> = Vec::new();
+            for line in String::from_utf8_lossy(&raw[..head_end]).split("\r\n") {
+                if line.starts_with([' ', '\t']) {
+                    if let Some(last) = headers.last_mut() {
+                        last.1.push_str(line.trim());
+                    }
+                } else if let Some((k, v)) = line.split_once(':') {
+                    headers.push((k.trim().to_ascii_lowercase(), v.trim().to_owned()));
+                }
+            }
             let msg = pylota_identity_platform::app::EmailIn {
                 from: body["mail_from"].as_str().unwrap_or("").to_owned(),
                 to: body["rcpt_to"].as_str().unwrap_or("").to_owned(),
-                headers: Vec::new(),
+                headers,
                 raw_size: raw.len() as u64,
                 raw: pylota_identity_platform::buffer::JsBuffer::from_bytes(&raw),
             };
@@ -216,6 +231,51 @@ pub async fn serve<P: Platform>(
                 }
             };
             Ok(Reply::json(200, out))
+        }
+        ("POST", "/__test/ses-acquire" | "/__test/ses-reset") => {
+            // One `Acquire` answered as is (no wait), or the bucket emptied.
+            use crate::domains::ses_control::{SesCaller, SesControlRequest, object_id};
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .unwrap_or_default();
+            let id = object_id(p.as_ref())
+                .await
+                .map_err(|_| ApiError::internal())?;
+            let caller: SesCaller =
+                serde_json::from_value(body["caller"].clone()).unwrap_or(SesCaller::DomainCheck);
+            let now = p.clock().now_ms();
+            let rq = if path == "/__test/ses-reset" {
+                SesControlRequest::Reset
+            } else {
+                SesControlRequest::Acquire {
+                    caller,
+                    deadline_ms: now + caller.wait_ms(),
+                }
+            };
+            let env = crate::rpc::envelope_for(p.as_ref(), None, None, "req_test", None, rq);
+            let out = p
+                .objects()
+                .call::<_, Value>(DoClass::SesControl, &id, &env)
+                .await?;
+            Ok(Reply::json(
+                200,
+                serde_json::to_value(out).unwrap_or(Value::Null),
+            ))
+        }
+        ("POST", "/__test/security-contact") => {
+            // `{"value": "a@b"}` overrides `PM_SECURITY_CONTACT`, `{"value": null}` unsets it,
+            // `{}` restores the configured value.
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .unwrap_or_default();
+            crate::inbound::role_mail::override_contact(
+                body.get("value").map(|v| v.as_str().map(str::to_owned)),
+            );
+            Ok(Reply::json(200, json!({})))
         }
         ("POST", "/__test/d1") => {
             // One statement on D1 with JSON parameters; the SQL is leaked into a static string,

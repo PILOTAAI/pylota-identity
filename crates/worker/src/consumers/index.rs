@@ -54,6 +54,7 @@ pub async fn batch<P: Platform>(p: &P, batch: Vec<Incoming<Value>>) {
         match done {
             Done::Ack => m.ack(),
             Done::Retry => m.retry(None),
+            Done::Later(s) => m.retry(Some(s)),
         }
     }
 }

@@ -872,7 +872,8 @@ CLI `idvy domains subscribe`. The other connection methods, `nameservers` includ
   (`it::domains::verify_rate_limited`). J5's live part, `live::transport::j5_ses_failover`, runs in
   M20.
 - The spike S9 fallback path for `cloudflare_zone`, whatever S9's result
-  (`it::domains::s9_manual_delivery_events`, `cli::domains::subscribe_manual`), with its sends from the
+  (`it::domains::s9_manual_delivery_events`; its CLI half, `idvy domains subscribe` with
+  `cli::domains::subscribe_manual`, lands with the CLI's framework in M16), with its sends from the
   platform address until the subscription exists (H17, `it::domains::h17_manual_events_fallback`), and the
   SES control-plane budget (`it::ses::control_plane_rate`).
 - H7's two-resolver failure (`it::domains::h7_dns_unresolvable`), the platform domain's health (H9,
@@ -1063,6 +1064,7 @@ signing tools of M25 (`mail_sign_assertion`, `mail_sign_http_request`). M27 late
   duplicate resources.
 - `idvy deploy` verifies checksums and refuses a tampered bundle.
 - `idvy doctor` reports every check with a fix.
+- `idvy domains subscribe`, the CLI half of the spike S9 fallback (`cli::domains::subscribe_manual`).
 - The landing-page CLI examples run as tests, and `sdk::doctest::published_examples` compiles the Rust
   examples of `quickstart.md` and checks that the landing page's example equals
   `crates/sdk/examples/confirm_booking.rs`.

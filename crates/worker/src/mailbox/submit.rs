@@ -47,6 +47,10 @@ pub struct SubmitInput {
     pub body: Value,
     pub ctx: SendContext,
     pub request_id: String,
+    /// Internal only (Role mail relay): adds `X-Pylota-Identity-Role-Hop: 1` and
+    /// `Auto-Submitted: auto-generated`.
+    #[serde(default)]
+    pub role_relay: bool,
 }
 
 /// One recipient after steps 6 and 16.
@@ -901,6 +905,14 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             }
             HeaderError::Invalid { path, message } => ApiError::invalid(&path, message),
         })?;
+        let mut headers = headers;
+        if inp.role_relay {
+            headers.push((
+                crate::inbound::role_mail::HOP_HEADER.to_owned(),
+                "1".to_owned(),
+            ));
+            headers.push(("Auto-Submitted".to_owned(), "auto-generated".to_owned()));
+        }
         // 12. Content.
         let text = s(&body["text"]);
         let html = s(&body["html"]);

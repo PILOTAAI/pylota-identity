@@ -2,8 +2,8 @@
 //! Each message is processed on its own and acked after its post-commit steps; a failure retries it
 //! after 30 seconds, and an unexpected error is left to the queue's own retry.
 //!
-//! The SES source (M23), re-parse (M14's job) and role-mail relay (M13) pointers arrive with their
-//! milestones; until then they are acked without work.
+//! The SES source (M23) and re-parse (M14's job) pointers arrive with their milestones; until then
+//! they are acked without work. Role-mail pointers go to `inbound::role_mail::relay`.
 //!
 //! [Inbound › The pm-inbound consumer]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/inbound.md
 
@@ -45,7 +45,7 @@ pub enum InboundJob {
     Message(InboundPointer),
     Staged(StagedPointer),
     Reparse(Value),
-    RoleMail(Value),
+    RoleMail(crate::inbound::role_mail::RoleMailPointer),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -103,6 +103,8 @@ const FRESH_MS: i64 = 120_000;
 pub enum Done {
     Ack,
     Retry,
+    /// Retried after this many seconds.
+    Later(u32),
 }
 
 /// One batch: fresh pointers first, then older ones, oldest last.
@@ -118,8 +120,9 @@ pub async fn batch<P: Platform>(p: &P, mut batch: Vec<Incoming<Value>>) {
         let done = match job {
             Ok(InboundJob::Message(ptr)) => message(p, ptr).await,
             Ok(InboundJob::Staged(ptr)) => staged(p, ptr).await,
-            // Re-parse (M14) and role-mail relay (M13) pointers: nothing to do until then.
-            Ok(InboundJob::Reparse(_) | InboundJob::RoleMail(_)) => Done::Ack,
+            Ok(InboundJob::RoleMail(ptr)) => crate::inbound::role_mail::relay(p, ptr).await,
+            // Re-parse pointers (M14): nothing to do until then.
+            Ok(InboundJob::Reparse(_)) => Done::Ack,
             Err(_) => {
                 crate::log::warn("inbound_bad_pointer", &[]);
                 Done::Ack
@@ -128,6 +131,7 @@ pub async fn batch<P: Platform>(p: &P, mut batch: Vec<Incoming<Value>>) {
         match done {
             Done::Ack => m.ack(),
             Done::Retry => m.retry(Some(RETRY_S)),
+            Done::Later(s) => m.retry(Some(s)),
         }
     }
 }
@@ -218,7 +222,7 @@ pub async fn staged<P: Platform>(p: &P, ptr: StagedPointer) -> Done {
 
 /// The TXT answers of the DNS prefetch (Authentication verdict, step 2): the first resolver, then the
 /// second on an error.
-async fn prefetch<P: Platform>(p: &P, names: &[String]) -> DnsAnswers {
+pub(crate) async fn prefetch<P: Platform>(p: &P, names: &[String]) -> DnsAnswers {
     let mut out = HashMap::new();
     for name in names {
         let mut answer = TxtAnswer::TempError;

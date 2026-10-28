@@ -30,6 +30,7 @@ mod routes;
 mod search;
 mod security;
 mod send;
+mod ses;
 mod tenants;
 mod testmode;
 mod thread;

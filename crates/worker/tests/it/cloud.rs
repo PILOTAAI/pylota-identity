@@ -64,6 +64,9 @@ struct Cloud {
     /// SES identities by name.
     ses: BTreeMap<String, Value>,
     ses_calls: Vec<(String, String)>,
+    /// When each SES call arrived, and how many next calls answer `ThrottlingException`.
+    ses_times: Vec<std::time::Instant>,
+    ses_throttle: u32,
     /// RDAP answers by registrable domain.
     rdap: BTreeMap<String, Value>,
 }
@@ -114,11 +117,6 @@ pub fn zone(name: &str) -> String {
         });
         zid
     })
-}
-
-/// Removes a zone from the account (deleted or moved out of band).
-pub fn drop_zone(name: &str) {
-    with(|c| c.zones.retain(|z| z.name != name));
 }
 
 /// A DNS record in the account (a pre-existing MX, an SPF record, …).
@@ -232,17 +230,6 @@ pub fn foreign_sending(zone_name: &str, name: &str) {
     });
 }
 
-/// A catch-all at the zone's apex whose action is not the Worker.
-pub fn foreign_catch_all(zone_name: &str) {
-    let zid = zone(zone_name);
-    with(|c| {
-        c.catch_all.insert(
-            zid,
-            json!({ "enabled": true, "matchers": [{ "type": "all" }], "actions": [{ "type": "forward", "value": ["ops@elsewhere.example"] }] }),
-        );
-    });
-}
-
 /// SES identities: `(name, identity)`.
 pub fn ses_identity(name: &str) -> Option<Value> {
     with(|c| c.ses.get(name).cloned())
@@ -258,18 +245,14 @@ pub fn ses_status(name: &str, verified: bool, dkim: &str) {
     });
 }
 
-/// An SES identity tagged for another deployment.
-pub fn foreign_ses_identity(name: &str) {
-    with(|c| {
-        c.ses.insert(name.into(), json!({ "IdentityType": "DOMAIN", "VerifiedForSendingStatus": true,
-            "DkimAttributes": { "Status": "SUCCESS", "Tokens": ["f1", "f2", "f3"], "SigningHostedZone": "dkim.amazonses.com" },
-            "Tags": [{ "Key": "pylota-identity:api-host", "Value": "other.example" }] }));
-    });
+/// When each SES call so far arrived.
+pub fn ses_times() -> Vec<std::time::Instant> {
+    with(|c| c.ses_times.clone())
 }
 
-/// SES calls so far: `(method, path)`.
-pub fn ses_calls() -> Vec<(String, String)> {
-    with(|c| c.ses_calls.clone())
+/// The next `n` SES calls answer `ThrottlingException`.
+pub fn ses_throttle(n: u32) {
+    with(|c| c.ses_throttle = n);
 }
 
 /// The RDAP answer for a registrable domain (registrar handle, registrant handle, registration date).
@@ -321,12 +304,13 @@ fn decode(v: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(x) = u8::from_str_radix(&v[i + 1..i + 3], 16) {
-                out.push(x);
-                i += 3;
-                continue;
-            }
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Ok(x) = u8::from_str_radix(&v[i + 1..i + 3], 16)
+        {
+            out.push(x);
+            i += 3;
+            continue;
         }
         out.push(b[i]);
         i += 1;
@@ -620,6 +604,14 @@ pub fn ses(method: &str, full: &str, body: &Value) -> Option<(u16, Value)> {
     let path = path.strip_prefix("/v2/email/identities")?;
     Some(with(|c| {
         c.ses_calls.push((method.to_owned(), path.to_owned()));
+        c.ses_times.push(std::time::Instant::now());
+        if c.ses_throttle > 0 {
+            c.ses_throttle -= 1;
+            return (
+                400,
+                json!({ "__type": "ThrottlingException", "message": "Rate exceeded" }),
+            );
+        }
         let name = decode(path.trim_start_matches('/').split('?').next().unwrap_or(""));
         match method {
             "POST" => {
@@ -735,11 +727,13 @@ pub fn dns(resolver: &str, name: &str, rtype: &str, cd: bool) -> Option<Value> {
         let mut answers: Vec<Value> = Vec::new();
         let hidden = c.hidden.contains(&(name.to_owned(), rtype.to_owned()));
         if !hidden {
-            if rtype == "NS" {
-                if let Some(z) = c.zones.iter().find(|z| z.name == name) {
-                    for ns in &z.name_servers {
-                        answers.push(json!({ "name": name, "type": 2, "TTL": 300, "data": format!("{ns}.") }));
-                    }
+            if rtype == "NS"
+                && let Some(z) = c.zones.iter().find(|z| z.name == name)
+            {
+                for ns in &z.name_servers {
+                    answers.push(
+                        json!({ "name": name, "type": 2, "TTL": 300, "data": format!("{ns}.") }),
+                    );
                 }
             }
             for r in c

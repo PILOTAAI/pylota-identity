@@ -774,3 +774,291 @@ fn receive_allow_skips_spam() {
     let m = crate::wait_stored(&s.iid, &s.key, "received", 1);
     assert_eq!(m[0]["subject"], "Friendly");
 }
+
+/// Role mail tests change `PM_SECURITY_CONTACT` for the whole Worker, so they run one at a time.
+static ROLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+const CONTACT: &str = "security@operator.example";
+
+/// Restores the configured `PM_SECURITY_CONTACT` when dropped.
+struct ContactReset;
+
+impl Drop for ContactReset {
+    fn drop(&mut self) {
+        crate::hook(
+            "POST",
+            "/__test/security-contact",
+            Some(serde_json::json!({})),
+        );
+    }
+}
+
+fn set_contact(v: Value) {
+    let r = crate::hook(
+        "POST",
+        "/__test/security-contact",
+        Some(serde_json::json!({ "value": v })),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+}
+
+/// The platform domain's `DomainMonitor` exists (the cron mints it from the seeded row).
+fn platform_monitor() {
+    let q = "SELECT monitor_do_id FROM domains WHERE kind = 'platform'";
+    if crate::d1(q)[0]["monitor_do_id"] == "" {
+        crate::cron("* * * * *");
+    }
+    assert_ne!(crate::d1(q)[0]["monitor_do_id"], "");
+}
+
+/// The sends to `to` whose subject contains `tag`, once there are `n`.
+fn relayed(to: &str, tag: &str, n: usize) -> Vec<Value> {
+    eventually(30, "the relay", || {
+        let m: Vec<Value> = crate::fakes::mail_sent(to)
+            .into_iter()
+            .filter(|m| m["subject"].as_str().is_some_and(|s| s.contains(tag)))
+            .collect();
+        (m.len() >= n).then_some(m)
+    })
+}
+
+fn relayed_count(to: &str, tag: &str) -> usize {
+    crate::fakes::mail_sent(to)
+        .iter()
+        .filter(|m| m["subject"].as_str().is_some_and(|s| s.contains(tag)))
+        .count()
+}
+
+fn attachment_types(m: &Value) -> Vec<String> {
+    m["attachments"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x["content_type"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn header<'a>(m: &'a Value, name: &str) -> Option<&'a str> {
+    m["headers"].as_array()?.iter().find_map(|h| {
+        let (k, v) = (h[0].as_str()?, h[1].as_str()?);
+        k.eq_ignore_ascii_case(name).then_some(v)
+    })
+}
+
+/// Sets the tenant's owner to `email` (`None` removes the owner).
+fn owner(tenant_id: &str, email: Option<&str>) {
+    let user = format!("usr_{}", crate::slug(tenant_id));
+    crate::d1(&format!(
+        "DELETE FROM members WHERE tenant_id = '{tenant_id}' AND role = 'owner'; DELETE FROM users WHERE id = '{user}'"
+    ));
+    if let Some(e) = email {
+        crate::d1(&format!(
+            "INSERT INTO users (id, email, created_at) VALUES ('{user}', '{e}', 1); INSERT INTO members (tenant_id, user_id, role, created_at) VALUES ('{tenant_id}', '{user}', 'owner', 1)"
+        ));
+    }
+}
+
+/// A4: operational names of the platform domain go to `PM_SECURITY_CONTACT` as a send of the system
+/// identity (`550 5.1.1` when it is unset); other role names are unknown; `postmaster@` a tenant
+/// domain goes to the owner, else to `PM_SECURITY_CONTACT`.
+#[test]
+fn a4_role_mail_routing() {
+    let _role = ROLE.lock().unwrap_or_else(|e| e.into_inner());
+    let _contact = ContactReset;
+    platform_monitor();
+    let sys = crate::system_identity();
+    let before = crate::mailbox_query(
+        &sys,
+        "SELECT COUNT(*) AS n FROM messages WHERE direction = 'inbound'",
+    );
+    for (n, local) in ["postmaster", "abuse"].into_iter().enumerate() {
+        let to = format!("{local}@agents.example");
+        let from = format!("reporter{n}@a4.example");
+        let subject = format!("A4 platform {local}");
+        let (o, smtp) = inbound(&from, &to, &mail(&from, &to, &subject, "Report"));
+        assert_eq!(o, "accepted", "{smtp}");
+        let m = relayed(CONTACT, &subject, 1);
+        assert_eq!(
+            m[0]["subject"],
+            format!("[agents.example] {local} mail: {subject}")
+        );
+        assert_eq!(header(&m[0], "X-Pylota-Identity-Role-Hop"), Some("1"));
+        assert_eq!(header(&m[0], "Auto-Submitted"), Some("auto-generated"));
+    }
+    // Nothing is stored in a mailbox: the system identity has no new inbound message.
+    assert_eq!(
+        crate::mailbox_query(
+            &sys,
+            "SELECT COUNT(*) AS n FROM messages WHERE direction = 'inbound'"
+        ),
+        before
+    );
+    // Other role names on the platform domain are unknown.
+    let (o, smtp) = inbound(
+        "x@a4.example",
+        "info@agents.example",
+        &mail("x@a4.example", "info@agents.example", "A4 info", "x"),
+    );
+    assert_eq!((o.as_str(), &smtp[..9]), ("rejected", "550 5.1.1"));
+    // Unset: 550 5.1.1.
+    set_contact(Value::Null);
+    let to = "security@agents.example";
+    let (o, smtp) = inbound(
+        "y@a4.example",
+        to,
+        &mail("y@a4.example", to, "A4 unset", "x"),
+    );
+    assert_eq!((o.as_str(), &smtp[..9]), ("rejected", "550 5.1.1"));
+    set_contact(Value::from(CONTACT));
+
+    // A tenant domain: the owner, else the security contact.
+    let (s, _, zone) = crate::addresses::on_domain("a4 role");
+    let pm = format!("postmaster@{zone}");
+    owner(&s.tid, Some("boss@owner-a4.example"));
+    let (o, smtp) = inbound(
+        "z1@a4.example",
+        &pm,
+        &mail("z1@a4.example", &pm, "A4 owner", "Hi https://x.example/a"),
+    );
+    assert_eq!(o, "accepted", "{smtp}");
+    let m = relayed("boss@owner-a4.example", "A4 owner", 1);
+    assert_eq!(attachment_types(&m[0]), ["text/rfc822-headers"]);
+    let text = m[0]["text"].as_str().unwrap_or("");
+    assert!(
+        text.contains("hxxps://x.example/a") && !text.contains("https://x.example"),
+        "{text}"
+    );
+    // The owner's address on a deployment domain: the security contact instead.
+    owner(&s.tid, Some("boss@agents.example"));
+    inbound(
+        "z2@a4.example",
+        &pm,
+        &mail("z2@a4.example", &pm, "A4 owner here", "x"),
+    );
+    relayed(CONTACT, "A4 owner here", 1);
+    assert_eq!(relayed_count("boss@agents.example", "A4 owner here"), 0);
+    // No owner: the security contact.
+    owner(&s.tid, None);
+    inbound(
+        "z3@a4.example",
+        &pm,
+        &mail("z3@a4.example", &pm, "A4 no owner", "x"),
+    );
+    relayed(CONTACT, "A4 no owner", 1);
+}
+
+/// D14: rate limits per domain and per sender, the loop guard, headers only unless clean, one relay
+/// per raw message, a suppressed contact ends without a retry, and a contact on the platform domain
+/// counts as unset.
+#[test]
+fn d14_role_mail_relay_guarded() {
+    let _role = ROLE.lock().unwrap_or_else(|e| e.into_inner());
+    let _contact = ContactReset;
+    platform_monitor();
+    let pm = "postmaster@agents.example";
+
+    // The loop guard: the hop header, and the system identity as the envelope sender.
+    let looped = format!(
+        "X-Pylota-Identity-Role-Hop: 1\r\n{}",
+        mail("l@d14.example", pm, "D14 loop", "x")
+    );
+    let (o, smtp) = inbound("l@d14.example", pm, &looped);
+    assert_eq!(
+        (o.as_str(), smtp.as_str()),
+        ("rejected", "550 5.4.6 Routing loop detected")
+    );
+    let sys = crate::system_identity();
+    let sys_addr = crate::d1(&format!(
+        "SELECT address FROM addresses WHERE identity_id = '{sys}' LIMIT 1"
+    ))[0]["address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (o, smtp) = inbound(&sys_addr, pm, &mail(&sys_addr, pm, "D14 self", "x"));
+    assert_eq!((o.as_str(), &smtp[..9]), ("rejected", "550 5.4.6"));
+
+    // Headers only unless the verdict is pass and nothing is risky; the whole original when clean.
+    let plain = mail("p@d14.example", pm, "D14 unsigned", "x");
+    inbound("p@d14.example", pm, &plain);
+    let m = relayed(CONTACT, "D14 unsigned", 1);
+    assert_eq!(attachment_types(&m[0]), ["text/rfc822-headers"]);
+    let clean = crate::dkim::sign(&mail("ann@brightwell.example", pm, "D14 clean", "x"));
+    inbound("ann@brightwell.example", pm, &clean);
+    let m = relayed(CONTACT, "D14 clean", 1);
+    assert_eq!(attachment_types(&m[0]), ["message/rfc822"]);
+    let risky = crate::dkim::sign(&format!(
+        "From: ann@brightwell.example\r\nTo: {pm}\r\nSubject: D14 risky\r\nMessage-ID: <{}@it.example>\r\nDate: Mon, 26 Oct 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee attached\r\n--b\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"invoice.exe\"\r\nContent-Transfer-Encoding: base64\r\n\r\nTVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAA\r\n--b--\r\n",
+        crate::slug("d14 risky")
+    ));
+    inbound("ann@brightwell.example", pm, &risky);
+    let m = relayed(CONTACT, "D14 risky", 1);
+    assert_eq!(attachment_types(&m[0]), ["text/rfc822-headers"]);
+
+    // The same raw message twice is relayed once.
+    let twice = mail("t@d14.example", pm, "D14 twice", "x");
+    inbound("t@d14.example", pm, &twice);
+    inbound("t@d14.example", pm, &twice);
+    relayed(CONTACT, "D14 twice", 1);
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    assert_eq!(relayed_count(CONTACT, "D14 twice"), 1);
+
+    // A suppressed contact: no send, and the staged copy is gone (no retry).
+    let gone = "gone@operator.example";
+    let r = crate::post(
+        &format!("/v1/tenants/{}/suppressions", crate::default_tenant()),
+        &crate::platform(),
+        serde_json::json!({ "address": gone }),
+    );
+    assert!(matches!(r.status, 200 | 201), "{}", r.body);
+    set_contact(Value::from(format!("mailto:{gone}")));
+    inbound(
+        "g@d14.example",
+        pm,
+        &mail("g@d14.example", pm, "D14 suppressed", "x"),
+    );
+    eventually(30, "the staged copy is deleted", || {
+        let r = crate::hook(
+            "POST",
+            "/__test/r2",
+            Some(serde_json::json!({ "op": "list", "key": "inbound-staging/role/" })),
+        );
+        r.body["keys"]
+            .as_array()
+            .is_some_and(|k| k.is_empty())
+            .then_some(())
+    });
+    assert_eq!(relayed_count(gone, "D14 suppressed"), 0);
+    // A contact on the platform domain counts as unset.
+    set_contact(Value::from("ops@agents.example"));
+    let (o, smtp) = inbound(
+        "u@d14.example",
+        pm,
+        &mail("u@d14.example", pm, "D14 own domain", "x"),
+    );
+    assert_eq!((o.as_str(), &smtp[..9]), ("rejected", "550 5.1.1"));
+    set_contact(Value::from(CONTACT));
+
+    // Rate limits on a tenant domain: 5 an hour per sender, 30 per domain.
+    let (s, _, zone) = crate::addresses::on_domain("d14 rate");
+    owner(&s.tid, Some("boss@owner-d14.example"));
+    let to = format!("abuse@{zone}");
+    let send = |from: &str, n: usize| {
+        inbound(
+            from,
+            &to,
+            &mail(from, &to, &format!("D14 rate {from} {n}"), "x"),
+        )
+        .0
+    };
+    for n in 0..5 {
+        assert_eq!(send("one@d14.example", n), "accepted");
+    }
+    assert_eq!(send("one@d14.example", 5), "tempfail");
+    for k in 0..5 {
+        for n in 0..5 {
+            assert_eq!(send(&format!("s{k}@d14.example"), n), "accepted");
+        }
+    }
+    assert_eq!(send("last@d14.example", 0), "tempfail");
+}

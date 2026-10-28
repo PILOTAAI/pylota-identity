@@ -4,7 +4,7 @@
 //!
 //! Every special branch has its place here, in the order of the design's steps, so later milestones
 //! fill a branch in and never reorder the handler (build plan M7): `journal` (M9), `pm-probe` and the
-//! forwarding check (M23), and the role-name relay (M13) are stubs until then.
+//! forwarding check (M23) are stubs until then; the role-name relay is `inbound::role_mail`.
 //!
 //! [Inbound › The email() handler]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/inbound.md
 
@@ -53,7 +53,7 @@ pub const REJECT_RETIRED: &str =
     "550 5.1.6 Recipient address has moved; contact the sender by other means";
 pub const REJECT_DISABLED: &str = "550 5.2.1 Mailbox disabled, not accepting messages";
 
-/// The RFC 2142 operational names relayed to `PM_SECURITY_CONTACT` (M13; `550 5.1.1` until then).
+/// The RFC 2142 operational names relayed to `PM_SECURITY_CONTACT` (Role mail relay).
 const OPERATIONAL: &[&str] = &[
     "postmaster",
     "abuse",
@@ -156,7 +156,7 @@ fn count_miss(domain: &str, now: i64) {
 
 /// The deployment's domains for staging: the platform domain and every live `domains` name. `None`
 /// when they could never be read (then any domain may be staged).
-async fn deployment_domains<P: Platform>(p: &P, now: i64) -> Option<Vec<String>> {
+pub(crate) async fn deployment_domains<P: Platform>(p: &P, now: i64) -> Option<Vec<String>> {
     let fresh = ISOLATE.with(|i| {
         i.borrow()
             .domains
@@ -273,13 +273,24 @@ async fn handle_email<P: Platform>(p: &P, msg: &EmailIn) -> Result<(), Decision>
             "journal" if env.detail.is_some() => return Ok(()),
             // The alignment probe of an smtp_relay domain (M23): no effect for an unknown token.
             "pm-probe" if env.detail.is_some() => return Ok(()),
-            // The relay through the system identity arrives with M13.
-            l if OPERATIONAL.contains(&l) => return Err(Decision::Reject(REJECT_UNKNOWN)),
+            // Relayed to `PM_SECURITY_CONTACT` through the system identity.
+            l if OPERATIONAL.contains(&l) => {
+                return crate::inbound::role_mail::accept(
+                    p,
+                    msg,
+                    &env,
+                    true,
+                    received_at,
+                    &request_id,
+                )
+                .await;
+            }
             _ => {}
         }
     } else if matches!(env.base_local.as_str(), "postmaster" | "abuse") {
-        // The tenant owner relay arrives with M13.
-        return Err(Decision::Reject(REJECT_UNKNOWN));
+        // Relayed to the tenant's owner, else to `PM_SECURITY_CONTACT`.
+        return crate::inbound::role_mail::accept(p, msg, &env, false, received_at, &request_id)
+            .await;
     }
 
     // 4. Directory lookup: the cache, the dictionary guard, then D1.
@@ -375,7 +386,7 @@ fn env_to(env: &address::Envelope) -> String {
     }
 }
 
-async fn put_with_retries<P: Platform>(
+pub(crate) async fn put_with_retries<P: Platform>(
     p: &P,
     key: &str,
     msg: &EmailIn,
@@ -396,7 +407,7 @@ async fn put_with_retries<P: Platform>(
     Err(Decision::Temp(TempFail::Storage))
 }
 
-async fn send_with_retries<P: Platform>(p: &P, job: &InboundJob) -> bool {
+pub(crate) async fn send_with_retries<P: Platform>(p: &P, job: &InboundJob) -> bool {
     for (n, wait) in [0u32, 100, 300].into_iter().enumerate() {
         if n > 0 {
             p.clock().sleep(wait).await;
