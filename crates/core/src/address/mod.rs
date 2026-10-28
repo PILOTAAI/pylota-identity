@@ -135,6 +135,64 @@ pub fn is_reserved(local: &str, class: DomainClass) -> bool {
     reserved_pattern(local) || reserved_names(class).any(|n| n == local)
 }
 
+/// Suffixes that may not be taken, besides the reserved usernames (REST API › `POST /v1/tenants`, D12).
+pub const RESERVED_SUFFIXES: &[&str] = &[
+    "pylota",
+    "pylotamail",
+    "stripe",
+    "paypal",
+    "google",
+    "gmail",
+    "microsoft",
+    "outlook",
+    "apple",
+    "icloud",
+    "amazon",
+    "aws",
+    "cloudflare",
+    "github",
+    "hmrc",
+    "gov",
+    "govuk",
+    "dvla",
+    "police",
+    "bank",
+    "visa",
+    "mastercard",
+    "amex",
+    "billing",
+    "payments",
+    "admin",
+];
+
+/// A tenant slug: `^[a-z0-9][a-z0-9-]{1,31}$`.
+pub fn valid_slug(s: &str) -> bool {
+    let b = s.as_bytes();
+    (2..=32).contains(&b.len())
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+/// Checks an address suffix (`""` or `.` + a slug-shaped name) and returns its fold, the value
+/// `tenants.suffix_fold` keeps unique. `Err(true)`: malformed; `Err(false)`: reserved.
+pub fn suffix_fold(suffix: &str) -> Result<String, bool> {
+    if suffix.is_empty() {
+        return Ok(String::new());
+    }
+    let name = suffix
+        .strip_prefix('.')
+        .filter(|n| valid_slug(n))
+        .ok_or(true)?;
+    let f = fold(name);
+    let reserved = RESERVED_SUFFIXES
+        .iter()
+        .copied()
+        .chain(reserved_names(DomainClass::Platform))
+        .any(|r| fold(r) == f);
+    if reserved { Err(false) } else { Ok(f) }
+}
+
 fn in_ranges(c: char, ranges: &[(u32, u32)]) -> bool {
     let c = c as u32;
     ranges
@@ -610,5 +668,27 @@ mod tests {
         assert!(in_ranges('\u{200b}', DEFAULT_IGNORABLE));
         assert!(in_ranges('\u{5d0}', STRONG_RTL));
         assert!(confusables_table::SCRIPT_NAMES.contains(&"Latn"));
+    }
+}
+
+#[cfg(test)]
+mod suffix_tests {
+    use super::*;
+
+    /// D12: a suffix folding to a reserved name or another's is refused; the fold is what stays unique.
+    #[test]
+    fn suffixes() {
+        assert_eq!(suffix_fold(""), Ok(String::new()));
+        assert!(suffix_fold(".acme").is_ok());
+        assert_eq!(
+            suffix_fold(".acrne"),
+            suffix_fold(".acme"),
+            "rn folds like m"
+        );
+        assert_eq!(suffix_fold(".paypa1"), Err(false));
+        assert_eq!(suffix_fold(".postmaster"), Err(false));
+        assert_eq!(suffix_fold("acme"), Err(true));
+        assert_eq!(suffix_fold(".A"), Err(true));
+        assert!(valid_slug("acme-2") && !valid_slug("-acme") && !valid_slug("a"));
     }
 }

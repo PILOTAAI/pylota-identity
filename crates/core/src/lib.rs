@@ -11,6 +11,8 @@ pub mod auth;
 pub mod citations;
 pub mod classify;
 pub mod crypto;
+pub mod cursor;
+pub mod days;
 pub mod dns;
 pub mod domain_fsm;
 pub mod fusion;

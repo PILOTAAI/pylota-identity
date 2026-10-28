@@ -1,0 +1,141 @@
+{
+  "identity_daily_send_cap": 500,
+  "tenant_daily_send_cap": 5000,
+  "max_recipients": 10,
+  "send_allowlist_only": false,
+  "large_attachments": "refuse",
+  "link_ttl_hours": 72,
+  "ai_disclosure": {
+    "mode": "none",
+    "text": "This message was written with the help of an AI assistant."
+  },
+  "auto_reply": {
+    "allowed": true,
+    "max_automatic_exchanges": 2
+  },
+  "quarantine": {
+    "on_auth_fail": true,
+    "spam_threshold": 0.8,
+    "unsolicited_otp": true,
+    "key_release": false
+  },
+  "inbound": {
+    "per_sender_per_hour": 60,
+    "unauthenticated_per_hour": 120,
+    "per_tenant_per_hour": 2000,
+    "extract_attachment_text": [
+      "pdf",
+      "office",
+      "text",
+      "html"
+    ],
+    "extract_image_text": false,
+    "ses_bounce_retired": true,
+    "trusted_arc_sealers": [
+      "google.com",
+      "microsoft.com"
+    ]
+  },
+  "retention": {
+    "raw_days": 90,
+    "message_days": null,
+    "events_days": 30
+  },
+  "triage": {
+    "enabled": true,
+    "daily_model_cap": 2000,
+    "categories": null,
+    "rules": []
+  },
+  "search": {
+    "agentic_enabled": true,
+    "agentic_daily_cap": 500,
+    "agentic_max_steps": 6,
+    "agentic_max_seconds": 8,
+    "refs_packs": [
+      "core"
+    ],
+    "custom_refs": []
+  },
+  "webhook_text_bytes": 16384,
+  "abuse": {
+    "complaint_rate_pause": 0.003,
+    "bounce_rate_pause": 0.05,
+    "tenant_complaint_rate_pause": 0.001,
+    "tenant_bounce_rate_pause": 0.05
+  },
+  "domains": {
+    "allow_create_zone": false,
+    "cloudflare_zones": []
+  },
+  "web_bot_auth": {
+    "allowed": false
+  },
+  "accounts": {
+    "require_approval": false
+  },
+  "vault": {
+    "allowed": false,
+    "key_approval": false,
+    "min_approval": "grant",
+    "codes_into_fills_only": false,
+    "max_items": 1000,
+    "session_max_ttl_days": 30,
+    "approval_deadline_seconds": 600
+  },
+  "phone": {
+    "allowed": false,
+    "key_approval": false,
+    "countries": null,
+    "max_numbers_per_identity": 5,
+    "max_numbers_per_tenant": 20,
+    "auto_approve": {
+      "enabled": false
+    },
+    "spend": {
+      "tenant_monthly_cap_pence": null,
+      "identity_monthly_cap_pence": null,
+      "registration_cap_pence": null
+    },
+    "sms": {
+      "identity_daily_cap": 200,
+      "tenant_daily_cap": 2000,
+      "tenant_monthly_cap": null,
+      "allowed_destination_countries": null,
+      "brand_name": null
+    },
+    "inbound": {
+      "per_sender_per_hour": 30,
+      "per_identity_per_hour": 600
+    },
+    "calls": {
+      "outbound": "approval",
+      "allowed_destination_countries": null,
+      "concurrent_limit": 2,
+      "max_minutes": 15
+    },
+    "recording": "off",
+    "disclosure": {
+      "calls": "required",
+      "first_sms": "required",
+      "call_text": null,
+      "sms_text": null
+    },
+    "verification": {
+      "redact": true
+    }
+  },
+  "drafts": {
+    "require_approval": "never",
+    "key_approval": false
+  },
+  "screening": {
+    "mode": "monitor",
+    "on_unavailable": "quarantine",
+    "deadline_seconds": 120
+  },
+  "events": {
+    "labels_changed": false
+  },
+  "domain_fallback": true
+}

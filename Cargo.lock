@@ -1808,7 +1808,10 @@ dependencies = [
 name = "pylota-identity-worker"
 version = "0.1.0"
 dependencies = [
+ "pylota-identity-api-types",
+ "pylota-identity-core",
  "pylota-identity-platform",
+ "serde",
  "serde_json",
 ]
 

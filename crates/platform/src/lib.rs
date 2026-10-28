@@ -20,6 +20,7 @@ mod base64;
 pub mod buffer;
 pub mod clock;
 pub mod config;
+pub mod console;
 pub mod d1;
 pub mod dns;
 pub mod durable;

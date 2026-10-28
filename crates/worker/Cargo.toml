@@ -14,7 +14,13 @@ crate-type = ["cdylib", "rlib"]
 # Never `worker`, `wasm-bindgen`, `js-sys` or `web-sys` here: the entry points come from
 # platform::export_worker! (Rust workspace § 2; `cargo xtask check-layering`).
 [dependencies]
+pylota-identity-api-types = { path = "../api-types" }
+pylota-identity-core = { path = "../core" }
 pylota-identity-platform = { path = "../platform" }
-
-[dev-dependencies]
+serde = { workspace = true }
 serde_json = { workspace = true }
+
+
+[features]
+# The test hooks of `cargo xtask itest` (Testing § 6.1): never in a release bundle.
+itest-hooks = []
