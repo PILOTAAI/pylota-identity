@@ -1,5 +1,5 @@
-//! `domains` (Data model § 1): what M6 reads, the platform domain and a domain by ID. Tenant domains
-//! are written from M13.
+//! `domains` (Data model § 1): a row by ID, the platform domain and a tenant's rows. M13 writes tenant
+//! domains (`domains::onboard`, the monitor and removal).
 
 use pylota_identity_core::days::rfc3339;
 use pylota_identity_platform::d1::Stmt;
@@ -13,6 +13,7 @@ pub struct Row {
     pub name: String,
     pub kind: String,
     pub method: String,
+    pub zone_id: Option<String>,
     pub is_apex: i64,
     pub routing_mode: String,
     pub inbound: String,
@@ -23,17 +24,32 @@ pub struct Row {
     pub state: String,
     pub state_reason: Option<String>,
     pub state_changed_at: i64,
+    pub ownership_token: Option<String>,
+    pub ownership_verified_at: Option<i64>,
+    pub expected_ns_json: Option<String>,
+    pub provider_objects_json: String,
     pub event_subscription_id: Option<String>,
+    pub ses_identity: Option<String>,
     pub ses_region: Option<String>,
     pub mail_from_domain: Option<String>,
     pub records_json: String,
+    pub monitor_do_id: String,
     pub sending_paused_at: Option<i64>,
     pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// The columns every read of a row selects.
+#[macro_export]
+macro_rules! domain_columns {
+    () => {
+        "id, tenant_id, name, kind, method, zone_id, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_reason, state_changed_at, ownership_token, ownership_verified_at, expected_ns_json, provider_objects_json, event_subscription_id, ses_identity, ses_region, mail_from_domain, records_json, monitor_do_id, sending_paused_at, created_at, updated_at"
+    };
 }
 
 pub fn get(id: &str) -> Stmt {
     Stmt::new(
-        "SELECT id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_reason, state_changed_at, event_subscription_id, ses_region, mail_from_domain, records_json, sending_paused_at, created_at FROM domains WHERE id = ?1",
+        concat!("SELECT ", domain_columns!(), " FROM domains WHERE id = ?1"),
         vec![id.into()],
     )
 }
@@ -41,7 +57,11 @@ pub fn get(id: &str) -> Stmt {
 /// The platform domain (there is one live row).
 pub fn platform() -> Stmt {
     Stmt::new(
-        "SELECT id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_reason, state_changed_at, event_subscription_id, ses_region, mail_from_domain, records_json, sending_paused_at, created_at FROM domains WHERE kind = 'platform' AND state <> 'removed' ORDER BY created_at LIMIT 1",
+        concat!(
+            "SELECT ",
+            domain_columns!(),
+            " FROM domains WHERE kind = 'platform' AND state <> 'removed' ORDER BY created_at LIMIT 1"
+        ),
         vec![],
     )
 }
@@ -50,9 +70,13 @@ pub fn platform() -> Stmt {
 pub fn of_tenant(tenant_id: &str, keyset: Option<(i64, String)>, limit: u32) -> Stmt {
     let (kc, ki) = keyset.map_or((None, None), |(c, i)| (Some(c), Some(i)));
     Stmt::new(
-        "SELECT id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_reason, state_changed_at, event_subscription_id, ses_region, mail_from_domain, records_json, sending_paused_at, created_at FROM domains \
+        concat!(
+            "SELECT ",
+            domain_columns!(),
+            " FROM domains \
          WHERE (tenant_id = ?1 OR kind = 'platform') AND state <> 'removed' \
-         AND (?2 IS NULL OR created_at < ?2 OR (created_at = ?2 AND id < ?3)) ORDER BY created_at DESC, id DESC LIMIT ?4",
+         AND (?2 IS NULL OR created_at < ?2 OR (created_at = ?2 AND id < ?3)) ORDER BY created_at DESC, id DESC LIMIT ?4"
+        ),
         vec![tenant_id.into(), kc.into(), ki.into(), (limit + 1).into()],
     )
 }

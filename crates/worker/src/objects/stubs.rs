@@ -58,6 +58,29 @@ fn body_of(req: &HttpRequestIn) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// `SesControl`: the deployment's SES token bucket.
+pub struct SesControlObject {
+    platform: CfPlatform,
+    sql: CfSql,
+}
+
+impl ObjectApp for SesControlObject {
+    fn new(state: CfObjectState, platform: CfPlatform) -> Self {
+        Self {
+            sql: state.sql(),
+            platform,
+        }
+    }
+
+    async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
+        let c = crate::domains::ses_control::SesControl {
+            p: &self.platform,
+            sql: &self.sql,
+        };
+        json(200, &c.handle(&body_of(&req)))
+    }
+}
+
 /// `IdentityMailbox`.
 pub struct MailboxObject {
     platform: Rc<CfPlatform>,
@@ -152,6 +175,5 @@ macro_rules! shell {
 }
 
 shell!(MonitorObject, "DomainMonitor");
-shell!(SesControlObject, "SesControl");
 shell!(NotifierObject, "Notifier");
 shell!(EventsObject, "TenantEvents");
