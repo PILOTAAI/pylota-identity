@@ -855,8 +855,8 @@ CLI `idvy domains subscribe`. The other connection methods, `nameservers` includ
 
 **Acceptance:**
 
-- H1, H2 (`core::dns::h2_spf_lookup_count`; its MAIL FROM part, `it::ses::h2_mail_from_spf_preflight`,
-  is for `dns_records` and `send_only` domains and is accepted in M23), H3–H7, H8
+- H1, H2 (`core::dns::h2_spf_lookup_count`; its MAIL FROM part, for `dns_records` and `send_only`
+  domains, in M23), H3–H7, H8
   (`it::domains::h8_zone_permission` for `cloudflare_zone`, `replace_mx` and the listed zones of
   `domains.cloudflare_zones`; the `zone_claims` written by `nameservers` and `delegated_subdomain`, and the
   refusal of those methods under a claimed or deployment zone, are added in M23), H18
@@ -896,9 +896,9 @@ CLI `idvy domains subscribe`. The other connection methods, `nameservers` includ
   `delete_ses_identity`, which deletes the failover SES identity that onboarding created and its three
   DKIM CNAMEs. Every step acts on the recorded provider IDs only, `disable_routing` removes one name's
   routing unless it is the zone's last routing domain at its apex, and absence is read back rather than
-  inferred from a `404` code. `DELETE /v1/domains/{domain_id}` queues the job behind M6's `JobRunner` stub;
-  M14 runs it, inline in tenant erasure's `remove_domains` too, and accepts
-  `it::domains::remove_deletes_ses_identity` and the other removal tests.
+  inferred from a `404` code. `DELETE /v1/domains/{domain_id}` queues the job behind M6's `JobRunner` stub
+  (M14 runs it, inline in tenant erasure's `remove_domains` too, and accepts
+  `it::domains::remove_deletes_ses_identity` and the other removal tests).
 
 ---
 

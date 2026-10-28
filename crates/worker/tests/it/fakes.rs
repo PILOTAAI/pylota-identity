@@ -129,6 +129,14 @@ fn doh(s: &State, query: &str) -> Value {
         }
     }
     let name = name.trim_end_matches('.').to_owned();
+    let resolver = if query.contains("__resolver=dns.google") {
+        "dns.google"
+    } else {
+        "cloudflare-dns.com"
+    };
+    if let Some(v) = crate::cloud::dns(resolver, &name, &rtype, query.contains("cd=1")) {
+        return v;
+    }
     if name.ends_with(RECEIVERS) {
         // A public address that is never contacted (the Worker's requests come here by host), or
         // a private one for names starting `private.`, for the SSRF checks.
@@ -188,6 +196,7 @@ pub fn start() {
                 }
                 let mut raw = vec![0u8; len];
                 let _ = reader.read_exact(&mut raw);
+                let method = line.split_whitespace().next().unwrap_or("GET").to_owned();
                 let path = line.split_whitespace().nth(1).unwrap_or("/").to_owned();
                 let (status, text) = match path.strip_prefix("/__http/").filter(|t| {
                     t.split(['/', '?']).next().is_some_and(|h| h.ends_with(RECEIVERS))
@@ -195,6 +204,15 @@ pub fn start() {
                     Some(target) => (receive(target, headers, raw), String::new()),
                     None => {
                         let body: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
+                        if let Some((st, v)) = crate::cloud::cf(&method, &path, &body)
+                            .or_else(|| crate::cloud::ses(&method, &path, &body))
+                            .or_else(|| crate::cloud::rdap_call(&path))
+                        {
+                            let text = v.to_string();
+                            let mut out = stream;
+                            let _ = write!(out, "HTTP/1.1 {st} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len());
+                            continue;
+                        }
                         let v = handle(&path, &body);
                         match v["__status"].as_u64() {
                             Some(st) => (st as u16, String::new()),
@@ -235,7 +253,15 @@ fn handle(path: &str, body: &Value) -> Value {
         q if q.starts_with("/__http/cloudflare-dns.com/dns-query?")
             || q.starts_with("/__http/dns.google/resolve?") =>
         {
-            doh(&s, q.split_once('?').map_or("", |(_, q)| q))
+            let resolver = if q.starts_with("/__http/dns.google/") {
+                "&__resolver=dns.google"
+            } else {
+                ""
+            };
+            doh(
+                &s,
+                &format!("{}{resolver}", q.split_once('?').map_or("", |(_, q)| q)),
+            )
         }
         "/__mail/send" => {
             s.mail_sent.push(body.clone());

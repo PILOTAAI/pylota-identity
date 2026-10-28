@@ -5,6 +5,7 @@
 mod agentic;
 mod auth;
 mod bench;
+mod cloud;
 mod conformance;
 mod delivery;
 mod dkim;

@@ -2,3 +2,4 @@
 //! owns the module from then on).
 
 pub mod cloudflare_api;
+pub mod records;

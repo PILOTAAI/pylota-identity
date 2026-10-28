@@ -151,6 +151,8 @@ type Zone = HashMap<(Resolver, String, RType), Result<DnsAnswer, DnsError>>;
 #[derive(Default)]
 pub struct FakeDns {
     zone: RefCell<Zone>,
+    /// Answers with DNSSEC validation off (`cd=1`).
+    cd_zone: RefCell<Zone>,
     queries: RefCell<Vec<(Resolver, String, RType)>>,
 }
 
@@ -199,6 +201,14 @@ impl FakeDns {
         }
     }
 
+    /// The answer to a `cd=1` query of `name` on both resolvers.
+    pub fn set_cd(&self, name: &str, rtype: RType, answer: Result<DnsAnswer, DnsError>) {
+        let mut zone = self.cd_zone.borrow_mut();
+        for r in [Resolver::First, Resolver::Second] {
+            zone.insert((r, key(name), rtype), answer.clone());
+        }
+    }
+
     pub fn remove(&self, name: &str, rtype: RType) {
         self.zone
             .borrow_mut()
@@ -211,6 +221,14 @@ impl FakeDns {
 }
 
 impl Dns for FakeDns {
+    /// Answers from the zone set with `set_cd`, else as without `cd`.
+    async fn query_cd(&self, r: Resolver, name: &str, rtype: RType) -> Result<DnsAnswer, DnsError> {
+        if let Some(a) = self.cd_zone.borrow().get(&(r, key(name), rtype)) {
+            return a.clone();
+        }
+        self.query(r, name, rtype).await
+    }
+
     async fn query(&self, r: Resolver, name: &str, rtype: RType) -> Result<DnsAnswer, DnsError> {
         self.queries.borrow_mut().push((r, key(name), rtype));
         self.zone

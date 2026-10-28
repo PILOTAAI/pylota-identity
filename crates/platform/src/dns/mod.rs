@@ -117,6 +117,9 @@ pub enum DnsError {
 
 pub trait Dns {
     async fn query(&self, r: Resolver, name: &str, rtype: RType) -> Result<DnsAnswer, DnsError>;
+    /// The same query with DNSSEC validation off (`cd=1`), which tells a broken signature chain from
+    /// a name that does not resolve at all (Identities and domains › C8).
+    async fn query_cd(&self, r: Resolver, name: &str, rtype: RType) -> Result<DnsAnswer, DnsError>;
 }
 
 pub const TIMEOUT_MS: u32 = 3_000;
@@ -261,9 +264,20 @@ fn encode(name: &str) -> String {
 
 impl<H: HttpClient> Dns for DohClient<H> {
     async fn query(&self, r: Resolver, name: &str, rtype: RType) -> Result<DnsAnswer, DnsError> {
+        self.send(self.url(r, name, rtype)).await
+    }
+
+    async fn query_cd(&self, r: Resolver, name: &str, rtype: RType) -> Result<DnsAnswer, DnsError> {
+        self.send(format!("{}&cd=1", self.url(r, name, rtype)))
+            .await
+    }
+}
+
+impl<H: HttpClient> DohClient<H> {
+    async fn send(&self, url: String) -> Result<DnsAnswer, DnsError> {
         let req = HttpRequest {
             method: "GET",
-            url: self.url(r, name, rtype),
+            url,
             headers: vec![("accept".to_owned(), "application/dns-json".to_owned())],
             body: None,
             timeout_ms: TIMEOUT_MS,
