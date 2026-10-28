@@ -71,7 +71,8 @@ mod entry {
         }
 
         /// Until M8 consumes `pm-webhooks`, its messages wait in the queue. The itest build hands
-        /// them to the fake server instead, so the suite can see them (Testing § 6.2).
+        /// them, and those of two dead-letter queues, to the fake server instead, so the suite can see them
+        /// (Testing § 6.2).
         async fn queue(
             &self,
             queue: pylota_identity_platform::queues::QueueName,
@@ -79,8 +80,17 @@ mod entry {
             batch: Vec<pylota_identity_platform::queues::Incoming<serde_json::Value>>,
         ) {
             #[cfg(feature = "itest-hooks")]
-            if queue == pylota_identity_platform::queues::QueueName::Webhooks && !dead_letter {
-                crate::hooks::capture_queue(self.0.p.as_ref(), queue, batch).await;
+            // `pm-inbound-dlq` and `pm-index-dlq` too: J7's test redrives a dead-lettered pointer,
+            // and the index tests check that nothing was dead-lettered.
+            if (queue == pylota_identity_platform::queues::QueueName::Webhooks && !dead_letter)
+                || (dead_letter
+                    && matches!(
+                        queue,
+                        pylota_identity_platform::queues::QueueName::Inbound
+                            | pylota_identity_platform::queues::QueueName::Index
+                    ))
+            {
+                crate::hooks::capture_queue(self.0.p.as_ref(), queue, dead_letter, batch).await;
                 return;
             }
             crate::consumers::run(self.0.p.as_ref(), queue, dead_letter, batch).await;

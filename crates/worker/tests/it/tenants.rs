@@ -48,3 +48,39 @@ fn create_idempotent_replay() {
         0
     );
 }
+
+/// D12: a suffix folding to a reserved name is `address_reserved`; one folding to another tenant's
+/// suffix is `suffix_taken`; a distinct one is accepted.
+#[test]
+fn d12_suffix_confusable_refused() {
+    let p = crate::platform();
+    let base = crate::slug("d12");
+    let create = |suffix: &str| {
+        crate::post(
+            "/v1/tenants",
+            &p,
+            serde_json::json!({ "slug": crate::slug(suffix), "name": "d12", "mode": "live", "address_suffix": suffix }),
+        )
+    };
+    for s in [".stripe", ".str1pe", ".p0stmaster"] {
+        let r = create(s);
+        assert_eq!(
+            (r.status, r.code()),
+            (400, "address_reserved"),
+            "{s}: {}",
+            r.body
+        );
+        assert_eq!(r.details()["field"], "address_suffix");
+    }
+    let mine = format!(".m{}", &base[1..7]);
+    assert_eq!(create(&mine).status, 201);
+    let look = mine.replacen('m', "rn", 1);
+    let r = create(&look);
+    assert_eq!(
+        (r.status, r.code()),
+        (409, "suffix_taken"),
+        "{look}: {}",
+        r.body
+    );
+    assert_eq!(create(&format!(".d{}", &base[1..7])).status, 201);
+}

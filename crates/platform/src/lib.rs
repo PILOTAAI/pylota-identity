@@ -16,7 +16,7 @@
 pub mod ai;
 pub mod app;
 pub mod background;
-mod base64;
+pub mod base64;
 pub mod buffer;
 pub mod clock;
 pub mod config;

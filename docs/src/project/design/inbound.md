@@ -1899,6 +1899,28 @@ After the commit the mailbox queues `Triage { reason: Release }` (when `pending`
 The `message.received` event reaches the Notifier through the webhook fan-out
 ([Webhooks › Handing new mail to the Notifier](webhooks.md#handing-new-mail-to-the-notifier)).
 
+**As built (M7).** The read path and release above hold, with these settlements until the milestones
+that need more:
+
+- The read requests are one `MailboxRequest::Read` variant whose inner tag is `q` (`{"op": "read", "q":
+  "list_threads", …}`): a field of `UpdateMessage` is named `read`. `BatchGet`, `BatchUpdate` and the
+  label events are M37's; `Raw` and `Attachment` were added for the raw and attachment routes.
+- Release takes the identity's live addresses from the handler (participants and `reply_from_address`),
+  and only API keys release until the console (M21) passes `Actor::User`. A held message keeps its
+  verification match in `automated_json.verification`, from which release step 4 inserts the row.
+- `wait` releases a code without the ledger and vault checks of steps 1 and 4, which arrive with M27 and
+  M44.
+- `AttachmentTextReady` carries each attachment's text (at most 256 KiB) instead of one `fts_text`; the
+  mailbox rebuilds the keyword row with `core::search::fts_doc`, and the consumer queues the
+  `Embed { reason: AttachmentText }` job after the mailbox answers. The steering scan of each text
+  arrives with screening (M31).
+- Some rows of the tests table are proved in part until their milestone: the hidden-message part of
+  `it::messages::read_path_visible_threads` and the `wait(kind=reply)` part of
+  `it::inbound::c11_token_flood_keeps_replies` need outbound mail (M9); the tenant-wide cap and the
+  `storage_gb` part of `it::inbound::d13_unsolicited_flood_caps` need M22's metering; and
+  `it::inbound::j7_staging_outlives_dlq` redrives the dead-lettered pointer 14 days later, while the daily
+  `staging` re-queue is M14's.
+
 ## Open points
 
 1. **Suspended tenants on the SES source (FR-TEN-3): decided.** SES has already accepted the message, so no

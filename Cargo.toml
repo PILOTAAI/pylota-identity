@@ -96,6 +96,7 @@ aes-gcm               = { version = "=0.11.1", default-features = false, feature
 proptest              = "=1.12.0"                                           # native dev-dependency; 2026-10-10
 
 # Native only, chosen at build time (the newest release at least two weeks old; crates.io, read 2026-10-19)
+rustls-pki-types = "=1.15.1" # worker it:: suite: the DKIM test key for mail-auth's signer
 toml = "=1.1.6" # xtask: reads Cargo.toml; 1.1.6+spec-1.1.0 published 2026-09-10 (1.1.7 and 1.1.8 are newer)
 # platform::fakes: D1 and Durable Object SQLite natively (crates.io API, read 2026-10-28: 0.40.2 published
 # 2026-08-08; 0.41.0 of 2026-10-24 is newer). `bundled` builds SQLite with FTS5.

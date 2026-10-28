@@ -258,6 +258,31 @@ the rest:
 - workerd's local rate limiter counts in fixed one-minute windows, so a test whose burst must land in
   one window waits for the top of a minute first (`it::fresh_minute`).
 
+**As built (M7).** Inbound mail joins the suite, with these additions:
+
+- Mail goes in through wrangler's local email endpoint (`it::inject`, section 6.4), which answers `200`,
+  `400` for `setReject` and `500` for a temporary failure, as S1 recorded; cases the endpoint cannot carry
+  or whose SMTP reply a test reads go through `POST /__test/inbound` (`it::inbound`).
+- **Outbound requests.** In the itest build every outbound `fetch` is sent to
+  `{fakes}/__http/{host}{path}` instead (`platform::cf::itest::reroute`). The fake server answers the two
+  default DoH resolvers from the corpus zones (`crates/conformance/corpus/dns/zones.toml`); the other
+  hosts of section 6.3 join with the milestones that call them. DKIM-signed test mail is signed in the
+  test process with the corpus's test-only key and mail-auth's signer (`it::dkim::sign`), so DKIM, DMARC
+  and the verdict run unchanged in workerd.
+- Two more hooks: `POST /__test/mailbox-query` (`{ "identity_id", "sql" }`: the rows of one statement on
+  that mailbox, for what no route shows: throttled and hidden rows, thread `seq`, attachment text state)
+  and `POST /__test/queue-send` (`{ "queue", "body" }`, to redrive a dead-lettered pointer). Queue capture
+  also takes `pm-inbound-dlq` and `pm-index-dlq`.
+- Fault targets so far: `do.call`, `d1` (binding `DB`), `r2.put`, `queue.send`, and two consumer hooks,
+  `parse.panic` (B2) and `inbound.after_ingest` (J2). `GET {fakes}/state` reports `faults_armed`, so an
+  isolate asks for a fault only while one is armed.
+- The itest build shortens two retry delays: a `pm-inbound` retry waits 1 second (30 in a release
+  build) and an `AttachmentText` re-enqueue 1 second (60 and 300).
+- Workers AI has no local mode, so `toMarkdown` fails in workerd: `it::index::b12_extraction_failure`
+  uses that, and the converted path is proved natively on `platform::fakes`
+  (`worker::tests::inbound::text_attachment_extracted_and_indexed`).
+- The fake clock: `Clock::sleep` advances it natively, so a polling loop such as `wait` ends on fakes.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

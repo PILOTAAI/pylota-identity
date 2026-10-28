@@ -90,8 +90,9 @@ pub struct StagedPointer {
     pub request_id: String,
 }
 
-/// Retried after this many seconds on a known transient failure (Failure handling).
-const RETRY_S: u32 = 30;
+/// Retried after this many seconds on a known transient failure (Failure handling); one second in the
+/// itest build, so the suite sees retries without waiting.
+const RETRY_S: u32 = if cfg!(feature = "itest-hooks") { 1 } else { 30 };
 /// From this parse attempt the consumer parses headers only (B2, FR-IN-3).
 pub const DEGRADED_FROM_ATTEMPT: i64 = 3;
 /// Pointers younger than this have not failed before and go first (Poison messages).
@@ -780,6 +781,15 @@ pub async fn message<P: Platform>(p: &P, ptr: InboundPointer) -> Done {
         }
         _ => return Done::Retry,
     };
+
+    // J2's fault hook: the consumer dies after the ingest committed, before its post-commit steps.
+    #[cfg(all(feature = "itest-hooks", target_arch = "wasm32"))]
+    if pylota_identity_platform::cf::itest::take_fault("inbound.after_ingest", "")
+        .await
+        .is_some()
+    {
+        panic!("the inbound.after_ingest fault hook");
+    }
 
     // 15. Post-commit.
     let IngestOutcome::Stored {

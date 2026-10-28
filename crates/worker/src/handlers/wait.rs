@@ -112,10 +112,12 @@ pub async fn wait<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
                 json!({ "message": out["message"], "verification": out["verification"], "timed_out": false }),
             ));
         }
-        if c.p.clock().now_ms() + i64::from(POLL_MS) > deadline {
+        // A last poll at the deadline, so a full `timeout` is always waited.
+        let left = deadline - c.p.clock().now_ms();
+        if left <= 0 {
             break;
         }
-        c.p.clock().sleep(POLL_MS).await;
+        c.p.clock().sleep(left.min(i64::from(POLL_MS)) as u32).await;
     }
     Ok(Reply::json(
         200,

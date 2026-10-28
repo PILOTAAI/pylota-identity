@@ -66,10 +66,14 @@ impl HttpClient for CfHttp {
             )
             .map_err(fail)?;
         }
+        #[cfg(feature = "itest-hooks")]
+        let url = super::itest::reroute(&req.url);
+        #[cfg(not(feature = "itest-hooks"))]
+        let url = req.url.clone();
         let fetch: js_sys::Promise = js::call(
             &js_sys::global(),
             "fetch",
-            &[&JsValue::from_str(&req.url), &init],
+            &[&JsValue::from_str(&url), &init],
         )
         .map_err(fail)?
         .dyn_into()

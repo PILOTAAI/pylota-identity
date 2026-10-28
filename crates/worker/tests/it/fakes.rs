@@ -1,7 +1,9 @@
 //! The fake server on `127.0.0.1:8798` (Testing § 6.3–6.6), hosted by the test process: the fake clock
-//! and the fault plan the Worker reads at each invocation, and the queue messages the itest build hands
-//! over. A blocking server on `std::net`, enough for the hooks so far.
+//! and the fault plan the Worker reads at each invocation, the queue messages the itest build hands
+//! over, and the hosts the Worker's outbound requests are rerouted to (`/__http/{host}/…`): so far the
+//! two DoH resolvers, answering from the corpus zones (`crates/conformance/corpus/dns/zones.toml`). A blocking server on `std::net`.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpListener;
 use std::sync::{Mutex, Once};
@@ -13,17 +15,79 @@ struct State {
     faults: Vec<Value>,
     /// Messages the itest build's queue consumer handed over: `(queue, body)`.
     queued: Vec<(String, Value)>,
+    /// TXT records by name; `None` answers SERVFAIL.
+    txt: BTreeMap<String, Option<Vec<String>>>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     offset: 0,
     faults: Vec::new(),
     queued: Vec::new(),
+    txt: BTreeMap::new(),
 });
+
+/// The corpus zones, loaded once.
+fn load_zones(s: &mut State) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../conformance/corpus/dns/zones.toml");
+    let text = std::fs::read_to_string(path).expect("the corpus zones");
+    let t: toml::Table = text.parse().expect("zones.toml parses");
+    if let Some(txt) = t.get("txt").and_then(|v| v.as_table()) {
+        for (name, records) in txt {
+            let rs = records
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|r| r.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+            s.txt.insert(name.to_ascii_lowercase(), Some(rs));
+        }
+    }
+    if let Some(names) = t
+        .get("temperror")
+        .and_then(|v| v.get("names"))
+        .and_then(|v| v.as_array())
+    {
+        for n in names.iter().filter_map(|n| n.as_str()) {
+            s.txt.insert(n.to_ascii_lowercase(), None);
+        }
+    }
+}
+
+/// A DoH JSON answer (`application/dns-json`) for `name` and `type`.
+fn doh(s: &State, query: &str) -> Value {
+    let mut name = String::new();
+    let mut rtype = String::new();
+    for pair in query.split('&') {
+        match pair.split_once('=') {
+            Some(("name", v)) => name = v.replace("%5F", "_").to_ascii_lowercase(),
+            Some(("type", v)) => rtype = v.to_ascii_uppercase(),
+            _ => {}
+        }
+    }
+    let name = name.trim_end_matches('.').to_owned();
+    match (rtype.as_str(), s.txt.get(&name)) {
+        ("TXT", Some(None)) => json!({ "Status": 2, "Answer": [] }),
+        ("TXT", Some(Some(records))) => json!({
+            "Status": 0,
+            "Answer": records.iter().map(|r| {
+                // DoH quotes TXT data and splits it into strings of at most 255 bytes.
+                let parts: Vec<String> = r.as_bytes().chunks(255)
+                    .map(|c| format!("\"{}\"", String::from_utf8_lossy(c).replace('"', "\\\"")))
+                    .collect();
+                json!({ "name": name, "type": 16, "TTL": 300, "data": parts.join(" ") })
+            }).collect::<Vec<_>>()
+        }),
+        _ => json!({ "Status": 3, "Answer": [] }),
+    }
+}
 
 pub fn start() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
+        load_zones(&mut STATE.lock().unwrap());
         let listener = TcpListener::bind("127.0.0.1:8798").expect("port 8798 is free for the fake server");
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
@@ -58,7 +122,7 @@ pub fn start() {
 fn handle(path: &str, body: &Value) -> Value {
     let mut s = STATE.lock().unwrap();
     match path {
-        "/state" => json!({ "clock_offset_ms": s.offset }),
+        "/state" => json!({ "clock_offset_ms": s.offset, "faults_armed": !s.faults.is_empty() }),
         "/faults/take" => {
             let pos = s.faults.iter().position(|f| {
                 f["target"] == body["target"]
@@ -77,6 +141,11 @@ fn handle(path: &str, body: &Value) -> Value {
                 }
                 None => json!({}),
             }
+        }
+        q if q.starts_with("/__http/cloudflare-dns.com/dns-query?")
+            || q.starts_with("/__http/dns.google/resolve?") =>
+        {
+            doh(&s, q.split_once('?').map_or("", |(_, q)| q))
         }
         q if q.starts_with("/queues/") => {
             s.queued
@@ -113,6 +182,16 @@ pub fn fault(target: &str, binding: &str, mode: &str, count: u32) {
         .unwrap()
         .faults
         .push(json!({ "target": target, "binding": binding, "mode": mode, "count": count }));
+}
+
+/// Arms a fault on `target` for any binding.
+pub fn fault_any(target: &str, mode: &str, count: u32) {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .faults
+        .push(json!({ "target": target, "binding": null, "mode": mode, "count": count }));
 }
 
 /// Resets the clock and the faults (a guard in each test that changes them).

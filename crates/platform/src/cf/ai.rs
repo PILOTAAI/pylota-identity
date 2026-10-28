@@ -91,7 +91,14 @@ impl Ai for CfAi {
             js::set(&file, "blob", &blob).map_err(|e| js::error(AI, &e))?;
             files.push(&file);
         }
-        let out = wait(AI, ai.to_markdown(&files, &JsValue::UNDEFINED)).await?;
+        // PDFs without the metadata section (Inbound › Attachment text extraction).
+        let options = js::object();
+        let pdf = js::object();
+        js::set(&pdf, "metadata", &JsValue::FALSE).map_err(|e| js::error(AI, &e))?;
+        let conversion = js::object();
+        js::set(&conversion, "pdf", &pdf).map_err(|e| js::error(AI, &e))?;
+        js::set(&options, "conversionOptions", &conversion).map_err(|e| js::error(AI, &e))?;
+        let out = wait(AI, ai.to_markdown(&files, &options)).await?;
         js::to_value(AI, &out)
     }
 }

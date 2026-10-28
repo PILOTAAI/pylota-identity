@@ -226,3 +226,31 @@ fn deleting_and_deleted_routes() {
         );
     }
 }
+
+/// A13: after an identity is deleted, mail to its address (a reply to an in-flight thread) gets
+/// `550 5.1.1`.
+#[test]
+fn a13_delete_then_reply_rejected() {
+    let (_, idn, addr, key) = crate::mailbox_fixture("a13");
+    assert_eq!(
+        crate::inject(
+            "a@r.example",
+            &addr,
+            &crate::mail("a@r.example", &addr, "Before", "x")
+        ),
+        200
+    );
+    crate::wait_stored(&idn, &key, "received", 1);
+    let r = crate::delete(&format!("/v1/identities/{idn}"), &key);
+    assert!(r.status < 300, "{}", r.body);
+    let (outcome, smtp) = crate::inbound(
+        "a@r.example",
+        &addr,
+        &crate::mail("a@r.example", &addr, "Re: Before", "reply"),
+    );
+    assert_eq!(
+        (outcome.as_str(), &smtp[..9]),
+        ("rejected", "550 5.1.1"),
+        "{smtp}"
+    );
+}

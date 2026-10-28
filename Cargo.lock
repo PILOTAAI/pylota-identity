@@ -1808,12 +1808,15 @@ dependencies = [
 name = "pylota-identity-worker"
 version = "0.1.0"
 dependencies = [
+ "mail-auth",
  "pylota-identity-api-types",
  "pylota-identity-core",
  "pylota-identity-platform",
  "reqwest",
+ "rustls-pki-types",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

@@ -77,6 +77,11 @@ pub enum MailboxRequest {
     /// `POST /__test/alarm`: runs the alarm now.
     #[cfg(feature = "itest-hooks")]
     TestAlarm,
+    /// `POST /__test/mailbox-query`: rows of one statement on this mailbox's SQLite.
+    #[cfg(feature = "itest-hooks")]
+    TestQuery {
+        sql: String,
+    },
 }
 
 /// The statements of a migration: comments dropped, split on `;`.
@@ -388,6 +393,11 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             MailboxRequest::TestAlarm => {
                 self.alarm().await;
                 Ok(Value::Null)
+            }
+            #[cfg(feature = "itest-hooks")]
+            MailboxRequest::TestQuery { sql } => {
+                let rows: Vec<Value> = self.sql.query(&sql, &[])?;
+                Ok(Value::Array(rows))
             }
         }
     }

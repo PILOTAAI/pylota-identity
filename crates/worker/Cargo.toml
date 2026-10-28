@@ -23,6 +23,9 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["blocking"] }
+toml = { workspace = true }
+mail-auth = { workspace = true }
+rustls-pki-types = { workspace = true }
 
 # The workerd suite (Testing § 6): `cargo xtask itest` runs it; `cargo test --workspace` never builds it.
 [[test]]

@@ -60,6 +60,22 @@ pub async fn take_fault(target: &str, binding: &str) -> Option<String> {
     v["mode"].as_str().map(str::to_owned)
 }
 
+/// Testing § 6.3: every outbound request goes to the fake server instead, as
+/// `{fakes}/__http/{host}{path}`; the server routes it by host (DoH, providers, receivers). Requests to
+/// the fake server itself pass unchanged.
+pub fn reroute(url: &str) -> String {
+    let Some(fakes) = FAKES.with(|f| f.borrow().clone()) else {
+        return url.to_owned();
+    };
+    if url.starts_with(&fakes) {
+        return url.to_owned();
+    }
+    match url.split_once("://") {
+        Some((_, rest)) => format!("{fakes}/__http/{rest}"),
+        None => url.to_owned(),
+    }
+}
+
 /// The `PlatformError` an armed fault answers with.
 pub fn fault_error(binding: &'static str) -> crate::PlatformError {
     crate::PlatformError::unavailable(binding, "fault injected by the test")

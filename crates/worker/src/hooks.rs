@@ -70,7 +70,7 @@ pub async fn serve<P: Platform>(
                 serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
-        ("POST", "/__test/mailbox-schema" | "/__test/alarm") => {
+        ("POST", "/__test/mailbox-schema" | "/__test/alarm" | "/__test/mailbox-query") => {
             let body: Value = req
                 .body
                 .as_ref()
@@ -82,10 +82,12 @@ pub async fn serve<P: Platform>(
                 .first(crate::db::identities::get(id))
                 .await?
                 .ok_or_else(|| ApiError::not_found(ErrorCode::IdentityNotFound))?;
-            let req = if path == "/__test/alarm" {
-                crate::mailbox::MailboxRequest::TestAlarm
-            } else {
-                crate::mailbox::MailboxRequest::TestSchemaBack
+            let req = match path {
+                "/__test/alarm" => crate::mailbox::MailboxRequest::TestAlarm,
+                "/__test/mailbox-query" => crate::mailbox::MailboxRequest::TestQuery {
+                    sql: body["sql"].as_str().unwrap_or("").to_owned(),
+                },
+                _ => crate::mailbox::MailboxRequest::TestSchemaBack,
             };
             let env = crate::rpc::envelope_for(
                 p.as_ref(),
@@ -104,6 +106,48 @@ pub async fn serve<P: Platform>(
                 serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
+        ("POST", "/__test/queue-send") => {
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let (q, _) = pylota_identity_platform::queues::QueueName::from_queue_name(
+                body["queue"].as_str().unwrap_or(""),
+            )
+            .ok_or_else(|| ApiError::invalid("queue", "Unknown queue."))?;
+            pylota_identity_platform::QueueProducer::send(p.queues(), q, &body["body"], 0).await?;
+            Ok(Reply::json(200, json!({})))
+        }
+        ("POST", "/__test/inbound") => {
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let raw =
+                pylota_identity_platform::base64::decode(body["raw_base64"].as_str().unwrap_or(""))
+                    .ok_or_else(|| ApiError::invalid("raw_base64", "Base64 expected."))?;
+            let msg = pylota_identity_platform::app::EmailIn {
+                from: body["mail_from"].as_str().unwrap_or("").to_owned(),
+                to: body["rcpt_to"].as_str().unwrap_or("").to_owned(),
+                headers: Vec::new(),
+                raw_size: raw.len() as u64,
+                raw: pylota_identity_platform::buffer::JsBuffer::from_bytes(&raw),
+            };
+            let out = match crate::email::handle(p.as_ref(), &msg).await {
+                pylota_identity_platform::app::EmailOutcome::Accept => {
+                    json!({ "outcome": "accepted" })
+                }
+                pylota_identity_platform::app::EmailOutcome::Reject { smtp } => {
+                    json!({ "outcome": "rejected", "smtp": smtp })
+                }
+                pylota_identity_platform::app::EmailOutcome::TempFail => {
+                    json!({ "outcome": "tempfail" })
+                }
+            };
+            Ok(Reply::json(200, out))
+        }
         _ => Err(not_found()),
     }
 }
@@ -112,6 +156,7 @@ pub async fn serve<P: Platform>(
 pub async fn capture_queue<P: Platform>(
     p: &P,
     queue: pylota_identity_platform::queues::QueueName,
+    dead_letter: bool,
     batch: Vec<pylota_identity_platform::queues::Incoming<Value>>,
 ) {
     use pylota_identity_platform::HttpClient as _;
@@ -120,7 +165,8 @@ pub async fn capture_queue<P: Platform>(
         return;
     };
     for m in &batch {
-        let mut req = HttpRequest::get(format!("{fakes}/queues/{}", queue.queue_name()));
+        let dlq = if dead_letter { "-dlq" } else { "" };
+        let mut req = HttpRequest::get(format!("{fakes}/queues/{}{dlq}", queue.queue_name()));
         req.method = "POST";
         req.timeout_ms = 2_000;
         req.headers

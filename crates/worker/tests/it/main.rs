@@ -3,17 +3,25 @@
 //! `PM_ITEST_TOKEN`, and the local D1 location for the few fixtures only setup writes directly.
 
 mod auth;
+mod conformance;
+mod dkim;
 mod fakes;
 mod identities;
+mod inbound;
+mod index;
 mod intents;
 mod keyring;
 mod keys;
 mod mailbox;
+mod messages;
 mod partners;
 mod policy;
+mod quarantine;
 mod routes;
 mod security;
 mod tenants;
+mod thread;
+mod wait;
 
 use std::process::Command;
 use std::sync::OnceLock;
@@ -324,4 +332,138 @@ pub fn indexed(identity_id: &str) -> Vec<(String, String)> {
         .iter()
         .map(|r| (r["type"].as_str().unwrap().to_owned(), r["id"].as_str().unwrap().to_owned()))
         .collect()
+}
+
+/// Delivers `raw` through wrangler's local email endpoint (Testing § 6.4); the status is `200`
+/// (accepted), `400` (`setReject`) or `500` (a temporary failure).
+pub fn inject(from: &str, to: &str, raw: &str) -> u16 {
+    fakes::start();
+    let url = format!(
+        "{}/cdn-cgi/local/email?from={}&to={}",
+        env("PM_ITEST_URL"),
+        from.replace('+', "%2B"),
+        to.replace('+', "%2B")
+    );
+    client()
+        .post(url)
+        .body(raw.to_owned())
+        .send()
+        .expect("the email endpoint answers")
+        .status()
+        .as_u16()
+}
+
+/// Runs the `email()` handler through `/__test/inbound` and returns `(outcome, smtp)`.
+pub fn inbound(from: &str, to: &str, raw: &str) -> (String, String) {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut b64 = String::new();
+    for c in raw.as_bytes().chunks(3) {
+        let n = c
+            .iter()
+            .enumerate()
+            .fold(0u32, |a, (i, &b)| a | (u32::from(b) << (16 - 8 * i)));
+        for i in 0..4 {
+            b64.push(if i <= c.len() {
+                char::from(T[((n >> (18 - 6 * i)) & 63) as usize])
+            } else {
+                '='
+            });
+        }
+    }
+    let r = hook(
+        "POST",
+        "/__test/inbound",
+        Some(json!({ "mail_from": from, "rcpt_to": to, "raw_base64": b64 })),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    (
+        r.body["outcome"].as_str().unwrap_or("").to_owned(),
+        r.body["smtp"].as_str().unwrap_or("").to_owned(),
+    )
+}
+
+/// A plain-text message with a unique `Message-ID`.
+pub fn mail(from: &str, to: &str, subject: &str, body: &str) -> String {
+    format!(
+        "From: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nMessage-ID: <{}@it.example>\r\nDate: Mon, 26 Oct 2026 10:00:00 +0000\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n",
+        slug(subject)
+    )
+}
+
+/// Polls `f` every 250 ms for up to `secs` seconds until it answers `Some`.
+pub fn eventually<T>(secs: u64, what: &str, mut f: impl FnMut() -> Option<T>) -> T {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        if let Some(v) = f() {
+            return v;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// A tenant, an identity in it, and a tenant key holding the mail permissions:
+/// `(tenant id, identity id, address, key)`.
+pub fn mailbox_fixture(name: &str) -> (String, String, String, String) {
+    let p = platform();
+    let t = tenant(&p, name);
+    let tid = t["id"].as_str().unwrap().to_owned();
+    let idn = identity(&p, &tid, &slug(name)[..8]);
+    let (_, key) = mint(
+        &p,
+        json!({ "name": name, "level": "tenant", "tenant_id": tid, "permissions": [
+            "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read",
+            "identities:read", "identities:write"
+        ] }),
+    );
+    (
+        tid,
+        idn["id"].as_str().unwrap().to_owned(),
+        idn["primary_address"].as_str().unwrap().to_owned(),
+        key,
+    )
+}
+
+/// The identity's messages through the read API (`status` filter with review), newest first.
+pub fn messages_of(identity_id: &str, key: &str, query: &str) -> Vec<Value> {
+    let r = get(
+        &format!("/v1/identities/{identity_id}/messages?limit=100{query}"),
+        key,
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    r.body["data"].as_array().cloned().unwrap_or_default()
+}
+
+/// Waits until the identity holds `n` messages in `status`.
+pub fn wait_stored(identity_id: &str, key: &str, status: &str, n: usize) -> Vec<Value> {
+    eventually(30, &format!("{n} {status} message(s)"), || {
+        let m = messages_of(identity_id, key, &format!("&status={status}"));
+        (m.len() >= n).then_some(m)
+    })
+}
+
+/// Rows of one SQL statement on an identity's mailbox (`/__test/mailbox-query`).
+pub fn mailbox_query(identity_id: &str, sql: &str) -> Vec<Value> {
+    let r = hook(
+        "POST",
+        "/__test/mailbox-query",
+        Some(json!({ "identity_id": identity_id, "sql": sql })),
+    );
+    r.body["ok"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("{}", r.body))
+}
+
+/// Sends `body` to `queue` from inside the Worker (`/__test/queue-send`).
+pub fn queue_send(queue: &str, body: Value) {
+    let r = hook(
+        "POST",
+        "/__test/queue-send",
+        Some(json!({ "queue": queue, "body": body })),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
 }
