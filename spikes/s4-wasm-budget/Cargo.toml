@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 # The crates the Worker will link for inbound mail, so the bundle size is representative. mail-auth is
 # absent: no release of it resolves with reqwest 0.13 (see RESULT.md).
 [dependencies]
-pylota-identity-platform = { path = "../../crates/platform", features = ["spike-s1"] }
+pylota-identity-platform = { path = "../../crates/platform" }
 mail-parser = { workspace = true }
 mail-builder = { workspace = true }
 ammonia = { workspace = true }

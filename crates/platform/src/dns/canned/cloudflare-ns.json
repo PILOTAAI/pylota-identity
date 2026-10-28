@@ -1,0 +1,28 @@
+{
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [
+        {
+            "name": "pylotamail.com",
+            "type": 2
+        }
+    ],
+    "Answer": [
+        {
+            "name": "pylotamail.com",
+            "type": 2,
+            "TTL": 86400,
+            "data": "cortney.ns.cloudflare.com."
+        },
+        {
+            "name": "pylotamail.com",
+            "type": 2,
+            "TTL": 86400,
+            "data": "everton.ns.cloudflare.com."
+        }
+    ]
+}

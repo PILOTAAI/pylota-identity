@@ -64,6 +64,143 @@ mod entry {
     }
 }
 
+/// Worker logic is generic over one `Platform` bundle; native tests run it on `platform::fakes`. Until the
+/// logic modules arrive (M5 on), this exercise touches every trait of the bundle through the bound, as
+/// they will.
+#[cfg(test)]
+mod platform_bundle {
+    use pylota_identity_platform::ai::AiOptions;
+    use pylota_identity_platform::d1::Stmt;
+    use pylota_identity_platform::dns::{RType, Resolver};
+    use pylota_identity_platform::durable::DoClass;
+    use pylota_identity_platform::email::StructuredEmail;
+    use pylota_identity_platform::http::HttpRequest;
+    use pylota_identity_platform::ids::IdPrefix;
+    use pylota_identity_platform::metrics::DataPoint;
+    use pylota_identity_platform::queues::QueueName;
+    use pylota_identity_platform::r2::{BlobBody, BlobMeta};
+    use pylota_identity_platform::ratelimit::RlBucket;
+    use pylota_identity_platform::tcp::TlsMode;
+    use pylota_identity_platform::vectorize::VectorRecord;
+    use pylota_identity_platform::{
+        Ai, Background, BlobStore, Clock, ControlDb, Dns, HttpClient, Ids, MailSender, Metrics,
+        ObjectClient, Platform, QueueProducer, RateLimiter, Rng, TcpConnect, VectorIndex,
+    };
+
+    /// One call through each trait; returns what a handler would act on.
+    async fn touch_everything<P: Platform>(p: &P) -> Vec<String> {
+        let mut seen = Vec::new();
+        let id = p.ids().new_id(IdPrefix::Request);
+        seen.push(format!("{}@{}", &id[..4], p.clock().now_ms()));
+        let mut nonce = [0u8; 16];
+        p.rng().fill(&mut nonce);
+        let n: Vec<serde_json::Value> = p
+            .db()
+            .query(Stmt::new("SELECT 1 AS one", vec![]))
+            .await
+            .unwrap();
+        seen.push(format!("db {}", n[0]["one"]));
+        seen.push(format!(
+            "do {}",
+            p.objects().new_object_id(DoClass::Quota).unwrap().len()
+        ));
+        p.blobs()
+            .put(
+                "t/x",
+                BlobBody::Bytes(b"raw".to_vec()),
+                &BlobMeta::default(),
+            )
+            .await
+            .unwrap();
+        seen.push(format!("r2 {:?}", p.blobs().head("t/x").await.unwrap()));
+        p.queues()
+            .send(QueueName::Index, &serde_json::json!({ "op": "embed" }), 0)
+            .await
+            .unwrap();
+        let ai: Result<serde_json::Value, _> = p
+            .ai()
+            .run("@cf/baai/bge-m3", &1, &AiOptions::default())
+            .await;
+        seen.push(format!("ai {}", ai.is_err()));
+        let v = VectorRecord {
+            id: "c1".into(),
+            namespace: "idn".into(),
+            values: vec![1.0],
+            metadata: Default::default(),
+        };
+        p.vectors().upsert(&[v]).await.unwrap();
+        seen.push(format!(
+            "vectors {}",
+            p.vectors().describe().await.unwrap().vector_count
+        ));
+        seen.push(format!(
+            "mail {}",
+            p.mail()
+                .send(&StructuredEmail::default(), 30_000)
+                .await
+                .is_ok()
+        ));
+        seen.push(format!(
+            "rl {}",
+            p.limits().allow(RlBucket::Api, "key_1").await.unwrap()
+        ));
+        let a = p
+            .dns()
+            .query(Resolver::First, "example.test", RType::Txt)
+            .await
+            .unwrap();
+        seen.push(format!("dns {:?}", a.status));
+        seen.push(format!(
+            "http {:?}",
+            p.http()
+                .send(HttpRequest::get("https://x.test/"))
+                .await
+                .is_err()
+        ));
+        seen.push(format!(
+            "tcp {}",
+            p.tcp()
+                .connect("relay.test", 465, TlsMode::Implicit, 1_000)
+                .await
+                .is_err()
+        ));
+        p.metrics().write(DataPoint {
+            indexes: ["ten_1".into()],
+            blobs: vec![],
+            doubles: vec![1.0],
+        });
+        p.background().wait_until(async {});
+        seen.push(format!("config {}", p.config().platform_domain));
+        seen
+    }
+
+    #[test]
+    fn every_trait_runs_on_the_fakes() {
+        let p = pylota_identity_platform::fakes::FakePlatform::new();
+        let seen = pylota_identity_platform::fakes::block_on(touch_everything(&p));
+        assert_eq!(seen[0], "req_@1791540000000");
+        assert_eq!(
+            seen[1..],
+            [
+                "db 1",
+                "do 64",
+                "r2 Some(3)",
+                "ai true",
+                "vectors 1",
+                "mail true",
+                "rl true",
+                "dns NxDomain",
+                "http true",
+                "tcp true",
+                "config pylotamail.test",
+            ]
+        );
+        assert_eq!(p.queues.sent().len(), 1);
+        assert_eq!(p.metrics.points().len(), 1);
+        assert_eq!(p.background.pending(), 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The M0 Worker answers `200` (build plan M0).

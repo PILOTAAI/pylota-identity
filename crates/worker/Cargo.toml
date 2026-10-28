@@ -15,3 +15,6 @@ crate-type = ["cdylib", "rlib"]
 # platform::export_worker! (Rust workspace § 2; `cargo xtask check-layering`).
 [dependencies]
 pylota-identity-platform = { path = "../platform" }
+
+[dev-dependencies]
+serde_json = { workspace = true }

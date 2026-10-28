@@ -5,6 +5,7 @@
 
 pub mod errors;
 pub mod events;
+pub mod ids;
 pub mod nullable;
 pub mod objects;
 pub mod openapi;

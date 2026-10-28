@@ -1,16 +1,18 @@
 //! The functions behind [`export_worker!`](crate::export_worker): each converts the runtime's JS
 //! values, calls the application trait and converts the result back, as the code `worker-macros`
 //! 0.8.7 generates for `#[event(...)]` and `#[durable_object]` does, including its answer to a
-//! conversion error (a plain `500`).
+//! conversion error (a plain `500`). Spike S1 wrote and ran the first version against the runtime.
 //!
-//! Spike S1 wrote the `email`, `queue` and `scheduled` exports and the Durable Object classes and ran
-//! them against the deployed runtime ([Rust workspace §6.3]); M4 hardens them.
+//! Differences from `worker-macros` 0.8.7, each deliberate:
 //!
-//! Two deliberate differences from `worker-macros` 0.8.7, which panics when an `email` or `queue`
-//! handler fails: here a failure is a rejected promise. The runtime treats both as a thrown exception,
-//! and a rejection leaves the wasm instance usable.
-//!
-//! [Rust workspace §6.3]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/rust-workspace.md
+//! - A failed `email` or `queue` handler is a rejected promise, not a panic. The runtime treats both as
+//!   a thrown exception, and a rejection leaves the wasm instance usable.
+//! - Configuration is read once per isolate before any handler runs. While it is invalid, `fetch`
+//!   answers `503 unavailable` with `details.config_invalid` naming the variable (on `/health` as on
+//!   every other path), mail is refused as a temporary failure, queue messages are retried, cron ticks
+//!   and alarms do nothing, and Durable Object requests get the same `503` (Rust workspace § 6.1).
+//! - The raw message and request bodies stay in the JS heap ([`JsBuffer`]) until the application
+//!   reads them.
 
 pub use js_sys;
 pub use wasm_bindgen;
@@ -18,6 +20,19 @@ pub use wasm_bindgen::JsValue;
 pub use wasm_bindgen_futures;
 
 use wasm_bindgen::JsCast as _;
+
+pub use super::CfPlatform;
+use super::basic::dup_state;
+use super::js;
+use super::queues::{CfSettle, read_message};
+use super::{CfBackground, CfHibernation, CfIds, CfSql, CfStorage, CfWebSocket};
+pub use crate::app::{
+    EmailIn, EmailOutcome, HttpRequestIn, HttpResponseOut, ScheduledIn, UpgradeResponse, WsMessage,
+};
+use crate::buffer::JsBuffer;
+use crate::config::ConfigInvalid;
+use crate::ids::{IdPrefix, Ids as _};
+use crate::queues::{Incoming, QueueName};
 
 /// The argument types of the exports, named so the macro expansion needs no `worker` path.
 pub type RawRequest = worker::worker_sys::web_sys::Request;
@@ -28,116 +43,39 @@ pub type RawBatch = worker::worker_sys::MessageBatch;
 pub type RawScheduledEvent = worker::worker_sys::ScheduledEvent;
 pub type RawScheduleContext = worker::worker_sys::ScheduleContext;
 pub type RawObjectState = worker::worker_sys::DurableObjectState;
-
-/// The Cloudflare platform handed to the application for one invocation. M4 gives it the trait set.
-pub struct CfPlatform {
-    // Read only by the spike accessors until M4 builds the trait set on it.
-    #[cfg_attr(not(feature = "spike-s1"), allow(dead_code))]
-    env: worker::Env,
-}
-
-impl CfPlatform {
-    /// The raw bindings, for the spike only; M4 replaces this with the platform traits.
-    #[cfg(feature = "spike-s1")]
-    pub fn env(&self) -> &worker::Env {
-        &self.env
-    }
-
-    /// A variable or secret, for the spikes only; M4 replaces this with `Config` and `Secrets`.
-    #[cfg(feature = "spike-s1")]
-    pub fn var(&self, name: &str) -> Option<String> {
-        self.env
-            .secret(name)
-            .or_else(|_| self.env.var(name))
-            .ok()
-            .map(|v| v.to_string())
-    }
-}
+pub type RawWebSocket = worker::worker_sys::web_sys::WebSocket;
 
 /// A Durable Object's state, handed to [`ObjectApp::new`].
 pub struct CfObjectState {
-    #[cfg_attr(not(feature = "spike-s1"), allow(dead_code))]
+    raw: RawObjectState,
     state: worker::State,
 }
 
 impl CfObjectState {
-    /// The raw state, for the spike only; M4 replaces this with the platform traits.
-    #[cfg(feature = "spike-s1")]
-    pub fn state(&self) -> &worker::State {
-        &self.state
-    }
-}
-
-/// An HTTP request as the application sees it.
-pub struct HttpRequestIn {
-    pub method: String,
-    pub url: String,
-    pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
-    pub cf_connecting_ip: Option<String>,
-}
-
-/// The application's answer. M30 adds the WebSocket upgrade.
-pub enum HttpResponseOut {
-    Http {
-        status: u16,
-        headers: Vec<(String, String)>,
-        body: Vec<u8>,
-    },
-}
-
-/// An inbound message from Email Routing.
-pub struct EmailIn {
-    pub from: String,
-    pub to: String,
-    pub headers: Vec<(String, String)>,
-    pub raw: Vec<u8>,
-    pub raw_size: u64,
-}
-
-/// What the email export does with the message ([Inbound › Interface]).
-///
-/// [Inbound › Interface]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/inbound.md
-pub enum EmailOutcome {
-    Accept,
-    /// `setReject`: a permanent SMTP failure with this text.
-    Reject {
-        smtp: String,
-    },
-    /// The export rejects its promise, which the runtime reports to the sender as a temporary failure.
-    TempFail,
-}
-
-/// A cron trigger.
-pub struct ScheduledIn {
-    pub cron: String,
-    pub scheduled_time_ms: f64,
-}
-
-/// One queue message. Unhandled messages follow the runtime's default: the batch succeeds and is acked.
-pub struct Incoming {
-    pub id: String,
-    /// When the message was first sent, in milliseconds since the epoch.
-    pub timestamp_ms: f64,
-    /// Delivery attempts so far, starting at 1.
-    pub attempts: u32,
-    /// The body as JSON text.
-    pub body_json: String,
-    raw: worker::worker_sys::Message,
-}
-
-impl Incoming {
-    pub fn ack(&self) {
-        let _ = self.raw.ack();
+    /// The object's own ID (hex).
+    pub fn id(&self) -> String {
+        self.state.id().to_string()
     }
 
-    /// Retries the message, after `delay_seconds` when given.
-    pub fn retry(&self, delay_seconds: Option<u32>) {
-        let options = js_sys::Object::new();
-        if let Some(delay) = delay_seconds {
-            let _ = js_sys::Reflect::set(&options, &"delaySeconds".into(), &delay.into());
+    /// `ctx.storage.sql`.
+    pub fn sql(&self) -> CfSql {
+        let storage = self.state.storage();
+        CfSql {
+            sql: storage.sql(),
+            storage,
         }
-        let _ = self.raw.retry(options.into());
+    }
+
+    /// The alarm and `deleteAll`.
+    pub fn storage(&self) -> CfStorage {
+        CfStorage {
+            storage: self.state.storage(),
+        }
+    }
+
+    /// Hibernating WebSockets (`TenantEvents`).
+    pub fn hibernation(&self) -> CfHibernation {
+        CfHibernation::new(&self.raw)
     }
 }
 
@@ -154,7 +92,14 @@ pub trait WorkerApp: Sized + 'static {
     async fn email(&self, _msg: EmailIn) -> EmailOutcome {
         EmailOutcome::TempFail
     }
-    async fn queue(&self, _queue: String, batch: Vec<Incoming>) {
+    /// One batch of `queue` (its dead-letter queue when `dead_letter`); every message is acked or
+    /// retried. A message nobody settles is acked when the batch succeeds (the runtime's default).
+    async fn queue(
+        &self,
+        _queue: QueueName,
+        _dead_letter: bool,
+        batch: Vec<Incoming<serde_json::Value>>,
+    ) {
         for message in &batch {
             message.retry(None);
         }
@@ -162,33 +107,62 @@ pub trait WorkerApp: Sized + 'static {
     async fn scheduled(&self, _ev: ScheduledIn) {}
 }
 
-/// What each Durable Object class implements.
+/// What each Durable Object class implements. Only `TenantEvents` is exported with the hibernation
+/// handlers; the defaults close the socket with `1011`.
 #[allow(async_fn_in_trait)]
 pub trait ObjectApp: Sized + 'static {
     fn new(state: CfObjectState, platform: CfPlatform) -> Self;
+    /// Decodes the `RpcEnvelope`, checks the owner, dispatches and encodes the `RpcResult`.
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut;
+    /// Runs the due purposes (Design conventions, rule 5).
     async fn alarm(&self) {}
+    async fn websocket_message(&self, ws: CfWebSocket, _msg: WsMessage) {
+        let _ = ws.close(1011, "unexpected message");
+    }
+    async fn websocket_close(&self, ws: CfWebSocket, _code: u16, _reason: String, _clean: bool) {
+        let _ = ws.close(1011, "closed");
+    }
+    async fn websocket_error(&self, ws: CfWebSocket, _err: String) {
+        let _ = ws.close(1011, "error");
+    }
+}
+
+/// The JS object behind an exported class: the application's object, or the reason it could not be
+/// built.
+#[doc(hidden)]
+pub enum Object<O> {
+    Ready(O),
+    Invalid(ConfigInvalid),
 }
 
 #[doc(hidden)]
 pub async fn fetch<A: WorkerApp>(
     req: RawRequest,
     env: RawEnv,
-    _ctx: RawContext,
+    ctx: RawContext,
 ) -> Result<JsValue, JsValue> {
-    let app = A::new(CfPlatform { env });
-    Ok(JsValue::from(
-        handle_http(req, "fetch", |input| app.fetch(input)).await,
-    ))
+    let ctx = worker::Context::new(ctx);
+    let response = match CfPlatform::new(env, CfBackground::Worker(ctx)) {
+        Ok(platform) => {
+            let app = A::new(platform);
+            handle_http(req, "fetch", |input| app.fetch(input)).await
+        }
+        Err(e) => config_invalid(e),
+    };
+    Ok(response.into())
 }
 
 #[doc(hidden)]
 pub async fn email<A: WorkerApp>(
     message: RawEmail,
     env: RawEnv,
-    _ctx: RawContext,
+    ctx: RawContext,
 ) -> Result<JsValue, JsValue> {
-    let app = A::new(CfPlatform { env });
+    let ctx = worker::Context::new(ctx);
+    let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
+        return Err(JsValue::from_str("temporary failure"));
+    };
+    let app = A::new(platform);
     let input = match email_in(&message).await {
         Ok(input) => input,
         Err(_) => {
@@ -210,15 +184,42 @@ pub async fn email<A: WorkerApp>(
 pub async fn queue<A: WorkerApp>(
     batch: RawBatch,
     env: RawEnv,
-    _ctx: RawContext,
+    ctx: RawContext,
 ) -> Result<JsValue, JsValue> {
-    let app = A::new(CfPlatform { env });
+    let ctx = worker::Context::new(ctx);
+    let raw: Vec<JsValue> = batch.messages()?.iter().collect();
+    let retry_all = |raw: &[JsValue]| {
+        for m in raw {
+            let _ = js::call(m, "retry", &[]);
+        }
+    };
+    let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
+        retry_all(&raw);
+        return Ok(JsValue::UNDEFINED);
+    };
     let name = batch.queue()?.as_string().unwrap_or_default();
-    let mut messages = Vec::new();
-    for raw in batch.messages()?.iter() {
-        messages.push(incoming(raw.unchecked_into())?);
+    let Some((queue, dead_letter)) = QueueName::from_queue_name(&name) else {
+        worker::console_error!("event=glue_error handler=queue reason=unknown_queue");
+        retry_all(&raw);
+        return Ok(JsValue::UNDEFINED);
+    };
+    let mut messages = Vec::with_capacity(raw.len());
+    for m in raw {
+        match read_message(&m) {
+            Ok((id, timestamp_ms, attempts, body)) => messages.push(Incoming::new(
+                id,
+                timestamp_ms,
+                attempts,
+                body,
+                std::rc::Rc::new(CfSettle { raw: m }),
+            )),
+            Err(_) => {
+                worker::console_error!("event=glue_error handler=queue reason=unreadable_message");
+                let _ = js::call(&m, "retry", &[]);
+            }
+        }
     }
-    app.queue(name, messages).await;
+    A::new(platform).queue(queue, dead_letter, messages).await;
     Ok(JsValue::UNDEFINED)
 }
 
@@ -226,39 +227,103 @@ pub async fn queue<A: WorkerApp>(
 pub async fn scheduled<A: WorkerApp>(
     event: RawScheduledEvent,
     env: RawEnv,
-    _ctx: RawScheduleContext,
+    ctx: RawScheduleContext,
 ) -> Result<JsValue, JsValue> {
-    let app = A::new(CfPlatform { env });
+    let background: worker::worker_sys::Context = ctx.unchecked_into();
+    let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(worker::Context::new(background)))
+    else {
+        return Ok(JsValue::UNDEFINED);
+    };
     let event = worker::ScheduledEvent::from(event);
-    app.scheduled(ScheduledIn {
-        cron: event.cron(),
-        scheduled_time_ms: event.schedule(),
-    })
-    .await;
+    A::new(platform)
+        .scheduled(ScheduledIn {
+            cron: event.cron(),
+            scheduled_time_ms: event.schedule() as i64,
+        })
+        .await;
     Ok(JsValue::UNDEFINED)
 }
 
 #[doc(hidden)]
-pub fn object_new<O: ObjectApp>(state: RawObjectState, env: RawEnv) -> O {
-    O::new(
-        CfObjectState {
-            state: worker::State::from(state),
-        },
-        CfPlatform { env },
-    )
+pub fn object_new<O: ObjectApp>(state: RawObjectState, env: RawEnv) -> Object<O> {
+    match CfPlatform::new(env, CfBackground::Object(dup_state(&state))) {
+        Ok(platform) => Object::Ready(O::new(
+            CfObjectState {
+                state: worker::State::from(dup_state(&state)),
+                raw: state,
+            },
+            platform,
+        )),
+        Err(e) => Object::Invalid(e),
+    }
 }
 
 #[doc(hidden)]
-pub async fn object_fetch<O: ObjectApp>(object: &O, req: RawRequest) -> Result<JsValue, JsValue> {
-    Ok(JsValue::from(
-        handle_http(req, "object_fetch", |input| object.fetch(input)).await,
-    ))
+pub async fn object_fetch<O: ObjectApp>(
+    object: &Object<O>,
+    req: RawRequest,
+) -> Result<JsValue, JsValue> {
+    let response = match object {
+        Object::Ready(o) => handle_http(req, "object_fetch", |input| o.fetch(input)).await,
+        Object::Invalid(e) => config_invalid(*e),
+    };
+    Ok(response.into())
 }
 
 #[doc(hidden)]
-pub async fn object_alarm<O: ObjectApp>(object: &O) -> Result<JsValue, JsValue> {
-    object.alarm().await;
+pub async fn object_alarm<O: ObjectApp>(object: &Object<O>) -> Result<JsValue, JsValue> {
+    if let Object::Ready(o) = object {
+        o.alarm().await;
+    }
     Ok(JsValue::UNDEFINED)
+}
+
+#[doc(hidden)]
+pub async fn object_websocket_message<O: ObjectApp>(
+    object: &Object<O>,
+    ws: RawWebSocket,
+    message: JsValue,
+) -> Result<JsValue, JsValue> {
+    let ws = CfWebSocket(ws.into());
+    let message = match message.as_string() {
+        Some(text) => WsMessage::Text(text),
+        None => WsMessage::Binary(js_sys::Uint8Array::new(&message).to_vec()),
+    };
+    match object {
+        Object::Ready(o) => o.websocket_message(ws, message).await,
+        Object::Invalid(_) => {
+            let _ = ws.close(1011, "unavailable");
+        }
+    }
+    Ok(JsValue::NULL)
+}
+
+#[doc(hidden)]
+pub async fn object_websocket_close<O: ObjectApp>(
+    object: &Object<O>,
+    ws: RawWebSocket,
+    code: u16,
+    reason: String,
+    clean: bool,
+) -> Result<JsValue, JsValue> {
+    if let Object::Ready(o) = object {
+        o.websocket_close(CfWebSocket(ws.into()), code, reason, clean)
+            .await;
+    }
+    Ok(JsValue::NULL)
+}
+
+#[doc(hidden)]
+pub async fn object_websocket_error<O: ObjectApp>(
+    object: &Object<O>,
+    ws: RawWebSocket,
+    error: JsValue,
+) -> Result<JsValue, JsValue> {
+    if let Object::Ready(o) = object {
+        o.websocket_error(CfWebSocket(ws.into()), js::message(&error))
+            .await;
+    }
+    Ok(JsValue::NULL)
 }
 
 async fn handle_http<F, Fut>(
@@ -270,7 +335,7 @@ where
     F: FnOnce(HttpRequestIn) -> Fut,
     Fut: core::future::Future<Output = HttpResponseOut>,
 {
-    let input = match request_in(worker::Request::from(req)).await {
+    let input = match request_in(req).await {
         Ok(input) => input,
         Err(_) => return internal_error(handler),
     };
@@ -280,71 +345,61 @@ where
     }
 }
 
-async fn request_in(mut req: worker::Request) -> worker::Result<HttpRequestIn> {
-    let headers = req.headers().clone();
-    let body = match req.method() {
-        worker::Method::Get | worker::Method::Head => Vec::new(),
-        _ => req.bytes().await?,
+async fn request_in(req: RawRequest) -> Result<HttpRequestIn, JsValue> {
+    let method = req.method();
+    let headers = worker::Headers(req.headers());
+    let body = match method.as_str() {
+        "GET" | "HEAD" => None,
+        _ => {
+            let buffer = js::call_async(&req, "arrayBuffer", &[]).await?;
+            let array = js_sys::Uint8Array::new(&buffer);
+            (array.length() > 0).then_some(JsBuffer { array })
+        }
     };
     Ok(HttpRequestIn {
-        method: req.method().to_string(),
-        url: req.url()?.to_string(),
-        cf_connecting_ip: headers.get("cf-connecting-ip")?,
+        method,
+        url: req.url(),
+        cf_connecting_ip: headers.get("cf-connecting-ip").ok().flatten(),
         headers: headers.entries().collect(),
         body,
     })
 }
 
-async fn email_in(message: &RawEmail) -> worker::Result<EmailIn> {
-    let from = js_string(message, "from")?;
-    let to = js_string(message, "to")?;
+async fn email_in(message: &RawEmail) -> Result<EmailIn, JsValue> {
+    let from = js::get(message, "from")?.as_string().unwrap_or_default();
+    let to = js::get(message, "to")?.as_string().unwrap_or_default();
     let headers = worker::Headers(message.headers()).entries().collect();
+    // The raw stream read whole into an ArrayBuffer that stays in the JS heap (§5 rule 5).
+    let response = js::construct("Response", &[&message.raw().into()])?;
+    let buffer = js::call_async(&response, "arrayBuffer", &[]).await?;
+    let array = js_sys::Uint8Array::new(&buffer);
     Ok(EmailIn {
         from,
         to,
         headers,
         raw_size: message.raw_size() as u64,
-        raw: message.raw_bytes().await?,
+        raw: JsBuffer { array },
     })
-}
-
-fn incoming(raw: worker::worker_sys::Message) -> Result<Incoming, JsValue> {
-    let attempts = js_sys::Reflect::get(&raw, &"attempts".into())?
-        .as_f64()
-        .unwrap_or(1.0) as u32;
-    let body_json = js_sys::JSON::stringify(&raw.body()?)?
-        .as_string()
-        .unwrap_or_default();
-    Ok(Incoming {
-        id: raw.id()?.as_string().unwrap_or_default(),
-        timestamp_ms: raw.timestamp()?.get_time(),
-        attempts,
-        body_json,
-        raw,
-    })
-}
-
-/// `from` and `to` are getters inherited from the runtime's `EmailMessage`.
-fn js_string(value: &JsValue, name: &str) -> worker::Result<String> {
-    js_sys::Reflect::get(value, &name.into())?
-        .as_string()
-        .ok_or_else(|| worker::Error::RustError(format!("email message has no `{name}`")))
 }
 
 fn response_out(out: HttpResponseOut) -> worker::Result<worker::worker_sys::web_sys::Response> {
-    let HttpResponseOut::Http {
-        status,
-        headers,
-        body,
-    } = out;
-    let h = worker::Headers::new();
-    for (name, value) in &headers {
-        h.append(name, value)?;
+    match out {
+        HttpResponseOut::Http {
+            status,
+            headers,
+            body,
+        } => {
+            let h = worker::Headers::new();
+            for (name, value) in &headers {
+                h.append(name, value)?;
+            }
+            Ok(worker::Response::from_bytes(body)?
+                .with_status(status)
+                .with_headers(h)
+                .into())
+        }
+        HttpResponseOut::Upgrade(up) => Ok(up.response),
     }
-    Ok(worker::Response::from_bytes(body)?
-        .with_status(status)
-        .with_headers(h)
-        .into())
 }
 
 /// The response for a request or response the glue could not convert, as worker-macros 0.8.7
@@ -354,4 +409,26 @@ fn internal_error(handler: &str) -> worker::worker_sys::web_sys::Response {
     worker::Response::error("INTERNAL SERVER ERROR", 500)
         .expect("a fixed body and a valid status always build a response")
         .into()
+}
+
+/// `503 unavailable` with `details.config_invalid` naming the variable.
+fn config_invalid(e: ConfigInvalid) -> worker::worker_sys::web_sys::Response {
+    let body = serde_json::json!({
+        "error": {
+            "code": "unavailable",
+            "message": "The deployment's configuration is invalid.",
+            "retryable": true,
+            "fix": "The operator must correct the variable named in details.config_invalid and redeploy.",
+            "docs": format!("{}/reference/errors#code-unavailable", crate::config::DEFAULT_DOCS_URL),
+            "request_id": CfIds.new_id(IdPrefix::Request),
+            "details": { "config_invalid": e.name },
+        }
+    });
+    let headers = worker::Headers::new();
+    let _ = headers.set("content-type", "application/json");
+    let _ = headers.set("retry-after", "60");
+    match worker::Response::from_bytes(body.to_string().into_bytes()) {
+        Ok(r) => r.with_status(503).with_headers(headers).into(),
+        Err(_) => internal_error("config_invalid"),
+    }
 }

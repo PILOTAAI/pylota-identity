@@ -3,7 +3,8 @@
 **Pass.** Run against Pylota's account on 2026-10-27 with the Worker `pi-spike-1` (workers.dev), built by
 `worker-build` 0.8.7 from `spikes/s1-bindings`, whose only dependency is `crates/platform`. The entry points
 come from `platform::export_worker!` and `platform::cf::glue`, which S1 wrote; the spike's own logic is in
-`platform::cf::spike_s1` (feature `spike-s1`, deleted at M4).
+`platform::cf::spike_s1` (feature `spike-s1`). M4 moved its findings into the platform traits and removed
+the module and the spike crate; both are in the history at commit `84a76b2`.
 
 ## Done
 

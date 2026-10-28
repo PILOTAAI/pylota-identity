@@ -669,6 +669,32 @@ Implementation notes:
   runs at most four SMTP sends at once. Certificate and host-name checking is spike S12. The fake is a
   scripted SMTP peer.
 
+**As built (M4).** The signatures above hold, with these additions and settlements:
+
+- `IdPrefix` and the ID format live in `api_types::ids` (re-exported by `core::ids`), because `platform`
+  may depend on `api-types` but not on `core`.
+- `RpcEnvelope` and `RpcResult` are defined in `platform::durable` (`RpcResult::Err` holds a boxed
+  `ApiErrorBody`, the API error envelope) and re-exported by `worker::rpc`. `ObjectClient::upgrade` is
+  generic over the envelope's request type. `MailboxStub` is defined in `worker` with `MailboxRequest`.
+- `QueueName` adds `Phone` (`Q_PHONE`); `QueueName::from_queue_name` maps a batch's queue name, its
+  `-dlq` included, and `WorkerApp::queue` receives `(queue, dead_letter, batch)`. `Incoming` adds
+  `attempts`. `RlBucket` adds `Ai` (`RL_AI`) and `Embed` (`RL_EMBED`).
+- `Hibernation` has an associated `Socket` type (`cf::CfWebSocket`, `fakes::FakeSocket`).
+  `export_worker!` exports the three hibernation handlers for a class written `TenantEvents =>
+  crate::events::EventsObject { websocket }`.
+- `Config::read(lookup, Build)` applies the startup rules; it also holds `phone`, `vault`, `degraded`
+  (the `/health` reasons) and `warnings` (`docs_url_invalid`). On Cloudflare it is read once per isolate;
+  while it is invalid the glue answers every `fetch` and object request with `503 unavailable` and
+  `details.config_invalid`.
+- R2 errors are `PlatformError`s whose detail reads `r2 {code}: …` (`PlatformError::r2_code`). The R2
+  binding has no server-side copy, so `BlobStore::copy` streams the source into a new put that R2 checks
+  against the length and SHA-256 again.
+- `DnsError::Http(0)` means no HTTP response came from the resolver (DNS, TLS or connect failure).
+  `dns::DohClient` implements `Dns` over any `HttpClient`; its parsing is tested on answers recorded from
+  both resolvers (`crates/platform/src/dns/canned/`).
+- The fakes use `rusqlite =0.40.2` (bundled SQLite with FTS5) and `sha2`, as native-only dependencies of
+  `platform` that never reach the Worker bundle.
+
 **The `Platform` bundle.** Logic is generic over one bundle, so handlers and objects name a single type
 parameter instead of a dozen traits:
 

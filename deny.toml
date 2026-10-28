@@ -50,10 +50,8 @@ exceptions = [
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-cli" },
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-conformance" },
     { allow = ["FSL-1.1-ALv2"], crate = "xtask" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-spike-s1" },
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-spike-s4" },
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-spike-s5" },
-    { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-spike-s8-s11" },
     { allow = ["FSL-1.1-ALv2"], crate = "pylota-identity-spike-s13" },
 ]
 

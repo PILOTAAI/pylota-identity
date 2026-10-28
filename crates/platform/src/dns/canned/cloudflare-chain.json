@@ -1,0 +1,34 @@
+{
+    "Status": 0,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [
+        {
+            "name": "www.github.com",
+            "type": 16
+        }
+    ],
+    "Answer": [
+        {
+            "name": "www.github.com",
+            "type": 5,
+            "TTL": 3600,
+            "data": "github.com."
+        },
+        {
+            "name": "github.com",
+            "type": 16,
+            "TTL": 300,
+            "data": "\"00Dd0000000hHE0=1TBKg000000TN2r\""
+        },
+        {
+            "name": "github.com",
+            "type": 16,
+            "TTL": 300,
+            "data": "\"MS=6BF03E6AF5CB689E315FB6199603BABF2C88D805\""
+        }
+    ]
+}

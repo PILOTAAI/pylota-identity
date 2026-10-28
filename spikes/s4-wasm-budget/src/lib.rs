@@ -57,7 +57,7 @@ mod entry {
     use pylota_identity_platform::cf::glue::{
         CfPlatform, HttpRequestIn, HttpResponseOut, WorkerApp,
     };
-    use pylota_identity_platform::cf::spike_s1::wasm_memory_bytes;
+    use pylota_identity_platform::cf::wasm_memory_bytes;
 
     pub struct App;
 
@@ -69,7 +69,7 @@ mod entry {
         async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
             let before = wasm_memory_bytes();
             let mut report = if req.method == "POST" {
-                super::parse_report(&req.body)
+                super::parse_report(&req.body.map(|b| b.to_vec()).unwrap_or_default())
             } else {
                 serde_json::json!({ "hello": "s4" })
             };

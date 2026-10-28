@@ -6,7 +6,9 @@ Code: `core::ses::sigv4` and `core::sns`, called from the spike Worker `spikes/s
 (`wrangler dev --local`) on a GitHub Actions runner with the staging role's temporary credentials (OIDC,
 [ADR 0023](../../docs/src/project/adr/0023-staging-in-the-existing-account-and-ses-through-oidc.md)), by the
 workflow `spikes-ses.yml` (run 7, <https://github.com/PILOTAAI/pylota-identity/actions/runs/40596207014>).
-The same run is S11's; see [`spikes/s8-s11-ses`](../s8-s11-ses/).
+The same run is S11's. The spike Worker, its `run.sh` and the `spikes-ses.yml` workflow were removed at
+build plan M4, once the platform crate replaced the spike helpers they used; they are in the history at
+commit `84a76b2`.
 
 | Check | Result |
 |---|---|

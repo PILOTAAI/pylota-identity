@@ -1,6 +1,0 @@
-# Spikes S8 and S11 (build plan M1). Run only locally in workerd by the workflow spikes-ses.yml
-# (`wrangler dev --local`); never deployed. The AWS credentials come from the workflow's OIDC role
-# through .dev.vars, which the workflow writes and deletes.
-name = "pi-spike-8"
-main = "build/index.js"
-compatibility_date = "2026-09-22"

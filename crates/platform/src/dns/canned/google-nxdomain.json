@@ -1,0 +1,22 @@
+{
+    "Status": 3,
+    "TC": false,
+    "RD": true,
+    "RA": true,
+    "AD": false,
+    "CD": false,
+    "Question": [
+        {
+            "name": "nonexistent-zz9.pylotamail.com.",
+            "type": 16
+        }
+    ],
+    "Authority": [
+        {
+            "name": "pylotamail.com.",
+            "type": 6,
+            "TTL": 1787,
+            "data": "cortney.ns.cloudflare.com. dns.cloudflare.com. 2418626807 10000 2400 604800 1800"
+        }
+    ]
+}
