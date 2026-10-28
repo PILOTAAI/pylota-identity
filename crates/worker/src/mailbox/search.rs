@@ -454,7 +454,21 @@ fn location(source: Option<&str>) -> (String, Option<(String, Option<u32>)>) {
 pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
     let terms = inp.c.term_patterns();
     let chars = inp.snippet_chars as usize;
-    let refs: SqlValue = serde_json::to_string(&inp.c.ref_like)
+    // Free-text reference terms and `ref:` operator values are both located in `refs`.
+    let ref_values: Vec<String> = inp
+        .c
+        .ref_like
+        .iter()
+        .cloned()
+        .chain(
+            inp.c
+                .why_filters
+                .iter()
+                .filter_map(|w| w.strip_prefix("ref:"))
+                .map(|v| v.trim_matches('"').to_owned()),
+        )
+        .collect();
+    let refs: SqlValue = serde_json::to_string(&ref_values)
         .unwrap_or_default()
         .into();
     let groups = [
@@ -478,7 +492,7 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
             "SELECT id, filename, text_status FROM attachments WHERE message_rowid = ?1 ORDER BY rowid",
             &[(*rowid).into()],
         )?;
-        if !inp.c.ref_like.is_empty() {
+        if !ref_values.is_empty() {
             let hits: Vec<RefHit> = s.query(
                 "SELECT value, source FROM refs WHERE message_rowid = ?1 AND value IN (SELECT value FROM json_each(?2))",
                 &[(*rowid).into(), refs.clone()],
@@ -529,7 +543,18 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
                 }
             }
         }
-        why.extend(inp.c.why_filters.iter().cloned());
+        // A located `ref:` entry replaces the operator's bare one.
+        let located: Vec<String> = why
+            .iter()
+            .filter_map(|w| w.split(" (").next().map(str::to_owned))
+            .collect();
+        why.extend(
+            inp.c
+                .why_filters
+                .iter()
+                .filter(|w| !located.contains(w))
+                .cloned(),
+        );
         if inp.c.attachment_query && atts.iter().any(|a| a.text_status == "unavailable") {
             why.push("attachment_text_unavailable".into());
         }

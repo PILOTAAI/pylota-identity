@@ -91,6 +91,17 @@ pub fn list(
     )
 }
 
+/// The identities tenant search reads ([Search § 10]): `active` and `paused`, never the system
+/// identity.
+///
+/// [Search § 10]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/search.md
+pub fn searchable(tenant_id: &str) -> Stmt {
+    Stmt::new(
+        "SELECT id, tenant_id, username, display_name, purpose, client_id, client_fingerprint, owner_name, owner_email, signature_text, signature_html, status, pause_reason, send_policy_json, message_hours, metadata_json, mailbox_do_id, is_system, created_at, updated_at FROM identities WHERE tenant_id = ?1 AND status IN ('active','paused') AND is_system = 0 ORDER BY id",
+        vec![tenant_id.into()],
+    )
+}
+
 /// The system identity's row, when setup has written one that is still live.
 pub fn system() -> Stmt {
     Stmt::new(

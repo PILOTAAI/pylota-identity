@@ -47,6 +47,17 @@ pub fn request_hash(parts: &[&str]) -> String {
     h[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// `hex(HMAC-SHA256(PM_HASH_KEY, q))[..16]`, the only form of a query that reaches a log line
+/// ([Search § 2] step 10).
+///
+/// [Search § 2]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/search.md
+pub fn query_hash(hash_key: &[u8; 32], q: &str) -> String {
+    let mut m = <hmac::Hmac<Sha256> as KeyInit>::new_from_slice(hash_key).expect("any key length");
+    m.update(q.as_bytes());
+    let full: [u8; 32] = m.finalize().into_bytes().into();
+    full[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn tag(key: &[u8; 32], payload: &[u8]) -> [u8; 16] {
     let mut m = <hmac::Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("any key length");
     m.update(DOMAIN);
@@ -166,6 +177,8 @@ mod tests {
             Err(CursorError::Invalid)
         );
         assert_eq!(open(&t, &[("1", &k)], 2_000).map(|c| c.qh), Ok(qh));
+        assert_eq!(query_hash(&k, "plate").len(), 16);
+        assert_ne!(query_hash(&k, "plate"), query_hash(&old, "plate"));
     }
 
     #[test]

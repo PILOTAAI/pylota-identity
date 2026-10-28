@@ -102,6 +102,10 @@ pub enum Handler {
     ListEntryPut,
     ListEntryDelete,
     SignedLink,
+    SearchIdentity,
+    SearchTenant,
+    Related,
+    Contacts,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1034,6 +1038,56 @@ pub static ROUTES: &[RouteSpec] = &[
         I::None,
         &[],
         Handler::SignedLink,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/search",
+        "searchIdentity",
+        &["search:read"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::None,
+        ALL,
+        Handler::SearchIdentity,
+    ),
+    route(
+        M::Post,
+        "/v1/tenants/{tenant_id}/search",
+        "searchTenant",
+        &["search:read"],
+        &[],
+        Scope::TenantPath { param: "tenant_id" },
+        I::None,
+        TENANT_UP,
+        Handler::SearchTenant,
+    ),
+    route(
+        M::Get,
+        "/v1/identities/{identity_id}/messages/{message_id}/related",
+        "findRelatedMessages",
+        &["search:read"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::None,
+        ALL,
+        Handler::Related,
+    ),
+    route(
+        M::Get,
+        "/v1/identities/{identity_id}/contacts",
+        "searchContacts",
+        &["search:read"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::None,
+        ALL,
+        Handler::Contacts,
     ),
 ];
 

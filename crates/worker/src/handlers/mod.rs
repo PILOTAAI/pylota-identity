@@ -15,6 +15,7 @@ pub mod partners;
 pub mod platform;
 pub mod policy;
 pub mod quarantine;
+pub mod search;
 pub mod send;
 pub mod suppressions;
 pub mod tenants;
@@ -103,6 +104,10 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::ListEntryPut => lists::put(c).await,
         Handler::ListEntryDelete => lists::delete(c).await,
         Handler::SignedLink => links::get(c).await,
+        Handler::SearchIdentity => search::identity(c).await,
+        Handler::SearchTenant => search::tenant(c).await,
+        Handler::Related => search::related(c).await,
+        Handler::Contacts => search::contacts(c).await,
     }
 }
 

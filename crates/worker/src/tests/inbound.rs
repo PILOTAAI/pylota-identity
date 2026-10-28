@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use super::Harness;
 
 /// A tenant with one identity; returns `(tenant id, identity id, address, mailbox object ID)`.
-fn setup(h: &Harness) -> (String, String, String, String) {
+pub(super) fn setup(h: &Harness) -> (String, String, String, String) {
     crate::email::reset_isolate();
     h.sql(
         "INSERT INTO domains (id, tenant_id, name, kind, method, zone_id, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, monitor_do_id, created_at, updated_at) VALUES ('dom_01ARYZ6S410000000000000000', NULL, 'pylotamail.test', 'platform', 'platform', 'z', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', 1, '', 1, 1)",
@@ -56,7 +56,7 @@ fn setup(h: &Harness) -> (String, String, String, String) {
     (tid, idn, address, mb)
 }
 
-fn email(h: &Harness, from: &str, to: &str, raw: &str) -> EmailOutcome {
+pub(super) fn email(h: &Harness, from: &str, to: &str, raw: &str) -> EmailOutcome {
     block_on(crate::email::handle(
         h.app.p.as_ref(),
         &EmailIn {
@@ -70,7 +70,7 @@ fn email(h: &Harness, from: &str, to: &str, raw: &str) -> EmailOutcome {
 }
 
 /// Delivers everything waiting in `q` to its consumer once; returns how each was settled.
-fn drain(h: &Harness, q: QueueName) -> Vec<Settled> {
+pub(super) fn drain(h: &Harness, q: QueueName) -> Vec<Settled> {
     let bodies = h.app.p.queues.take(q);
     let mut logs = Vec::new();
     let batch: Vec<_> = bodies
@@ -90,7 +90,7 @@ fn messages(h: &Harness, mb: &str) -> Vec<Value> {
     h.mailbox_sql(mb, "SELECT id, status, subject, is_bcc, is_primary_recipient, flags_json, raw_r2_key, thread_seq FROM messages ORDER BY rowid")
 }
 
-fn plain(to: &str, msg_id: &str, subject: &str, body: &str) -> String {
+pub(super) fn plain(to: &str, msg_id: &str, subject: &str, body: &str) -> String {
     format!(
         "From: Alex <alex@sender.example>\r\nTo: {to}\r\nSubject: {subject}\r\nMessage-ID: <{msg_id}>\r\nDate: Mon, 26 Oct 2026 10:00:00 +0000\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n"
     )

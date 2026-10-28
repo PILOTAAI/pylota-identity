@@ -4,6 +4,7 @@
 mod flows;
 mod identities;
 mod inbound;
+mod search;
 mod webhooks;
 
 use std::cell::RefCell;
