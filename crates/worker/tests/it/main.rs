@@ -462,11 +462,13 @@ pub fn wait_stored(identity_id: &str, key: &str, status: &str, n: usize) -> Vec<
 
 /// Rows of one SQL statement on an identity's mailbox (`/__test/mailbox-query`).
 pub fn mailbox_query(identity_id: &str, sql: &str) -> Vec<Value> {
-    let r = hook(
-        "POST",
-        "/__test/mailbox-query",
-        Some(json!({ "identity_id": identity_id, "sql": sql })),
-    );
+    let body = json!({ "identity_id": identity_id, "sql": sql });
+    let mut r = hook("POST", "/__test/mailbox-query", Some(body.clone()));
+    // Wrangler's dev proxy now and then drops a request (as in `inbound`); the statements are reads or
+    // idempotent fixture writes.
+    if r.body.to_string().contains("Network connection lost") {
+        r = hook("POST", "/__test/mailbox-query", Some(body));
+    }
     r.body["ok"]
         .as_array()
         .cloned()

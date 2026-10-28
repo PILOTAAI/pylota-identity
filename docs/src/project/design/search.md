@@ -1863,10 +1863,22 @@ contacts, find related and the index pipeline, with these settlements until the 
   evaluator.
 - Find related answers `{ data }` without a `degraded` flag (the contract has none); the keyword
   fallback logs nothing more than a normal search.
+- Keyword candidates cross the RPC boundary light (row ID, thread, date, scores); the page's display
+  fields come back with its details, so a search moves about a tenth of the bytes per candidate.
+  Sender, domain, category and month facets are counted in the mailbox from one read of the candidate
+  rows; labels and attachment types keep their `GROUP BY` queries. The `RecordUsage` call runs after
+  the response (`waitUntil`).
+- `chunks` gains `chunks_message ON chunks(message_rowid)` ([Data model § 2](data-model.md)): without
+  it the coverage query is quadratic in the mailbox size.
 - The benchmark seed (`POST /__test/bulk-seed`) generates its synthetic messages inside the itest build
   (`mailbox/seed.rs`) rather than from `crates/conformance/src/gen/`, writes their chunk rows as
   `embedded`, and the test process seeds the fake Vectorize with the same texts instead of queuing
-  50,000 `Embed` jobs.
+  50,000 `Embed` jobs. One word in five comes from a 97-word domain vocabulary and the rest from 3,000
+  filler words, so a domain term appears in about one message in ten. Measured in local workerd on
+  2026-10-28: keyword p95 201 ms (NFR-PERF-3, 200 ms), hybrid p95 792 ms (NFR-PERF-4, 800 ms, with the
+  fake Vectorize scanning all 50,000 vectors), tenant search over 10 identities p95 936 ms (NFR-PERF-5,
+  1 s). The keyword figure sits at its target, so the nightly run's warning is expected to flicker
+  until the per-request overhead is measured on Cloudflare (M20).
 
 ## Tests
 

@@ -886,9 +886,8 @@ fn g4_partial_suppression() {
 fn g4_suppressed_after_submit() {
     let s = open_sender("g4 after", "live");
     let _f = fakes::Reset;
-    // Three, in case an earlier test's re-enqueue takes one; the rest are cleared below.
-    fakes::fault("queue.send", "Q_OUTBOUND", "error", 3);
-    let mid = send_ok(&s, &["late@example.net"], "g4 late");
+    fakes::fault("queue.send", "Q_OUTBOUND", "error", 1);
+    let mid = send_ok(&s, &["g4-late@example.net"], "g4 late");
     // Held at transport whatever else takes the queue fault: the tenant's sending is paused.
     d1w(
         "UPDATE tenants SET sending_paused_at = 1, sending_pause_reason = 'abuse_threshold' WHERE id = ?1",
@@ -898,7 +897,7 @@ fn g4_suppressed_after_submit() {
         post(
             &format!("/v1/tenants/{}/suppressions", s.tid),
             &s.key,
-            json!({ "address": "late@example.net", "reason": "hard_bounce" })
+            json!({ "address": "g4-late@example.net", "reason": "hard_bounce" })
         )
         .status,
         201
@@ -907,13 +906,12 @@ fn g4_suppressed_after_submit() {
         "UPDATE tenants SET sending_paused_at = NULL, sending_pause_reason = NULL WHERE id = ?1",
         json!([s.tid]),
     );
-    fakes::reset();
     crate::queue_send(
         "pm-outbound",
         json!({ "kind": "send", "v": 1, "tenant_id": s.tid, "identity_id": s.iid, "message_id": mid, "request_id": "req_g4" }),
     );
     wait_status(&s, &mid, "suppressed");
-    assert!(fakes::mail_sent("late@example.net").is_empty());
+    assert!(fakes::mail_sent("g4-late@example.net").is_empty());
     // A provider suppression on the shared platform domain writes no row and no event.
     let domain = s.addr.rsplit('@').next().unwrap().to_owned();
     fakes::cf_suppress("shared@example.net", &domain);
