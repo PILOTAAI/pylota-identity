@@ -5,6 +5,16 @@
 use pylota_identity_platform::d1::Stmt;
 use serde::Deserialize;
 
+const INSERT: &str = "INSERT OR IGNORE INTO rpc_intents (id, class, object_id, tenant_id, identity_id, op, body_json, occurred_at, attempts, next_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?8, ?8)";
+
+/// `insert` for a row of a tenant created in the same batch: written only once the tenant row exists
+/// (`handlers::tenants::create`).
+pub fn when_tenant(mut s: Stmt) -> Stmt {
+    debug_assert_eq!(s.sql, INSERT);
+    s.sql = "INSERT OR IGNORE INTO rpc_intents (id, class, object_id, tenant_id, identity_id, op, body_json, occurred_at, attempts, next_at, created_at) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?8, ?8 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?4)";
+    s
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn insert(
     id: &str,
@@ -17,7 +27,7 @@ pub fn insert(
     now: i64,
 ) -> Stmt {
     Stmt::new(
-        "INSERT OR IGNORE INTO rpc_intents (id, class, object_id, tenant_id, identity_id, op, body_json, occurred_at, attempts, next_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?8, ?8)",
+        INSERT,
         vec![
             id.into(),
             class.into(),

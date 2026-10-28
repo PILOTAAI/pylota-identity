@@ -60,6 +60,13 @@ impl ObjectClient for CfObjects {
         envelope: &RpcEnvelope<Req>,
     ) -> PResult<RpcResult<Resp>> {
         let binding = class.binding();
+        #[cfg(feature = "itest-hooks")]
+        if super::itest::take_fault("do.call", binding).await.is_some() {
+            return Err(PlatformError::unavailable(
+                binding,
+                "fault injected by the test",
+            ));
+        }
         let body = serde_json::to_vec(envelope)
             .map_err(|e| PlatformError::invalid(binding, format!("envelope: {e}")))?;
         let headers = worker::Headers::new();

@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 aes-gcm = { workspace = true }
 ammonia = { workspace = true }
-pylota-identity-api-types = { path = "../api-types" }
+pylota-identity-api-types = { path = "../api-types", version = "=0.1.0" }
 base64 = { workspace = true }
 cfb = { workspace = true }
 chrono = { workspace = true }

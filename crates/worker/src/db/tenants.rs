@@ -78,7 +78,11 @@ impl Row {
         serde_json::from_str(&self.policy_ceilings_json).unwrap_or_else(|_| json!({}))
     }
 
+    /// The partner's ceilings; a tenant of no partner has none, whatever the column holds (J26).
     pub fn partner_ceilings(&self) -> Value {
+        if self.partner_id.is_none() {
+            return json!({});
+        }
         serde_json::from_str(&self.partner_ceilings_json).unwrap_or_else(|_| json!({}))
     }
 

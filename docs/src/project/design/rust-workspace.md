@@ -695,6 +695,13 @@ Implementation notes:
 - The fakes use `rusqlite =0.40.2` (bundled SQLite with FTS5) and `sha2`, as native-only dependencies of
   `platform` that never reach the Worker bundle.
 
+**As built (M5).** `platform` and `worker` have an `itest-hooks` feature. Under it `Config` also reads
+`PM_ITEST_FAKES_URL` and `PM_ITEST_TOKEN` (only with `PM_ENV = "local"`), `platform::cf::itest` syncs the
+fake clock at each `fetch` and `scheduled` and takes `do.call` faults before an object call, and
+`worker::hooks` serves `GET /__test/routes` and `POST /__test/rpc`. `cargo xtask build-worker` builds
+without the feature and fails if the bundle contains `/__test/`. The `it` test target is
+`crates/worker/tests/it/`.
+
 **The `Platform` bundle.** Logic is generic over one bundle, so handlers and objects name a single type
 parameter instead of a dozen traits:
 

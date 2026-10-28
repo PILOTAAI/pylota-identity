@@ -109,10 +109,22 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     let suffix_fold = match address::suffix_fold(&suffix) {
         Ok(f) if !f.is_empty() => f,
         Ok(_) => {
-            return Err(ApiError::invalid(
-                "address_suffix",
-                "Only the default tenant may have an empty suffix.",
-            ));
+            // Only the default tenant, which `idvy setup` creates first with a platform key, has an
+            // empty suffix.
+            let empty: Option<Count> =
+                c.p.db()
+                    .first(Stmt::new(
+                        "SELECT COUNT(*) AS n FROM tenants WHERE suffix_fold = ''",
+                        vec![],
+                    ))
+                    .await?;
+            if key.level != Level::Platform || empty.is_some_and(|n| n.n > 0) {
+                return Err(ApiError::invalid(
+                    "address_suffix",
+                    "Only the default tenant may have an empty suffix.",
+                ));
+            }
+            String::new()
         }
         Err(true) => {
             return Err(ApiError::invalid(
@@ -206,7 +218,7 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         cpolicy::Writer::Partner
     };
     if patch.as_object().is_some_and(|o| !o.is_empty()) {
-        policy::validate(&patch, &dep)?;
+        policy::validate(&patch, &dep, &json!({}))?;
         let none = json!({});
         cpolicy::check_write(
             writer,
@@ -260,7 +272,7 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             "Another tenant uses this slug.",
         ));
     }
-    if taken.iter().any(|t| t.suffix_fold == suffix_fold) {
+    if !suffix_fold.is_empty() && taken.iter().any(|t| t.suffix_fold == suffix_fold) {
         return Err(ApiError::new(
             ErrorCode::SuffixTaken,
             "This suffix is confusable with another tenant's.",
@@ -278,7 +290,9 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     let now = c.now;
     let mut batch = vec![
         Stmt::new(
-            "INSERT INTO tenants (id, slug, name, partner_id, mode, status, address_suffix, suffix_fold, timezone, policy_json, policy_ceilings_json, partner_ceilings_json, policy_version, quota_do_id, notify_do_id, events_do_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, '', '', ?13, ?13)",
+            // `max_tenants` holds under concurrent creations: the row is written only while the partner is
+            // under it, and every other row of the batch only when the tenant row exists (J18).
+            "INSERT INTO tenants (id, slug, name, partner_id, mode, status, address_suffix, suffix_fold, timezone, policy_json, policy_ceilings_json, partner_ceilings_json, policy_version, quota_do_id, notify_do_id, events_do_id, created_at, updated_at) SELECT ?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, '', '', ?13, ?13 WHERE ?4 IS NULL OR (SELECT COUNT(*) FROM tenants WHERE partner_id = ?4 AND status <> 'erased') < ?14",
             vec![
                 tenant_id.clone().into(),
                 slug.into(),
@@ -293,10 +307,11 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
                 ptc.to_string().into(),
                 quota_do_id.clone().into(),
                 now.into(),
+                partner.as_ref().map_or(0, |p| p.max_tenants).into(),
             ],
         ),
         Stmt::new(
-            "INSERT INTO billing_accounts (tenant_id, mode, plan_id, status, period_start, period_end, updated_at) VALUES (?1, ?2, 'free', 'active', ?3, ?4, ?3)",
+            "INSERT INTO billing_accounts (tenant_id, mode, plan_id, status, period_start, period_end, updated_at) SELECT ?1, ?2, 'free', 'active', ?3, ?4, ?3 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?1)",
             vec![
                 tenant_id.clone().into(),
                 billing_mode.clone().into(),
@@ -304,7 +319,7 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
                 (now + 30 * 86_400_000).into(),
             ],
         ),
-        intents::insert(
+        intents::when_tenant(intents::insert(
             &intent_id,
             "quota",
             &quota_do_id,
@@ -313,8 +328,8 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             "init",
             &json!({ "op": "init", "tenant_id": tenant_id }).to_string(),
             now,
-        ),
-        audit::insert(
+        )),
+        audit::when_tenant(audit::insert(
             &ids.new_id(IdPrefix::Audit),
             Some(&tenant_id),
             Some(&key.key_id),
@@ -324,19 +339,19 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             &json!({ "partner_id": partner_id, "slug": slug }),
             &c.request_id,
             now,
-        ),
+        )),
     ];
     if let Some((e, owner_name)) = &owner {
         batch.push(Stmt::new(
-            "INSERT INTO users (id, email, name, status, created_at) VALUES (?1, ?2, ?3, 'active', ?4) ON CONFLICT (email) DO NOTHING",
-            vec![ids.new_id(IdPrefix::ConsoleUser).into(), e.clone().into(), owner_name.clone().into(), now.into()],
+            "INSERT INTO users (id, email, name, status, created_at) SELECT ?1, ?2, ?3, 'active', ?4 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?5) ON CONFLICT (email) DO NOTHING",
+            vec![ids.new_id(IdPrefix::ConsoleUser).into(), e.clone().into(), owner_name.clone().into(), now.into(), tenant_id.clone().into()],
         ));
         batch.push(Stmt::new(
-            "INSERT INTO members (tenant_id, user_id, role, created_at) SELECT ?1, id, 'owner', ?3 FROM users WHERE email = ?2",
+            "INSERT INTO members (tenant_id, user_id, role, created_at) SELECT ?1, id, 'owner', ?3 FROM users WHERE email = ?2 AND EXISTS (SELECT 1 FROM tenants WHERE id = ?1)",
             vec![tenant_id.clone().into(), e.clone().into(), now.into()],
         ));
     }
-    c.p.db().batch(batch).await.map_err(|e| {
+    let metas = c.p.db().batch(batch).await.map_err(|e| {
         if e.kind == pylota_identity_platform::PlatformErrorKind::Conflict {
             ApiError::new(
                 ErrorCode::SlugTaken,
@@ -346,6 +361,14 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             e.into()
         }
     })?;
+    if metas.first().is_some_and(|m| m.changes == 0) {
+        let max = partner.as_ref().map_or(0, |p| p.max_tenants);
+        return Err(ApiError::new(
+            ErrorCode::PartnerTenantLimit,
+            "The partner has its maximum number of tenants.",
+        )
+        .details(json!({ "max_tenants": max })));
+    }
     send_quota_init(c, &tenant_id, &quota_do_id, &intent_id).await;
     let t: tdb::Row =
         c.p.db()

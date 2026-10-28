@@ -173,6 +173,10 @@ impl<P: Platform> App<P> {
                 "No route matches this path.",
             ));
         }
+        #[cfg(feature = "itest-hooks")]
+        if path.starts_with("/__test/") {
+            return crate::hooks::serve(&self.p, req, request_id, &path).await;
+        }
         let route = router::find(&req.method, &path)?;
         let spec = route.spec;
         let mut c = Ctx {

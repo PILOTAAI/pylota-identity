@@ -9,6 +9,18 @@ use std::process::Command;
 pub const WORKER_BUILD_VERSION: &str = "0.8.7";
 
 pub fn run(root: &Path) -> Result<(), String> {
+    build(root, &[])?;
+    // The release bundle never carries the test hooks (Testing § 6.2).
+    let wasm =
+        std::fs::read(root.join("crates/worker/build/index_bg.wasm")).map_err(|e| e.to_string())?;
+    if wasm.windows(8).any(|w| w == b"/__test/") {
+        return Err("the release bundle contains /__test/".into());
+    }
+    Ok(())
+}
+
+/// `worker-build --release` with these cargo features, then the size budget.
+pub fn build(root: &Path, features: &[&str]) -> Result<(), String> {
     check_worker_build()?;
     let crate_dir = root.join("crates/worker");
 
@@ -23,8 +35,12 @@ pub fn run(root: &Path) -> Result<(), String> {
     };
     println!("build-worker: version {version}, commit {commit}, date {date}");
 
-    let status = Command::new("worker-build")
-        .args(["--release", "--locked"])
+    let mut cmd = Command::new("worker-build");
+    cmd.args(["--release", "--locked"]);
+    if !features.is_empty() {
+        cmd.args(["--features", &features.join(",")]);
+    }
+    let status = cmd
         .current_dir(&crate_dir)
         .env("PM_BUILD_VERSION", &version)
         .env("PM_BUILD_COMMIT", &commit)

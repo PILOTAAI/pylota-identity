@@ -229,6 +229,28 @@ As defined in [Rust workspace](rust-workspace.md#9-xtask), plus the details belo
    when that job ends.
 8. Stop wrangler and the fake server; delete `target/itest/state` unless `--keep` was passed.
 
+**As built (M5).** The sequence above holds, with these settlements until the milestones that need
+the rest:
+
+- The rendered file, `.dev.vars`, the D1 state, the TLS files, `worker.log` and `wrangler.pid` live in
+  `target/itest/`, so nothing under `deploy/` is written. Wrangler 4.139.0 runs from
+  `site/node_modules/.bin/wrangler` until `deploy/wrangler/package-lock.json` exists.
+- Local workerd has no jurisdictions (`newUniqueId({ jurisdiction: "eu" })` throws), so the run renders a
+  `default` deployment: `PM_JURISDICTION = "default"` and no R2 `jurisdiction` line, as setup writes them.
+  It also sets `PM_QUARANTINE_KEY_RELEASE = "off"` (as Cloud does) and `PM_SECURITY_CONTACT`.
+- Step 4 writes a throwaway CA and a leaf certificate it signs (`CA:FALSE`, `serverAuth`, the same
+  names): rustls refuses a self-signed certificate that is also a CA. `PM_ITEST_CA` names the CA.
+- Wrangler runs in its own process group, which the harness stops on every exit path, so no workerd
+  process outlives a failed run.
+- The bootstrap key and the suite's key hold the same set: every permission a platform key can hold but
+  `tenants:erase` (`xtask::itest::tests::platform_permissions_match_auth`).
+- Step 5 seeds the bootstrap key and the default tenant. The platform domain row (M6, `pending` from M13)
+  and the system identity (M6) follow their milestones; no fake beyond the clock and the fault plan
+  exists yet (section 6.3), and Durable Objects do not yet read the fake clock.
+- The fake server is hosted by the test process (`crates/worker/tests/it/fakes.rs`).
+- workerd's local rate limiter counts in fixed one-minute windows, so a test whose burst must land in
+  one window waits for the top of a minute first (`it::fresh_minute`).
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

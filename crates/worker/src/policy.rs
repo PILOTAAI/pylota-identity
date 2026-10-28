@@ -77,16 +77,18 @@ pub fn refusal(r: Refusal, writer: Writer) -> ApiError {
     }
 }
 
-/// Validates a patch's shape: a non-empty object whose merge gives a valid `TenantPolicy`.
-pub fn validate(patch: &Value, effective: &Value) -> Result<(), ApiError> {
+/// Validates a patch's shape: a non-empty object whose merge gives a valid `TenantPolicy`. The patch is
+/// merged into the stored policy, so a `null` falls back to the deployment default (J26).
+pub fn validate(patch: &Value, defaults: &Value, stored: &Value) -> Result<(), ApiError> {
     let Some(obj) = patch.as_object() else {
         return Err(ApiError::invalid("policy", "policy must be an object."));
     };
     if obj.is_empty() {
         return Err(ApiError::invalid("policy", "The policy patch is empty."));
     }
-    let mut after = effective.clone();
-    policy::merge(&mut after, patch);
+    let mut stored = stored.clone();
+    policy::merge(&mut stored, patch);
+    let after = policy::effective(defaults, &stored);
     serde_json::from_value::<pylota_identity_api_types::TenantPolicy>(after)
         .map_err(|e| ApiError::invalid("policy", e.to_string()))?;
     Ok(())
@@ -96,8 +98,8 @@ pub fn validate(patch: &Value, effective: &Value) -> Result<(), ApiError> {
 pub fn check<P: Platform>(c: &Ctx<P>, t: &tdb::Row, patch: &Value) -> Result<Writer, ApiError> {
     let writer = writer_of(c.key(), t);
     let eff = effective(c.p.as_ref(), t);
-    validate(patch, &eff)?;
     let dep = deployment_defaults(c.p.as_ref());
+    validate(patch, &dep, &t.stored_policy())?;
     let (pc, ptc) = (t.platform_ceilings(), t.partner_ceilings());
     let decide = key_may_decide(
         c.p.as_ref(),

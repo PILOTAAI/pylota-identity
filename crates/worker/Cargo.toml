@@ -21,6 +21,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 
+[dev-dependencies]
+reqwest = { workspace = true, features = ["blocking"] }
+
+# The workerd suite (Testing § 6): `cargo xtask itest` runs it; `cargo test --workspace` never builds it.
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+required-features = ["itest-hooks"]
+
 [features]
 # The test hooks of `cargo xtask itest` (Testing § 6.1): never in a release bundle.
-itest-hooks = []
+itest-hooks = ["pylota-identity-platform/itest-hooks"]

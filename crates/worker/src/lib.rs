@@ -15,6 +15,8 @@ pub mod ctx;
 pub mod db;
 pub mod errors;
 pub mod handlers;
+#[cfg(feature = "itest-hooks")]
+pub mod hooks;
 pub mod keyring;
 pub mod log;
 pub mod metrics;

@@ -5,6 +5,7 @@
 
 mod build_worker;
 mod fuzz;
+mod itest;
 mod layering;
 mod openapi;
 mod size;
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
         Some("trace") => trace::run(&root),
         Some("openapi") => openapi::run(&root),
         Some("fuzz") => fuzz::run(&root, &args[1..]),
+        Some("itest") => itest::run(&root, &args[1..]),
         Some("gen-unicode") => unicode::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         _ => {
             eprintln!("{USAGE}");

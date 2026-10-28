@@ -1811,6 +1811,7 @@ dependencies = [
  "pylota-identity-api-types",
  "pylota-identity-core",
  "pylota-identity-platform",
+ "reqwest",
  "serde",
  "serde_json",
 ]
@@ -3243,8 +3244,10 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "miniz_oxide",
  "pylota-identity-api-types",
+ "pylota-identity-core",
  "serde_json",
  "sha2",
  "toml",

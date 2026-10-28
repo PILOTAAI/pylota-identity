@@ -284,6 +284,10 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             _ => return Err(scope_exceeded()),
         }
     }
+    // Only a platform key mints partner keys (J11), even of its own partner.
+    if level == Level::Partner && caller.level != Level::Platform {
+        return Err(scope_exceeded());
+    }
     if level == Level::Partner {
         let pid = partner_id.as_deref().unwrap_or("");
         if c.p

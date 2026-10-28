@@ -724,6 +724,60 @@ fn keys_scope_levels_and_limits() {
     assert_eq!(aud.body["data"].as_array().unwrap().len(), 2);
 }
 
+/// J11: a partner key never mints a partner key, its own partner's included.
+#[test]
+fn partner_key_mints_no_partner_key() {
+    let h = Harness::new();
+    let p = h.platform_key();
+    let pid = h
+        .call(
+            "POST",
+            "/v1/partners",
+            Some(&p),
+            Some(json!({ "name": "P" })),
+            &[],
+        )
+        .body["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let body = json!({ "name": "pk", "level": "partner", "partner_id": pid, "permissions": ["keys:manage", "identities:read"] });
+    let pk = h.call("POST", "/v1/keys", Some(&p), Some(body.clone()), &[]);
+    let pk = pk.body["secret"].as_str().unwrap().to_owned();
+    let r = h.call("POST", "/v1/keys", Some(&pk), Some(body), &[]);
+    assert_eq!((r.status, r.code()), (403, "key_scope_exceeded"));
+}
+
+/// J26: a `null` resets a field to the deployment default and removes the writer's ceiling.
+#[test]
+fn policy_null_resets_to_default() {
+    let h = Harness::new();
+    let p = h.platform_key();
+    let t = tenant(&h, &p, "acme");
+    let path = format!("/v1/tenants/{}/policy", t["id"].as_str().unwrap());
+    let set = h.call(
+        "PATCH",
+        &path,
+        Some(&p),
+        Some(json!({ "tenant_daily_send_cap": 10 })),
+        &[],
+    );
+    assert_eq!(set.body["policy"]["tenant_daily_send_cap"], 10);
+    let r = h.call(
+        "PATCH",
+        &path,
+        Some(&p),
+        Some(json!({ "tenant_daily_send_cap": null })),
+        &[],
+    );
+    assert_eq!(
+        (r.status, r.body["policy"]["tenant_daily_send_cap"].as_i64()),
+        (200, Some(5000)),
+        "{}",
+        r.body
+    );
+}
+
 #[test]
 fn workspace_policy_j23_to_j27() {
     let h = Harness::new();

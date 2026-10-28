@@ -1,6 +1,6 @@
 # The pull-request gate (Rust workspace § 10, Testing § 12). Build plan M0 starts it with these jobs:
 # fmt, clippy, test, layering, wasm (with the NFR-SEC-2 size budget), deny, docs and trace. Later
-# milestones add itest, browser, audit and skills; M2 adds fuzz-smoke, M3 openapi.
+# milestones add browser, audit and skills; M2 adds fuzz-smoke, M3 openapi, M5 itest.
 #
 # Every action is pinned to a full commit SHA, read from the action's releases on 2026-10-19. The
 # toolchain comes from rust-toolchain.toml; the tools are exact versions installed with --locked. No
@@ -57,6 +57,11 @@ jobs:
         run: >-
           cargo clippy --locked -p pylota-identity-core -p pylota-identity-platform -p pylota-identity-worker
           --target wasm32-unknown-unknown -- -D warnings
+      - name: Clippy on the itest hooks and the it suite
+        run: |
+          cargo clippy --locked -p pylota-identity-worker --features itest-hooks --all-targets -- -D warnings
+          cargo clippy --locked -p pylota-identity-core -p pylota-identity-platform -p pylota-identity-worker \
+            --target wasm32-unknown-unknown --features itest-hooks -- -D warnings
 
   test:
     runs-on: ubuntu-24.04
@@ -146,6 +151,33 @@ jobs:
         run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
       - name: Build the Worker and check the size budget (xtask::size_budget, NFR-SEC-2)
         run: cargo xtask build-worker
+
+  itest:
+    # The it:: suite against the Worker in workerd (Testing § 6). Wrangler comes from site/package-lock.json.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0, verified 2026-10-09
+        with:
+          node-version: "22" # wrangler 4.139.0 declares Node >= 22
+      - name: Install Wrangler from the lockfile
+        working-directory: site
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install worker-build
+        run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
+      - name: cargo xtask itest
+        run: cargo xtask itest
+      - name: The Worker's log
+        if: failure()
+        run: tail -n 200 target/itest/worker.log
 
   deny:
     runs-on: ubuntu-24.04

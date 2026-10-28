@@ -4,6 +4,16 @@ use pylota_identity_platform::d1::Stmt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+const INSERT: &str = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9)";
+
+/// `insert` for a row of a tenant created in the same batch: written only once the tenant row exists
+/// (`handlers::tenants::create`).
+pub fn when_tenant(mut s: Stmt) -> Stmt {
+    debug_assert_eq!(s.sql, INSERT);
+    s.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?2)";
+    s
+}
+
 /// The insert of one audit row, for a handler's D1 batch.
 #[allow(clippy::too_many_arguments)]
 pub fn insert(
@@ -18,7 +28,7 @@ pub fn insert(
     now: i64,
 ) -> Stmt {
     Stmt::new(
-        "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9)",
+        INSERT,
         vec![
             id.into(),
             tenant_id.map(str::to_owned).into(),

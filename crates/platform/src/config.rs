@@ -191,6 +191,9 @@ pub struct Config {
     pub degraded: Vec<(&'static str, &'static str)>,
     /// Logged once per isolate (`docs_url_invalid`).
     pub warnings: Vec<&'static str>,
+    /// `PM_ITEST_FAKES_URL` and `PM_ITEST_TOKEN`: read only with `PM_ENV = local` (Testing § 6.1–6.2).
+    pub itest_fakes_url: Option<String>,
+    pub itest_token: Option<String>,
 }
 
 /// Each decoded from base64; 32 bytes for the `PM_*` keys. `Debug` prints which are set, never a value.
@@ -747,6 +750,16 @@ impl Config {
             },
             degraded,
             warnings,
+            itest_fakes_url: if env == DeployEnv::Local {
+                v.opt("PM_ITEST_FAKES_URL")
+            } else {
+                None
+            },
+            itest_token: if env == DeployEnv::Local {
+                v.opt("PM_ITEST_TOKEN")
+            } else {
+                None
+            },
         })
     }
 

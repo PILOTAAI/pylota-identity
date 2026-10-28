@@ -144,6 +144,8 @@ pub async fn fetch<A: WorkerApp>(
     let ctx = worker::Context::new(ctx);
     let response = match CfPlatform::new(env, CfBackground::Worker(ctx)) {
         Ok(platform) => {
+            #[cfg(feature = "itest-hooks")]
+            super::itest::sync(crate::Platform::config(&platform)).await;
             let app = A::new(platform);
             handle_http(req, "fetch", |input| app.fetch(input)).await
         }
@@ -234,6 +236,8 @@ pub async fn scheduled<A: WorkerApp>(
     else {
         return Ok(JsValue::UNDEFINED);
     };
+    #[cfg(feature = "itest-hooks")]
+    super::itest::sync(crate::Platform::config(&platform)).await;
     let event = worker::ScheduledEvent::from(event);
     A::new(platform)
         .scheduled(ScheduledIn {

@@ -17,7 +17,10 @@ pub struct CfClock;
 
 impl Clock for CfClock {
     fn now_ms(&self) -> i64 {
-        js_sys::Date::now() as i64
+        #[cfg(feature = "itest-hooks")]
+        return js_sys::Date::now() as i64 + super::itest::offset();
+        #[cfg(not(feature = "itest-hooks"))]
+        return js_sys::Date::now() as i64;
     }
 }
 

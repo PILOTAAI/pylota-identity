@@ -205,6 +205,14 @@ simple = { limit = 1800, period = 60 }
 name = "RL_PARTNER_API"                        # keyed by partner ID; every request of a partner key
 namespace_id = "{1009}"
 simple = { limit = 1800, period = 60 }
+[[ratelimits]]
+name = "RL_AI"                                 # keyed by tenant ID; text generation (and screen:{tenant_id})
+namespace_id = "{1010}"
+simple = { limit = 60, period = 60 }
+[[ratelimits]]
+name = "RL_EMBED"                              # keyed by tenant ID; embedding requests
+namespace_id = "{1011}"
+simple = { limit = 600, period = 60 }
 
 [triggers]
 crons = ["* * * * *", "*/15 * * * *"]

@@ -9,6 +9,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+base64 = { workspace = true }
+pylota-identity-core = { path = "../crates/core" }
 miniz_oxide = { workspace = true }
 pylota-identity-api-types = { path = "../crates/api-types" }
 serde_json = { workspace = true }

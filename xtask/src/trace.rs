@@ -11,6 +11,8 @@ use std::path::Path;
 const PLAN: &str = "docs/src/project/build-plan.md";
 const REGISTER: &str = "docs/src/project/edge-cases.md";
 const PRD: &str = "docs/src/project/prd.md";
+/// Its § 2 table lists the security invariants (`SEC-1` …), which tests may cover like requirements.
+const SECURITY: &str = "docs/src/project/design/security.md";
 const DESIGN: &str = "docs/src/project/design";
 const TS_INVENTORY: &str = "sdks/typescript-tests.json";
 
@@ -101,7 +103,9 @@ pub fn check(root: &Path) -> Result<Report, String> {
         |rel: &str| std::fs::read_to_string(root.join(rel)).map_err(|e| format!("{rel}: {e}"));
     let plan = parse_plan(&read(PLAN)?);
     let register = parse_register(&read(REGISTER)?);
-    let requirements = parse_requirements(&read(PRD)?);
+    let mut requirements = parse_requirements(&read(PRD)?);
+    // Absent only in the unit tests' synthetic trees.
+    requirements.extend(parse_invariants(&read(SECURITY).unwrap_or_default()));
     let row_ids: BTreeSet<&str> = register.iter().map(|r| r.id.as_str()).collect();
     let tests = collect_tests(root)?;
     let ts = read_ts_inventory(root)?;
@@ -361,6 +365,16 @@ fn parse_requirements(text: &str) -> BTreeSet<String> {
     out
 }
 
+/// The `| SEC-n |` rows of the security invariants table.
+fn parse_invariants(text: &str) -> BTreeSet<String> {
+    text.lines()
+        .filter_map(|l| l.strip_prefix("| SEC-"))
+        .filter_map(|rest| rest.split(" |").next())
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        .map(|n| format!("SEC-{n}"))
+        .collect()
+}
+
 fn is_requirement(id: &str) -> bool {
     let parts: Vec<&str> = id.split('-').collect();
     parts.len() == 3
@@ -390,6 +404,28 @@ fn is_test_name(s: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':' || c == '*')
         && !rest.ends_with(':')
+}
+
+/// Whether `text` assigns the acceptance of row `id` to a milestone other than `own`.
+fn deferred(text: &str, id: &str, own: &str) -> bool {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = text.as_str();
+    let later = |rest: &str| {
+        let m: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        m.starts_with('M') && m != own
+    };
+    text.match_indices(&format!("{id} is accepted in "))
+        .any(|(i, s)| later(&text[i + s.len()..]))
+        || text
+            .match_indices(&format!(", which accepts {id}"))
+            .any(|(i, _)| {
+                let before = &text[..i];
+                let m = before.rsplit(' ').next().unwrap_or("");
+                m.starts_with('M') && m != own
+            })
 }
 
 /// Splits a table row on `|` outside code spans; drops the empty edge cells.
@@ -469,6 +505,11 @@ fn named_in(acceptance: &str, own: &str, row_ids: &BTreeSet<&str>) -> Named {
             k += 1;
         }
     }
+    // A row the acceptance says another milestone accepts ("J13 is accepted in M9", "M6, which accepts
+    // J21") is only partly run here: its tests are required by that milestone, and here only those
+    // the acceptance names itself.
+    let raw = drop_link_targets(acceptance);
+    named.rows.retain(|id| !deferred(&raw, id, own));
     named
 }
 
@@ -1230,6 +1271,22 @@ mod tests {
     }
 
     /// "every `core::` row" limits the rows' required tests to `core::` and the corpus's `conf::`.
+    /// A row accepted by a later milestone contributes only the tests the acceptance names.
+    #[test]
+    fn trace_defers_rows_accepted_later() {
+        let ids: BTreeSet<&str> = ["J13", "J21", "J20"].into_iter().collect();
+        let n = named_in(
+            "Keys (J20): `it::keys::a`. The authentication part of J13 runs here (`it::partners::j13_x`); J13 is accepted in M9. A lost Init (J21; its mailbox part lands in M6, which accepts J21).",
+            "M5",
+            &ids,
+        );
+        assert_eq!(n.rows, ["J20"]);
+        assert!(n.tests.contains(&"it::partners::j13_x".to_owned()));
+        assert!(deferred("J13 is accepted in M9", "J13", "M5"));
+        assert!(!deferred("J13 is accepted in M5", "J13", "M5"));
+        assert!(deferred("W35 is\n  accepted in M21", "W35", "M5"));
+    }
+
     #[test]
     fn trace_scopes_rows_to_a_prefix() {
         let ids: BTreeSet<&str> = ["A2", "B4"].into_iter().collect();
@@ -1293,5 +1350,13 @@ mod tests {
             "{}",
             report.matrix
         );
+    }
+
+    #[test]
+    fn security_invariants_are_coverable() {
+        let ids = parse_invariants(
+            "| ID | Invariant |\n|---|---|\n| SEC-1 | Scope |\n| SEC-12 | Mail |\n| SEC-x | no |\n",
+        );
+        assert_eq!(ids.into_iter().collect::<Vec<_>>(), ["SEC-1", "SEC-12"]);
     }
 }

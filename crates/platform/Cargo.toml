@@ -8,6 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish = false # shipped inside the Worker bundle, never to crates.io
 
+[features]
+# The test hooks of `cargo xtask itest` (Testing § 6.2–6.6): the fake clock offset and fault plan, read
+# from the test process's fake server. Never in a release bundle.
+itest-hooks = []
+
 [dependencies]
 pylota-identity-api-types = { path = "../api-types" }
 serde = { workspace = true }
