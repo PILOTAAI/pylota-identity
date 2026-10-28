@@ -19,8 +19,8 @@ pub use compile::{
     CompiledQuery, MSG_DATE, SqlFragment, SqlParam, TermPattern, VectorFilter, compile,
     require_semantic_text,
 };
-pub use dates::{ResolvedQuery, ago, bound_ms, local_midnight_ms, resolve};
-pub use parser::{MAX_CHARS, MAX_DEPTH, MAX_LEAVES};
+pub use dates::{ResolvedQuery, ago, bound_ms, local_midnight_ms, month_buckets, resolve};
+pub use parser::{MAX_CHARS, MAX_DEPTH, MAX_LEAVES, fold_nfkc};
 
 use crate::refs::{CustomRef, Pack};
 
@@ -703,6 +703,14 @@ mod tests {
 
     #[test]
     fn f9_timezone() {
+        // Facet months are local: October 2026 in London starts at 2026-09-30T23:00Z (BST).
+        let m = month_buckets(Tz::Europe__London, NOW, 3);
+        assert_eq!(
+            m[0],
+            ("2026-10".into(), 1_790_809_200_000, 1_793_491_200_000)
+        );
+        assert_eq!((m[1].0.as_str(), m[1].2), ("2026-09", m[0].1));
+        assert_eq!(m[2].0, "2026-08");
         let london = cctx(Tz::Europe__London, NOW);
         let bound =
             |q: &str, ctx: &CompileCtx<'_>| match &resolve(&p(q), ctx.tz, ctx.now_ms).query.root {

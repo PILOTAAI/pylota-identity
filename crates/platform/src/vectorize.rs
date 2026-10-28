@@ -40,6 +40,14 @@ pub trait VectorIndex {
         top_k: u32,
         filter: &Value,
     ) -> PResult<Vec<VectorMatch>>;
+    /// `queryById`: the nearest neighbours of a stored vector (find related, Search § 12.2).
+    async fn query_by_id(
+        &self,
+        namespace: &str,
+        id: &str,
+        top_k: u32,
+        filter: &Value,
+    ) -> PResult<Vec<VectorMatch>>;
     async fn delete_by_ids(&self, ids: &[String]) -> PResult<String>;
     /// The IDs that still exist (the erasure probe).
     async fn get_by_ids(&self, ids: &[String]) -> PResult<Vec<String>>;

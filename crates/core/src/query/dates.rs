@@ -102,3 +102,34 @@ fn first_after_gap(local: NaiveDateTime, tz: Tz) -> i64 {
     }
     hi * 1000
 }
+
+/// The `month` facet's buckets: `[label "YYYY-MM", start_ms, end_ms)` for the `n` local months up to
+/// and including the one that holds `now_ms`, newest first ([Search § 5.7]).
+///
+/// [Search § 5.7]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/search.md
+pub fn month_buckets(tz: Tz, now_ms: i64, n: u32) -> Vec<(String, i64, i64)> {
+    use chrono::Datelike as _;
+    let Some(now) = DateTime::from_timestamp_millis(now_ms) else {
+        return Vec::new();
+    };
+    let local = now.with_timezone(&tz).date_naive();
+    let Some(mut first) = CivilDate::from_ymd_opt(local.year(), local.month(), 1) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for _ in 0..n {
+        let Some(next) = first.checked_add_months(Months::new(1)) else {
+            break;
+        };
+        out.push((
+            format!("{:04}-{:02}", first.year(), first.month()),
+            local_midnight_ms(first, tz),
+            local_midnight_ms(next, tz),
+        ));
+        let Some(prev) = first.checked_sub_months(Months::new(1)) else {
+            break;
+        };
+        first = prev;
+    }
+    out
+}

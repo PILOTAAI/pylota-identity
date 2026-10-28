@@ -71,6 +71,19 @@ pub struct MarkdownOutput {
     pub error: Option<String>,
 }
 
+/// Whether a failed `AI.run` was Workers AI refusing for load: an HTTP 429, a rate-limit message, or
+/// error 3040 ("Capacity temporarily exceeded"). The binding reports these only as error text, so the
+/// test is on the text ([Search § 6], F16).
+///
+/// [Search § 6]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/search.md
+pub fn is_rate_limited(e: &crate::PlatformError) -> bool {
+    let d = e.detail.to_ascii_lowercase();
+    d.contains("429")
+        || d.contains("rate limit")
+        || d.contains("too many requests")
+        || d.contains("3040")
+}
+
 pub trait Ai {
     async fn run<I: Serialize, O: DeserializeOwned>(
         &self,
@@ -91,6 +104,16 @@ pub trait Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limit_answers() {
+        let e = |d: &str| crate::PlatformError::unavailable("AI", d);
+        assert!(is_rate_limited(&e("fake answered 429")));
+        assert!(is_rate_limited(&e(
+            "AiError: 3040: Capacity temporarily exceeded"
+        )));
+        assert!(!is_rate_limited(&e("fake answered 500")));
+    }
 
     #[test]
     fn gateway_options_and_markdown_shape() {

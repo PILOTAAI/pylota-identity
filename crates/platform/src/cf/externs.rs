@@ -37,6 +37,12 @@ extern "C" {
         vector: &js_sys::Float32Array,
         options: &JsValue,
     ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(method, catch, js_name = queryById)]
+    pub fn query_by_id(
+        this: &VectorizeIndex,
+        id: &str,
+        options: &JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(method, catch, js_name = deleteByIds)]
     pub fn delete_by_ids(
         this: &VectorizeIndex,

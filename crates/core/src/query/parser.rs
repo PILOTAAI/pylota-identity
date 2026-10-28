@@ -455,7 +455,7 @@ pub(crate) fn classify_addr(v: &str) -> AddrMatch {
 }
 
 /// Lower case and NFKC, repeated until stable (at most 4 rounds).
-fn fold_nfkc(s: &str) -> String {
+pub fn fold_nfkc(s: &str) -> String {
     let mut cur = s.to_owned();
     for _ in 0..4 {
         let next: String = cur.nfkc().collect::<String>().to_lowercase();

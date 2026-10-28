@@ -33,12 +33,17 @@ pub struct KeywordIn {
     pub limit: u32,
     /// Month buckets `[label, start_ms, end_ms]` when facets are wanted.
     pub months: Option<Vec<(String, i64, i64)>>,
+    /// Answer the facet candidate set's row IDs instead (hybrid adds the semantic hits to them).
+    #[serde(default)]
+    pub facet_rows: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct KeywordOut {
     pub cands: Vec<Cand>,
     pub facets: Option<Value>,
+    #[serde(default)]
+    pub facet_rows: Vec<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -194,7 +199,7 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
             .then(b.msg_date.cmp(&a.msg_date))
             .then(b.rowid.cmp(&a.rowid))
     });
-    let facet_rows: Vec<i64> = cands
+    let mut facet_rows: Vec<i64> = cands
         .iter()
         .take(FACET_SET as usize)
         .map(|x| x.rowid)
@@ -242,6 +247,7 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
                 let mut r = r;
                 r.kw = 0.5 * r.s / (r.s + 4.0);
                 r.fuzzy = true;
+                facet_rows.push(r.rowid);
                 cands.push(r);
             }
         }
@@ -250,7 +256,15 @@ pub fn keyword<S: Sql>(s: &S, inp: &KeywordIn) -> PResult<KeywordOut> {
         Some(m) => Some(facets(s, &facet_rows, m)?),
         None => None,
     };
-    Ok(KeywordOut { cands, facets })
+    Ok(KeywordOut {
+        cands,
+        facets,
+        facet_rows: if inp.facet_rows {
+            facet_rows
+        } else {
+            Vec::new()
+        },
+    })
 }
 
 /// The subject, participants and references of a message, lower case.
@@ -988,6 +1002,125 @@ pub fn refs_of<S: Sql>(s: &S, rowids: &[i64]) -> PResult<Vec<(i64, String)>> {
         .into_iter()
         .map(|r| (r.message_rowid, r.value))
         .collect())
+}
+
+// ---- The RPC ---------------------------------------------------------------------------------------
+
+/// The mailbox's search and index operations, tagged `sq` inside `{"op": "search", …}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "sq", rename_all = "snake_case")]
+pub enum SearchOp {
+    Keyword(KeywordIn),
+    ReadBack(ReadBackIn),
+    Details(DetailsIn),
+    Facets {
+        rowids: Vec<i64>,
+        months: Vec<(String, i64, i64)>,
+    },
+    Coverage {
+        as_of: i64,
+        model: String,
+    },
+    Threads {
+        seqs: Vec<i64>,
+    },
+    Contacts(ContactsIn),
+    RelatedSource {
+        message_id: String,
+        include_quarantined: bool,
+    },
+    RefsOf {
+        rowids: Vec<i64>,
+    },
+    IndexSource {
+        message_id: String,
+    },
+    PutChunks {
+        message_id: String,
+        chunks: Vec<ChunkRow>,
+        model: String,
+    },
+    Mark {
+        message_id: String,
+        ids: Vec<String>,
+        status: String,
+        model: String,
+    },
+    DropDeleting {
+        ids: Vec<String>,
+    },
+    VectorIds {
+        message_id: String,
+    },
+    Reconcile,
+    MarkPending {
+        ids: Vec<String>,
+    },
+}
+
+fn to_value<T: Serialize>(t: &T) -> Value {
+    serde_json::to_value(t).unwrap_or(Value::Null)
+}
+
+/// Runs one operation. The system identity's mailbox is never searched or indexed ([A15]): its reads
+/// answer empty and its index operations skip.
+///
+/// [A15]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/edge-cases.md
+pub fn handle<S: Sql>(s: &S, op: SearchOp, now: i64, is_system: bool) -> PResult<Value> {
+    if is_system {
+        return Ok(match op {
+            SearchOp::Keyword(_) => to_value(&KeywordOut::default()),
+            SearchOp::IndexSource { .. } => to_value(&IndexSource {
+                skip: true,
+                ..IndexSource::default()
+            }),
+            SearchOp::PutChunks { .. } => to_value(&PutChunksOut {
+                erased: true,
+                ..PutChunksOut::default()
+            }),
+            SearchOp::Mark { .. } => Value::Bool(false),
+            SearchOp::Coverage { .. } => to_value(&Coverage::default()),
+            SearchOp::Reconcile => to_value(&ReconcileOut::default()),
+            SearchOp::RelatedSource { .. } => Value::Null,
+            _ => Value::Array(Vec::new()),
+        });
+    }
+    Ok(match op {
+        SearchOp::Keyword(i) => to_value(&keyword(s, &i)?),
+        SearchOp::ReadBack(i) => to_value(&read_back(s, &i)?),
+        SearchOp::Details(i) => to_value(&details(s, &i)?),
+        SearchOp::Facets { rowids, months } => facets(s, &rowids, &months)?,
+        SearchOp::Coverage { as_of, model } => to_value(&coverage(s, as_of, &model)?),
+        SearchOp::Threads { seqs } => Value::Array(threads(s, &seqs)?),
+        SearchOp::Contacts(i) => Value::Array(contacts(s, &i)?),
+        SearchOp::RelatedSource {
+            message_id,
+            include_quarantined,
+        } => related_source(s, &message_id, include_quarantined)?.unwrap_or(Value::Null),
+        SearchOp::RefsOf { rowids } => to_value(&refs_of(s, &rowids)?),
+        SearchOp::IndexSource { message_id } => to_value(&index_source(s, &message_id)?),
+        SearchOp::PutChunks {
+            message_id,
+            chunks,
+            model,
+        } => to_value(&s.transaction_sync(|t| put_chunks(t, &message_id, &chunks, &model, now))?),
+        SearchOp::Mark {
+            message_id,
+            ids,
+            status,
+            model,
+        } => Value::Bool(s.transaction_sync(|t| mark(t, &message_id, &ids, &status, &model, now))?),
+        SearchOp::DropDeleting { ids } => {
+            drop_deleting(s, &ids)?;
+            Value::Null
+        }
+        SearchOp::VectorIds { message_id } => to_value(&vector_ids(s, &message_id)?),
+        SearchOp::Reconcile => to_value(&reconcile(s, now)?),
+        SearchOp::MarkPending { ids } => {
+            mark_pending(s, &ids, now)?;
+            Value::Null
+        }
+    })
 }
 
 #[cfg(test)]

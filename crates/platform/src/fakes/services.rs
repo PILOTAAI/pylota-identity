@@ -244,6 +244,15 @@ fn matches_filter(meta: &serde_json::Map<String, Value>, filter: &Value) -> bool
                 "$ne" => v != arg,
                 "$in" => arg.as_array().is_some_and(|a| a.contains(v)),
                 "$nin" => arg.as_array().is_some_and(|a| !a.contains(v)),
+                "$gte" | "$gt" | "$lte" | "$lt" => match (v.as_f64(), arg.as_f64()) {
+                    (Some(x), Some(y)) => match op.as_str() {
+                        "$gte" => x >= y,
+                        "$gt" => x > y,
+                        "$lte" => x <= y,
+                        _ => x < y,
+                    },
+                    _ => false,
+                },
                 _ => false,
             }),
             other => v == other,
@@ -293,6 +302,20 @@ impl VectorIndex for FakeVectors {
         out.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
         out.truncate(top_k as usize);
         Ok(out)
+    }
+
+    async fn query_by_id(
+        &self,
+        namespace: &str,
+        id: &str,
+        top_k: u32,
+        filter: &Value,
+    ) -> PResult<Vec<VectorMatch>> {
+        let values = self.records.borrow().get(id).map(|r| r.values.clone());
+        match values {
+            Some(v) => self.query(namespace, &v, top_k, filter).await,
+            None => Ok(Vec::new()),
+        }
     }
 
     async fn delete_by_ids(&self, ids: &[String]) -> PResult<String> {

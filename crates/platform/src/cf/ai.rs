@@ -202,6 +202,30 @@ impl VectorIndex for CfVectors {
         read_matches(b, &self.json(&out)?)
     }
 
+    async fn query_by_id(
+        &self,
+        namespace: &str,
+        id: &str,
+        top_k: u32,
+        filter: &Value,
+    ) -> PResult<Vec<VectorMatch>> {
+        let b = self.binding;
+        let options = query_options(b, namespace, top_k, filter)?;
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = self
+            .fake(
+                "query_by_id",
+                serde_json::json!({ "id": id, "options": options }),
+            )
+            .await
+        {
+            return read_matches(b, &r?);
+        }
+        let options = js::from_json(&options).map_err(|e| js::error(b, &e))?;
+        let out = wait(b, self.index()?.query_by_id(id, &options)).await?;
+        read_matches(b, &self.json(&out)?)
+    }
+
     async fn delete_by_ids(&self, ids: &[String]) -> PResult<String> {
         #[cfg(feature = "itest-hooks")]
         if let Some(r) = self.fake("delete", serde_json::json!({ "ids": ids })).await {

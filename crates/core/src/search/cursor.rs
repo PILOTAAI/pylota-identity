@@ -69,6 +69,16 @@ pub fn decode(
     qh: &str,
     now_ms: i64,
 ) -> Result<CursorV1, CursorError> {
+    let c = open(token, keys, now_ms)?;
+    if c.qh != qh {
+        return Err(CursorError::Invalid);
+    }
+    Ok(c)
+}
+
+/// [`decode`] without the request hash, so the caller can say that the cursor belongs to another
+/// query.
+pub fn open(token: &str, keys: &[(&str, &[u8; 32])], now_ms: i64) -> Result<CursorV1, CursorError> {
     let rest = token.strip_prefix("c_").ok_or(CursorError::Invalid)?;
     let (kid, data) = rest.split_at_checked(1).ok_or(CursorError::Invalid)?;
     let (_, key) = keys
@@ -93,9 +103,6 @@ pub fn decode(
     }
     if now_ms - c.issued_at > LIFETIME_MS {
         return Err(CursorError::Expired);
-    }
-    if c.qh != qh {
-        return Err(CursorError::Invalid);
     }
     Ok(c)
 }
@@ -158,6 +165,7 @@ mod tests {
             decode(&t, &[("1", &k)], "other", 2_000),
             Err(CursorError::Invalid)
         );
+        assert_eq!(open(&t, &[("1", &k)], 2_000).map(|c| c.qh), Ok(qh));
     }
 
     #[test]

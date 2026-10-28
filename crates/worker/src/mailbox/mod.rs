@@ -82,6 +82,8 @@ pub enum MailboxRequest {
     /// Reads, label changes and release (Inbound › Read path and release), and `wait`; the request
     /// is tagged `q` inside (`{"op": "read", "q": "list_threads", …}`).
     Read(read::ReadRequest),
+    /// Search and index operations ([Search]); tagged `sq` inside.
+    Search(search::SearchOp),
     /// A send, reply, reply-all or forward (Outbound › The submit path).
     Submit(Box<submit::SubmitInput>),
     /// What the outbound consumer reads before D1: status, From and the queued recipients.
@@ -423,6 +425,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             MailboxRequest::Read(r) => {
                 read::handle(self.p, self.sql, owner, r, now, is_system).await
             }
+            MailboxRequest::Search(op) => Ok(search::handle(self.sql, op, now, is_system)?),
             MailboxRequest::EmitEvent(ev) => {
                 let seq = self.sql.transaction_sync(|s| {
                     outbox::append(
