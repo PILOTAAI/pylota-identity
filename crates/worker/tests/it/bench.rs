@@ -53,6 +53,14 @@ fn queue_to_transport_p95() {
     }
 }
 
+/// `count`, or `PM_BENCH_MESSAGES` when set (a quick local run of the benchmarks).
+fn scale(count: u64) -> u64 {
+    std::env::var("PM_BENCH_MESSAGES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(count)
+}
+
 /// Bulk-seeds `count` synthetic messages into an identity's mailbox, and their vectors into the fake
 /// Vectorize (Testing § 6.9).
 fn seed(tenant_id: &str, identity_id: &str, count: u64, seed: u64) {
@@ -107,7 +115,7 @@ const QUERIES: &[&str] = &[
 #[ignore = "nightly: seeds 50,000 messages (Testing § 6.9)"]
 fn keyword_p95() {
     let (tid, idn, _, key) = crate::mailbox_fixture("bench keyword");
-    seed(&tid, &idn, 50_000, 7);
+    seed(&tid, &idn, scale(50_000), 7);
     let qs: Vec<_> = QUERIES
         .iter()
         .map(|q| json!({ "q": q, "mode": "keyword" }))
@@ -121,7 +129,7 @@ fn keyword_p95() {
 #[ignore = "nightly: seeds 50,000 messages (Testing § 6.9)"]
 fn hybrid_p95() {
     let (tid, idn, _, key) = crate::mailbox_fixture("bench hybrid");
-    seed(&tid, &idn, 50_000, 11);
+    seed(&tid, &idn, scale(50_000), 11);
     let qs: Vec<_> = QUERIES
         .iter()
         .map(|q| json!({ "q": q, "mode": "hybrid" }))
@@ -139,7 +147,12 @@ fn tenant_fanout_p95() {
     let tid = t["id"].as_str().unwrap().to_owned();
     for i in 0..10 {
         let idn = crate::identity(&p, &tid, &format!("fan{i}"));
-        seed(&tid, idn["id"].as_str().unwrap(), 5_000, 100 + i);
+        seed(
+            &tid,
+            idn["id"].as_str().unwrap(),
+            scale(50_000) / 10,
+            100 + i,
+        );
     }
     let (_, key) = crate::mint(
         &p,

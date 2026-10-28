@@ -59,7 +59,12 @@ fn job_kinds_before_milestone() {
         &key,
     );
     assert_eq!(full.body["triage"]["status"], "pending", "{}", full.body);
-    assert!(crate::fakes::queued("pm-index-dlq").is_empty());
+    // Only this test's jobs: an earlier test's fault can dead-letter its own.
+    assert!(
+        !crate::fakes::queued("pm-index-dlq")
+            .iter()
+            .any(|j| j["identity_id"] == idn.as_str())
+    );
 }
 
 const DAY: i64 = 86_400_000;
