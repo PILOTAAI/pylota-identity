@@ -5,6 +5,7 @@
 //!
 //! [Search § 2]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/search.md
 
+pub mod agentic;
 pub mod contacts;
 pub mod facets;
 pub mod hybrid;
@@ -67,6 +68,7 @@ impl Mode {
 }
 
 /// The identities a search reads, sorted by ID; their index is the high part of `ord` at tenant scope.
+#[derive(Clone)]
 pub struct Scope {
     pub tenant: tdb::Row,
     pub targets: Vec<idb::Row>,
@@ -95,6 +97,7 @@ pub struct Plan {
     pub direction: Option<String>,
     pub after_ms: Option<i64>,
     pub before_ms: Option<i64>,
+    pub safe_why: bool,
 }
 
 impl Plan {
@@ -167,6 +170,8 @@ pub struct Params {
     pub before_ms: Option<i64>,
     pub key_id: String,
     pub request_id: String,
+    /// `why` for the agentic planner: a reference value only when `injection::fact_ref` accepts it.
+    pub safe_why: bool,
 }
 
 /// The tenant's time zone (UTC when the stored name is not an IANA zone).
@@ -360,6 +365,7 @@ pub async fn plan<P: Platform>(p: &P, scope: Scope, x: Params) -> Result<Plan, A
         direction: x.direction,
         after_ms: x.after_ms,
         before_ms: x.before_ms,
+        safe_why: x.safe_why,
     })
 }
 
@@ -853,6 +859,20 @@ fn why(item: &Item, d: &Detail, plan: &Plan) -> Vec<String> {
     for w in out {
         if !dedup.contains(&w) {
             dedup.push(w);
+        }
+    }
+    if plan.safe_why {
+        // A located reference keeps its value only when it may sit among the service's own lines (E1).
+        for w in &mut dedup {
+            if let Some(rest) = w.strip_prefix("ref:")
+                && let Some((value, loc)) = rest.split_once(" (")
+                && let Some((_, kind)) = d.ref_kinds.iter().find(|(v, _)| v == value)
+            {
+                *w = format!(
+                    "{} ({loc}",
+                    pylota_identity_core::injection::why_ref(kind, value)
+                );
+            }
         }
     }
     if d.why.iter().any(|w| w == UNAVAILABLE) {

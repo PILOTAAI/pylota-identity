@@ -10,7 +10,7 @@ pub mod externs;
 pub mod glue;
 #[cfg(feature = "itest-hooks")]
 pub mod itest;
-mod js;
+pub(crate) mod js;
 mod net;
 mod queues;
 mod r2;

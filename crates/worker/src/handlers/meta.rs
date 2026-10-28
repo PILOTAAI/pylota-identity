@@ -71,6 +71,7 @@ pub fn security_txt<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         body: None,
         raw: Some(("text/plain; charset=utf-8", text.into_bytes())),
         headers: Vec::new(),
+        stream: None,
     })
 }
 

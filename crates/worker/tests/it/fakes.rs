@@ -32,6 +32,11 @@ struct State {
     cf_suppressions: BTreeMap<String, Vec<Value>>,
     /// Workers AI: statuses to answer instead, per model substring, taken in order.
     ai_fail: Vec<(String, Vec<u16>)>,
+    /// Workers AI: scripted answers per model substring, taken in order (`{"__delay_ms": n}` waits
+    /// first, `{"__status": n}` fails).
+    ai_script: Vec<(String, Vec<Value>)>,
+    /// The inputs of the calls of scripted models, in order.
+    ai_inputs: Vec<(String, Value)>,
     /// Vectorize by binding, by vector ID.
     vectors: BTreeMap<String, BTreeMap<String, Rec>>,
     /// `describe()` reports this count instead of the stored one.
@@ -75,6 +80,8 @@ static STATE: Mutex<State> = Mutex::new(State {
     mail_sent: Vec::new(),
     cf_suppressions: BTreeMap::new(),
     ai_fail: Vec::new(),
+    ai_script: Vec::new(),
+    ai_inputs: Vec::new(),
     vectors: BTreeMap::new(),
     vec_count: None,
     vec_fail: BTreeMap::new(),
@@ -364,6 +371,7 @@ pub fn reset() {
     s.offset = 0;
     s.faults.clear();
     s.ai_fail.clear();
+    s.ai_script.clear();
     s.vec_fail.clear();
     s.vec_count = None;
 }
@@ -463,6 +471,32 @@ fn ai_run(s: &mut State, body: &Value) -> Value {
         return json!({ "__status": st });
     }
     let input = &body["input"];
+    if model.contains("qwen") || s.ai_script.iter().any(|(m, _)| model.contains(m.as_str())) {
+        s.ai_inputs.push((model.clone(), input.clone()));
+    }
+    if let Some((_, answers)) = s
+        .ai_script
+        .iter_mut()
+        .find(|(m, a)| model.contains(m.as_str()) && !a.is_empty())
+    {
+        let mut answer = answers.remove(0);
+        if let Some(ms) = answer["__delay_ms"].as_u64() {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            if let Some(o) = answer.as_object_mut() {
+                o.remove("__delay_ms");
+            }
+        }
+        return answer;
+    }
+    if model.contains("qwen") {
+        // Unscripted planner: stop at once; an answer call finds nothing.
+        let content = if input["tool_choice"] == "none" {
+            json!({ "status": "insufficient_evidence", "sentences": [], "confidence": 0.0, "not_found": ["unscripted"] }).to_string()
+        } else {
+            "READY".to_owned()
+        };
+        return json!({ "choices": [ { "message": { "role": "assistant", "content": content }, "finish_reason": "stop" } ] });
+    }
     if model.contains("rerank") {
         let q = tokens(input["query"].as_str().unwrap_or(""));
         let response: Vec<Value> = input["contexts"]
@@ -626,6 +660,28 @@ pub fn ai_fail(model: &str, statuses: &[u16]) {
         .unwrap()
         .ai_fail
         .push((model.to_owned(), statuses.to_vec()));
+}
+
+/// Scripts the next answers of models whose name contains `model` (a chat completion, or
+/// `{"__status": n}`, or either with `"__delay_ms": n`).
+pub fn ai_script(model: &str, answers: Vec<Value>) {
+    start();
+    let mut s = STATE.lock().unwrap();
+    s.ai_script.retain(|(m, _)| m != model);
+    s.ai_script.push((model.to_owned(), answers));
+}
+
+/// The inputs of the agent model's calls so far.
+pub fn ai_inputs(model: &str) -> Vec<Value> {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .ai_inputs
+        .iter()
+        .filter(|(m, _)| m.contains(model))
+        .map(|(_, i)| i.clone())
+        .collect()
 }
 
 /// The stored vectors of `binding`: `id → { namespace, metadata }`.

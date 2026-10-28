@@ -257,6 +257,7 @@ async fn search<P: Platform>(c: &Ctx<P>, scope: Scope, body: Value) -> Result<Re
             before_ms,
             key_id: key.key_id.clone(),
             request_id: c.request_id.clone(),
+            safe_why: false,
         },
     )
     .await?;
@@ -330,6 +331,7 @@ pub async fn related<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         review(c),
         &key.key_id,
         &c.request_id,
+        false,
     )
     .await?;
     Ok(Reply::json(200, out))
@@ -378,6 +380,7 @@ pub async fn contacts<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             before_ms: None,
             key_id: key.key_id.clone(),
             request_id: c.request_id.clone(),
+            safe_why: false,
         },
     )
     .await?;

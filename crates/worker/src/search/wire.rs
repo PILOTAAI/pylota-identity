@@ -148,6 +148,9 @@ pub struct Detail {
     /// The hit's display fields.
     #[serde(default)]
     pub cand: Option<Cand>,
+    /// `(value, kind)` of each matched reference, for the planner's `why=` line.
+    #[serde(default)]
+    pub ref_kinds: Vec<(String, String)>,
 }
 
 impl Cand {

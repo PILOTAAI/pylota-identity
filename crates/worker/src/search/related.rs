@@ -79,6 +79,7 @@ pub async fn related<P: Platform>(
     review: bool,
     key_id: &str,
     request_id: &str,
+    safe_why: bool,
 ) -> Result<Value, ApiError> {
     let params = |q: String| Params {
         q,
@@ -97,6 +98,7 @@ pub async fn related<P: Platform>(
         before_ms: None,
         key_id: key_id.to_owned(),
         request_id: request_id.to_owned(),
+        safe_why,
     };
     let base = plan(p, scope, params(String::new())).await?;
     let fan = Fan::new(p, &base);
@@ -166,8 +168,12 @@ pub async fn related<P: Platform>(
         .map(|i| {
             let d = by.remove(&i.c.rowid).unwrap_or_default();
             let mut why = vec![format!("semantic:{:.2}", i.cosine.unwrap_or(0.0))];
-            for v in shared.get(&i.c.rowid).into_iter().flatten() {
-                why.push(format!("ref:{v}"));
+            for (v, kind) in shared.get(&i.c.rowid).into_iter().flatten() {
+                why.push(if safe_why {
+                    pylota_identity_core::injection::why_ref(kind, v)
+                } else {
+                    format!("ref:{v}")
+                });
             }
             why.truncate(super::MAX_WHY);
             let mut h = message_hit(idn, i, d, why);
@@ -179,7 +185,7 @@ pub async fn related<P: Platform>(
 }
 
 /// The neighbours, and the references each shares with the source.
-type Neighbours = (Vec<Item>, HashMap<i64, Vec<String>>);
+type Neighbours = (Vec<Item>, HashMap<i64, Vec<(String, String)>>);
 
 /// Steps 2–5 with Vectorize: `None` when Vectorize did not answer (the fallback runs, degraded).
 async fn neighbours<P: Platform>(
@@ -239,15 +245,15 @@ async fn neighbours<P: Platform>(
     let cands = back.into_iter().flatten().flatten().collect::<Vec<_>>();
     // Shared references: +0.1 each, at most +0.2.
     let rowids: Vec<i64> = cands.iter().map(|c| c.rowid).collect();
-    let refs: Vec<Option<Vec<(i64, String)>>> = fan
+    let refs: Vec<Option<Vec<(i64, String, String)>>> = fan
         .each(vec![
             (!rowids.is_empty()).then_some(SearchOp::RefsOf { rowids }),
         ])
         .await?;
-    let mut shared: HashMap<i64, Vec<String>> = HashMap::new();
-    for (rowid, v) in refs.into_iter().flatten().flatten() {
+    let mut shared: HashMap<i64, Vec<(String, String)>> = HashMap::new();
+    for (rowid, v, kind) in refs.into_iter().flatten().flatten() {
         if src.refs.contains(&v) {
-            shared.entry(rowid).or_default().push(v);
+            shared.entry(rowid).or_default().push((v, kind));
         }
     }
     let mut items: Vec<Item> = cands

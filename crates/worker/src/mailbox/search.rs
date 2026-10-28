@@ -445,6 +445,7 @@ struct Body {
 #[derive(Deserialize)]
 struct RefHit {
     value: String,
+    kind: String,
     source: Option<String>,
 }
 
@@ -519,6 +520,7 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
         full.push_str(" FROM messages m JOIN threads t ON t.seq = m.thread_seq WHERE m.rowid = ?1");
         let cand: Option<Cand> = s.first(&full, &[(*rowid).into()])?;
         let mut why: Vec<String> = Vec::new();
+        let mut ref_kinds: Vec<(String, String)> = Vec::new();
         let mut attachment_hits: Vec<Value> = Vec::new();
         let atts: Vec<Att> = s.query(
             "SELECT id, filename, text_status FROM attachments WHERE message_rowid = ?1 ORDER BY rowid",
@@ -526,10 +528,13 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
         )?;
         if !ref_values.is_empty() {
             let hits: Vec<RefHit> = s.query(
-                "SELECT value, source FROM refs WHERE message_rowid = ?1 AND value IN (SELECT value FROM json_each(?2))",
+                "SELECT value, kind, source FROM refs WHERE message_rowid = ?1 AND value IN (SELECT value FROM json_each(?2))",
                 &[(*rowid).into(), refs.clone()],
             )?;
             for h in hits {
+                if !ref_kinds.iter().any(|(v, _)| *v == h.value) {
+                    ref_kinds.push((h.value.clone(), h.kind.clone()));
+                }
                 let (label, att) = location(h.source.as_deref());
                 why.push(format!("ref:{} ({label})", h.value));
                 if let Some((id, page)) = att
@@ -625,6 +630,7 @@ pub fn details<S: Sql>(s: &S, inp: &DetailsIn) -> PResult<Vec<Detail>> {
             why,
             attachment_hits,
             cand,
+            ref_kinds,
         });
     }
     Ok(out)
@@ -1045,20 +1051,21 @@ pub fn related_source<S: Sql>(s: &S, message_id: &str, include: bool) -> PResult
     })))
 }
 
-/// The reference values of messages (`rowid → values`), for the related boost.
-pub fn refs_of<S: Sql>(s: &S, rowids: &[i64]) -> PResult<Vec<(i64, String)>> {
+/// The reference values of messages, `(rowid, value, kind)`, for the related boost.
+pub fn refs_of<S: Sql>(s: &S, rowids: &[i64]) -> PResult<Vec<(i64, String, String)>> {
     #[derive(Deserialize)]
     struct R {
         message_rowid: i64,
         value: String,
+        kind: String,
     }
     Ok(s
         .query::<R>(
-            "SELECT DISTINCT message_rowid, value FROM refs WHERE message_rowid IN (SELECT value FROM json_each(?1))",
+            "SELECT DISTINCT message_rowid, value, kind FROM refs WHERE message_rowid IN (SELECT value FROM json_each(?1))",
             &[serde_json::to_string(rowids).unwrap_or_default().into()],
         )?
         .into_iter()
-        .map(|r| (r.message_rowid, r.value))
+        .map(|r| (r.message_rowid, r.value, r.kind))
         .collect())
 }
 

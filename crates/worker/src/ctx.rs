@@ -38,6 +38,8 @@ pub struct Reply {
     /// A body that is not JSON (`security.txt`): content type and bytes.
     pub raw: Option<(&'static str, Vec<u8>)>,
     pub headers: Vec<(String, String)>,
+    /// A body written after the response (server-sent events); its writer runs in `waitUntil`.
+    pub stream: Option<pylota_identity_platform::stream::StreamBody>,
 }
 
 impl Reply {
@@ -47,6 +49,7 @@ impl Reply {
             body: Some(body),
             raw: None,
             headers: Vec::new(),
+            stream: None,
         }
     }
 
@@ -56,6 +59,7 @@ impl Reply {
             body: None,
             raw: None,
             headers: Vec::new(),
+            stream: None,
         }
     }
 }

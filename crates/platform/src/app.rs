@@ -36,12 +36,18 @@ pub enum HttpResponseOut {
     },
     /// The runtime's `101` from a Durable Object (`ObjectClient::upgrade`), returned unchanged.
     Upgrade(UpgradeResponse),
+    /// A body written after the response is returned (`crate::stream`).
+    Stream {
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: crate::stream::StreamBody,
+    },
 }
 
 impl HttpResponseOut {
     pub fn status(&self) -> u16 {
         match self {
-            Self::Http { status, .. } => *status,
+            Self::Http { status, .. } | Self::Stream { status, .. } => *status,
             Self::Upgrade(_) => 101,
         }
     }

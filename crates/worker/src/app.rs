@@ -93,8 +93,10 @@ impl<P: Platform> App<P> {
                 &mut rl_limit,
             )
             .await;
+        let mut stream = None;
         let (status, mut headers, body) = match result {
             Ok(reply) => {
+                stream = reply.stream;
                 let mut h = reply.headers;
                 let body = match (reply.raw, reply.body) {
                     (Some((ct, bytes)), _) => {
@@ -139,10 +141,17 @@ impl<P: Platform> App<P> {
                 headers.push(("ratelimit-limit".into(), l.to_string()));
             }
         }
-        HttpResponseOut::Http {
-            status,
-            headers,
-            body,
+        match stream {
+            Some(body) => HttpResponseOut::Stream {
+                status,
+                headers,
+                body,
+            },
+            None => HttpResponseOut::Http {
+                status,
+                headers,
+                body,
+            },
         }
     }
 

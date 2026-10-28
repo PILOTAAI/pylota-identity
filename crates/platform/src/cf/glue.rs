@@ -407,6 +407,27 @@ fn response_out(out: HttpResponseOut) -> worker::Result<worker::worker_sys::web_
                 .into())
         }
         HttpResponseOut::Upgrade(up) => Ok(up.response),
+        HttpResponseOut::Stream {
+            status,
+            headers,
+            body,
+        } => {
+            use wasm_bindgen::JsCast as _;
+            let h = worker::Headers::new();
+            for (name, value) in &headers {
+                h.append(name, value)?;
+            }
+            let init = super::js::object();
+            let set = |k: &str, v: &wasm_bindgen::JsValue| {
+                super::js::set(&init, k, v).map_err(|_| worker::Error::RustError(k.to_owned()))
+            };
+            set("status", &wasm_bindgen::JsValue::from(status))?;
+            set("headers", &h.0.clone().into())?;
+            let r = super::js::construct("Response", &[&body.readable, &init])
+                .map_err(|_| worker::Error::RustError("stream response".into()))?;
+            r.dyn_into()
+                .map_err(|_| worker::Error::RustError("stream response".into()))
+        }
     }
 }
 

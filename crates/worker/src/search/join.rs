@@ -35,6 +35,21 @@ pub async fn bounded<F: Future>(futs: Vec<F>, n: usize) -> Vec<F::Output> {
         .collect()
 }
 
+/// Gives the other futures of a [`both`] or [`bounded`] a turn.
+pub async fn yield_now() {
+    let mut yielded = false;
+    poll_fn(|cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
 /// Both outputs, the two futures polled together.
 pub async fn both<A: Future, B: Future>(a: A, b: B) -> (A::Output, B::Output) {
     let mut a = Box::pin(a);

@@ -157,13 +157,19 @@ impl Harness {
         };
         let out = block_on(self.app.fetch(req));
         self.app.p.background.run_pending();
-        let HttpResponseOut::Http {
-            status,
-            headers,
-            body,
-        } = out
-        else {
-            panic!("an upgrade")
+        let (status, headers, body) = match out {
+            HttpResponseOut::Http {
+                status,
+                headers,
+                body,
+            } => (status, headers, body),
+            // A stream is complete once the background work has run.
+            HttpResponseOut::Stream {
+                status,
+                headers,
+                body,
+            } => (status, headers, body.text().into_bytes()),
+            HttpResponseOut::Upgrade(_) => panic!("an upgrade"),
         };
         let body = serde_json::from_slice(&body)
             .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&body).into_owned()));

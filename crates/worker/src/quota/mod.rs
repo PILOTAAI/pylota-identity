@@ -909,16 +909,31 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
             QuotaRequest::SystemMail { .. } => to_v(&SystemMailAnswer::Ok),
             QuotaRequest::DeploymentReserve { .. } => json!({ "kind": "ok" }),
             QuotaRequest::DeploymentStatus { .. } => json!({ "count": 0, "stage": "none" }),
-            QuotaRequest::CountAgentic { tz, .. } => {
-                let day = days::local_day(now, &tz);
-                self.sql
-                    .transaction_sync(|s| -> Result<(), PlatformError> {
+            // One agentic search against the tenant's daily cap (Search § 11.2 Init): a spent cap
+            // counts nothing and answers when it resets.
+            QuotaRequest::CountAgentic { tz, cap } => {
+                let answer = self.sql.transaction_sync(
+                    |s| -> Result<CountAgenticAnswer, PlatformError> {
+                        let (day, zone) = self.cap_day(s, now, &tz)?;
+                        let used = s
+                            .first::<N>(
+                                "SELECT value AS n FROM counters WHERE metric = 'agentic' AND window = ?1",
+                                &[day.clone().into()],
+                            )?
+                            .map_or(0, |r| r.n);
+                        if used >= i64::from(cap) {
+                            return Ok(CountAgenticAnswer::CapReached {
+                                resets_at: days::next_local_midnight(now, &zone),
+                            });
+                        }
                         Self::add(s, "agentic", &day, 1)?;
-                        Self::add(s, "usage:agentic", &utc, 1)
-                    })?;
-                to_v(&CountAgenticAnswer::Ok {
-                    used: self.counter("agentic", &day)? as u32,
-                })
+                        Self::add(s, "usage:agentic", &utc, 1)?;
+                        Ok(CountAgenticAnswer::Ok {
+                            used: (used + 1) as u32,
+                        })
+                    },
+                )?;
+                to_v(&answer)
             }
             QuotaRequest::RecordUsage { metric, n } => {
                 let name = format!(

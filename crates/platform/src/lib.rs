@@ -32,6 +32,7 @@ pub mod queues;
 pub mod r2;
 pub mod ratelimit;
 pub mod rng;
+pub mod stream;
 pub mod tcp;
 pub mod vectorize;
 

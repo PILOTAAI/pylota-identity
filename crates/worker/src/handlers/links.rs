@@ -36,5 +36,6 @@ pub async fn get<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             "content-disposition".into(),
             format!("attachment; filename=\"{}\"", link.attachment_id),
         )],
+        stream: None,
     })
 }
