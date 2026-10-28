@@ -128,3 +128,33 @@ pub async fn mail_send(
         })
     })
 }
+
+/// Testing § 6.3: Workers AI and Vectorize go to the fake server, `POST {fakes}/__{service}/{op}`
+/// with a JSON body. `None` without a fake server; an answer of 429 or 5xx is an error of the binding
+/// (the detail names the status, so a caller can tell a rate limit).
+pub async fn fake_call(
+    binding: &'static str,
+    path: &str,
+    body: Value,
+) -> Option<crate::PResult<Value>> {
+    let url = FAKES.with(|f| f.borrow().clone())?;
+    let mut req = HttpRequest::get(format!("{url}{path}"));
+    req.method = "POST";
+    req.timeout_ms = 10_000;
+    req.max_body_bytes = 32 << 20;
+    req.headers
+        .push(("content-type".into(), "application/json".into()));
+    req.body = Some(body.to_string().into_bytes());
+    Some(match CfHttp.send(req).await {
+        Ok(r) if r.status >= 400 => Err(crate::PlatformError::unavailable(
+            binding,
+            format!("fake answered {}", r.status),
+        )),
+        Ok(r) => serde_json::from_slice(&r.body)
+            .map_err(|e| crate::PlatformError::invalid(binding, e.to_string())),
+        Err(_) => Err(crate::PlatformError::unavailable(
+            binding,
+            "fake unreachable",
+        )),
+    })
+}

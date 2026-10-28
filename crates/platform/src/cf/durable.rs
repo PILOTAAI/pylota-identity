@@ -61,11 +61,19 @@ impl ObjectClient for CfObjects {
     ) -> PResult<RpcResult<Resp>> {
         let binding = class.binding();
         #[cfg(feature = "itest-hooks")]
-        if super::itest::take_fault("do.call", binding).await.is_some() {
-            return Err(PlatformError::unavailable(
-                binding,
-                "fault injected by the test",
-            ));
+        match super::itest::take_fault("do.call", binding).await {
+            // `delay:{ms}`: a slow object (F15), then the call as usual.
+            Some(mode) if mode.starts_with("delay:") => {
+                let ms: u64 = mode["delay:".len()..].parse().unwrap_or(2_000);
+                worker::Delay::from(std::time::Duration::from_millis(ms)).await;
+            }
+            Some(_) => {
+                return Err(PlatformError::unavailable(
+                    binding,
+                    "fault injected by the test",
+                ));
+            }
+            None => {}
         }
         let body = serde_json::to_vec(envelope)
             .map_err(|e| PlatformError::invalid(binding, format!("envelope: {e}")))?;

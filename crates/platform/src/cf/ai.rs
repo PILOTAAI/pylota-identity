@@ -54,6 +54,16 @@ impl Ai for CfAi {
         input: &I,
         opts: &AiOptions,
     ) -> PResult<O> {
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = super::itest::fake_call(
+            AI,
+            "/__ai/run",
+            serde_json::json!({ "model": model, "input": serde_json::to_value(input).unwrap_or(Value::Null) }),
+        )
+        .await
+        {
+            return serde_json::from_value(r?).map_err(|e| PlatformError::invalid(AI, e.to_string()));
+        }
         let out = self.raw(model, input, opts).await?;
         js::to_value(AI, &out)
     }
@@ -122,11 +132,27 @@ impl CfVectors {
     fn json(&self, v: &JsValue) -> PResult<Value> {
         js::to_value(self.binding, v)
     }
+
+    #[cfg(feature = "itest-hooks")]
+    async fn fake(&self, op: &str, body: Value) -> Option<PResult<Value>> {
+        super::itest::fake_call(self.binding, &format!("/__vec/{}/{op}", self.binding), body).await
+    }
 }
 
 impl VectorIndex for CfVectors {
     async fn upsert(&self, vectors: &[VectorRecord]) -> PResult<String> {
         check_upsert(self.binding, vectors)?;
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = self
+            .fake(
+                "upsert",
+                serde_json::json!({ "vectors": vectors.iter().map(|v| serde_json::json!({
+                    "id": v.id, "namespace": v.namespace, "values": v.values, "metadata": v.metadata })).collect::<Vec<_>>() }),
+            )
+            .await
+        {
+            return read_mutation(self.binding, &r?);
+        }
         let b = self.binding;
         let array = js_sys::Array::new();
         for v in vectors {
@@ -156,6 +182,16 @@ impl VectorIndex for CfVectors {
     ) -> PResult<Vec<VectorMatch>> {
         let b = self.binding;
         let options = query_options(b, namespace, top_k, filter)?;
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = self
+            .fake(
+                "query",
+                serde_json::json!({ "vector": vector, "options": options }),
+            )
+            .await
+        {
+            return read_matches(b, &r?);
+        }
         let options = js::from_json(&options).map_err(|e| js::error(b, &e))?;
         let out = wait(
             b,
@@ -167,11 +203,26 @@ impl VectorIndex for CfVectors {
     }
 
     async fn delete_by_ids(&self, ids: &[String]) -> PResult<String> {
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = self.fake("delete", serde_json::json!({ "ids": ids })).await {
+            return read_mutation(self.binding, &r?);
+        }
         let out = wait(self.binding, self.index()?.delete_by_ids(&Self::ids(ids))).await?;
         read_mutation(self.binding, &self.json(&out)?)
     }
 
     async fn get_by_ids(&self, ids: &[String]) -> PResult<Vec<String>> {
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = self.fake("get", serde_json::json!({ "ids": ids })).await {
+            return Ok(r?
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v["id"].as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default());
+        }
         let out = wait(self.binding, self.index()?.get_by_ids(&Self::ids(ids))).await?;
         let found = self.json(&out)?;
         let list = found.as_array().ok_or_else(|| {
@@ -188,6 +239,10 @@ impl VectorIndex for CfVectors {
     }
 
     async fn describe(&self) -> PResult<IndexInfo> {
+        #[cfg(feature = "itest-hooks")]
+        if let Some(r) = self.fake("describe", serde_json::json!({})).await {
+            return read_info(self.binding, &r?);
+        }
         let out = wait(self.binding, self.index()?.describe()).await?;
         read_info(self.binding, &self.json(&out)?)
     }

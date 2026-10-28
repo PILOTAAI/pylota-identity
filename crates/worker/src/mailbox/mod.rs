@@ -14,6 +14,7 @@ pub mod locks;
 pub mod messages;
 pub mod outbox;
 pub mod read;
+pub mod search;
 pub mod submit;
 pub mod threads;
 

@@ -34,6 +34,7 @@ pub mod ratelimit;
 pub mod request_id;
 pub mod router;
 pub mod rpc;
+pub mod search;
 pub mod send;
 pub mod transport;
 pub mod webhooks;
