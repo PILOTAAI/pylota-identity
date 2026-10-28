@@ -5,4 +5,11 @@
 
 pub trait Clock {
     fn now_ms(&self) -> i64;
+
+    /// Waits `ms` milliseconds (the retry pauses of the `email()` handler, the `wait` polls). The fake
+    /// clock advances by `ms` and returns at once.
+    fn sleep(&self, ms: u32) -> impl std::future::Future<Output = ()> {
+        let _ = ms;
+        async {}
+    }
 }

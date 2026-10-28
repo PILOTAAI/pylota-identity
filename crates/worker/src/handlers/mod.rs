@@ -7,11 +7,15 @@ pub mod audit;
 pub mod domains;
 pub mod identities;
 pub mod keys;
+pub mod messages;
 pub mod meta;
 pub mod partners;
 pub mod platform;
 pub mod policy;
+pub mod quarantine;
 pub mod tenants;
+pub mod threads;
+pub mod wait;
 
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_platform::{ControlDb as _, Platform};
@@ -57,6 +61,18 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::AddressList => addresses::list(c).await,
         Handler::DomainGet => domains::get(c).await,
         Handler::TenantDomainList => domains::list_tenant(c).await,
+        Handler::ThreadList => threads::list(c).await,
+        Handler::ThreadGet => threads::get(c).await,
+        Handler::ThreadUpdate => threads::update(c).await,
+        Handler::MessageList => messages::list(c).await,
+        Handler::MessageGet => messages::get(c).await,
+        Handler::MessageUpdate => messages::update(c).await,
+        Handler::MessageRaw => messages::raw(c).await,
+        Handler::AttachmentGet => messages::attachment(c).await,
+        Handler::AttachmentText => messages::attachment_text(c).await,
+        Handler::QuarantineList => quarantine::list(c).await,
+        Handler::QuarantineRelease => quarantine::release(c).await,
+        Handler::Wait => wait::wait(c).await,
     }
 }
 

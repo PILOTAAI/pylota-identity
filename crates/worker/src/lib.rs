@@ -10,9 +10,11 @@
 
 pub mod app;
 pub mod auth;
+pub mod consumers;
 pub mod crons;
 pub mod ctx;
 pub mod db;
+pub mod email;
 pub mod errors;
 pub mod handlers;
 #[cfg(feature = "itest-hooks")]
@@ -61,16 +63,27 @@ mod entry {
             self.0.fetch(req).await
         }
 
+        async fn email(
+            &self,
+            msg: pylota_identity_platform::app::EmailIn,
+        ) -> pylota_identity_platform::app::EmailOutcome {
+            crate::email::handle(self.0.p.as_ref(), &msg).await
+        }
+
         /// Until M8 consumes `pm-webhooks`, its messages wait in the queue. The itest build hands
         /// them to the fake server instead, so the suite can see them (Testing § 6.2).
-        #[cfg(feature = "itest-hooks")]
         async fn queue(
             &self,
             queue: pylota_identity_platform::queues::QueueName,
-            _dead_letter: bool,
+            dead_letter: bool,
             batch: Vec<pylota_identity_platform::queues::Incoming<serde_json::Value>>,
         ) {
-            crate::hooks::capture_queue(self.0.p.as_ref(), queue, batch).await;
+            #[cfg(feature = "itest-hooks")]
+            if queue == pylota_identity_platform::queues::QueueName::Webhooks && !dead_letter {
+                crate::hooks::capture_queue(self.0.p.as_ref(), queue, batch).await;
+                return;
+            }
+            crate::consumers::run(self.0.p.as_ref(), queue, dead_letter, batch).await;
         }
 
         async fn scheduled(&self, ev: ScheduledIn) {

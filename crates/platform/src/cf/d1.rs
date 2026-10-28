@@ -56,6 +56,10 @@ fn meta(result: &worker::D1Result) -> PResult<ExecMeta> {
 
 impl ControlDb for CfD1 {
     async fn query<T: DeserializeOwned>(&self, stmt: Stmt) -> PResult<Vec<T>> {
+        #[cfg(feature = "itest-hooks")]
+        if super::itest::take_fault("d1", BINDING).await.is_some() {
+            return Err(super::itest::fault_error(BINDING));
+        }
         let db = self.db()?;
         let result = self.prepare(&db, &stmt)?.all().await.map_err(err)?;
         if let Some(e) = result.error() {

@@ -120,6 +120,13 @@ fn size(object: &JsValue) -> u64 {
 impl BlobStore for CfBlobs {
     async fn put(&self, key: &str, body: BlobBody, meta: &BlobMeta) -> PResult<()> {
         check_meta(self.binding, meta)?;
+        #[cfg(feature = "itest-hooks")]
+        if super::itest::take_fault("r2.put", self.binding)
+            .await
+            .is_some()
+        {
+            return Err(super::itest::fault_error(self.binding));
+        }
         let value: JsValue = match &body {
             BlobBody::Bytes(b) => js_sys::Uint8Array::from(b.as_slice()).into(),
             BlobBody::Js(b) => b.array.clone().into(),

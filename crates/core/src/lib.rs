@@ -7,6 +7,7 @@
 
 pub mod address;
 pub mod attach;
+pub mod attach_text;
 pub mod auth;
 pub mod citations;
 pub mod classify;
@@ -19,6 +20,7 @@ pub mod fusion;
 pub mod fuzz;
 pub mod httpsig;
 pub mod ids;
+pub mod inbound;
 pub mod injection;
 pub mod jwk;
 pub mod keys;
@@ -30,6 +32,7 @@ pub mod refs;
 pub mod reply;
 pub mod sanitize;
 pub mod sealed;
+pub mod search;
 pub mod ses;
 pub mod sns;
 pub mod text;
@@ -37,6 +40,7 @@ pub mod thread;
 pub mod thread_token;
 pub mod triage_rules;
 pub mod trust;
+pub mod visibility;
 
 #[cfg(test)]
 mod tests {

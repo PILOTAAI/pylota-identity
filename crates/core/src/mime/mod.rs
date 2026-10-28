@@ -671,6 +671,50 @@ pub fn sent_at(date_seconds: Option<i64>, received_at_ms: i64) -> i64 {
     }
 }
 
+/// The header fields of a raw message as received, in order (Inbound › Read path, `include=headers`):
+/// unfolded, at most `max_fields` fields and `max_bytes` of header block, each value cut to
+/// `value_bytes` (on a character boundary).
+pub fn header_fields(
+    raw: &[u8],
+    max_fields: usize,
+    max_bytes: usize,
+    value_bytes: usize,
+) -> Vec<(String, String)> {
+    let end = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .or_else(|| raw.windows(2).position(|w| w == b"\n\n"))
+        .unwrap_or(raw.len());
+    let block = String::from_utf8_lossy(&raw[..end.min(max_bytes)]);
+    let mut out: Vec<(String, String)> = Vec::new();
+    for line in block.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if line.starts_with([' ', '\t']) {
+            if let Some((_, v)) = out.last_mut() {
+                v.push(' ');
+                v.push_str(line.trim());
+            }
+            continue;
+        }
+        if out.len() >= max_fields {
+            break;
+        }
+        if let Some((n, v)) = line.split_once(':') {
+            out.push((n.trim().to_owned(), v.trim().to_owned()));
+        }
+    }
+    for (_, v) in &mut out {
+        if v.len() > value_bytes {
+            let mut cut = value_bytes;
+            while !v.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            v.truncate(cut);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,5 +840,19 @@ mod tests {
             "invoice.pdf"
         );
         assert_eq!(sanitise_filename("..."), "");
+    }
+
+    #[test]
+    fn header_fields_unfold_and_cap() {
+        let raw = b"Subject: a\r\n b\r\nX-Long: 0123456789\r\nTo: x@y\r\n\r\nBody: no\r\n";
+        assert_eq!(
+            header_fields(raw, 200, 65536, 4),
+            vec![
+                ("Subject".into(), "a b".into()),
+                ("X-Long".into(), "0123".into()),
+                ("To".into(), "x@y".into())
+            ]
+        );
+        assert_eq!(header_fields(raw, 1, 65536, 2048).len(), 1);
     }
 }

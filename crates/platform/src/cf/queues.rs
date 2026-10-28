@@ -27,6 +27,10 @@ fn message(text: &str, delay_s: u32) -> Result<JsValue, JsValue> {
 impl QueueProducer for CfQueues {
     async fn send<T: Serialize>(&self, q: QueueName, body: &T, delay_s: u32) -> PResult<()> {
         let name = q.binding();
+        #[cfg(feature = "itest-hooks")]
+        if super::itest::take_fault("queue.send", name).await.is_some() {
+            return Err(super::itest::fault_error(name));
+        }
         let texts = encode(q, std::slice::from_ref(body), delay_s)?;
         let queue = js::binding(&self.env, name)?;
         let options = js::object();

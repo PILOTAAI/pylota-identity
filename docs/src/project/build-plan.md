@@ -670,9 +670,9 @@ No deployment runs these stubs in production; the first staging deploy is M20.
 ([Inbound › The `wait` handler](design/inbound.md#the-wait-handler-e4)), which is P0 because quarantine
 rule 5 (E5) depends on its registrations.
 
-**Acceptance:** A2, A6 (`it::inbound::a6_reject_codes`; its SES part in M23), A9, A10 (inbound part), A13, A16, B1 (documented), B2 (with `it::inbound::panic_to_degraded`), B3, B12 (`it::index::b12_extraction_failure`; the search part in M10), B14, C1 (with `it::thread::seq_never_reused`), C9, C10 (`it::inbound::c10_forged_participant_unverified`), C11 (`it::inbound::c11_token_flood_keeps_replies`), D4, D5, D9, D10,
+**Acceptance:** A2, A6 (`it::inbound::a6_reject_codes`; its SES part in M23), A9, A10 (`it::inbound::a10_bcc_copy_flagged`; the reply-all part in M9), A13, A16, B1 (documented), B2 (with `it::inbound::panic_to_degraded`), B3, B12 (`it::index::b12_extraction_failure`; the search part in M10), B14, C1 (with `it::thread::seq_never_reused`), C9, C10 (`it::inbound::c10_forged_participant_unverified`), C11 (`it::inbound::c11_token_flood_keeps_replies`), D4, D5, D9, D10,
 D12, D13 (`it::inbound::d13_unsolicited_flood_caps`; the triage cap in M12),
-E4 (`it::wait::e4_*`), E5, J1, J2, J7, J14 (`it::quarantine::j14_key_release_policy`), J16
+E4 (`it::wait::e4_*`), E5 (`it::inbound::e5_unsolicited_otp`; the service-account approval case in M27), J1, J2, J7, J14 (`it::quarantine::j14_key_release_policy`), J16
 (`it::quarantine::j16_key_release_override`), the message, thread and quarantine routes added to J10's
 matrix, and every `conf::` corpus case ingested end to end through workerd. The read path, labels and
 release (FR-IN-10): `it::messages::read_path_visible_threads`, `it::messages::labels_and_read_state`,

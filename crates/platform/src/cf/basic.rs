@@ -22,6 +22,10 @@ impl Clock for CfClock {
         #[cfg(not(feature = "itest-hooks"))]
         return js_sys::Date::now() as i64;
     }
+
+    async fn sleep(&self, ms: u32) {
+        worker::Delay::from(std::time::Duration::from_millis(u64::from(ms))).await;
+    }
 }
 
 /// `crypto.getRandomValues` through `getrandom` (`wasm_js`).

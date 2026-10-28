@@ -5,7 +5,12 @@
 //! The logic is generic over `platform::durable::{Sql, ObjectState}`, so native tests run it on
 //! `platform::fakes`; `objects::stubs::MailboxObject` wires it to the runtime.
 
+pub mod attachments;
+pub mod ingest;
+pub mod messages;
 pub mod outbox;
+pub mod read;
+pub mod threads;
 
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_platform::durable::{ObjectState, RpcEnvelope, Sql};
@@ -47,6 +52,25 @@ pub struct InitMailbox {
 pub enum MailboxRequest {
     Init(InitMailbox),
     EmitEvent(EmitEvent),
+    /// Stores an inbound message (Inbound › IdentityMailbox.ingest).
+    Ingest(Box<ingest::IngestInput>),
+    /// Counts a parse attempt (Inbound › consumer step 4); answers the new count.
+    NoteParseAttempt {
+        message_id: String,
+    },
+    /// Post-commit check (I10): whether the message still exists.
+    ConfirmStored {
+        message_id: String,
+    },
+    /// The attachments an `AttachmentText` job extracts.
+    PendingAttachmentText {
+        message_id: String,
+    },
+    /// The job's results (Inbound › Attachment text extraction).
+    AttachmentTextReady(attachments::AttachmentText),
+    /// Reads, label changes and release (Inbound › Read path and release), and `wait`; the request
+    /// is tagged `q` inside (`{"op": "read", "q": "list_threads", …}`).
+    Read(read::ReadRequest),
     /// `POST /__test/mailbox-schema` (Testing § 6.2): `schema_version` back by one.
     #[cfg(feature = "itest-hooks")]
     TestSchemaBack,
@@ -100,6 +124,7 @@ struct Meta {
     tenant_id: Option<String>,
     identity_id: Option<String>,
     erased: bool,
+    is_system: bool,
 }
 
 pub struct Mailbox<'a, P: Platform, S: Sql, St: ObjectState> {
@@ -146,7 +171,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
 
     fn meta(&self) -> PResult<Meta> {
         let rows: Vec<Kv> = self.sql.query(
-            "SELECT k, v FROM meta WHERE k IN ('tenant_id', 'identity_id', 'erased')",
+            "SELECT k, v FROM meta WHERE k IN ('tenant_id', 'identity_id', 'erased', 'is_system')",
             &[],
         )?;
         let mut m = Meta::default();
@@ -155,6 +180,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                 "tenant_id" => m.tenant_id = Some(r.v),
                 "identity_id" => m.identity_id = Some(r.v),
                 "erased" => m.erased = r.v == "1",
+                "is_system" => m.is_system = r.v == "1",
                 _ => {}
             }
         }
@@ -278,7 +304,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                     tenant_id,
                     identity_id,
                 };
-                self.dispatch_op(req, &owner, now).await
+                self.dispatch_op(req, &owner, now, meta.is_system).await
             }
         }
     }
@@ -288,9 +314,54 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
         req: MailboxRequest,
         owner: &outbox::Owner<'_>,
         now: i64,
+        is_system: bool,
     ) -> Result<Value, ApiError> {
         match req {
             MailboxRequest::Init(_) => Ok(Value::Null),
+            MailboxRequest::Ingest(mut inp) => {
+                inp.token = Some(
+                    self.check_token(owner.identity_id, inp.detail.as_deref())
+                        .await,
+                );
+                let out = self
+                    .sql
+                    .transaction_sync(|s| ingest::ingest(self.p, s, owner, *inp, now, is_system))?;
+                Ok(serde_json::to_value(out).unwrap_or(Value::Null))
+            }
+            MailboxRequest::NoteParseAttempt { message_id } => {
+                let key = format!("parse:{message_id}");
+                let n = self.sql.transaction_sync(|s| -> PResult<i64> {
+                    let cur: Option<Kv> =
+                        s.first("SELECT k, v FROM meta WHERE k = ?1", &[key.clone().into()])?;
+                    let n = cur.and_then(|c| c.v.parse::<i64>().ok()).unwrap_or(0) + 1;
+                    s.exec(
+                        "INSERT OR REPLACE INTO meta (k, v) VALUES (?1, ?2)",
+                        &[key.clone().into(), n.to_string().into()],
+                    )?;
+                    Ok(n)
+                })?;
+                Ok(serde_json::json!({ "attempts": n }))
+            }
+            MailboxRequest::ConfirmStored { message_id } => {
+                let erased: Option<Kv> = self.sql.first(
+                    "SELECT message_id AS k, '' AS v FROM erased_ids WHERE message_id = ?1",
+                    &[message_id.clone().into()],
+                )?;
+                let exists: Option<Kv> = self.sql.first(
+                    "SELECT id AS k, '' AS v FROM messages WHERE id = ?1",
+                    &[message_id.into()],
+                )?;
+                Ok(serde_json::json!({ "stored": erased.is_none() && exists.is_some() }))
+            }
+            MailboxRequest::PendingAttachmentText { message_id } => {
+                Ok(attachments::pending(self.sql, &message_id)?)
+            }
+            MailboxRequest::AttachmentTextReady(r) => Ok(self
+                .sql
+                .transaction_sync(|s| attachments::ready(s, &r, is_system))?),
+            MailboxRequest::Read(r) => {
+                read::handle(self.p, self.sql, owner, r, now, is_system).await
+            }
             MailboxRequest::EmitEvent(ev) => {
                 let seq = self.sql.transaction_sync(|s| {
                     outbox::append(
@@ -384,6 +455,60 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             }
             Ok(())
         })
+    }
+}
+
+impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
+    /// Threading § 2.3: the envelope detail checked against the thread keyring before the ingest
+    /// transaction (its brute-force limits are applied inside it).
+    async fn check_token(&self, identity_id: &str, detail: Option<&str>) -> ingest::TokenCheckWire {
+        use pylota_identity_core::thread_token::{self, ThreadKey, ThreadKeyring, TokenCheck};
+        let Some(detail) = detail else {
+            return ingest::TokenCheckWire::Absent;
+        };
+        let kid = |k: &crate::keyring::Key| k.kid.bytes().next().unwrap_or(b'0');
+        let keys = crate::keyring::keys(self.p, crate::keyring::Purpose::Thread)
+            .await
+            .unwrap_or_default();
+        let Some(current) = keys.iter().find(|k| k.verify_until.is_none()) else {
+            // No keyring: a token cannot verify, whatever it looks like.
+            return match thread_token::verify(
+                &ThreadKeyring {
+                    current: ThreadKey {
+                        kid: 0,
+                        key: &[0; 32],
+                    },
+                    verifying: &[],
+                },
+                identity_id,
+                detail,
+            ) {
+                TokenCheck::Absent => ingest::TokenCheckWire::Absent,
+                _ => ingest::TokenCheckWire::Invalid,
+            };
+        };
+        let verifying: Vec<ThreadKey<'_>> = keys
+            .iter()
+            .filter(|k| k.verify_until.is_some())
+            .map(|k| ThreadKey {
+                kid: kid(k),
+                key: &k.secret,
+            })
+            .collect();
+        let ring = ThreadKeyring {
+            current: ThreadKey {
+                kid: kid(current),
+                key: &current.secret,
+            },
+            verifying: &verifying,
+        };
+        match thread_token::verify(&ring, identity_id, detail) {
+            TokenCheck::Absent => ingest::TokenCheckWire::Absent,
+            TokenCheck::Valid { seq, kid, current } => {
+                ingest::TokenCheckWire::Valid { seq, kid, current }
+            }
+            TokenCheck::Invalid | TokenCheck::Unchecked => ingest::TokenCheckWire::Invalid,
+        }
     }
 }
 

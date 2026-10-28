@@ -478,6 +478,7 @@ fn code_spans(text: &str) -> Vec<&str> {
 /// object store; they count as rows only inside a range such as `D1–D3`.
 fn named_in(acceptance: &str, own: &str, row_ids: &BTreeSet<&str>) -> Named {
     let acceptance = &drop_accepted_there(acceptance);
+    let partial = partial_rows(&drop_link_targets(acceptance), own);
     let text = drop_other_milestone_parens(&drop_link_targets(acceptance), own);
     let mut named = Named::default();
     for (i, _) in text.match_indices("every `") {
@@ -527,7 +528,50 @@ fn named_in(acceptance: &str, own: &str, row_ids: &BTreeSet<&str>) -> Named {
     // the acceptance names itself.
     let raw = drop_link_targets(acceptance);
     named.rows.retain(|id| !deferred(&raw, id, own));
+    // "A6 (`it::x::a6`; its SES part in M23)": here only the tests the parenthesis names.
+    for (row, tests) in partial {
+        named.rows.retain(|r| *r != row);
+        for t in tests {
+            if !named.tests.contains(&t) {
+                named.tests.push(t);
+            }
+        }
+    }
     named
+}
+
+/// Rows followed by a parenthesis that names tests and sends the rest of the row to another
+/// milestone: `(row, tests)`.
+fn partial_rows(text: &str, own: &str) -> Vec<(String, Vec<String>)> {
+    let mut out = Vec::new();
+    for (i, _) in text.match_indices(" (") {
+        let row = text[..i]
+            .rsplit(|c: char| !c.is_ascii_alphanumeric())
+            .next()
+            .unwrap_or("");
+        if !is_row_shape(row) {
+            continue;
+        }
+        let rest = &text[i + 2..];
+        let Some(end) = rest.find(')') else { continue };
+        let group = &rest[..end];
+        let other = group.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| {
+            w.len() > 1
+                && w.starts_with('M')
+                && w[1..].bytes().all(|b| b.is_ascii_digit())
+                && w != own
+        });
+        let tests: Vec<String> = group
+            .split('`')
+            .enumerate()
+            .filter(|(k, s)| k % 2 == 1 && is_test_name(s))
+            .map(|(_, s)| s.to_owned())
+            .collect();
+        if other && !tests.is_empty() {
+            out.push((row.to_owned(), tests));
+        }
+    }
+    out
 }
 
 /// Row-shaped tokens in prose, each flagged when a dash (`–` or `-`) joins it to the next token.
@@ -649,6 +693,10 @@ fn exists(name: &str, tests: &Tests, ts: Option<&Tests>) -> Exists {
     }
     if name.starts_with("eval::") {
         return Exists::Pending("evaluation");
+    }
+    // Run against a deployed Worker, which exists from M20 (staging).
+    if name.starts_with("live::") && !matches(tests) {
+        return Exists::Pending("live deployment");
     }
     if matches(tests) {
         Exists::Yes
@@ -1300,6 +1348,13 @@ mod tests {
         assert_eq!(n.rows, ["J20"]);
         assert!(n.tests.contains(&"it::partners::j13_x".to_owned()));
         assert!(deferred("J13 is accepted in M9", "J13", "M5"));
+        assert_eq!(
+            partial_rows(
+                "A2, A6 (`it::inbound::a6_x`; its SES part in M23), B2 (with `it::b`)",
+                "M7"
+            ),
+            [("A6".to_owned(), vec!["it::inbound::a6_x".to_owned()])]
+        );
         assert_eq!(
             drop_accepted_there(
                 "Tests `a::b`. Rows that need a later milestone are accepted there: A7 in M9\n  (`it::send::a7`, needs the send path), and A11 in M13. The pause ships here."

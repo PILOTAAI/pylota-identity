@@ -72,6 +72,12 @@ impl Clock for FakeClock {
     fn now_ms(&self) -> i64 {
         self.0.get()
     }
+
+    /// Advances the clock instead of waiting, so a polling loop ends.
+    fn sleep(&self, ms: u32) -> impl std::future::Future<Output = ()> {
+        self.0.set(self.0.get() + i64::from(ms));
+        async {}
+    }
 }
 
 /// A seeded generator (SplitMix64): the same seed gives the same bytes. Not for anything but tests.

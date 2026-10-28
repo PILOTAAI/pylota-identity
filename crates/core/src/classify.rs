@@ -410,3 +410,160 @@ mod tests {
         assert_eq!(outbound_hop(Some(u32::MAX)), Err(u32::MAX));
     }
 }
+
+// ---- Verification codes and links (Inbound › Verification codes, FR-IN-11, E5) ---------------------
+
+/// A code or link a message carries for a sign-in or sign-up.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Verification {
+    /// `code` when a code was found, else `link`.
+    pub kind: &'static str,
+    /// The code with its original spacing, or the link URL.
+    pub value: String,
+}
+
+/// The trigger keywords, matched case-insensitively.
+pub const VERIFICATION_KEYWORDS: &[&str] = &[
+    "verification",
+    "verify",
+    "code",
+    "passcode",
+    "one-time",
+    "otp",
+    "security code",
+    "confirm",
+    "sign in",
+    "sign-in",
+    "log in",
+    "login",
+    "password reset",
+    "reset your password",
+    "2fa",
+    "authentication",
+    "bestätigungscode",
+    "code de vérification",
+    "código de verificación",
+];
+
+const LINK_WORDS: &[&str] = &[
+    "verify", "confirm", "activate", "reset", "magic", "token", "login", "signin",
+];
+
+fn code_patterns() -> &'static [regex::Regex; 3] {
+    static P: std::sync::OnceLock<[regex::Regex; 3]> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        [
+            regex::Regex::new(r"\b\d{3}[ -]\d{3}\b").expect("fixed pattern"),
+            regex::Regex::new(r"\b\d{4,8}\b").expect("fixed pattern"),
+            regex::Regex::new(r"\b[A-Z0-9]{6,8}\b").expect("fixed pattern"),
+        ]
+    })
+}
+
+/// The first code within 80 characters after a keyword (shared with SMS, Phone numbers § 11).
+pub fn find_code(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    if lower.len() != text.len() {
+        // Lower-casing changed byte offsets (rare non-ASCII casing): search the lower-cased text.
+        return find_code_in(&lower, &lower);
+    }
+    find_code_in(text, &lower)
+}
+
+fn find_code_in(text: &str, lower: &str) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
+    for k in VERIFICATION_KEYWORDS {
+        let mut from = 0;
+        while let Some(i) = lower[from..].find(k) {
+            let start = from + i + k.len();
+            let mut end = (start + 80).min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            let window = &text[start..end];
+            let hit = code_patterns()
+                .iter()
+                .enumerate()
+                .filter_map(|(n, re)| {
+                    re.find_iter(window)
+                        .find(|m| n < 2 || m.as_str().bytes().any(|b| b.is_ascii_digit()))
+                        .map(|m| (m.start(), m.as_str().to_owned()))
+                })
+                .min_by_key(|(s, _)| *s);
+            if let Some((s, v)) = hit {
+                let at = start + s;
+                if best.as_ref().is_none_or(|(b, _)| at < *b) {
+                    best = Some((at, v));
+                }
+                break;
+            }
+            from = start;
+        }
+    }
+    best.map(|(_, v)| v)
+}
+
+/// `find_verification(subject, extracted_text, links)`: `links` are `(href, visible text)` pairs.
+pub fn find_verification(
+    subject: &str,
+    extracted_text: &str,
+    links: &[(String, String)],
+) -> Option<Verification> {
+    let mut head_end = extracted_text.len().min(2000);
+    while !extracted_text.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let head = &extracted_text[..head_end];
+    let haystack = format!("{subject}\n{head}").to_lowercase();
+    if !VERIFICATION_KEYWORDS.iter().any(|k| haystack.contains(k)) {
+        return None;
+    }
+    // Subject and body are one text, so a keyword at the end of the subject reaches a code that opens
+    // the body.
+    if let Some(code) = find_code(&format!("{subject}\n{head}")) {
+        return Some(Verification {
+            kind: "code",
+            value: code,
+        });
+    }
+    links
+        .iter()
+        .find(|(href, text)| {
+            let (h, t) = (href.to_lowercase(), text.to_lowercase());
+            (h.starts_with("https://") || h.starts_with("http://"))
+                && LINK_WORDS.iter().any(|w| h.contains(w) || t.contains(w))
+        })
+        .map(|(href, _)| Verification {
+            kind: "link",
+            value: href.clone(),
+        })
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+
+    #[test]
+    fn codes_links_and_triggers() {
+        let v =
+            find_verification("Your verification code", "Use 481 207 to sign in.", &[]).unwrap();
+        assert_eq!((v.kind, v.value.as_str()), ("code", "481 207"));
+        let v = find_verification("", "Your code is 9921.", &[]).unwrap();
+        assert_eq!(v.value, "9921");
+        let v = find_verification("Sign in", "Your one-time code: AB12CD", &[]).unwrap();
+        assert_eq!(v.value, "AB12CD");
+        // No digit: not a code.
+        assert!(find_code("code ABCDEFG").is_none());
+        // Only after a keyword, within 80 characters.
+        assert_eq!(find_verification("Hello", "Order 12345 shipped", &[]), None);
+        let links = vec![(
+            "https://x.example/verify?t=1".to_owned(),
+            "Click".to_owned(),
+        )];
+        let v = find_verification("Confirm your email", "Click the link.", &links).unwrap();
+        assert_eq!(
+            (v.kind, v.value.as_str()),
+            ("link", "https://x.example/verify?t=1")
+        );
+    }
+}

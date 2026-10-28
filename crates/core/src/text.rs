@@ -365,3 +365,34 @@ mod tests {
         assert_eq!(snippet(&"x".repeat(500)).len(), 240);
     }
 }
+
+/// The system identity's stored bodies (Inbound › The system identity's mailbox, A15): each URL becomes
+/// `[link]` and each run of 6 or more digits, alone or split by spaces or dashes, `[code]`.
+pub fn redact_links_and_codes(s: &str) -> String {
+    static URL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static CODE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let url = URL.get_or_init(|| {
+        regex::Regex::new(r#"(?i)\b(?:https?|ftp)://[^\s<>"')\]]+|\bwww\.[^\s<>"')\]]+"#)
+            .expect("fixed pattern")
+    });
+    let code =
+        CODE.get_or_init(|| regex::Regex::new(r"\b\d(?:[ -]?\d){5,}\b").expect("fixed pattern"));
+    let s = url.replace_all(s, "[link]");
+    code.replace_all(&s, "[code]").into_owned()
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::*;
+
+    #[test]
+    fn links_and_codes() {
+        assert_eq!(
+            redact_links_and_codes(
+                "Sign in: https://console.example/s?t=abc or code 481 207, not 12345."
+            ),
+            "Sign in: [link] or code [code], not 12345."
+        );
+        assert_eq!(redact_links_and_codes("ref 12-34-56"), "ref [code]");
+    }
+}

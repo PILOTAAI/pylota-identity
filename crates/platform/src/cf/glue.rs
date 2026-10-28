@@ -164,6 +164,8 @@ pub async fn email<A: WorkerApp>(
     let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
         return Err(JsValue::from_str("temporary failure"));
     };
+    #[cfg(feature = "itest-hooks")]
+    super::itest::sync(crate::Platform::config(&platform)).await;
     let app = A::new(platform);
     let input = match email_in(&message).await {
         Ok(input) => input,
@@ -199,6 +201,8 @@ pub async fn queue<A: WorkerApp>(
         retry_all(&raw);
         return Ok(JsValue::UNDEFINED);
     };
+    #[cfg(feature = "itest-hooks")]
+    super::itest::sync(crate::Platform::config(&platform)).await;
     let name = batch.queue()?.as_string().unwrap_or_default();
     let Some((queue, dead_letter)) = QueueName::from_queue_name(&name) else {
         worker::console_error!("event=glue_error handler=queue reason=unknown_queue");

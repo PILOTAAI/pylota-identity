@@ -600,10 +600,21 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
                 }
                 to_v(&OutcomeDecision::default())
             }
-            QuotaRequest::AdmitInbound { at, .. } => {
-                self.sql
-                    .transaction_sync(|s| Self::add(s, "inbound_hour", &days::utc_hour(at), 1))?;
-                to_v(&AdmitAnswer::Admit)
+            // The per-tenant inbound cap (Inbound › Inbound volume caps, D13): one counter per UTC hour.
+            QuotaRequest::AdmitInbound { at, cap, .. } => {
+                let n = self.sql.transaction_sync(|s| -> Result<i64, PlatformError> {
+                    Self::add(s, "inbound_hour", &days::utc_hour(at), 1)?;
+                    let v: Option<N> = s.first(
+                        "SELECT value AS n FROM counters WHERE metric = 'inbound_hour' AND window = ?1",
+                        &[days::utc_hour(at).into()],
+                    )?;
+                    Ok(v.map_or(0, |v| v.n))
+                })?;
+                to_v(&if n > i64::from(cap) {
+                    AdmitAnswer::Throttle
+                } else {
+                    AdmitAnswer::Admit
+                })
             }
             QuotaRequest::CountTriageModel { tz, r#ref, .. } => {
                 let day = days::local_day(now, &tz);
