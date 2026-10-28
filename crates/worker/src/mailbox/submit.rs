@@ -35,7 +35,7 @@ const EXTRACTED_MAX: usize = 256 * 1024;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SubmitInput {
     /// `send`, `reply`, `reply_all` or `forward`.
-    pub op: String,
+    pub operation: String,
     /// The message answered or forwarded.
     pub target: Option<String>,
     /// hex SHA-256 of the `Idempotency-Key`; `None` on a dry run without one.
@@ -339,7 +339,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                 ("message".into(), plan.message_id.clone()),
                 ("idem_key_sha256".into(), key_hash.clone()),
                 ("fingerprint".into(), inp.fingerprint.clone()),
-                ("operation".into(), inp.op.clone()),
+                ("operation".into(), inp.operation.clone()),
             ],
         };
         let mut put_ok = blobs
@@ -555,7 +555,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
     ) -> Result<Plan, ApiError> {
         let ctx = &inp.ctx;
         let body = &inp.body;
-        let op = inp.op.as_str();
+        let op = inp.operation.as_str();
         let idn = &ctx.identity;
         // 1–4.
         if matches!(idn.status.as_str(), "deleting" | "deleted") {
@@ -1424,7 +1424,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                 now.into(),
                 plan.kind.clone().into(),
                 serde_json::to_string(&flags).unwrap_or_else(|_| "[]".into()).into(),
-                inp.op.clone().into(),
+                inp.operation.clone().into(),
                 plan.in_reply_to.clone().into(),
                 serde_json::to_string(&plan.references).unwrap_or_else(|_| "[]".into()).into(),
                 plan.metadata.to_string().into(),
@@ -1600,7 +1600,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             tx,
             key_hash,
             &inp.fingerprint,
-            &inp.op,
+            &inp.operation,
             &plan.message_id,
             &m.to_string(),
             now,

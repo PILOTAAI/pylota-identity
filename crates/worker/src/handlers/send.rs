@@ -203,7 +203,7 @@ pub async fn send<P: Platform>(c: &Ctx<P>, op: SendOp) -> Result<Reply, ApiError
     };
     let ctx = crate::send::context::load(c.p.as_ref(), &idn, &t).await?;
     let inp = SubmitInput {
-        op: op.as_str().to_owned(),
+        operation: op.as_str().to_owned(),
         target,
         key_hash,
         fingerprint: send_fingerprint(op, &fp_target, &b),
