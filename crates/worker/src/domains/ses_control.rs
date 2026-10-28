@@ -100,6 +100,9 @@ impl<P: Platform, S: Sql> SesControl<'_, P, S> {
                         .first::<V>("SELECT v FROM meta WHERE k = 'next_free_ms'", &[])?
                         .and_then(|r| r.v.parse::<i64>().ok())
                         .unwrap_or(0);
+                    // No grant is ever further ahead than the longest wait: a later slot means the
+                    // clock went back, and the queue restarts from now.
+                    let next = if next > now + BACKGROUND_WAIT_MS + TOKEN_MS { now } else { next };
                     let at = now.max(next);
                     if at > deadline_ms {
                         return Ok(AcquireAnswer::Busy {

@@ -444,18 +444,33 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
         if matches!(d.state, State::Removing | State::Removed) {
             return Ok(());
         }
-        let (results, check) = self.check(&row, &d, now).await?;
+        let rule_failed = self.retry_rules(&row, now).await?;
+        let (mut results, check) = self.check(&row, &d, now).await?;
+        if rule_failed {
+            for r in &mut results {
+                r.issues.push(Issue {
+                    code: "routing_rule_failed".into(),
+                    level: "info".into(),
+                    record: None,
+                });
+            }
+        }
         let s = domain_fsm::step(&mut d, Input::Check(check), now);
         self.save_fsm(&d)?;
         // The issues of this cycle (the agreed resolver's, or the first's), and the step's own.
-        let mut issues: Vec<Issue> = results[0].issues.clone();
-        for code in &s.issues {
-            if !issues.iter().any(|i| i.code == *code) {
-                issues.push(Issue {
-                    code: (*code).to_owned(),
-                    level: "fail".into(),
-                    record: None,
-                });
+        // The step's own issues (`dns_unresolvable`, `dnssec_bogus`) lead: they decided the outcome.
+        let mut issues: Vec<Issue> = s
+            .issues
+            .iter()
+            .map(|code| Issue {
+                code: (*code).to_owned(),
+                level: "fail".into(),
+                record: None,
+            })
+            .collect();
+        for i in &results[0].issues {
+            if !issues.iter().any(|x| x.code == i.code) {
+                issues.push(i.clone());
             }
         }
         if s.agreed.is_some() || results.iter().all(|r| r.errors.is_empty()) {
@@ -469,6 +484,36 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
         self.set("check_at", &next.to_string())?;
         self.state.set_alarm(next).await?;
         Ok(())
+    }
+
+    /// H6: the pending addresses of a literal domain without a rule get one; an address whose rule now
+    /// exists is activated when the domain is verified. Answers whether a create failed (the issue
+    /// `routing_rule_failed`, informational: it never changes the state).
+    async fn retry_rules(&self, row: &ddb::Row, now: i64) -> Result<bool, ApiError> {
+        if row.routing_mode != "literal" {
+            return Ok(false);
+        }
+        let pending: Vec<crate::db::addresses::Row> = self
+            .p
+            .db()
+            .query(Stmt::new(
+                "SELECT id, address, local_part, domain_id, tenant_id, identity_id, role, status, routing_rule_id, retire_at, retired_at, ses_bounce_rule, forwarding, forwarding_checked_at, created_at FROM addresses WHERE domain_id = ?1 AND status = 'pending' AND routing_rule_id IS NULL",
+                vec![row.id.clone().into()],
+            ))
+            .await?;
+        let mut failed = false;
+        for a in pending {
+            if crate::handlers::addresses::create_rule(self.p, row, &a)
+                .await
+                .is_none()
+            {
+                failed = true;
+            }
+        }
+        if matches!(row.state.as_str(), "healthy" | "degraded") {
+            self.activate_addresses(row, now).await?;
+        }
+        Ok(failed)
     }
 
     /// One check: both resolvers, the weekly NS and RDAP rows, the `cd=1` re-query when due.
@@ -567,7 +612,19 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
             let mut bogus = false;
             for (n, _) in &names {
                 for r in [Resolver::First, Resolver::Second] {
-                    if self.p.dns().query_cd(r, n, RType::Txt).await.is_ok() {
+                    if self
+                        .p
+                        .dns()
+                        .query_cd(r, n, RType::Txt)
+                        .await
+                        .is_ok_and(|a| {
+                            matches!(
+                                a.status,
+                                pylota_identity_platform::dns::DnsStatus::NoError
+                                    | pylota_identity_platform::dns::DnsStatus::NxDomain
+                            )
+                        })
+                    {
                         bogus = true;
                     }
                 }

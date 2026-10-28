@@ -659,3 +659,213 @@ fn cron_mints_missing_monitor() {
     check(&id);
     assert!(domain(&key, &id)["state"].is_string());
 }
+
+/// The `from` of the last send to `to` with `subject`.
+fn sent_from(to: &str, subject: &str) -> String {
+    crate::eventually(30, subject, || {
+        fakes::mail_sent(to)
+            .into_iter()
+            .rev()
+            .find(|m| m["subject"] == subject)
+            .and_then(|m| m["from"].as_str().map(str::to_owned))
+    })
+}
+
+/// A sender whose primary is on a healthy domain: `(sender, domain id, zone, primary)`.
+fn sender_on_domain(tag: &str) -> (crate::send::Sender, String, String, String) {
+    let (s, did, zone) = crate::addresses::on_domain(tag);
+    let x = crate::addresses::create(&s, "desk", &did);
+    assert_eq!(x.status, 201, "{}", x.body);
+    let xid = x.body["id"].as_str().unwrap().to_owned();
+    assert_eq!(crate::addresses::promote(&s, &xid, json!({})).status, 200);
+    (s, did, zone.clone(), format!("desk@{zone}"))
+}
+
+/// H1, FR-DOM-5, FR-DOM-6: a removed DKIM record makes the domain `failing` after two agreeing checks;
+/// sends fall back to the platform address; recovery restores new threads, pinned threads stay.
+#[test]
+fn h1_failing_fallback() {
+    let _reset = fakes::Reset;
+    let (s, did, zone, primary) = sender_on_domain("h1");
+    let rcpt = "h1@example.net";
+    crate::send::send_ok(&s, &[rcpt], "H1 before");
+    assert_eq!(sent_from(rcpt, "H1 before"), primary);
+    let dkim = format!("cf-send._domainkey.{zone}");
+    cloud::hide(&dkim, "TXT", true);
+    let d = until(&platform(), &did, "failing", 4);
+    assert_eq!(d["state_reason"], "dkim_missing");
+    let h = get(&format!("/v1/domains/{did}/health"), &platform());
+    assert_eq!(h.body["fallback_active"], true, "{}", h.body);
+    let mid = crate::send::send_ok(&s, &[rcpt], "H1 during");
+    assert_eq!(sent_from(rcpt, "H1 during"), s.addr);
+    let m = crate::send::wait_status(&s, &mid, "submitted");
+    assert!(
+        m["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "sent_via_fallback"),
+        "{m}"
+    );
+    let thread = m["thread_id"].as_str().unwrap().to_owned();
+    cloud::hide(&dkim, "TXT", false);
+    until(&platform(), &did, "healthy", 4);
+    crate::send::send_ok(&s, &[rcpt], "H1 after");
+    assert_eq!(sent_from(rcpt, "H1 after"), primary);
+    // The fallback thread stays pinned to the platform address.
+    let r = crate::send::send(
+        &s,
+        json!({ "to": [rcpt], "subject": "H1 pinned", "text": "x", "thread_id": thread }),
+    );
+    assert_eq!(r.status, 202, "{}", r.body);
+    assert_eq!(sent_from(rcpt, "H1 pinned"), s.addr);
+}
+
+/// H17: while `delivery_events` is `manual`, sends leave from the platform address; once the
+/// subscription is recorded, new threads send from the domain.
+#[test]
+fn h17_manual_events_fallback() {
+    let _reset = fakes::Reset;
+    let s = crate::send::open_sender("h17", "live");
+    let zone = zone_name("h17");
+    cloud::zone(&zone);
+    dmarc(&zone, &zone);
+    cloud::fail("POST", "/event_subscriptions/subscriptions", 403, 1);
+    let r = add(
+        &platform(),
+        &s.tid,
+        json!({ "name": zone, "method": "cloudflare_zone" }),
+    );
+    assert_eq!(r.body["delivery_events"], "manual", "{}", r.body);
+    let did = r.body["id"].as_str().unwrap().to_owned();
+    until(&platform(), &did, "healthy", 6);
+    let x = crate::addresses::create(&s, "desk", &did);
+    let xid = x.body["id"].as_str().unwrap().to_owned();
+    assert_eq!(crate::addresses::promote(&s, &xid, json!({})).status, 200);
+    let rcpt = "h17@example.net";
+    crate::send::send_ok(&s, &[rcpt], "H17 manual");
+    assert_eq!(sent_from(rcpt, "H17 manual"), s.addr);
+    d1(&format!(
+        "UPDATE domains SET event_subscription_id = 'sub-h17' WHERE id = '{did}'"
+    ));
+    crate::send::send_ok(&s, &[rcpt], "H17 active");
+    assert_eq!(sent_from(rcpt, "H17 active"), format!("desk@{zone}"));
+}
+
+/// H6: a literal rule that cannot be created leaves the address `pending` with `routing_rule_failed`;
+/// the monitor retries it and activates the address with its rule.
+#[test]
+fn h6_rule_failure() {
+    let _reset = fakes::Reset;
+    let (_, key, _, name, did) = healthy("h6");
+    let tid = domain(&key, &did)["tenant_id"].as_str().unwrap().to_owned();
+    let s = crate::send::sender_in(&tid, "h6 in", json!({ "require_known_recipient": false }));
+    cloud::fail("POST", "/email/routing/rules", 500, 1);
+    let r = crate::addresses::create(&s, "help", &did);
+    assert_eq!(
+        (r.status, r.body["status"].as_str()),
+        (201, Some("pending")),
+        "{}",
+        r.body
+    );
+    let address = format!("help@{name}");
+    assert!(!cloud::has_rule(&address));
+    check(&did);
+    assert!(cloud::has_rule(&address));
+    assert_eq!(
+        crate::addresses::by_address(&s, &address)["status"],
+        "active"
+    );
+}
+
+/// H7: both resolvers failing change nothing for 6 hours; then `cd=1` decides `dns_unresolvable` (or
+/// `dnssec_bogus` for a name that answers with validation off), both agree on `fail`, and two cycles
+/// later the domain is `failing`.
+#[test]
+fn h7_dns_unresolvable() {
+    let _reset = fakes::Reset;
+    let (_, key, zone, _, did) = healthy("h7");
+    cloud::dns_fail(&format!("*.{zone}"), None, Some(2));
+    check(&did);
+    fakes::advance(3 * 3_600_000);
+    check(&did);
+    assert_eq!(
+        domain(&key, &did)["state"],
+        "healthy",
+        "no change before 6 hours"
+    );
+    fakes::advance(3 * 3_600_000);
+    let d = until(&key, &did, "failing", 4);
+    assert_eq!(d["state_reason"], "dns_unresolvable", "{d}");
+    cloud::dns_fail(&format!("*.{zone}"), None, None);
+    until(&key, &did, "healthy", 4);
+    // A broken DNSSEC chain: the names answer with cd=1.
+    let (_, key2, zone2, name2, did2) = healthy("h7 bogus");
+    cloud::dns_fail(&format!("*.{zone2}"), None, Some(2));
+    cloud::dnssec_bogus(&name2);
+    check(&did2);
+    fakes::advance(6 * 3_600_000 + 60_000);
+    let d = until(&key2, &did2, "failing", 4);
+    assert_eq!(d["state_reason"], "dnssec_bogus", "{d}");
+    cloud::dns_fail(&format!("*.{zone2}"), None, None);
+}
+
+/// Puts the platform domain back as `xtask itest` left it.
+struct PlatformRestore;
+
+impl Drop for PlatformRestore {
+    fn drop(&mut self) {
+        cloud::hide("cf-send._domainkey.agents.example", "TXT", false);
+        d1(
+            "UPDATE domains SET state = 'healthy', state_reason = NULL, records_json = '[]', expected_ns_json = NULL WHERE kind = 'platform'",
+        );
+    }
+}
+
+/// H9: the platform domain becomes `failing` (a page, never `suspended`, also 14 days later); an NS
+/// change counts as `fail`; reprove re-records its name servers; it cannot be deleted.
+#[test]
+fn h9_platform_domain_failing() {
+    let _reset = fakes::Reset;
+    let _restore = PlatformRestore;
+    let p = platform();
+    crate::cron("* * * * *");
+    let row = d1("SELECT id, monitor_do_id FROM domains WHERE kind = 'platform'");
+    let did = row[0]["id"].as_str().unwrap().to_owned();
+    assert!(!row[0]["monitor_do_id"].as_str().unwrap_or("").is_empty());
+    let dkim = "cf-send._domainkey.agents.example";
+    cloud::record(
+        "agents.example",
+        "TXT",
+        dkim,
+        "v=DKIM1; k=rsa; p=PLATFORM",
+        None,
+    );
+    let recs = json!([{ "type": "TXT", "name": dkim, "value": "v=DKIM1; k=rsa; p=PLATFORM", "purpose": "dkim", "required": true, "source": "sending" }]);
+    d1(&format!(
+        "UPDATE domains SET records_json = '{}', expected_ns_json = '[\"ada.ns.cloudflare.com\",\"bob.ns.cloudflare.com\"]' WHERE id = '{did}'",
+        recs
+    ));
+    check(&did);
+    cloud::hide(dkim, "TXT", true);
+    let d = until(&p, &did, "failing", 4);
+    assert_eq!(d["state_reason"], "dkim_missing");
+    fakes::advance(15 * 86_400_000);
+    check(&did);
+    assert_eq!(domain(&p, &did)["state"], "failing", "never suspended");
+    let r = crate::delete(&format!("/v1/domains/{did}"), &p);
+    assert_eq!((r.status, r.code()), (403, "scope_denied"));
+    cloud::hide(dkim, "TXT", false);
+    until(&p, &did, "healthy", 4);
+    // An NS change is a `fail`, never a suspension.
+    cloud::hide("agents.example", "NS", true);
+    cloud::dns_extra("agents.example", "NS", "ns1.elsewhere.example.");
+    fakes::advance(8 * 86_400_000);
+    let d = until(&p, &did, "failing", 4);
+    assert_ne!(d["state"], "suspended");
+    cloud::hide("agents.example", "NS", false);
+    cloud::dns_extra_clear("agents.example");
+    let r = post(&format!("/v1/domains/{did}/reprove"), &p, json!({}));
+    assert_eq!(r.status, 200, "{}", r.body);
+    until(&p, &did, "healthy", 4);
+}

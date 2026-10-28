@@ -446,7 +446,9 @@ pub async fn check<D: Dns>(
             }
         };
         let dmarcs: Vec<&String> = found.iter().filter(|t| t.starts_with("v=DMARC1")).collect();
+        let queried = !out.errors.iter().any(|(n, _)| n.starts_with("_dmarc."));
         match dmarcs.as_slice() {
+            _ if !queried => {}
             [] => out
                 .issues
                 .push(issue("dmarc_missing", "degraded", Some(&own))),

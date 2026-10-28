@@ -81,6 +81,14 @@ fn with<T>(f: impl FnOnce(&mut Cloud) -> T) -> T {
             status: "active".into(),
             name_servers: NAME_SERVERS.iter().map(|s| (*s).to_owned()).collect(),
         });
+        c.records.push(Rec {
+            id: "platformdmarc".into(),
+            zone: PLATFORM_ZONE.into(),
+            rtype: "TXT".into(),
+            name: "_dmarc.agents.example".into(),
+            content: "v=DMARC1; p=quarantine".into(),
+            priority: None,
+        });
         c
     });
     f(c)
@@ -161,7 +169,7 @@ pub fn dns_extra_clear(name: &str) {
     with(|c| c.extra.retain(|(n, _, _)| n != name));
 }
 
-/// Every query of `name` (`*`: any name under the fake zones) fails on `resolver`
+/// Every query of `name` (`*.zone`: the zone and every name under it) fails on `resolver`
 /// (`cloudflare-dns.com`, `dns.google`, or `None` for both) with DoH status `status` (2: SERVFAIL).
 pub fn dns_fail(name: &str, resolver: Option<&str>, status: Option<u64>) {
     with(|c| match status {
@@ -701,10 +709,15 @@ pub fn dns(resolver: &str, name: &str, rtype: &str, cd: bool) -> Option<Value> {
             .zones
             .iter()
             .any(|z| name == z.name || name.ends_with(&format!(".{}", z.name)));
-        let fail = c
-            .failing
-            .get(name)
-            .or_else(|| under.then(|| c.failing.get("*")).flatten());
+        let fail = c.failing.get(name).or_else(|| {
+            c.failing
+                .iter()
+                .find(|(k, _)| {
+                    k.strip_prefix("*.")
+                        .is_some_and(|z| name == z || name.ends_with(&format!(".{z}")))
+                })
+                .map(|(_, v)| v)
+        });
         if let Some((r, st)) = fail
             && r.as_deref().is_none_or(|r| r == resolver)
             && !(cd && c.bogus.contains(name))

@@ -48,7 +48,7 @@ const UPDATE_FIELDS: &[&str] = &[
     "status",
 ];
 
-fn address_error(e: AddressError) -> ApiError {
+pub(crate) fn address_error(e: AddressError) -> ApiError {
     let (code, msg) = match e {
         AddressError::Reserved => (ErrorCode::AddressReserved, "This name is reserved."),
         AddressError::Unsupported => (

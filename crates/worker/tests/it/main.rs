@@ -2,6 +2,7 @@
 //! `PM_ITEST_URL`, `PM_ITEST_CA`, `PM_ITEST_KEY` (a platform key with every platform permission),
 //! `PM_ITEST_TOKEN`, and the local D1 location for the few fixtures only setup writes directly.
 
+mod addresses;
 mod agentic;
 mod auth;
 mod bench;
