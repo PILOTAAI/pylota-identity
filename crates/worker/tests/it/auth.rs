@@ -185,3 +185,53 @@ fn j22_tenant_aggregate_limits() {
     assert_eq!(r.header("ratelimit-limit"), Some("1800"));
     assert!(r.header("retry-after").is_some());
 }
+
+/// F2: a key without `search:read` gets `403 permission_denied` naming it on every search route; with
+/// it, the same requests answer.
+#[test]
+fn f2_permission() {
+    let (tid, idn, _, _) = crate::mailbox_fixture("f2perm");
+    let p = platform();
+    let (_, without) = mint(
+        &p,
+        json!({ "name": "nosearch", "level": "tenant", "tenant_id": tid, "permissions": ["messages:read"] }),
+    );
+    let (_, with) = mint(
+        &p,
+        json!({ "name": "search", "level": "tenant", "tenant_id": tid, "permissions": ["search:read"] }),
+    );
+    let msg = "msg_01ARYZ6S41TSV4RRFFQ69G5FAV";
+    for key in [&without, &with] {
+        let rs = [
+            post(
+                &format!("/v1/identities/{idn}/search"),
+                key,
+                json!({ "q": "x", "mode": "keyword" }),
+            ),
+            post(
+                &format!("/v1/tenants/{tid}/search"),
+                key,
+                json!({ "q": "x", "mode": "keyword" }),
+            ),
+            get(&format!("/v1/identities/{idn}/contacts"), key),
+            get(&format!("/v1/identities/{idn}/messages/{msg}/related"), key),
+        ];
+        for r in rs {
+            if key == &without {
+                assert_eq!(
+                    (r.status, r.code()),
+                    (403, "permission_denied"),
+                    "{}",
+                    r.body
+                );
+                assert_eq!(r.details()["required"], json!(["search:read"]));
+            } else {
+                assert!(
+                    r.status == 200 || r.code() == "message_not_found",
+                    "{}",
+                    r.body
+                );
+            }
+        }
+    }
+}

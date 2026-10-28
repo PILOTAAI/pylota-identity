@@ -15,6 +15,8 @@ pub mod messages;
 pub mod outbox;
 pub mod read;
 pub mod search;
+#[cfg(feature = "itest-hooks")]
+pub mod seed;
 pub mod submit;
 pub mod threads;
 
@@ -126,6 +128,13 @@ pub enum MailboxRequest {
     #[cfg(feature = "itest-hooks")]
     TestQuery {
         sql: String,
+    },
+    /// `POST /__test/bulk-seed`: synthetic messages for the benchmarks.
+    #[cfg(feature = "itest-hooks")]
+    TestBulkSeed {
+        start: u32,
+        count: u32,
+        seed: u64,
     },
 }
 
@@ -572,6 +581,13 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             #[cfg(feature = "itest-hooks")]
             MailboxRequest::TestQuery { sql } => {
                 let rows: Vec<Value> = self.sql.query(&sql, &[])?;
+                Ok(Value::Array(rows))
+            }
+            #[cfg(feature = "itest-hooks")]
+            MailboxRequest::TestBulkSeed { start, count, seed } => {
+                let rows = self
+                    .sql
+                    .transaction_sync(|s| seed::bulk_seed(s, start, count, seed, now))?;
                 Ok(Value::Array(rows))
             }
         }

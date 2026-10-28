@@ -435,6 +435,34 @@ const CASES: &[(&str, Case)] = &[
             None,
         )
     }),
+    ("searchIdentity", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/search", t.identity),
+            Some(json!({ "q": "x", "mode": "keyword" })),
+        )
+    }),
+    ("searchTenant", |t| {
+        (
+            "POST",
+            format!("/v1/tenants/{}/search", t.tenant),
+            Some(json!({ "q": "x", "mode": "keyword" })),
+        )
+    }),
+    ("findRelatedMessages", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/messages/{MESSAGE}/related", t.identity),
+            None,
+        )
+    }),
+    ("searchContacts", |t| {
+        (
+            "GET",
+            format!("/v1/identities/{}/contacts", t.identity),
+            None,
+        )
+    }),
 ];
 
 const MISSING_WEBHOOK: &str = "whk_01ARYZ6S41TSV4RRFFQ69G5FAV";
@@ -780,5 +808,60 @@ fn well_known_security_txt() {
     assert!(
         text.contains("\nExpires: ")
             && text.contains("Canonical: https://localhost:8799/.well-known/security.txt")
+    );
+}
+
+/// A15 (the search part): mail in the system identity's mailbox never reaches tenant search, keyword or
+/// semantic, by a tenant or partner key of the default tenant; it has no chunk rows and no vectors.
+#[test]
+fn a15_system_mailbox_unreachable() {
+    let sys = crate::system_identity();
+    let dt = crate::default_tenant();
+    let addr = crate::d1(&format!(
+        "SELECT address FROM addresses WHERE identity_id = '{sys}' LIMIT 1"
+    ))[0]["address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let from = "someone@outside.example";
+    let raw = crate::mail(from, &addr, "A15 zebra marker", "zebra marker body");
+    assert_eq!(crate::inject(from, &addr, &raw), 200);
+    crate::eventually(30, "stored in the system mailbox", || {
+        (!crate::mailbox_query(&sys, "SELECT id FROM messages WHERE subject LIKE 'A15%'")
+            .is_empty())
+        .then_some(())
+    });
+    let p = platform();
+    let (_, tk) = mint(
+        &p,
+        json!({ "name": "a15", "level": "tenant", "tenant_id": dt, "permissions": ["search:read"] }),
+    );
+    for mode in ["keyword", "semantic", "hybrid"] {
+        let r = post(
+            &format!("/v1/tenants/{dt}/search"),
+            &tk,
+            json!({ "q": "zebra marker", "mode": mode }),
+        );
+        assert_eq!(r.status, 200, "{mode}: {}", r.body);
+        assert!(
+            !r.body.to_string().contains("A15 zebra"),
+            "{mode}: {}",
+            r.body
+        );
+        assert!(!r.body["failed_identities"].to_string().contains(&sys));
+    }
+    // Naming it is refused like any identity outside the tenant search scope.
+    let r = post(
+        &format!("/v1/tenants/{dt}/search"),
+        &tk,
+        json!({ "q": "zebra", "mode": "keyword", "identity_ids": [sys] }),
+    );
+    assert_eq!(r.code(), "identity_not_found");
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    assert!(crate::mailbox_query(&sys, "SELECT vector_id FROM chunks").is_empty());
+    assert!(
+        !crate::fakes::vectors("VECTORS")
+            .values()
+            .any(|v| v["metadata"]["identity_id"] == sys.as_str())
     );
 }

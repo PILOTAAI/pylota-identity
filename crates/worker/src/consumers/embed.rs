@@ -66,8 +66,20 @@ struct Mailbox<'a, P: Platform> {
     request_id: String,
 }
 
+/// How a mailbox call failed: the object answered an error (an erased identity), or the call itself
+/// failed (transient).
+#[derive(Debug, PartialEq, Eq)]
+enum Fail {
+    Answer,
+    Call,
+}
+
 impl<P: Platform> Mailbox<'_, P> {
     async fn call<T: DeserializeOwned>(&self, op: SearchOp) -> Result<T, ()> {
+        self.try_call(op).await.map_err(|_| ())
+    }
+
+    async fn try_call<T: DeserializeOwned>(&self, op: SearchOp) -> Result<T, Fail> {
         let env = envelope_for(
             self.p,
             Some(self.tenant_id),
@@ -82,8 +94,9 @@ impl<P: Platform> Mailbox<'_, P> {
             .call::<_, Value>(DoClass::Mailbox, &self.object_id, &env)
             .await
         {
-            Ok(RpcResult::Ok(v)) => serde_json::from_value(v).map_err(|_| ()),
-            _ => Err(()),
+            Ok(RpcResult::Ok(v)) => serde_json::from_value(v).map_err(|_| Fail::Answer),
+            Ok(RpcResult::Err(_)) => Err(Fail::Answer),
+            Err(_) => Err(Fail::Call),
         }
     }
 }
@@ -276,10 +289,6 @@ pub async fn embed<P: Platform>(p: &P, job: IndexJob) -> Done {
         Ok(m) => m,
         Err(d) => return d,
     };
-    // Ask for the share before any work, so an over-share tenant costs nothing but this.
-    if !embed_allowed(p, tenant_id).await {
-        return defer(p, &job).await;
-    }
     let Ok(src) = mb
         .call::<IndexSource>(SearchOp::IndexSource {
             message_id: message_id.clone(),
@@ -423,8 +432,12 @@ pub async fn reconcile<P: Platform>(
         Ok(m) => m,
         Err(d) => return d,
     };
-    let Ok(r) = mb.call::<ReconcileOut>(SearchOp::Reconcile).await else {
-        return Done::Retry;
+    // A mailbox that answers an error (erased meanwhile) reports nothing to reconcile, so the night's
+    // evaluation does not wait for it.
+    let r = match mb.try_call::<ReconcileOut>(SearchOp::Reconcile).await {
+        Ok(r) => r,
+        Err(Fail::Answer) => ReconcileOut::default(),
+        Err(Fail::Call) => return Done::Retry,
     };
     let mut messages: Vec<String> = r.retry.iter().chain(&r.missing).cloned().collect();
     // The sample: embedded IDs Vectorize no longer has go back to `pending`.

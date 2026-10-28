@@ -63,6 +63,15 @@ pub struct CfLimits {
 impl RateLimiter for CfLimits {
     async fn allow(&self, bucket: RlBucket, key: &str) -> PResult<bool> {
         let name = bucket.binding();
+        // Testing § 6.5: a fault `rl.allow` on `{binding}:{key}` refuses that key without spending
+        // the binding's real budget.
+        #[cfg(feature = "itest-hooks")]
+        if super::itest::take_fault("rl.allow", &format!("{name}:{key}"))
+            .await
+            .is_some()
+        {
+            return Ok(false);
+        }
         let rl = js::binding(&self.env, name)?;
         let arg = js::object();
         js::set(&arg, "key", &JsValue::from_str(key)).map_err(|e| js::error(name, &e))?;

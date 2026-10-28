@@ -125,6 +125,11 @@ pub fn drift_pct(index_count: i64, embedded: i64) -> f64 {
     }
 }
 
+/// `vector_drift`: this run and the previous one both more than 1% away from zero.
+pub fn drift_alert(this: f64, previous: Option<f64>) -> bool {
+    this.abs() > DRIFT_PCT && previous.is_some_and(|p| p.abs() > DRIFT_PCT)
+}
+
 /// Step 5.
 pub async fn evaluate<P: Platform>(p: &P, run_date: &str, hour: i64, minute: i64, now: i64) {
     let summary: Option<Summary> = p
@@ -199,8 +204,7 @@ pub async fn evaluate<P: Platform>(p: &P, run_date: &str, hour: i64, minute: i64
         ))
         .await
         .unwrap_or(None);
-    let over = |d: Option<f64>| d.is_some_and(|d| d.abs() > DRIFT_PCT);
-    if over(Some(drift)) && over(prev.and_then(|s| s.drift_pct)) {
+    if drift_alert(drift, prev.and_then(|s| s.drift_pct)) {
         crate::log::error(
             "alert",
             &[
@@ -233,5 +237,8 @@ mod tests {
         assert_eq!(drift_pct(102, 100), 2.0);
         assert_eq!(drift_pct(0, 0), 0.0);
         assert!(drift_pct(99, 100).abs() <= DRIFT_PCT);
+        assert!(!drift_alert(2.0, None));
+        assert!(!drift_alert(2.0, Some(0.5)));
+        assert!(drift_alert(-2.0, Some(2.0)));
     }
 }

@@ -783,8 +783,8 @@ figures; CI warns above the targets.
 
 **Implements:** FR-SRCH-1–7, 10 and 11 (index side), FR-SRCH-12 (contacts and related); NFR-PERF-3/4/5.
 
-**Acceptance:** F2 (`it::auth::f2_permission`, now that search exists), F3–F5, F7, F8, F14, F15, F16
-(`it::index::f16_ai_fair_queue`; its triage part in M12), the search part of B12
+**Acceptance:** F2 (`it::auth::f2_permission`, now that search exists), F3–F5, F7, F8, F14, F15,
+F16 (`it::index::f16_ai_fair_queue`; its triage part in M12), the search part of B12
 (`it::search::b12_unavailable_in_why`), and the tenant fan-out's exclusion of the system identity (part of
 A15) (F6 needs erasure and is accepted in M14). The nightly reconciliation records its run in D1 `index_reconcile` and
 raises the drift alert only after two nights over 1% ([Search § 6.6](design/search.md#66-nightly-reconciliation)).

@@ -70,6 +70,55 @@ pub async fn serve<P: Platform>(
                 serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
+        ("POST", "/__test/bulk-seed") => {
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let row: crate::db::identities::Row = p
+                .db()
+                .first(crate::db::identities::get(
+                    body["identity_id"].as_str().unwrap_or(""),
+                ))
+                .await?
+                .ok_or_else(|| ApiError::not_found(ErrorCode::IdentityNotFound))?;
+            let start = body["start"].as_u64().unwrap_or(0) as u32;
+            let count = body["count"].as_u64().unwrap_or(0).min(50_000) as u32;
+            let seed = body["seed"].as_u64().unwrap_or(1);
+            let mut rows = Vec::new();
+            let mut at = start;
+            while at < start + count {
+                let n = (start + count - at).min(500);
+                let env = crate::rpc::envelope_for(
+                    p.as_ref(),
+                    Some(&row.tenant_id),
+                    Some(&row.id),
+                    _request_id,
+                    None,
+                    crate::mailbox::MailboxRequest::TestBulkSeed {
+                        start: at,
+                        count: n,
+                        seed,
+                    },
+                );
+                match p
+                    .objects()
+                    .call::<_, Value>(DoClass::Mailbox, &row.mailbox_do_id, &env)
+                    .await?
+                {
+                    crate::rpc::RpcResult::Ok(Value::Array(r)) => rows.extend(r),
+                    other => {
+                        return Ok(Reply::json(
+                            500,
+                            serde_json::to_value(other).unwrap_or(Value::Null),
+                        ));
+                    }
+                }
+                at += n;
+            }
+            Ok(Reply::json(200, json!({ "rows": rows })))
+        }
         ("POST", "/__test/mailbox-schema" | "/__test/alarm" | "/__test/mailbox-query") => {
             let body: Value = req
                 .body

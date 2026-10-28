@@ -27,6 +27,14 @@ struct State {
     mail_sent: Vec<Value>,
     /// Email Sending suppressions by address (`result` items of the API).
     cf_suppressions: BTreeMap<String, Vec<Value>>,
+    /// Workers AI: statuses to answer instead, per model substring, taken in order.
+    ai_fail: Vec<(String, Vec<u16>)>,
+    /// Vectorize by binding: `id → { namespace, values, metadata }`.
+    vectors: BTreeMap<String, BTreeMap<String, Value>>,
+    /// `describe()` reports this count instead of the stored one.
+    vec_count: Option<u64>,
+    /// Vectorize operations to fail, by op name, with the number of failures left.
+    vec_fail: BTreeMap<String, u32>,
 }
 
 /// One request a fake webhook receiver got.
@@ -63,6 +71,10 @@ static STATE: Mutex<State> = Mutex::new(State {
     mail_script: Vec::new(),
     mail_sent: Vec::new(),
     cf_suppressions: BTreeMap::new(),
+    ai_fail: Vec::new(),
+    vectors: BTreeMap::new(),
+    vec_count: None,
+    vec_fail: BTreeMap::new(),
 });
 
 /// The corpus zones, loaded once.
@@ -173,7 +185,11 @@ pub fn start() {
                     Some(target) => (receive(target, headers, raw), String::new()),
                     None => {
                         let body: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
-                        (200, handle(&path, &body).to_string())
+                        let v = handle(&path, &body);
+                        match v["__status"].as_u64() {
+                            Some(st) => (st as u16, String::new()),
+                            None => (200, v.to_string()),
+                        }
                     }
                 };
                 let mut out = stream;
@@ -245,6 +261,13 @@ fn handle(path: &str, body: &Value) -> Value {
                 .replace("%40", "@")
                 .replace("%2B", "+");
             json!({ "success": true, "result": s.cf_suppressions.get(&email).cloned().unwrap_or_default() })
+        }
+        "/__ai/run" => ai_run(&mut s, body),
+        q if q.starts_with("/__vec/") => {
+            let mut parts = q["/__vec/".len()..].splitn(2, '/');
+            let binding = parts.next().unwrap_or("").to_owned();
+            let op = parts.next().unwrap_or("").to_owned();
+            vec_op(&mut s, &binding, &op, body)
         }
         q if q.starts_with("/queues/") => {
             s.queued
@@ -337,6 +360,9 @@ pub fn reset() {
     let mut s = STATE.lock().unwrap();
     s.offset = 0;
     s.faults.clear();
+    s.ai_fail.clear();
+    s.vec_fail.clear();
+    s.vec_count = None;
 }
 
 pub struct Reset;
@@ -390,4 +416,250 @@ pub fn cf_suppress(address: &str, scope: &str) {
         .entry(address.to_owned())
         .or_default()
         .push(item);
+}
+
+// ---- Workers AI and Vectorize (Testing § 6.3) ------------------------------------------------------
+
+/// Lower-case runs of letters and digits.
+fn tokens(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// A deterministic 1,024-dimension embedding: each token hashed (FNV-1a) into a bucket, normalised.
+/// Texts that share words have a positive cosine; unrelated texts about zero.
+pub fn embed_text(text: &str) -> Vec<f64> {
+    let mut v = vec![0.0f64; 1024];
+    for t in tokens(text) {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in t.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        v[(h % 1024) as usize] += 1.0;
+    }
+    let n = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if n == 0.0 {
+        v[0] = 1.0;
+    } else {
+        v.iter_mut().for_each(|x| *x /= n);
+    }
+    v
+}
+
+fn ai_run(s: &mut State, body: &Value) -> Value {
+    let model = body["model"].as_str().unwrap_or("").to_owned();
+    if let Some((_, statuses)) = s
+        .ai_fail
+        .iter_mut()
+        .find(|(m, st)| model.contains(m.as_str()) && !st.is_empty())
+    {
+        let st = statuses.remove(0);
+        return json!({ "__status": st });
+    }
+    let input = &body["input"];
+    if model.contains("rerank") {
+        let q = tokens(input["query"].as_str().unwrap_or(""));
+        let response: Vec<Value> = input["contexts"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let ct = tokens(c["text"].as_str().unwrap_or(""));
+                let hit = q.iter().filter(|t| ct.contains(t)).count();
+                let score = if q.is_empty() {
+                    0.0
+                } else {
+                    hit as f64 / q.len() as f64
+                };
+                json!({ "id": i, "score": score })
+            })
+            .collect();
+        return json!({ "response": response });
+    }
+    let texts: Vec<String> = match &input["text"] {
+        Value::String(t) => vec![t.clone()],
+        Value::Array(a) => a
+            .iter()
+            .map(|t| t.as_str().unwrap_or("").to_owned())
+            .collect(),
+        _ => Vec::new(),
+    };
+    let data: Vec<Vec<f64>> = texts.iter().map(|t| embed_text(t)).collect();
+    json!({ "shape": [data.len(), 1024], "data": data })
+}
+
+fn cosine(a: &[f64], b: &[f64]) -> f64 {
+    let dot: f64 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let na = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let nb = b.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        dot / (na * nb)
+    }
+}
+
+fn matches(meta: &Value, filter: &Value) -> bool {
+    let Some(f) = filter.as_object() else {
+        return true;
+    };
+    f.iter().all(|(k, cond)| {
+        let v = &meta[k];
+        match cond {
+            Value::Object(ops) => ops.iter().all(|(op, arg)| match op.as_str() {
+                "$eq" => v == arg,
+                "$ne" => v != arg,
+                "$in" => arg.as_array().is_some_and(|a| a.contains(v)),
+                "$nin" => arg.as_array().is_some_and(|a| !a.contains(v)),
+                "$gte" | "$gt" | "$lte" | "$lt" => match (v.as_f64(), arg.as_f64()) {
+                    (Some(x), Some(y)) => match op.as_str() {
+                        "$gte" => x >= y,
+                        "$gt" => x > y,
+                        "$lte" => x <= y,
+                        _ => x < y,
+                    },
+                    _ => false,
+                },
+                _ => false,
+            }),
+            other => v == other,
+        }
+    })
+}
+
+fn values(v: &Value) -> Vec<f64> {
+    v.as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default()
+}
+
+fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
+    if let Some(left) = s.vec_fail.get_mut(op).filter(|n| **n > 0) {
+        *left -= 1;
+        return json!({ "__status": 503 });
+    }
+    let fixed = s.vec_count;
+    let store = s.vectors.entry(binding.to_owned()).or_default();
+    let query = |store: &BTreeMap<String, Value>, vector: &[f64], options: &Value| {
+        let ns = options["namespace"].as_str().unwrap_or("");
+        let k = options["topK"].as_u64().unwrap_or(10) as usize;
+        let mut m: Vec<(String, f64)> = store
+            .iter()
+            .filter(|(_, r)| r["namespace"] == ns && matches(&r["metadata"], &options["filter"]))
+            .map(|(id, r)| (id.clone(), cosine(vector, &values(&r["values"]))))
+            .collect();
+        m.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        m.truncate(k);
+        json!({ "count": m.len(), "matches": m.into_iter().map(|(id, score)| json!({ "id": id, "score": score })).collect::<Vec<_>>() })
+    };
+    match op {
+        "upsert" => {
+            for v in body["vectors"].as_array().cloned().unwrap_or_default() {
+                if let Some(id) = v["id"].as_str() {
+                    store.insert(id.to_owned(), v.clone());
+                }
+            }
+            json!({ "mutationId": "fake" })
+        }
+        "query" => query(store, &values(&body["vector"]), &body["options"]),
+        "query_by_id" => match store.get(body["id"].as_str().unwrap_or("")) {
+            Some(r) => {
+                let v = values(&r["values"]);
+                query(store, &v, &body["options"])
+            }
+            None => json!({ "count": 0, "matches": [] }),
+        },
+        "delete" => {
+            for id in body["ids"].as_array().cloned().unwrap_or_default() {
+                store.remove(id.as_str().unwrap_or(""));
+            }
+            json!({ "mutationId": "fake" })
+        }
+        "get" => Value::Array(
+            body["ids"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|id| id.as_str())
+                .filter(|id| store.contains_key(*id))
+                .map(|id| json!({ "id": id }))
+                .collect(),
+        ),
+        "describe" => {
+            let n = store.len() as f64;
+            let count = fixed.unwrap_or(n as u64);
+            json!({ "dimensions": 1024, "vectorCount": count })
+        }
+        _ => json!({}),
+    }
+}
+
+/// Workers AI answers `statuses` (in order) to the next calls of models containing `model`.
+pub fn ai_fail(model: &str, statuses: &[u16]) {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .ai_fail
+        .push((model.to_owned(), statuses.to_vec()));
+}
+
+/// The stored vectors of `binding`: `id → { namespace, values, metadata }`.
+pub fn vectors(binding: &str) -> BTreeMap<String, Value> {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .vectors
+        .get(binding)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Removes a stored vector (as if Vectorize lost it).
+pub fn vector_lose(binding: &str, id: &str) {
+    start();
+    if let Some(store) = STATE.lock().unwrap().vectors.get_mut(binding) {
+        store.remove(id);
+    }
+}
+
+/// `describe()` reports `count` vectors (`None`: the stored count).
+pub fn vector_count(count: Option<u64>) {
+    start();
+    STATE.lock().unwrap().vec_count = count;
+}
+
+/// The next `n` calls of Vectorize operation `op` (`upsert`, `query`, `query_by_id`, `delete`, `get`,
+/// `describe`) fail.
+pub fn vector_fail(op: &str, n: u32) {
+    start();
+    STATE.lock().unwrap().vec_fail.insert(op.to_owned(), n);
+}
+
+/// Stores the vectors of bulk-seeded rows (`{id, thread_id, text, sent_at}`) as `Embed` would.
+pub fn seed_vectors(namespace: &str, identity_id: &str, rows: &[Value]) {
+    start();
+    let mut s = STATE.lock().unwrap();
+    let store = s.vectors.entry("VECTORS".to_owned()).or_default();
+    for r in rows {
+        let id = format!("{}:0", r["id"].as_str().unwrap_or(""));
+        store.insert(
+            id.clone(),
+            json!({
+                "id": id, "namespace": namespace, "values": embed_text(r["text"].as_str().unwrap_or("")),
+                "metadata": {
+                    "identity_id": identity_id, "thread_id": r["thread_id"], "sent_at": r["sent_at"],
+                    "sender_domain": "", "direction": "inbound", "has_attachment": false,
+                    "verdict": "none", "kind": "body",
+                },
+            }),
+        );
+    }
 }

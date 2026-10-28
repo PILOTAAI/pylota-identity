@@ -23,6 +23,7 @@ mod partners;
 mod policy;
 mod quarantine;
 mod routes;
+mod search;
 mod security;
 mod send;
 mod tenants;
