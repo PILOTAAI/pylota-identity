@@ -1739,6 +1739,7 @@ dependencies = [
  "html5ever",
  "idna",
  "mail-auth",
+ "mail-builder",
  "mail-parser",
  "miniz_oxide",
  "proptest",

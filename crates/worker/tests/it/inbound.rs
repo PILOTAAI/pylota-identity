@@ -525,8 +525,9 @@ fn j7_staging_outlives_dlq() {
     let _reset = crate::fakes::Reset;
     let (_, idn, addr, key) = mailbox_fixture("j7dlq");
     let before = crate::fakes::queued("pm-inbound-dlq").len();
-    // D1 down for the handler and for every delivery of the staged pointer: it is dead-lettered.
-    crate::fakes::fault("d1", "DB", "error", 40);
+    // D1 down for the handler and for every delivery of the staged pointer: it is dead-lettered. The
+    // budget is large because every consumer running meanwhile (webhooks too) takes from it.
+    crate::fakes::fault("d1", "DB", "error", 400);
     assert_eq!(
         inject(
             "a@j7.example",
