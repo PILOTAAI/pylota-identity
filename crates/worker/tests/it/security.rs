@@ -9,6 +9,7 @@ const MISSING_KEY: &str = "key_01ARYZ6S410000000000000000";
 const MISSING_PARTNER: &str = "ptn_01ARYZ6S410000000000000000";
 const MISSING_IDENTITY: &str = "idn_01ARYZ6S410000000000000000";
 const MISSING_DOMAIN: &str = "dom_01ARYZ6S410000000000000000";
+const MISSING_ADDRESS: &str = "adr_01ARYZ6S410000000000000000";
 
 /// The victim's IDs, or the missing ones of the control call.
 struct Target {
@@ -17,6 +18,7 @@ struct Target {
     partner: String,
     identity: String,
     address: String,
+    address_id: String,
     domain: String,
     webhook: String,
 }
@@ -164,8 +166,86 @@ const CASES: &[(&str, Case)] = &[
     ("listTenantDomains", |t| {
         ("GET", format!("/v1/tenants/{}/domains", t.tenant), None)
     }),
+    ("createAddress", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/addresses", t.identity),
+            Some(json!({ "local_part": "pwned", "domain_id": t.domain })),
+        )
+    }),
+    ("promoteAddress", |t| {
+        (
+            "POST",
+            format!(
+                "/v1/identities/{}/addresses/{}/promote",
+                t.identity, t.address_id
+            ),
+            Some(json!({})),
+        )
+    }),
+    ("retireAddress", |t| {
+        (
+            "POST",
+            format!(
+                "/v1/identities/{}/addresses/{}/retire",
+                t.identity, t.address_id
+            ),
+            Some(json!({ "after_days": 0 })),
+        )
+    }),
+    ("deleteAddress", |t| {
+        (
+            "DELETE",
+            format!("/v1/identities/{}/addresses/{}", t.identity, t.address_id),
+            None,
+        )
+    }),
     ("getDomain", |t| {
         ("GET", format!("/v1/domains/{}", t.domain), None)
+    }),
+    ("createDomain", |t| {
+        (
+            "POST",
+            format!("/v1/tenants/{}/domains", t.tenant),
+            Some(json!({ "name": "pwned.example", "method": "cloudflare_zone" })),
+        )
+    }),
+    ("updateDomain", |t| {
+        (
+            "PATCH",
+            format!("/v1/domains/{}", t.domain),
+            Some(json!({ "sending_paused": true })),
+        )
+    }),
+    ("deleteDomain", |t| {
+        ("DELETE", format!("/v1/domains/{}", t.domain), None)
+    }),
+    ("getDomainRecords", |t| {
+        ("GET", format!("/v1/domains/{}/records", t.domain), None)
+    }),
+    ("getDomainHealth", |t| {
+        ("GET", format!("/v1/domains/{}/health", t.domain), None)
+    }),
+    ("verifyDomain", |t| {
+        (
+            "POST",
+            format!("/v1/domains/{}/verify", t.domain),
+            Some(json!({})),
+        )
+    }),
+    ("probeDomain", |t| {
+        (
+            "POST",
+            format!("/v1/domains/{}/probe", t.domain),
+            Some(json!({})),
+        )
+    }),
+    ("reproveDomain", |t| {
+        (
+            "POST",
+            format!("/v1/domains/{}/reprove", t.domain),
+            Some(json!({})),
+        )
     }),
     // The mail routes of M7: the identity is checked first, so a message or thread ID never matters.
     ("listThreads", |t| {
@@ -565,6 +645,7 @@ fn cross_tenant_matrix() {
         "identities:write",
         "erasure:manage",
         "domains:read",
+        "domains:write",
         "messages:read",
         "messages:write",
         "quarantine:review",
@@ -584,9 +665,14 @@ fn cross_tenant_matrix() {
     let vidn = crate::identity(&vk, &vtid, "victim");
     // A tenant domain of the victim, written as M13 will write one.
     let vdom = format!("dom_{}", &vtid[4..]);
+    let vzone = format!("v{}.example", vtid[4..].to_ascii_lowercase());
     d1(&format!(
-        "INSERT INTO domains (id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, monitor_do_id, created_at, updated_at) VALUES ('{vdom}', '{vtid}', '{}.example', 'zone', 'cloudflare_zone', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', 1, 'x', 1, 1)",
-        vtid.to_ascii_lowercase()
+        "INSERT INTO domains (id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, monitor_do_id, created_at, updated_at) VALUES ('{vdom}', '{vtid}', '{vzone}', 'zone', 'cloudflare_zone', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', 1, 'x', 1, 1)"
+    ));
+    // Its zone exists in the Cloudflare account and is claimed for the victim, as onboarding leaves it.
+    let vzid = crate::cloud::zone(&vzone);
+    d1(&format!(
+        "INSERT INTO zone_claims (zone_name, zone_id, tenant_id, domain_id, state, created_at) VALUES ('{vzone}', '{vzid}', '{vtid}', '{vdom}', 'active', 1)"
     ));
     let vwhk = post(
         &format!("/v1/tenants/{vtid}/webhooks"),
@@ -600,6 +686,13 @@ fn cross_tenant_matrix() {
         partner: victim_partner,
         identity: vidn["id"].as_str().unwrap().into(),
         address: vidn["primary_address"].as_str().unwrap().into(),
+        address_id: d1(&format!(
+            "SELECT id FROM addresses WHERE identity_id = '{}'",
+            vidn["id"].as_str().unwrap()
+        ))[0]["id"]
+            .as_str()
+            .unwrap()
+            .into(),
         domain: vdom,
         webhook: vwhk.body["id"].as_str().unwrap().into(),
     };
@@ -609,6 +702,7 @@ fn cross_tenant_matrix() {
         partner: MISSING_PARTNER.into(),
         identity: MISSING_IDENTITY.into(),
         address: "nobody.nowhere@agents.example".into(),
+        address_id: MISSING_ADDRESS.into(),
         domain: MISSING_DOMAIN.into(),
         webhook: MISSING_WEBHOOK.into(),
     };
@@ -616,7 +710,7 @@ fn cross_tenant_matrix() {
     let at = tenant(&p, "attacker");
     let (_, tenant_attacker) = mint(
         &p,
-        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage", "messages:send", "suppressions:manage"] }),
+        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "domains:write", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage", "messages:send", "suppressions:manage"] }),
     );
     let (_, partner_attacker) = partner("attacker", &all);
     tenant(&partner_attacker, "attacker_own");
@@ -652,6 +746,62 @@ fn cross_tenant_matrix() {
             );
         }
     }
+    assert_eq!(victim_state(&victim), before, "no side effect");
+
+    // foreign_zone (H8): the victim's zone, a name under it and a name under the platform domain's
+    // zone are refused before any Cloudflare call, with the body of a zone that does not exist, also
+    // once a platform key lists the victim's zone for the attacker.
+    let own_tenant = at["id"].as_str().unwrap().to_owned();
+    let partner_tenant = tenant(&partner_attacker, "attacker_zone")["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for listed in [false, true] {
+        if listed {
+            for t in [&own_tenant, &partner_tenant] {
+                crate::domains::list_zones(t, &[&vzone]);
+            }
+        }
+        for (key, tid) in [
+            (&tenant_attacker, &own_tenant),
+            (&partner_attacker, &partner_tenant),
+        ] {
+            let touched = || {
+                crate::cloud::calls()
+                    .iter()
+                    .filter(|(_, path)| path.contains(&vzid) || path.contains(&vzone))
+                    .count()
+            };
+            let calls = touched();
+            let refused = |name: &str, replace_mx: bool| {
+                let r = crate::domains::add(
+                    key,
+                    tid,
+                    json!({ "name": name, "method": "cloudflare_zone", "replace_mx": replace_mx }),
+                );
+                assert_eq!(
+                    (r.status, r.code(), r.details()["reason"].as_str()),
+                    (403, "scope_denied", Some("zone_not_allowed")),
+                    "{name}: {}",
+                    r.body
+                );
+                r.without_request_id()
+            };
+            let missing = refused("mail.no-such-zone-xyz.example", false);
+            for replace_mx in [false, true] {
+                assert_eq!(refused(&vzone, replace_mx), missing);
+                assert_eq!(refused(&format!("mail.{vzone}"), replace_mx), missing);
+                assert_eq!(refused("x.agents.example", replace_mx), missing);
+            }
+            assert_eq!(touched(), calls, "no Cloudflare call for the victim's zone");
+        }
+    }
+    assert_eq!(
+        d1(&format!(
+            "SELECT COUNT(*) AS n FROM domains WHERE tenant_id IN ('{own_tenant}', '{partner_tenant}')"
+        ))[0]["n"],
+        0
+    );
     assert_eq!(victim_state(&victim), before, "no side effect");
     // The own-scope listings never show the victim.
     for key in [&tenant_attacker, &partner_attacker] {
