@@ -81,6 +81,8 @@ pub struct Env {
     pub now_ms: Option<i64>,
     /// The minisign keys release signatures must verify with; `None` is the compiled-in pair.
     pub release_keys: Option<Vec<String>>,
+    /// Base URLs for hosts the CLI would reach as `https://{host}` (the deployment's own host in tests).
+    pub hosts: BTreeMap<String, String>,
 }
 
 impl Env {
@@ -102,6 +104,7 @@ impl Env {
             runner,
             now_ms: None,
             release_keys: None,
+            hosts: BTreeMap::new(),
         }
     }
 }
@@ -126,6 +129,7 @@ pub struct Ctx {
     pub runner: Arc<dyn Runner>,
     pub now_ms: Option<i64>,
     pub release_keys: Option<Vec<String>>,
+    pub hosts: BTreeMap<String, String>,
     api: OnceCell<http::Api>,
     pub(crate) me: RefCell<Option<serde_json::Value>>,
 }
@@ -151,6 +155,14 @@ impl Ctx {
             .get(name)
             .map(String::as_str)
             .filter(|v| !v.is_empty())
+    }
+
+    /// `https://{host}`, or the base URL the environment maps the host to.
+    pub fn base_for(&self, host: &str) -> String {
+        self.hosts
+            .get(host)
+            .cloned()
+            .unwrap_or_else(|| format!("https://{host}"))
     }
 
     /// Now, in Unix milliseconds.
@@ -252,6 +264,7 @@ pub async fn run(args: Vec<String>, env: Env) -> i32 {
         runner,
         now_ms,
         release_keys,
+        hosts,
     } = env;
     let parsed = match cli::Cli::try_parse_from(&args) {
         Ok(p) => p,
@@ -312,6 +325,7 @@ pub async fn run(args: Vec<String>, env: Env) -> i32 {
         runner,
         now_ms,
         release_keys,
+        hosts,
         api: OnceCell::new(),
         me: RefCell::new(None),
     };
