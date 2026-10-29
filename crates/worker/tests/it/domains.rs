@@ -1048,6 +1048,15 @@ fn h12_remove_failed_restart() {
     let steps = job_steps(&job);
     let failed = steps.iter().find(|s| s.0 == "disable_sending").unwrap();
     assert_eq!(failed.2, 10, "{steps:?}");
+    crate::eventually(30, "the domain_remove_failed alert", || {
+        let log = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/itest/worker.log"),
+        )
+        .unwrap_or_default();
+        log.lines()
+            .any(|l| l.contains("\"domain_remove_failed\"") && l.contains(id.as_str()))
+            .then_some(())
+    });
     // The daily run (04:00 UTC) restarts it from `disable_sending` once the provider recovers.
     cloud::unfail();
     let since = cloud::calls().len();

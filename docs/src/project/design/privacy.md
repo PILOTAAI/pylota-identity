@@ -1149,6 +1149,28 @@ are never returned by `GET /v1/platform/dlq` (`idvy dlq list`): it shows the que
 times only. The [I5](../edge-cases.md) test greps the captured output of the whole integration run for
 canaries.
 
+**As built (M14).** Erasure, holds, retention, exports and the maintenance jobs run on the `JobRunner`
+as designed, with these settlements until the milestones that need more:
+
+- An export is collected in parts, one R2 object per batch at `t/{ten}/exports/{exp}.partNNNNN` with
+  each part's central-directory records in the runner's `meta` (`zip_cd:NNNNN`); `finish_zip` joins the
+  parts and `messages.json` into `t/{ten}/exports/{exp}.zip` in memory and deletes the parts. The
+  platform crate has no R2 multipart upload yet: `meta.upload_id` only marks parts not yet joined, which
+  `finalise` deletes, and an export whose ZIP does not fit in the Worker's memory fails.
+- `reparse` queues one `{kind: "reparse"}` pointer per message on `pm-inbound`; the consumer acknowledges
+  them without re-parsing until [J3](../edge-cases.md) lands in M17. `reembed` and `reindex` queue
+  `IndexJob::Embed` as designed.
+- The steps that act on systems later milestones build are named no-ops: `cancel_billing` and the
+  billing rows (M22), the console rows (M21), the `Notifier` wipe (M26), and the domain's addresses in
+  the retired receipt rules (`prune_retired_rules`, M23). Each is a function of its own in
+  `jobs/erasure.rs` that the later milestone fills in.
+- Job alerts (`job_failed:{kind}`, `erasure_stalled`, `domain_remove_failed`) are a `warn` log line
+  `alert` and the metric `job_alert_total`; M17's evaluator turns them into alerts.
+- Job events (`erasure.*`, `identity.deleted`, `export.*`) are written to D1 `event_index` with
+  `owner_kind = 'job'` and the payload kept in the index row, then fanned out like domain events.
+- A continuation (`hold_released:{era_id}`) runs every step again; only the resumption of a `failed`
+  request copies the failed job's progress.
+
 ## 13. Tests
 
 | Test | Proves | Covers |

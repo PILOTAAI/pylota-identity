@@ -1282,8 +1282,6 @@ forwarded).
   re-fans any that were not fanned out.
 - A literal routing rule that failed is retried at each check of the domain (every 15 minutes while
   healthy), not on the 1/5/15/60-minute schedule; its issue `routing_rule_failed` is informational.
-- The removal job of `DELETE` and of an eviction waits for M14's `JobRunner`; until then the domain stays
-  `removing`.
 - Alerts (`domain_remove_failed`, `delivery_events_manual`, `platform_domain_failing`) are a `warn`
   log line `alert` and the metric `domain_alert_total`; M17's evaluator turns them into alerts.
 - The SES account's identity limit (10,000) is not checked before `CreateEmailIdentity`.
@@ -1296,6 +1294,18 @@ forwarded).
   environment, so the live tests of M20 are where they are confirmed.
 - `idvy domains subscribe` lands with the CLI in M16; until then a `manual` domain's subscription ID is
   recorded through D1 by hand.
+
+**As built (M14).** Removal runs as the `domain_remove` job on the `JobRunner`, with these settlements:
+
+- The monitor (`DELETE`, eviction, the 14-day expiry) writes the job row and starts it at once; the
+  every-minute cron restarts a start that was lost. Eviction goes through the monitor's `Evict` input,
+  so the evicted tenant receives `domain.removed` with `reason: evicted`.
+- A new job for a domain whose last removal job `failed` (the daily `*/15` run at 04:00 UTC, or `DELETE`)
+  copies that job's progress and resumes at its first step not done. The daily run writes the job itself
+  rather than through the monitor's `DailyRestart` input.
+- Dropping a zone, or an exact name, from `domains.cloudflare_zones` while the tenant has a domain in it
+  answers `409 domain_in_use` with `details.reason = "zone_has_domains"` and `details.domain_ids`.
+- `prune_retired_rules` is a no-op until M23.
 
 ## Tests
 

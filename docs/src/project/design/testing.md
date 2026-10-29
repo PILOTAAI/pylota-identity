@@ -344,6 +344,18 @@ unsets it, `{}` restores it). `/__test/inbound` now passes the message's headers
 workerd's `message.headers` does. The harness's `PM_SECURITY_CONTACT` is `security@operator.example`, an
 address outside the deployment.
 
+**As built (M14).** The harness binds a second R2 bucket, `BACKUP` (`PM_BACKUP_BUCKET`), and
+`/__test/r2` takes `bucket: "backup"` and stores `custom` metadata on `put`. New hooks:
+`/__test/job-create` creates and starts a job (`{kind, tenant_id, params}`), and `/__test/job-alarm`
+runs one alarm of a job's runner now and answers its `meta`, `steps` and next alarm. workerd also runs
+the runners' alarms on its own, so tests drive a job with the hook until its D1 row ends. The fake
+Vectorize can keep vectors through a delete (`fakes::vector_keep`), the fake Cloudflare API lists and
+deletes Email Sending suppressions (`fakes::cf_suppress_with`, `fakes::cf_suppressions_of`), loses a
+zone (`cloud::drop_zone`) or an SES identity (`cloud::ses_forget`), and `cloud::unfail` disarms
+failures (`fakes::Reset` calls it too). `fakes::advance_to_minute(m)` moves the clock to the next
+minute `m` of the UTC day, for the crons that act in one window. The `r2.delete` fault fails R2
+deletes. A test checks an alert by its `alert` line in `target/itest/worker.log`.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request
