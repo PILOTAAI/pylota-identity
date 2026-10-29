@@ -183,6 +183,13 @@ impl BlobStore for CfBlobs {
         if keys.is_empty() {
             return Ok(());
         }
+        #[cfg(feature = "itest-hooks")]
+        if super::itest::take_fault("r2.delete", self.binding)
+            .await
+            .is_some()
+        {
+            return Err(super::itest::fault_error(self.binding));
+        }
         let array: js_sys::Array = keys.iter().map(|k| JsValue::from_str(k)).collect();
         self.call("delete", &[&array.into()]).await?;
         Ok(())

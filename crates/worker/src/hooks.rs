@@ -212,6 +212,22 @@ pub async fn serve<P: Platform>(
                 serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
+        ("POST", "/__test/job-create") => {
+            // A job of any kind, created and started as a cron would: `{kind, tenant_id, params}`.
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let id = crate::jobs::create(
+                p.as_ref(),
+                body["kind"].as_str().unwrap_or(""),
+                body["tenant_id"].as_str(),
+                &body["params"],
+            )
+            .await?;
+            Ok(Reply::json(200, json!({ "job_id": id })))
+        }
         ("POST", "/__test/queue-send") => {
             let body: Value = req
                 .body
@@ -355,13 +371,20 @@ pub async fn serve<P: Platform>(
                 .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
                 .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
             let key = body["key"].as_str().unwrap_or("").to_owned();
+            // `"bucket": "backup"` reads and writes the BACKUP binding instead.
+            let store = if body["bucket"] == "backup" {
+                p.backup()
+                    .ok_or_else(|| ApiError::invalid("bucket", "BACKUP is not bound."))?
+            } else {
+                p.blobs()
+            };
             match body["op"].as_str() {
                 Some("put") => {
                     let bytes = pylota_identity_platform::base64::decode(
                         body["body_base64"].as_str().unwrap_or(""),
                     )
                     .unwrap_or_default();
-                    p.blobs()
+                    store
                         .put(
                             &key,
                             pylota_identity_platform::r2::BlobBody::Bytes(bytes),
@@ -371,16 +394,13 @@ pub async fn serve<P: Platform>(
                     Ok(Reply::json(200, json!({})))
                 }
                 Some("list") => {
-                    let page = p.blobs().list(&key, None, 1000).await?;
+                    let page = store.list(&key, None, 1000).await?;
                     Ok(Reply::json(
                         200,
                         json!({ "keys": page.keys.iter().map(|(k, _)| k).collect::<Vec<_>>() }),
                     ))
                 }
-                _ => Ok(Reply::json(
-                    200,
-                    json!({ "size": p.blobs().head(&key).await? }),
-                )),
+                _ => Ok(Reply::json(200, json!({ "size": store.head(&key).await? }))),
             }
         }
         _ => Err(not_found()),

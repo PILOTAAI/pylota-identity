@@ -202,8 +202,17 @@ async fn submit<P: Platform>(c: &Ctx<P>, plan: Plan) -> Result<Reply, ApiError> 
                 _ => {}
             }
         }
-    } else if let Some(l) = last.filter(|l| l.status == "failed") {
-        resumes = Some(l);
+    } else {
+        match last {
+            Some(l) if l.status == "failed" => resumes = Some(l),
+            // A resumption already queued or running answers a request that races it.
+            Some(l)
+                if l.resumes_id.is_some() && matches!(l.status.as_str(), "queued" | "running") =>
+            {
+                return Ok(Reply::json(200, l.json()));
+            }
+            _ => {}
+        }
     }
     // Without a resumption the target must exist now (a resumed one may already be gone).
     if resumes.is_none()

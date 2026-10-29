@@ -83,6 +83,11 @@ pub fn render(template: &str, root: &Path, token: &str) -> String {
         &format!("PM_CONSOLE_HOST        = \"localhost:{PORT}\""),
         &format!("PM_CONSOLE_HOST        = \"console.localhost:{PORT}\""),
     );
+    // The optional backup bucket is bound, so erasure, retention and the backup job reach it.
+    s = s.replace(
+        "# only when PM_BACKUP_BUCKET is set:\n",
+        "[[r2_buckets]]\nbinding = \"BACKUP\"\nbucket_name = \"pylota-identity-backup\"\n\n",
+    );
     s = s.replace(
         "PM_SIGNUP              = \"closed\"",
         "PM_SIGNUP              = \"open\"",
@@ -94,7 +99,7 @@ pub fn render(template: &str, root: &Path, token: &str) -> String {
     s = s.replace(
         "[vars]\n",
         &format!(
-            "[vars]\nPM_TERMS_URL = \"https://agents.example/terms\"\nPM_PRIVACY_URL = \"https://agents.example/privacy\"\nPM_DPA_URL = \"https://agents.example/dpa\"\nPM_TERMS_VERSION = \"itest-1\"\nPM_ITEST_FAKES_URL = \"{FAKES}\"\nPM_ITEST_TOKEN = \"{token}\"\nPM_SECURITY_CONTACT = \"security@operator.example\"\nPM_QUARANTINE_KEY_RELEASE = \"off\"\nPM_SES_REGION = \"eu-west-2\"\nPM_SES_SNS_TOPIC_ARN = \"arn:aws:sns:eu-west-2:111122223333:pylota-identity-ses\"\n"
+            "[vars]\nPM_TERMS_URL = \"https://agents.example/terms\"\nPM_PRIVACY_URL = \"https://agents.example/privacy\"\nPM_DPA_URL = \"https://agents.example/dpa\"\nPM_TERMS_VERSION = \"itest-1\"\nPM_ITEST_FAKES_URL = \"{FAKES}\"\nPM_ITEST_TOKEN = \"{token}\"\nPM_SECURITY_CONTACT = \"security@operator.example\"\nPM_QUARANTINE_KEY_RELEASE = \"off\"\nPM_SES_REGION = \"eu-west-2\"\nPM_SES_SNS_TOPIC_ARN = \"arn:aws:sns:eu-west-2:111122223333:pylota-identity-ses\"\nPM_BACKUP_BUCKET = \"pylota-identity-backup\"\n"
         ),
     );
     s

@@ -238,3 +238,409 @@ fn i1_counterparty() {
     ));
     assert_eq!(row[0]["counterparty_hash"].as_str().unwrap().len(), 64);
 }
+
+/// A tenant key holding `tenants:erase`, as the workspace owner mints one (W35).
+pub fn eraser(tenant: &str) -> String {
+    crate::owner_key(
+        tenant,
+        &["erasure:manage", "tenants:erase", "identities:read"],
+    )
+}
+
+/// The steps of the request's job, by name: `(status, attempts, last_error)`.
+fn steps_of(job: &Value) -> Vec<(String, String, i64, String)> {
+    job["steps"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|s| {
+            (
+                s["name"].as_str().unwrap_or("").to_owned(),
+                s["status"].as_str().unwrap_or("").to_owned(),
+                s["attempts"].as_i64().unwrap_or(0),
+                s["last_error"].as_str().unwrap_or("").to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Alarms until a step has failed at least `n` times; answers the runner.
+fn until_failed(job: &str, step: &str, n: i64) -> Value {
+    eventually(60, "the step to fail", || {
+        let j = job_alarm(job);
+        steps_of(&j)
+            .iter()
+            .any(|(name, _, a, _)| name == step && *a >= n)
+            .then_some(j)
+    })
+}
+
+fn one_message(s: &Sender, from: &str, subject: &str) -> Value {
+    let (o, smtp) = inbound(
+        from,
+        &s.addr,
+        &mail(from, &s.addr, subject, "Plate AB12CDE, booking BK-77"),
+    );
+    assert_eq!(o, "accepted", "{smtp}");
+    eventually(30, "the message", || {
+        messages_of(&s.iid, &s.key, "")
+            .into_iter()
+            .find(|m| m["subject"] == subject)
+    })
+}
+
+fn embedded(identity: &str, message: &str) -> Vec<String> {
+    eventually(60, "the message's vectors", || {
+        let rows = mailbox_query(
+            identity,
+            &format!(
+                "SELECT c.vector_id FROM chunks c JOIN messages m ON m.rowid = c.message_rowid WHERE m.id = '{message}' AND c.status = 'embedded'"
+            ),
+        );
+        let ids: Vec<String> = rows
+            .iter()
+            .filter_map(|r| r["vector_id"].as_str().map(str::to_owned))
+            .collect();
+        (!ids.is_empty()).then_some(ids)
+    })
+}
+
+fn erase_message(s: &Sender, id: &str) -> String {
+    let r = erase(
+        &platform(),
+        json!({ "tenant_id": s.tid, "scope": "message", "identity_id": s.iid, "message_id": id }),
+    );
+    assert_eq!(r.status, 202, "{}", r.body);
+    r.body["id"].as_str().unwrap().to_owned()
+}
+
+fn events_of_type(t: &str, tenant: &str) -> usize {
+    d1(&format!(
+        "SELECT id FROM event_index WHERE type = '{t}' AND tenant_id = '{tenant}'"
+    ))
+    .as_array()
+    .map_or(0, Vec::len)
+}
+
+/// F6: keyword, semantic and object probes are empty after an erasure; an index that keeps a
+/// vector makes the job retry, then fail with `erasure.failed` past its window.
+#[test]
+fn f6_probe_empty() {
+    let _reset = fakes::Reset;
+    let s = open_sender("f6 probe", "live");
+    let m = one_message(&s, "kim@f6.example", "f6 first");
+    let id = m["id"].as_str().unwrap();
+    let vectors = embedded(&s.iid, id);
+    let era = erase_message(&s, id);
+    let done = run(&era);
+    assert_eq!(done["status"], "completed", "{done}");
+    assert_eq!(
+        done["receipt"]["probe"],
+        json!({ "keyword_hits": 0, "semantic_hits": 0, "log_hits": 0 })
+    );
+    assert!(done["receipt"]["vectors_deleted"].as_i64().unwrap() >= vectors.len() as i64);
+    let r = get(&format!("/v1/identities/{}/messages/{id}", s.iid), &s.key);
+    assert_eq!(r.status, 404);
+    let left = hook(
+        "POST",
+        "/__test/r2",
+        Some(json!({ "op": "list", "key": format!("t/{}/i/{}/m/{id}/", s.tid, s.iid) })),
+    );
+    assert_eq!(left.body["keys"], json!([]));
+    // A vector the index keeps: the probe waits, re-sends, then the step fails until the window ends.
+    let m2 = one_message(&s, "kim@f6.example", "f6 second");
+    let id2 = m2["id"].as_str().unwrap();
+    let v2 = embedded(&s.iid, id2);
+    fakes::vector_keep(&v2[0]);
+    let era2 = erase_message(&s, id2);
+    let job = job_of(&era2);
+    let j = until_failed(&job, "probe", 1);
+    assert!(
+        steps_of(&j)
+            .iter()
+            .any(|(n, _, _, e)| n == "probe" && e == "probe_semantic_hits"),
+        "{j}"
+    );
+    fakes::advance(21 * 3_600_000);
+    let done = run(&era2);
+    assert_eq!(done["status"], "failed", "{done}");
+    assert_eq!(events_of_type("erasure.failed", &s.tid), 1);
+}
+
+/// I2: a held thread survives an erasure and is listed with its reason; once the hold expires a new
+/// request erases it.
+#[test]
+fn i2_hold() {
+    let _reset = fakes::Reset;
+    let s = open_sender("i2 hold", "live");
+    let cp = "pat@i2.example";
+    let held = one_message(&s, cp, "i2 held thread");
+    let free = one_message(&s, cp, "i2 free thread");
+    let thread = held["thread_id"].as_str().unwrap();
+    let until = pylota_identity_core::days::rfc3339(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+            + 2 * 86_400_000,
+    );
+    let r = post(
+        &format!("/v1/identities/{}/threads/{thread}/hold", s.iid),
+        &platform(),
+        json!({ "reason": "PCN dispute WM12345678", "until": until }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["hold"]["reason"], "PCN dispute WM12345678");
+    let e = erase(
+        &platform(),
+        json!({ "tenant_id": s.tid, "scope": "counterparty", "counterparty_address": cp }),
+    );
+    let done = run(e.body["id"].as_str().unwrap());
+    assert_eq!(done["status"], "completed_with_holds", "{done}");
+    assert_eq!(
+        done["receipt"]["held"],
+        json!([{ "thread_id": thread, "reason": "PCN dispute WM12345678" }])
+    );
+    let ids: Vec<String> = messages_of(&s.iid, &s.key, "")
+        .iter()
+        .filter_map(|m| m["id"].as_str().map(str::to_owned))
+        .collect();
+    assert!(ids.contains(&held["id"].as_str().unwrap().to_owned()));
+    assert!(!ids.contains(&free["id"].as_str().unwrap().to_owned()));
+    // A single-message delete in the held thread is refused.
+    let r = crate::delete(
+        &format!(
+            "/v1/identities/{}/messages/{}",
+            s.iid,
+            held["id"].as_str().unwrap()
+        ),
+        &platform(),
+    );
+    assert_eq!((r.status, r.code()), (423, "legal_hold"));
+    // The hold expires: the next erasure takes the thread.
+    fakes::advance(3 * 86_400_000);
+    let e = erase(
+        &platform(),
+        json!({ "tenant_id": s.tid, "scope": "counterparty", "counterparty_address": cp }),
+    );
+    let done = run(e.body["id"].as_str().unwrap());
+    assert_eq!(done["status"], "completed", "{done}");
+    assert!(messages_of(&s.iid, &s.key, "").is_empty());
+}
+
+/// I7: after counterparty erasure the suppression keeps its hash, hint and reason, loses note and
+/// source, and still refuses a send.
+#[test]
+fn i7_suppression_kept_hashed() {
+    let s = open_sender("i7 suppression", "live");
+    let cp = "gone@i7.example";
+    let r = post(
+        &format!("/v1/tenants/{}/suppressions", s.tid),
+        &s.key,
+        json!({ "address": cp, "note": "Asked us to stop" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    one_message(&s, cp, "i7 hello");
+    let e = erase(
+        &platform(),
+        json!({ "tenant_id": s.tid, "scope": "counterparty", "counterparty_address": cp }),
+    );
+    let done = run(e.body["id"].as_str().unwrap());
+    assert_eq!(done["status"], "completed", "{done}");
+    let row = &d1(&format!(
+        "SELECT address_hash, address_hint, reason, note, source_message_id FROM suppressions WHERE tenant_id = '{}'",
+        s.tid
+    ))[0];
+    assert_eq!(row["address_hash"].as_str().unwrap().len(), 64);
+    assert!(row["address_hint"].as_str().unwrap().contains('*'));
+    assert!(
+        row["note"].is_null() && row["source_message_id"].is_null(),
+        "{row}"
+    );
+    let r = send(
+        &s,
+        json!({ "to": [cp], "subject": "i7 again", "text": "x" }),
+    );
+    assert_eq!(r.body["status"], "suppressed", "{}", r.body);
+}
+
+/// Privacy § 6.6: routing stops first, billing second, then domains, mailboxes, D1 rows and the
+/// vector sweep; the tenant ends `erased` and `erasure.completed` is recorded.
+#[test]
+fn tenant_scope_order() {
+    let s = open_sender("tenant order", "live");
+    one_message(&s, "lee@order.example", "order hello");
+    let e = erase(
+        &eraser(&s.tid),
+        json!({ "tenant_id": s.tid, "scope": "tenant" }),
+    );
+    assert_eq!(e.status, 202, "{}", e.body);
+    let era = e.body["id"].as_str().unwrap().to_owned();
+    let job = job_of(&era);
+    let order: Vec<String> = steps_of(&job_alarm(&job))
+        .into_iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "stop_routing",
+            "cancel_billing",
+            "remove_domains",
+            "erase_identities",
+            "delete_d1_rows",
+            "sweep_vectors",
+            "sweep_r2",
+            "probe",
+            "receipt"
+        ]
+    );
+    // Routing stopped: once the directory cache (60 s) has turned over, inbound is refused.
+    let _reset = fakes::Reset;
+    fakes::advance(61_000);
+    let (o, smtp) = inbound(
+        "lee@order.example",
+        &s.addr,
+        &mail("lee@order.example", &s.addr, "order late", "x"),
+    );
+    assert_eq!((o.as_str(), &smtp[..9]), ("rejected", "550 5.1.1"));
+    let done = run(&era);
+    assert_eq!(done["status"], "completed", "{done}");
+    let t = &d1(&format!(
+        "SELECT status, name FROM tenants WHERE id = '{}'",
+        s.tid
+    ))[0];
+    assert_eq!(
+        (t["status"].as_str(), t["name"].as_str()),
+        (Some("erased"), Some(""))
+    );
+    assert_eq!(events_of_type("erasure.completed", &s.tid), 1);
+    for table in ["identities", "api_keys", "addresses", "suppressions"] {
+        let n = d1(&format!(
+            "SELECT COUNT(*) AS n FROM {table} WHERE tenant_id = '{}'",
+            s.tid
+        ))[0]["n"]
+            .as_i64()
+            .unwrap();
+        assert_eq!(n, 0, "{table}");
+    }
+    let left = hook(
+        "POST",
+        "/__test/r2",
+        Some(json!({ "op": "list", "key": format!("t/{}/", s.tid) })),
+    );
+    assert_eq!(left.body["keys"], json!([]));
+}
+
+/// Privacy § 6.12: tenant erasure deletes thousands of index rows in statements of at most 1,000.
+#[test]
+fn batched_deletes() {
+    let s = open_sender("batched deletes", "live");
+    d1(&format!(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000) \
+         INSERT INTO event_index (id, tenant_id, identity_id, type, owner_kind, owner_id, occurred_at) \
+         SELECT 'evt_bd' || i || '{0}', '{0}', NULL, 'identity.updated', 'platform', 'x', 1 FROM n",
+        s.tid
+    ));
+    let e = erase(
+        &eraser(&s.tid),
+        json!({ "tenant_id": s.tid, "scope": "tenant" }),
+    );
+    assert_eq!(e.status, 202, "{}", e.body);
+    let era = e.body["id"].as_str().unwrap().to_owned();
+    let done = run(&era);
+    assert_eq!(done["status"], "completed", "{done}");
+    let n = d1(&format!(
+        "SELECT COUNT(*) AS n FROM event_index WHERE tenant_id = '{}' AND id LIKE 'evt_bd%'",
+        s.tid
+    ))[0]["n"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+/// Every scope's failed request is resumed by a new request for the same scope and target.
+#[test]
+fn resume_failed_any_scope() {
+    let _reset = fakes::Reset;
+    let s = open_sender("resume any", "live");
+    let m = one_message(&s, "ash@resume.example", "resume me");
+    let id = m["id"].as_str().unwrap().to_owned();
+    fakes::fault("r2.delete", "BLOBS", "error", 1000);
+    let era = erase_message(&s, &id);
+    let job = job_of(&era);
+    until_failed(&job, "erase_mailbox", 1);
+    fakes::advance(21 * 3_600_000);
+    let failed = run(&era);
+    assert_eq!(failed["status"], "failed", "{failed}");
+    fakes::reset();
+    fakes::advance(21 * 3_600_000);
+    // Two resumptions at once make one request.
+    let body =
+        json!({ "tenant_id": s.tid, "scope": "message", "identity_id": s.iid, "message_id": id });
+    let a = std::thread::spawn({
+        let b = body.clone();
+        move || erase(&platform(), b)
+    });
+    let r2 = erase(&platform(), body);
+    let r1 = a.join().unwrap();
+    let mut statuses = [r1.status, r2.status];
+    statuses.sort();
+    assert_eq!(statuses, [200, 202], "{} {}", r1.body, r2.body);
+    let resumed = if r1.status == 202 { r1.body } else { r2.body };
+    assert_eq!(resumed["resumes_id"], era);
+    assert_eq!(resumed["deadline_at"], failed["deadline_at"]);
+    let done = run(resumed["id"].as_str().unwrap());
+    assert_eq!(done["status"], "completed", "{done}");
+    // The resumed job did not start over: its init step came done from the failed one.
+    let steps = steps_of(&job_alarm(&job_of(resumed["id"].as_str().unwrap())));
+    assert!(steps.iter().all(|(_, st, _, _)| st == "done"), "{steps:?}");
+}
+
+/// NFR-PRV-1: injected R2 faults retry with backoff; past its window the job fails with a partial
+/// receipt and `erasure.failed`; a non-erasure job fails after 10 attempts.
+#[test]
+fn step_retry_and_fail() {
+    let _reset = fakes::Reset;
+    let s = open_sender("retry fail", "live");
+    let m = one_message(&s, "bo@retry.example", "retry me");
+    fakes::fault("r2.delete", "BLOBS", "error", 3);
+    let era = erase_message(&s, m["id"].as_str().unwrap());
+    let job = job_of(&era);
+    let j = until_failed(&job, "erase_mailbox", 3);
+    assert_eq!(
+        j["meta"]["stalled"], "1",
+        "erasure_stalled fired on the third failure"
+    );
+    let done = run(&era);
+    assert_eq!(done["status"], "completed", "{done}");
+    assert_eq!(done["receipt"]["messages_deleted"], 1, "not counted twice");
+    // Past the window: failed, with a partial receipt.
+    let m2 = one_message(&s, "bo@retry.example", "retry never");
+    fakes::fault("r2.delete", "BLOBS", "error", 1000);
+    let era2 = erase_message(&s, m2["id"].as_str().unwrap());
+    until_failed(&job_of(&era2), "erase_mailbox", 1);
+    fakes::advance(21 * 3_600_000);
+    let failed = run(&era2);
+    assert_eq!(failed["status"], "failed", "{failed}");
+    assert!(failed["receipt"].is_object());
+    assert!(failed["receipt"]["probe"]["keyword_hits"].is_null());
+    fakes::reset();
+    // A non-erasure job fails on its 10th attempt.
+    let r = hook(
+        "POST",
+        "/__test/job-create",
+        Some(
+            json!({ "kind": "domain_remove", "tenant_id": s.tid, "params": { "domain_id": "dom_01ARYZ6S410000000000000000" } }),
+        ),
+    );
+    let jid = r.body["job_id"].as_str().unwrap().to_owned();
+    eventually(60, "the job to fail", || {
+        job_alarm(&jid);
+        (d1(&format!("SELECT status FROM jobs WHERE id = '{jid}'"))[0]["status"] == "failed")
+            .then_some(())
+    });
+    let steps = steps_of(&job_alarm(&jid));
+    assert_eq!(steps[0].2, 10, "{steps:?}");
+}

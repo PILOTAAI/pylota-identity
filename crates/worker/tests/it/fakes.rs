@@ -6,7 +6,7 @@
 //! Sending (`/__mail/send`), Workers AI (`/__ai/run`) and Vectorize (`/__vec/{binding}/{op}`). A blocking
 //! server on `std::net`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpListener;
 use std::sync::{Mutex, Once};
@@ -43,6 +43,8 @@ struct State {
     vec_count: Option<u64>,
     /// Vectorize operations to fail, by op name, with the number of failures left.
     vec_fail: BTreeMap<String, u32>,
+    /// Vector IDs that `deleteByIds` leaves in place (an index that keeps a vector, F6).
+    vec_keep: BTreeSet<String>,
 }
 
 /// One request a fake webhook receiver got.
@@ -85,6 +87,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     vectors: BTreeMap::new(),
     vec_count: None,
     vec_fail: BTreeMap::new(),
+    vec_keep: BTreeSet::new(),
 });
 
 /// The corpus zones, loaded once.
@@ -399,6 +402,7 @@ pub fn reset() {
     s.ai_fail.clear();
     s.ai_script.clear();
     s.vec_fail.clear();
+    s.vec_keep.clear();
     s.vec_count = None;
 }
 
@@ -628,6 +632,7 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
         return json!({ "__status": 503 });
     }
     let fixed = s.vec_count;
+    let keep = s.vec_keep.clone();
     let store = s.vectors.entry(binding.to_owned()).or_default();
     let query = |store: &BTreeMap<String, Rec>, vector: &[f64], options: &Value| {
         let ns = options["namespace"].as_str().unwrap_or("");
@@ -667,7 +672,10 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
         },
         "delete" => {
             for id in body["ids"].as_array().cloned().unwrap_or_default() {
-                store.remove(id.as_str().unwrap_or(""));
+                let id = id.as_str().unwrap_or("");
+                if !keep.contains(id) {
+                    store.remove(id);
+                }
             }
             json!({ "mutationId": "fake" })
         }
@@ -689,6 +697,12 @@ fn vec_op(s: &mut State, binding: &str, op: &str, body: &Value) -> Value {
         }
         _ => json!({}),
     }
+}
+
+/// `deleteByIds` leaves `id` in place until the next reset.
+pub fn vector_keep(id: &str) {
+    start();
+    STATE.lock().unwrap().vec_keep.insert(id.to_owned());
 }
 
 /// What the unscripted triage model answers.
