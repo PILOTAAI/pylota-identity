@@ -22,6 +22,10 @@ pub async fn get<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         .find(|k| k.kid.starts_with(kid) && k.kid.chars().count() == 1)
         .filter(|k| k.verify_until.is_none_or(|u| u > c.now))
         .ok_or_else(not_found)?;
+    // An export link (Privacy § 9.4): every refusal is `404 export_not_found`.
+    if let Some(l) = links::verify_export(&key.secret, token, c.now / 1000) {
+        return super::exports::download(c, l).await;
+    }
     let link = links::verify(&key.secret, token, c.now / 1000).ok_or_else(not_found)?;
     let k = format!(
         "t/{}/i/{}/out/{}/a/{}",

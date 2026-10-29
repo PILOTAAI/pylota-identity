@@ -50,6 +50,9 @@ pub enum JobRequest {
     TestAlarm,
 }
 
+/// Step errors that end the job at once (an export superseded twice by an erasure, § 6.11).
+const FATAL: &[&str] = &["superseded_by_erasure"];
+
 /// What one slice of a step did.
 pub enum Slice {
     /// Work remains: store the cursor and run again at once.
@@ -617,7 +620,9 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
                 )?;
                 let erasure = c.kind == "erasure";
                 let retry_until = self.get("retry_until")?.and_then(|v| v.parse().ok());
-                if rules::fails_job(erasure, attempts, retry_until, now) {
+                if FATAL.contains(&code.as_str())
+                    || rules::fails_job(erasure, attempts, retry_until, now)
+                {
                     return self.end(&c, "failed", Some((&step.name, &code))).await;
                 }
                 if erasure && attempts == rules::STALLED_AT {

@@ -6,6 +6,7 @@ pub mod addresses;
 pub mod audit;
 pub mod domains;
 pub mod erasure;
+pub mod exports;
 pub mod identities;
 pub mod keys;
 pub mod links;
@@ -126,6 +127,11 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::HoldSet => erasure::hold_set(c).await,
         Handler::HoldRemove => erasure::hold_remove(c).await,
         Handler::MessageDelete => erasure::delete_message(c).await,
+        Handler::ExportCreate => exports::create(c).await,
+        Handler::ExportGet => exports::get(c).await,
+        Handler::ExportDelete => exports::delete(c).await,
+        Handler::JobCreate => platform::job_create(c).await,
+        Handler::JobGet => platform::job_get(c).await,
         Handler::SearchIdentity => search::identity(c).await,
         Handler::SearchTenant => search::tenant(c).await,
         Handler::Related => search::related(c).await,

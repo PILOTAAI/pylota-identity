@@ -974,11 +974,11 @@ also needs S11; without it, `smtp_relay` ships with `inbound: forward` only. `cl
 
 **Implements:** FR-PRV-1–6, FR-IDN-4, NFR-PRV-1, and partner deletion after its tenants' erasure (FR-KEY-4).
 
-**Acceptance:** F6, I1–I7, I11–I14 (`it::erasure::i11_inflight_copies`, `it::export::i14_export_permissions`,
+**Acceptance:** F6, I1–I5, I7, I6 (`it::erasure::i6_backup_purge`, `it::erasure::i6_reapply_by_hash`; its restore replay test is M17's), I11–I14 (`it::erasure::i11_inflight_copies`, `it::export::i14_export_permissions`,
 `it::erasure::i12_provider_suppressions`, `it::jobs::i13_finalise_on_fail_and_cancel`), the tenant-scope hold behaviour of I2
 (`it::erasure::i2_hold_tenant_scope`, with the global job's `held_erasures` step), the staging lifetime of
 J7 (`it::inbound::j7_staging_outlives_dlq`, with the 15-day lifecycle rule and the daily re-queue of the
-`staging` step), batched D1 deletes (`it::erasure::batched_deletes`), the `reparse` job that J3 starts (J3 itself is accepted with M17 Completion,
+`staging` step), batched D1 deletes (`it::erasure::batched_deletes`), the `reparse` job that J3 starts (J3 is accepted in M17 Completion,
 which adds its start through `POST /v1/platform/jobs`), plus every erasure scope with receipt counts and
 empty probes (identity and tenant scope also delete `identity_keys` and write `key_tombstones`; with M25
 this is O7), J12 (a partner whose tenants are all erased can be deleted, softly, and not before:
@@ -1018,12 +1018,12 @@ test it names:
 
 | Substep | Completed by | Test |
 |---|---|---|
-| Console rows: `members`, `invitations` and `sessions` in `delete_d1_rows` | M21 | `it::erasure::tenant_console_rows` (lands in M21) |
-| Billing: the `cancel_billing` step (step 2), and `billing_events` and `billing_accounts` in `delete_d1_rows` | M22 | `it::erasure::tenant_cancels_billing`; billing assertions in `it::erasure::tenant_console_rows` |
-| SES: the domain's addresses in the `pm-retired-{n}` receipt rules (`prune_retired_rules`, run by `remove_domains`) | M23 | `it::erasure::tenant_ses_rows` (lands in M23) |
-| Person rows: deleting every person left with no workspace ([Privacy §6.9](design/privacy.md#69-people-console-accounts)) | M24 | `it::erasure::person_scope`; assertions on people left with no workspace in `it::erasure::tenant_console_rows` |
-| Notifier: `notification_prefs` in `delete_d1_rows`, and `Notifier` `delete_all` | M26 | Notifier assertions in `it::erasure::tenant_console_rows` and `it::erasure::person_scope` |
-| Service accounts: `service_accounts` in `delete_d1_rows` (tenant scope) and in `scrub_control_plane` (identity scope) | M27 | `it::accounts::erasure_and_retention` |
+| Console rows: `members`, `invitations` and `sessions` in `delete_d1_rows` | M21 | (`it::erasure::tenant_console_rows`, which lands in M21) |
+| Billing: the `cancel_billing` step (step 2), and `billing_events` and `billing_accounts` in `delete_d1_rows` | M22 | (`it::erasure::tenant_cancels_billing`, and billing assertions in `it::erasure::tenant_console_rows`, in M22) |
+| SES: the domain's addresses in the `pm-retired-{n}` receipt rules (`prune_retired_rules`, run by `remove_domains`) | M23 | (`it::erasure::tenant_ses_rows`, which lands in M23) |
+| Person rows: deleting every person left with no workspace ([Privacy §6.9](design/privacy.md#69-people-console-accounts)) | M24 | (`it::erasure::person_scope`, and assertions on people left with no workspace in `it::erasure::tenant_console_rows`, in M24) |
+| Notifier: `notification_prefs` in `delete_d1_rows`, and `Notifier` `delete_all` | M26 | (Notifier assertions in `it::erasure::tenant_console_rows` and `it::erasure::person_scope`, in M26) |
+| Service accounts: `service_accounts` in `delete_d1_rows` (tenant scope) and in `scrub_control_plane` (identity scope) | M27 | (`it::accounts::erasure_and_retention`, in M27) |
 
 ---
 

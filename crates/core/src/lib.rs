@@ -47,6 +47,7 @@ pub mod thread_token;
 pub mod triage_rules;
 pub mod trust;
 pub mod visibility;
+pub mod zip;
 
 #[cfg(test)]
 mod tests {
