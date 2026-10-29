@@ -31,9 +31,17 @@ pub struct ClientBuilder {
     api_key: Option<String>,
     user_agent: Option<String>,
     retry: Option<RetryPolicy>,
+    http: Option<reqwest::Client>,
 }
 
 impl ClientBuilder {
+    /// Uses this `reqwest` client (its own TLS roots, proxy or resolver) instead of the default one.
+    /// The SDK's per-request timeouts still apply.
+    pub fn http_client(mut self, http: reqwest::Client) -> Self {
+        self.http = Some(http);
+        self
+    }
+
     /// The deployment root, for example `https://mail.example.com`.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into());
@@ -75,11 +83,14 @@ impl ClientBuilder {
             .api_key
             .filter(|k| !k.is_empty())
             .ok_or_else(|| Error::Config("api_key is required".into()))?;
-        let http = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| Error::Config(e.to_string()))?;
+        let http = match self.http {
+            Some(h) => h,
+            None => reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|e| Error::Config(e.to_string()))?,
+        };
         Ok(Client {
             http,
             base,
@@ -272,6 +283,20 @@ fn encode(s: &str) -> String {
     out
 }
 
+/// A decode error with the text before where it happened, so a mismatch is easy to place.
+fn decode_message(e: &serde_json::Error, bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let line: Vec<char> = text
+        .lines()
+        .nth(e.line().saturating_sub(1))
+        .unwrap_or("")
+        .chars()
+        .collect();
+    let at = e.column().min(line.len());
+    let near: String = line[at.saturating_sub(80)..at].iter().collect();
+    format!("{e} (after …{near})")
+}
+
 /// One path segment, encoded.
 pub fn segment(s: &str) -> String {
     encode(s)
@@ -300,7 +325,7 @@ impl Response {
         } else {
             &self.body
         };
-        serde_json::from_slice(bytes).map_err(|e| Error::Decode(e.to_string()))
+        serde_json::from_slice(bytes).map_err(|e| Error::Decode(decode_message(&e, bytes)))
     }
 
     pub fn raw(self) -> Result<Raw, Error> {

@@ -92,7 +92,10 @@ impl Row {
         let records: Vec<Value> = serde_json::from_str::<Vec<Value>>(&self.records_json)
             .unwrap_or_default()
             .into_iter()
-            .map(|r| {
+            .map(|mut r| {
+                if let Some(name) = r["name"].as_str() {
+                    r["host"] = pylota_identity_core::dns::host(name).into();
+                }
                 let mut out = serde_json::Map::new();
                 for k in RECORD_KEYS {
                     if let Some(v) = r.get(*k) {

@@ -99,10 +99,8 @@ fn addresses(s: &str) -> Vec<Value> {
         .unwrap_or_default()
         .into_iter()
         .map(|a| {
-            let name = a["name"]
-                .as_str()
-                .filter(|n| !n.is_empty())
-                .map(str::to_owned);
+            // The contract's `MailboxAddress.name` is an empty string when there is none.
+            let name = a["name"].as_str().unwrap_or("");
             json!({ "address": a["address"], "name": name })
         })
         .collect()
@@ -123,7 +121,7 @@ impl Row {
     pub fn from(&self) -> Value {
         match &self.from_address {
             Some(a) => {
-                json!({ "address": a, "name": self.from_name.as_deref().filter(|n| !n.is_empty()) })
+                json!({ "address": a, "name": self.from_name.as_deref().unwrap_or("") })
             }
             None => Value::Null,
         }

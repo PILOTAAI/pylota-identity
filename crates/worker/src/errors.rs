@@ -105,6 +105,11 @@ impl From<PlatformError> for ApiError {
             &[
                 ("binding", e.binding.into()),
                 ("kind", format!("{:?}", e.kind).into()),
+                // Machine text from the platform (an SQLite message, a status); never content.
+                (
+                    "detail",
+                    e.detail.chars().take(200).collect::<String>().into(),
+                ),
             ],
         );
         ApiError::new(

@@ -125,6 +125,19 @@ pub enum AttachmentClass {
     Other,
 }
 
+/// One MIME rule as SQL on `col`: the condition, with one `?` for the value, and the value. A prefix
+/// rule (`…%`) compares the lowercased prefix instead of using `LIKE`: workerd's SQLite refuses `LIKE`
+/// patterns over 50 bytes, and the OOXML rules are longer.
+pub fn mime_rule_sql<'r>(col: &str, rule: &'r str) -> (String, &'r str) {
+    match rule.strip_suffix('%') {
+        Some(prefix) => (
+            format!("lower(substr({col}, 1, {})) = ?", prefix.len()),
+            prefix,
+        ),
+        None => (format!("{col} = ?"), rule),
+    }
+}
+
 impl AttachmentClass {
     pub const ALL: [Self; 13] = [
         Self::Pdf,
@@ -180,7 +193,8 @@ impl AttachmentClass {
         })
     }
 
-    /// MIME rules on the effective type; a `%` makes the rule a `LIKE`. `Other` is everything else.
+    /// MIME rules on the effective type; a trailing `%` makes the rule a prefix match ([`mime_rule_sql`]).
+    /// `Other` is everything else.
     pub const fn mime_rules(self) -> &'static [&'static str] {
         match self {
             Self::Pdf => &["application/pdf"],

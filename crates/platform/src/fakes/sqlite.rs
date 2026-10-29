@@ -85,12 +85,23 @@ pub struct FakeD1 {
     conn: Rc<RefCell<Connection>>,
 }
 
+/// An in-memory SQLite with the limits workerd applies that bundled SQLite does not: a `LIKE` or
+/// `GLOB` pattern over 50 bytes is refused (`LIKE or GLOB pattern too complex`; workerd refused a
+/// 61-byte pattern in the M16 SDK suite, 2026-10-29), so native tests catch such a query first.
+fn workerd_like_connection() -> Connection {
+    let c = Connection::open_in_memory().expect("in-memory SQLite");
+    c.set_limit(
+        rusqlite::limits::Limit::SQLITE_LIMIT_LIKE_PATTERN_LENGTH,
+        50,
+    )
+    .expect("a LIKE pattern limit");
+    c
+}
+
 impl FakeD1 {
     pub fn new() -> Self {
         Self {
-            conn: Rc::new(RefCell::new(
-                Connection::open_in_memory().expect("in-memory SQLite"),
-            )),
+            conn: Rc::new(RefCell::new(workerd_like_connection())),
         }
     }
 
@@ -155,9 +166,7 @@ pub struct FakeSql {
 impl FakeSql {
     pub fn new() -> Self {
         Self {
-            conn: Rc::new(RefCell::new(
-                Connection::open_in_memory().expect("in-memory SQLite"),
-            )),
+            conn: Rc::new(RefCell::new(workerd_like_connection())),
             depth: Rc::default(),
         }
     }

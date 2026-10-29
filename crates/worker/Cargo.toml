@@ -31,6 +31,9 @@ rustls-pki-types = { workspace = true }
 # The round-trip test of the local MCP protocol types (ADR 0009): native only, never in the Worker.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 rmcp = { workspace = true, default-features = false }
+# it::sdk: the Rust SDK against the harness, on a current-thread runtime.
+pylota-identity = { path = "../sdk" }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 # The workerd suite (Testing § 6): `cargo xtask itest` runs it; `cargo test --workspace` never builds it.
 [[test]]

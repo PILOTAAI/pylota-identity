@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use pylota_identity_core::query::AttachmentClass;
+use pylota_identity_core::query::{AttachmentClass, mime_rule_sql};
 use pylota_identity_core::search::snippet;
 use pylota_identity_platform::PResult;
 use pylota_identity_platform::d1::SqlValue;
@@ -317,15 +317,10 @@ pub fn class_case(x: &str) -> String {
     let mut sql = String::from("CASE");
     for class in AttachmentClass::ALL {
         for rule in class.mime_rules() {
+            let (cond, value) = mime_rule_sql(x, rule);
             sql.push_str(" WHEN ");
-            sql.push_str(x);
-            sql.push_str(if rule.contains('%') {
-                " LIKE '"
-            } else {
-                " = '"
-            });
-            sql.push_str(rule);
-            sql.push_str("' THEN '");
+            sql.push_str(&cond.replace('?', &format!("'{value}'")));
+            sql.push_str(" THEN '");
             sql.push_str(class.as_str());
             sql.push('\'');
         }
@@ -1239,7 +1234,7 @@ mod tests {
         assert_eq!(kw_score(0.0, false, false), 1.0);
         assert!((kw_score(4.0, true, true) - (0.35 + 0.3)).abs() < 1e-9);
         assert!(class_case("x").contains("WHEN x = 'application/pdf' THEN 'pdf'"));
-        assert!(class_case("x").contains("WHEN x LIKE 'image/%' THEN 'image'"));
+        assert!(class_case("x").contains("WHEN lower(substr(x, 1, 6)) = 'image/' THEN 'image'"));
         let a = trigrams("plate");
         assert!(jaccard(&a, &trigrams("plates")) >= 0.45);
         assert!(jaccard(&a, &trigrams("zebra")) < 0.45);

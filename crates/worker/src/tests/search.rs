@@ -587,3 +587,62 @@ fn agentic_gates_and_budget() {
         "invalid_request"
     );
 }
+
+/// A keyword that appears in a message's body and in its text attachment answers both hits (the SDK
+/// suite's message: an attachment's extracted text joins the search).
+#[test]
+fn keyword_hits_message_with_text_attachment() {
+    let h = Harness::new();
+    let (tid, idn, address, _) = setup(&h);
+    let raw = format!(
+        "From: zia@sdk.example\r\nTo: {address}\r\nSubject: SDK booking BK-77\r\nMessage-ID: <att1@it.example>\r\nDate: Mon, 26 Oct 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nThe booking is attached.\r\n--b\r\nContent-Type: text/plain; name=\"note.txt\"\r\nContent-Disposition: attachment; filename=\"note.txt\"\r\n\r\nBooking BK-77 for Friday.\r\n--b--\r\n"
+    );
+    email(&h, "zia@sdk.example", &address, &raw);
+    drain(&h, QueueName::Inbound);
+    drain(&h, QueueName::Index);
+    let key = searcher(
+        &h,
+        &tid,
+        &["search:read", "messages:read", "messages:write"],
+    );
+    let list = h.call(
+        "GET",
+        &format!("/v1/identities/{idn}/messages"),
+        Some(&key),
+        None,
+        &[],
+    );
+    let mid = list.body["data"][0]["id"].as_str().unwrap().to_owned();
+    let thr = list.body["data"][0]["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let r = h.call(
+        "PATCH",
+        &format!("/v1/identities/{idn}/messages/{mid}"),
+        Some(&key),
+        Some(json!({ "labels_add": ["sdk"] })),
+        &[],
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    let r = h.call(
+        "PATCH",
+        &format!("/v1/identities/{idn}/threads/{thr}"),
+        Some(&key),
+        Some(json!({ "read": true })),
+        &[],
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    let r = h.call(
+        "POST",
+        &format!("/v1/identities/{idn}/messages/{mid}/triage"),
+        Some(&key),
+        None,
+        &[],
+    );
+    assert!(r.status < 300, "{}", r.body);
+    drain(&h, QueueName::Index);
+    let r = search(&h, &key, &idn, json!({ "q": "booking", "mode": "keyword" }));
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["hits"].as_array().unwrap().len(), 1, "{}", r.body);
+}

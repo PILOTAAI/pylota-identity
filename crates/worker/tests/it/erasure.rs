@@ -392,6 +392,12 @@ fn i2_hold() {
     );
     assert_eq!(r.status, 200, "{}", r.body);
     assert_eq!(r.body["hold"]["reason"], "PCN dispute WM12345678");
+    assert_eq!(r.body["hold"]["until"], until.as_str());
+    assert!(
+        r.body["hold"]["set_at"]
+            .as_str()
+            .is_some_and(|t| t.ends_with('Z'))
+    );
     let e = erase(
         &platform(),
         json!({ "tenant_id": s.tid, "scope": "counterparty", "counterparty_address": cp }),

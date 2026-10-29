@@ -126,6 +126,10 @@ fn records_from_api() {
         (Some("zone"), Some("literal"), Some("active"))
     );
     let records = r.body["records"].as_array().unwrap().clone();
+    assert!(
+        records.iter().all(|x| x["host"].is_string()),
+        "every record has its host: {records:?}"
+    );
     let has = |t: &str, n: &str, v: &str| {
         records.iter().any(|x| {
             x["type"] == t && x["name"] == n && x["value"].as_str().unwrap_or("").contains(v)

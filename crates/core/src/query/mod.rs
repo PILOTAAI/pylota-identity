@@ -12,7 +12,8 @@ mod parser;
 
 pub use ast::{
     AddrMatch, AttachmentClass, CivilDate, DateBound, Direction, DurUnit, Expr, Filter, Query,
-    RefMatch, RelDuration, Span, TextField, TextKind, TextLeaf, TypeMatch, print, print_filter,
+    RefMatch, RelDuration, Span, TextField, TextKind, TextLeaf, TypeMatch, mime_rule_sql, print,
+    print_filter,
 };
 pub use chrono_tz::Tz;
 pub use compile::{

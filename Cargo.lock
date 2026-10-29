@@ -1908,6 +1908,7 @@ name = "pylota-identity-worker"
 version = "0.1.0"
 dependencies = [
  "mail-auth",
+ "pylota-identity",
  "pylota-identity-api-types",
  "pylota-identity-core",
  "pylota-identity-platform",
@@ -1917,6 +1918,7 @@ dependencies = [
  "rustls-pki-types",
  "serde",
  "serde_json",
+ "tokio",
  "toml",
 ]
 

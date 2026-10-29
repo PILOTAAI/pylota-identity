@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// A receiver URL and its target as the fake server records it.
-fn receiver(name: &str) -> (String, String) {
+pub(crate) fn receiver(name: &str) -> (String, String) {
     let host = format!("{}{RECEIVERS}", slug(name));
     (format!("https://{host}/hook"), format!("{host}/hook"))
 }

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use super::ast::{
     AddrMatch, AttachmentClass, DateBound, Direction, Expr, Filter, Query, TextField, TextKind,
-    TextLeaf, TypeMatch, print_filter,
+    TextLeaf, TypeMatch, mime_rule_sql, print_filter,
 };
 use super::dates::{ago, bound_ms, resolve};
 use super::{CompileCtx, QueryError, expected};
@@ -426,9 +426,9 @@ impl Sql {
     }
 
     fn mime_rule(&mut self, rule: &str) -> String {
-        self.text(rule);
-        let op = if rule.contains('%') { "LIKE" } else { "=" };
-        format!("COALESCE(a.sniffed_type, a.content_type) {op} ?")
+        let (sql, value) = mime_rule_sql("COALESCE(a.sniffed_type, a.content_type)", rule);
+        self.text(value);
+        sql
     }
 }
 

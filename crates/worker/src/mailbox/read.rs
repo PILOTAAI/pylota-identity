@@ -309,6 +309,17 @@ struct ThreadRow {
     snippet: Option<String>,
 }
 
+/// A stored hold (times in Unix milliseconds) as the API's `ThreadHold` (RFC 3339 times).
+fn hold_view(stored: &str) -> Option<Value> {
+    let mut h: Value = serde_json::from_str(stored).ok()?;
+    for k in ["until", "set_at"] {
+        if let Some(ms) = h[k].as_i64() {
+            h[k] = Value::String(pylota_identity_core::days::rfc3339(ms));
+        }
+    }
+    Some(h)
+}
+
 const THREAD_COLUMNS: &str = "t.seq, t.id, t.subject, t.participants_json, t.message_count, t.unread_count, t.first_at, t.last_at, t.last_inbound_at, t.category, t.needs_reply, t.urgency, t.archived, t.hold_json, lm.direction AS last_direction, lm.snippet";
 
 fn latest_visible_join() -> String {
@@ -340,10 +351,7 @@ fn thread_summary(t: &ThreadRow, labels: &[(i64, String)]) -> Value {
         .into_iter()
         .take(50)
         .map(|p| {
-            let name = p["name"]
-                .as_str()
-                .filter(|n| !n.is_empty())
-                .map(str::to_owned);
+            let name = p["name"].as_str().unwrap_or("");
             json!({ "address": p["address"], "name": name })
         })
         .collect();
@@ -363,7 +371,7 @@ fn thread_summary(t: &ThreadRow, labels: &[(i64, String)]) -> Value {
         "needs_reply": t.needs_reply,
         "urgency": t.urgency,
         "archived": t.archived == 1,
-        "hold": t.hold_json.as_deref().and_then(|h| serde_json::from_str::<Value>(h).ok()),
+        "hold": t.hold_json.as_deref().and_then(hold_view),
     })
 }
 
