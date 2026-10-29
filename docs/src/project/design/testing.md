@@ -362,6 +362,12 @@ binary: a proxy inside the test logs the Inspector CLI's exchanges with the Work
 `crates/worker/tests/it/mcp_inspector_session.json`, with the key and IDs replaced by placeholders and
 each response kept as its shape.
 
+**As built (M16).** `it::sdk::every_served_operation` calls every operation the Worker serves through
+its SDK method (on a multi-thread runtime; the blocking harness helpers run in `block_in_place`) and
+compares the operations it called with `/__test/routes`. `it::cli::landing_examples` runs `idvy` as a
+library (`pylota_identity_cli::run`) with a profile for the harness. The worker's native
+dev-dependencies gain `pylota-identity`, `pylota-identity-cli` and `tokio`.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

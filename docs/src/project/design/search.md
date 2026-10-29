@@ -1901,6 +1901,15 @@ contacts, find related and the index pipeline, with these settlements until the 
   (`it::bench::agentic_p95`): total p95 510 ms, first evidence p95 228 ms (NFR-PERF-6: 8 s and 1.5 s).
   The figures leave out the real model's latency, which the nightly evaluation records (M18).
 
+**As built (M16).** The attachment-class rules of the query compiler and of keyword ranking compare a
+prefix rule (`application/vnd.openxmlformats-officedocument.wordprocessingml.%`) as
+`lower(substr(type, 1, n)) = prefix`, not with `LIKE`: workerd's SQLite refused the longer `LIKE`
+patterns ("LIKE or GLOB pattern too complex", observed with a 61-byte pattern), which failed every
+keyword search of a mailbox that held an attachment. `core::query::mime_rule_sql` is the one place that
+writes a rule. The native SQLite fakes set the same kind of limit (`SQLITE_LIMIT_LIKE_PATTERN_LENGTH`,
+50 bytes; the D1 limit's exact value could not be re-read from the Cloudflare docs this session: verify
+at build time), so a long pattern fails in `cargo test` too.
+
 ## Tests
 
 Every row maps to a requirement or an edge-case row. Names in the edge-case register are used as

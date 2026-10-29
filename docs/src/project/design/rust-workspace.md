@@ -1405,6 +1405,40 @@ of [Errors](../../reference/errors.md) decodes with its `retryable` flag), `it::
 `alg: none`, a `sub` that is not an identity ID and a redirected or mistyped JWKS answer), and the M16
 integration tests that call every method against the workerd harness.
 
+**As built (M16).** The client, the generated methods, the errors, idempotency, retries, the pagers and
+webhook verification hold as designed, with these settlements until the milestones that need more:
+
+- **Generated.** `crates/sdk/src/generated.rs` is written by `cargo xtask gen-sdk` from the operation
+  table of `api-types` (`gen-sdk --check` in CI fails on a stale file). An operation with a `dry_run`
+  query parameter has two methods: the plain one answers the `202` object, and `{name}_dry_run` the `200`
+  `DryRunResult`. List operations with a `cursor` have their `*_stream` pager. Header parameters other than
+  `Idempotency-Key` travel in the operation's query struct.
+- **Errors.** `Error::Api(Box<ApiError>)` (boxed, so `Result<_, Error>` stays small in callers' code);
+  `ApiError.code` is the code as sent (a `String`), and `ApiError::error_code()` reads it as a known
+  `ErrorCode`, so a code newer than the SDK still arrives. `Error::Status { status, body }` is a
+  non-success answer without the envelope (a proxy, another host). Enums of response objects have no
+  `Unknown(String)` variant yet ([Y40](../edge-cases.md)); a value newer than the SDK is a `Decode` error.
+  `Error::from_response(status, body)` is public, for callers that send through `Client::send`.
+- **Retries** follow the errors page exactly: an envelope's `retryable`; a network error or a proxy
+  `502`, `503` or `504` only for a `GET` or a request with an idempotency key, so a keyless `PATCH`,
+  `DELETE` or `PUT` is sent once.
+- **Client.** The API key is optional: a client without one reaches the routes that need none (`/health`)
+  and refuses the others before sending. `ClientBuilder::http_client` takes a prepared `reqwest::Client`
+  (the CLI's proxy and timeouts, the tests' certificate authority). `Client::send(Req)`, `Req` and
+  `segment` are public, so the CLI prints response bodies unchanged.
+- **Dependencies.** `hmac`, `sha2` and `base64` for `webhooks::verify` (and `verify_with`, which takes the
+  tolerance `idvy webhooks verify --tolerance` needs), and `tokio` (`time`) for the back-off sleeps.
+- **Not in the SDK** (`NOT_IN_SDK` of `sdk::coverage::every_operation`, nine operations): the two SNS
+  hooks, the Telnyx hook, `getSecurityTxt`, and the five routes the vault consumer's own client calls.
+- **Later.** `search_agentic_stream`, the `events` module and `EventStream` (M30), fixtures (M36), the
+  phone and vault helpers (M38, M43), the conformance runner (M46) and `assertions::Verifier` (M25).
+- **Contract gaps found by the integration test** (`it::sdk::every_served_operation`, which calls every
+  operation the Worker serves through its method and decodes every answer) were fixed in the Worker:
+  empty mailbox names were `null`, thread holds sent epoch milliseconds, the Domain object's records
+  lacked `host`, and keyword search failed on workerd (see [Search › As built](search.md#tests)).
+  `GET /v1/keys` reads a `tenant_id` filter that `openapi.yaml` does not declare yet; `idvy keys list
+  --tenant` sends it.
+
 ## 12. Tests
 
 | Test | Covers |

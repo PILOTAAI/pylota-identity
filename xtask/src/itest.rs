@@ -538,7 +538,7 @@ mod tests {
     #[test]
     fn platform_permissions_match_auth() {
         let src =
-            std::fs::read_to_string(crate::workspace_root().join("crates/worker/src/auth.rs"))
+            std::fs::read_to_string(crate::workspace_root().join("crates/core/src/keys.rs"))
                 .unwrap();
         let list = src
             .split("pub const PERMISSIONS: &[&str] = &[")

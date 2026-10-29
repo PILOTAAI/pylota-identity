@@ -4681,7 +4681,6 @@ paths:
             schema: {$ref: '#/components/schemas/ReplyRequest'}
             example:
               text: Friday works. See you at 10.
-              html: null
               attachments: []
               kind: transactional
       responses:

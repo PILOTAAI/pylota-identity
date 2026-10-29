@@ -2010,6 +2010,55 @@ reads no configuration, needs no key and makes no request ([Y65](../edge-cases.m
 - `cli::schema::y65_offline_and_valid` validates every document against the JSON Schema 2020-12 meta-schema
   and every `--json` output produced by the CLI test suite against its command's `output`.
 
+## As built (M16)
+
+`idvy` holds as designed for the commands of the routes served through M15, `setup`, `deploy`,
+`upgrade`, `doctor`, `domains subscribe` and `idvy wrangler`, with these settlements until the
+milestones that need more:
+
+- **A library behind the binary.** `pylota_identity_cli::run(args, Env)` is the whole CLI; `Env` carries
+  the environment, the standard streams, the HTTP client, the Cloudflare and GitHub base URLs, a
+  `Runner` for child processes (`node`, `npm`, Wrangler, `key_command`), the release keys and a map of
+  hosts to base URLs. `main.rs` passes the process's own, so tests drive every command in-process.
+  The layout groups commands by area (`profile`, `admin`, `identities`, `domains`, `mail`, `search`,
+  `webhooks`, `privacy`, `setup`, `deploy`, `doctor`), the Cloudflare calls live in `cloudflare/api.rs`,
+  and the error type in `error.rs`.
+- **Not built yet**, each with the milestone that owns it: `--schema`, `--query`, `skills`, `mcp stdio`
+  and the `mcp config` clients other than `generic` (M36); `dlq`, `ops`, `jobs`, `secrets rotate-master`
+  and `erasure retry|reapply` (M17); `identity-keys`, `assertions` and `http-sign` (M25); `usage`,
+  `plans` and `billing` (M22); `members` and `invitations` (M21); `waitlist` (M24); `accounts` (M27);
+  `drafts` (M29); `events` (M30); screening feedback and `screening summary` (M31); `calendar-reply`
+  (M32); `uploads` and attachments over 1 MiB, which are refused before sending (M33); `agent-signup`
+  (M34); `metrics` (M35); several message IDs in `messages get|label`, and `webhooks headers` and
+  `--header` (M37); `setup ses`, `domains add --local-token`, `domains update` and
+  `addresses test-forwarding` (M23). `destroy`, the gradual rollout of `deploy --gradual` and `upgrade`
+  (which deploys at 100 % today), and the index-generation start, finalise and cancel of § 8.7 (deploy
+  refuses a changed `PM_EMBED_MODEL` or a bound `VECTORS_NEXT` with the reason) are not built; they are
+  needed before M20 deploys staging through `idvy`.
+- **Release keys.** `bundle::verify::RELEASE_KEYS` is empty until the owner's keys exist (M19), so every
+  download fails verification (exit 11) until then. The tests sign bundles with their own key through
+  `Env::release_keys`.
+- **Setup.** The 24 steps run in the order of § 6.3, each read first. The AI model check of preflight
+  step 7 is not made; the interactive diff before a non-`[vars]` change of § 7 is not shown (the file is
+  rendered and written); a re-run that changes nothing reports `exists` for every step and writes the
+  file byte for byte as it was. The platform domain row keeps the provider objects the first run
+  recorded. The system identity is `postmaster@{mail_domain}` with the display name `Pylota Identity`
+  until `PM_SYSTEM_FROM` is read by setup.
+- **Doctor.** The checks run one after another (not eight at a time), each with its timeout. `alerts`
+  and `agent_signup` skip until `GET /v1/platform/status` exists (M17); `ses` skips until `setup ses`
+  (M23); `web_bot_auth` checks the directory's status, type and key count, not the signatures (M25);
+  `phone` and `vault` skip until their milestones. The quota query reads the Analytics Engine dataset
+  `pylota_identity_metrics` with `blob1` as the metric name: verify at build time against the metric
+  writer.
+- **Tests.** The recorded fakes are `crates/cli/tests/support`: one loopback server for the Cloudflare
+  API, GitHub releases, DNS over HTTPS and the Worker routes setup and doctor call, with a SQLite
+  database (foreign keys on, the real migrations) behind the D1 query API, and a runner that answers as
+  Node.js, npm and Wrangler. `cli::landing_examples` is two tests: `cli::landing_examples::setup_then_deploy`
+  (the self-hosting block, against the fakes) and `it::cli::landing_examples` (the CLI block and the
+  idempotent send, against the workerd harness); both read the commands from `site/public/index.html`,
+  and the harness test names identities it creates where the page writes `@acme.example.com`. The other
+  M16 rows of the table below are integration tests in `crates/cli/tests`, with the names given.
+
 ## Tests
 
 | Test | Proves | Covers |
