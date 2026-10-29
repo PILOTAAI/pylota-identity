@@ -550,7 +550,79 @@ const CASES: &[(&str, Case)] = &[
             None,
         )
     }),
+    ("deleteMessage", |t| {
+        (
+            "DELETE",
+            format!("/v1/identities/{}/messages/{MESSAGE}", t.identity),
+            None,
+        )
+    }),
+    ("setThreadHold", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/threads/{THREAD}/hold", t.identity),
+            Some(json!({ "reason": "audit" })),
+        )
+    }),
+    ("removeThreadHold", |t| {
+        (
+            "DELETE",
+            format!("/v1/identities/{}/threads/{THREAD}/hold", t.identity),
+            None,
+        )
+    }),
+    ("createErasureRequest", |t| {
+        (
+            "POST",
+            "/v1/erasure-requests".into(),
+            Some(json!({ "tenant_id": t.tenant, "scope": "identity", "identity_id": t.identity })),
+        )
+    }),
+    ("listErasureRequests", |t| {
+        (
+            "GET",
+            format!("/v1/erasure-requests?tenant_id={}", t.tenant),
+            None,
+        )
+    }),
+    ("getErasureRequest", |_| {
+        ("GET", format!("/v1/erasure-requests/{ERASURE}"), None)
+    }),
+    ("reapplyErasureRequest", |_| {
+        (
+            "POST",
+            format!("/v1/platform/erasure-requests/{ERASURE}/reapply"),
+            Some(json!({})),
+        )
+    }),
+    ("createExport", |t| {
+        (
+            "POST",
+            "/v1/exports".into(),
+            Some(json!({ "tenant_id": t.tenant, "scope": "identity", "identity_id": t.identity })),
+        )
+    }),
+    ("getExport", |_| {
+        ("GET", format!("/v1/exports/{EXPORT}"), None)
+    }),
+    ("deleteExport", |_| {
+        ("DELETE", format!("/v1/exports/{EXPORT}"), None)
+    }),
+    ("createJob", |t| {
+        (
+            "POST",
+            "/v1/platform/jobs".into(),
+            Some(json!({ "kind": "reindex", "tenant_id": t.tenant })),
+        )
+    }),
+    ("getJob", |_| {
+        ("GET", format!("/v1/platform/jobs/{JOB}"), None)
+    }),
 ];
+
+const ERASURE: &str = "era_01ARYZ6S41TSV4RRFFQ69G5FAV";
+const EXPORT: &str = "exp_01ARYZ6S41TSV4RRFFQ69G5FAV";
+const JOB: &str = "job_01ARYZ6S41TSV4RRFFQ69G5FAV";
 
 const MISSING_WEBHOOK: &str = "whk_01ARYZ6S41TSV4RRFFQ69G5FAV";
 const THREAD: &str = "thr_01ARYZ6S41TSV4RRFFQ69G5FAV";
