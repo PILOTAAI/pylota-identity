@@ -30,7 +30,7 @@ pub enum EraseMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "privacy", rename_all = "snake_case")]
 pub enum PrivacyOp {
     ErasurePlan {
         target: Target,
