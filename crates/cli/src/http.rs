@@ -84,6 +84,7 @@ impl Api {
         let mut b = Client::builder()
             .base_url(url)
             .user_agent(user_agent())
+            .retry(pylota_identity::RetryPolicy::standard())
             .http_client(ctx.http.clone());
         if let Some(k) = key {
             b = b.api_key(k);

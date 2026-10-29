@@ -280,6 +280,67 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// `cli::output::exit_codes`: each HTTP status and CLI error maps to the code of §3.4; a `404`
+    /// without the envelope is exit 9.
+    #[test]
+    fn exit_codes() {
+        let api = |status: u16| {
+            CliError::from(pylota_identity::Error::from_response(
+                status,
+                br#"{"error":{"code":"x","message":"y"}}"#,
+            ))
+        };
+        for (status, code) in [
+            (400, 7),
+            (401, 4),
+            (402, 8),
+            (403, 4),
+            (404, 5),
+            (409, 6),
+            (410, 6),
+            (413, 7),
+            (422, 7),
+            (423, 6),
+            (429, 8),
+            (500, 9),
+            (503, 9),
+        ] {
+            assert_eq!(api(status).exit_code(), code, "{status}");
+        }
+        let bare = CliError::from(pylota_identity::Error::from_response(404, b"<html>"));
+        assert_eq!(bare.exit_code(), 9);
+        assert_eq!(bare.envelope()["error"]["code"], "upstream_not_found");
+        for (e, code) in [
+            (CliError::usage("x"), 2),
+            (CliError::config("x"), 3),
+            (
+                CliError::Network {
+                    message: "reset".into(),
+                    idempotency_key: None,
+                },
+                9,
+            ),
+            (CliError::prerequisite("x"), 10),
+            (CliError::verification("x"), 11),
+            (CliError::DoctorFailed(1), 12),
+            (CliError::timeout("x"), 13),
+            (
+                CliError::Precondition(crate::error::Local {
+                    message: "x".into(),
+                    fix: None,
+                    details: None,
+                }),
+                15,
+            ),
+            (CliError::Interrupted, 130),
+            (CliError::internal("x"), 1),
+        ] {
+            assert_eq!(e.exit_code(), code, "{e:?}");
+            assert!(e.envelope()["error"]["code"].is_string());
+            assert_eq!(e.envelope()["error"]["request_id"], Value::Null);
+        }
+    }
+
     /// `cli::output::terminal_safe`: ANSI escapes, C1 controls, bidi and zero-width characters from
     /// mail are neutralised in human output, in objects and in tables.
     #[test]

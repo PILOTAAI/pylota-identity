@@ -1048,11 +1048,24 @@ impl Runner for FakeRunner {
             "node" => ok("v22.12.0\n"),
             "npm" => ok("10.9.0\n"),
             "sh" | "cmd" => {
-                let out = std::process::Command::new(&cmd.program)
+                let mut child = std::process::Command::new(&cmd.program)
                     .args(&cmd.args)
                     .stdin(std::process::Stdio::null())
-                    .output()
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
                     .map_err(|e| e.to_string())?;
+                let limit = std::time::Duration::from_secs(cmd.timeout_s.unwrap_or(60));
+                let deadline = std::time::Instant::now() + limit;
+                while child.try_wait().map_err(|e| e.to_string())?.is_none() {
+                    if std::time::Instant::now() > deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(format!("{} timed out", cmd.program));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                let out = child.wait_with_output().map_err(|e| e.to_string())?;
                 Ok(Proc {
                     code: out.status.code().unwrap_or(1),
                     stdout: out.stdout,
