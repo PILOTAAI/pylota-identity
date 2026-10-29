@@ -1109,7 +1109,7 @@ pub async fn mail_test(
             )
             .await;
     }
-    if let Some(out) = sent["message"]["id"].as_str() {
+    if let Some(out) = sent["id"].as_str() {
         let _ = api
             .call(
                 ctx,

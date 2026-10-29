@@ -916,7 +916,7 @@ fn worker(
         ),
         ("POST", ["v1", "identities", _, "messages"]) => api(
             202,
-            json!({ "message": { "id": "msg_00000000000000000000000001", "status": "queued" }, "deduplicated": false }),
+            json!({ "id": "msg_00000000000000000000000001", "status": "queued", "deduplicated": false }),
         ),
         ("GET", ["v1", "identities", _, "wait"]) => api(
             200,
@@ -1239,6 +1239,26 @@ impl Cli {
     /// Runs `idvy <args>` with `stdin`.
     pub fn run_in(&self, args: &[&str], stdin: &[u8]) -> Run {
         let (env, out, err) = self.env(stdin);
+        let mut argv = vec!["idvy".to_owned()];
+        argv.extend(args.iter().map(|a| (*a).to_owned()));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let code = rt.block_on(pylota_identity_cli::run(argv, env));
+        let s = |b: &Buf| String::from_utf8_lossy(&b.0.lock().unwrap()).into_owned();
+        Run {
+            code,
+            out: s(&out),
+            err: s(&err),
+        }
+    }
+
+    /// Runs `idvy <args>` as if on a terminal: prompts are answered from `stdin`.
+    pub fn run_tty(&self, args: &[&str], stdin: &[u8]) -> Run {
+        let (mut env, out, err) = self.env(stdin);
+        env.stdin_tty = true;
+        env.stderr_tty = true;
         let mut argv = vec!["idvy".to_owned()];
         argv.extend(args.iter().map(|a| (*a).to_owned()));
         let rt = tokio::runtime::Builder::new_current_thread()

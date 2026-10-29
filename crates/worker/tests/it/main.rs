@@ -6,6 +6,7 @@ mod addresses;
 mod agentic;
 mod auth;
 mod bench;
+mod cli;
 mod cloud;
 mod conformance;
 mod delivery;

@@ -125,12 +125,11 @@ fn headers(items: &[String]) -> Result<Option<Value>, CliError> {
 
 /// A send's result: the queued message, with `id`, `status` and `deduplicated` on one line for people.
 fn sent(doc: Value) -> Output {
-    let m = &doc["message"];
     let line = format!(
         "{{ \"id\": {}, \"status\": {}, \"deduplicated\": {} }}\n",
-        m["id"], m["status"], doc["deduplicated"]
+        doc["id"], doc["status"], doc["deduplicated"]
     );
-    let id = m["id"].as_str().unwrap_or("").to_owned();
+    let id = doc["id"].as_str().unwrap_or("").to_owned();
     Output::object(doc).human(line).quiet(format!("{id}\n"))
 }
 

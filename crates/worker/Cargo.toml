@@ -33,6 +33,8 @@ rustls-pki-types = { workspace = true }
 rmcp = { workspace = true, default-features = false }
 # it::sdk: the Rust SDK against the harness, on a current-thread runtime.
 pylota-identity = { path = "../sdk" }
+# it::cli: the landing page's CLI examples through idvy's library.
+pylota-identity-cli = { path = "../cli" }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 # The workerd suite (Testing § 6): `cargo xtask itest` runs it; `cargo test --workspace` never builds it.

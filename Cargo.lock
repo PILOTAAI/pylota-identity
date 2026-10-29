@@ -2064,6 +2064,7 @@ dependencies = [
  "mail-auth",
  "pylota-identity",
  "pylota-identity-api-types",
+ "pylota-identity-cli",
  "pylota-identity-core",
  "pylota-identity-platform",
  "regex",
