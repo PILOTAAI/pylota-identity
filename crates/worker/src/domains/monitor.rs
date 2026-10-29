@@ -929,6 +929,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
                             ),
                         ])
                         .await?;
+                    crate::jobs::domain_remove::start_for(p, &row.id).await;
                 }
                 Action::RestartRemoveJob => {
                     let reason = row
@@ -945,6 +946,7 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
                             now,
                         )?)
                         .await?;
+                    crate::jobs::domain_remove::start_for(p, &row.id).await;
                 }
                 Action::Alert(name) => {
                     crate::log::warn(

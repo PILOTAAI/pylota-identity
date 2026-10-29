@@ -387,6 +387,7 @@ async fn evict<P: Platform>(c: &Ctx<P>, h: &Holder, claimant: &str) -> Result<()
             ),
         ])
         .await?;
+    crate::jobs::domain_remove::start_for(p, &h.id).await;
     Ok(())
 }
 

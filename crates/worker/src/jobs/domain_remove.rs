@@ -447,3 +447,40 @@ pub async fn restart_failed<P: Platform>(p: &P) {
         .await;
     }
 }
+
+/// Starts the domain's queued removal jobs now (the rows M13's monitor and eviction write); the
+/// every-minute cron repairs a start that was lost.
+pub async fn start_for<P: Platform>(p: &P, domain_id: &str) {
+    #[derive(Deserialize)]
+    struct J {
+        id: String,
+        tenant_id: Option<String>,
+        runner_do_id: String,
+        params_json: String,
+    }
+    let Ok(rows) = p
+        .db()
+        .query::<J>(Stmt::new(
+            "SELECT id, tenant_id, runner_do_id, params_json FROM jobs WHERE kind = 'domain_remove' AND status = 'queued' AND json_extract(params_json, '$.domain_id') = ?1",
+            vec![domain_id.into()],
+        ))
+        .await
+    else {
+        return;
+    };
+    for j in rows {
+        super::start(
+            p,
+            &j.runner_do_id,
+            super::JobRequest::Start {
+                job_id: j.id,
+                kind: "domain_remove".into(),
+                tenant_id: j.tenant_id.clone(),
+                params: serde_json::from_str(&j.params_json).unwrap_or_else(|_| json!({})),
+                resume_job_id: None,
+            },
+            j.tenant_id.as_deref(),
+        )
+        .await;
+    }
+}
