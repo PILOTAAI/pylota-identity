@@ -182,7 +182,7 @@ fn a5_tombstone_blocks_reuse() {
 }
 
 /// FR-IDN-4: a `deleting` and a `deleted` identity read with their status, refuse writes, and a second
-/// `DELETE` answers the same request without starting a job.
+/// `DELETE` answers the same erasure request without starting a job.
 #[test]
 fn deleting_and_deleted_routes() {
     let p = platform();
@@ -199,11 +199,19 @@ fn deleting_and_deleted_routes() {
             "{}",
             first.body
         );
-        if state == "deleted" {
-            d1(&format!(
-                "UPDATE identities SET status = 'deleted' WHERE id = '{id}'"
-            ));
-        }
+        // The erasure job runs to its end (M14); the state under test is then set directly.
+        let job = crate::erasure::job_of(first.body["id"].as_str().unwrap());
+        crate::eventually(120, "the erasure to end", || {
+            crate::erasure::job_alarm(&job);
+            let s = d1(&format!("SELECT status FROM jobs WHERE id = '{job}'"))[0]["status"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned();
+            matches!(s.as_str(), "completed" | "failed").then_some(())
+        });
+        d1(&format!(
+            "UPDATE identities SET status = '{state}' WHERE id = '{id}'"
+        ));
         let g = get(&path, &p);
         assert_eq!((g.status, g.body["status"].as_str()), (200, Some(state)));
         let r = patch(&path, &p, json!({ "display_name": "x" }));
@@ -218,12 +226,6 @@ fn deleting_and_deleted_routes() {
         let again = delete(&path, &p);
         assert_eq!((again.status, &again.body["id"]), (200, &first.body["id"]));
         assert_eq!(jobs(), n, "no new job");
-        assert_eq!(
-            d1(&format!(
-                "SELECT status FROM jobs WHERE params_json LIKE '%{id}%'"
-            ))[0]["status"],
-            "queued"
-        );
     }
 }
 
