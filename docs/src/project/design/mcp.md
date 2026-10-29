@@ -1418,6 +1418,45 @@ authorization optional; when supported, an HTTP server acts as an OAuth 2.1 reso
 
 v1.1 needs an ADR and updates to [Configuration](../../reference/configuration.md) before work starts.
 
+**As built (M15).** The transport, the tool filter, the error mapping, the prompt and the instructions
+hold as designed, with these settlements until the milestones that need more:
+
+- **Tools.** The fourteen whose REST routes exist: `mail_list_identities` to `mail_wait`, `mail_send`,
+  `mail_reply`, `mail_forward` and `mail_update_labels`. `mail_get_usage` arrives with M22's
+  `GET /v1/usage`, the two signing tools with M25, and the other tools of § 4.3 with the milestones of
+  their pages (M29 to M37). The effect enum has the three classes these tools use (`Read`,
+  `ExternalSend`, `Mutating`); a later milestone adds the class its tools need.
+- **Descriptions and schemas follow the routes that exist.** The send tools' descriptions leave out the
+  sentences that name `mail_create_draft`, `mail_send_draft` (M29) and `mail_create_upload` (M33);
+  their `attachments` take inline items only (`upload_id` items arrive with M33) and there is no
+  `calendar` argument (M32). `mail_update_labels` takes `message_id` or `thread_id` (`message_ids` and
+  `require_absent` arrive with the batch call of M37) and its description says so. For a message it
+  answers `read` as the state the call set (`null` when the call did not set it), because the Message
+  object carries no read state; for a thread, `read` is `unread_count == 0`.
+- **No streaming yet.** Every tool answers `application/json`; the SSE answers of [§ 2.6](#26-streaming-responses)
+  (progress notifications and keep-alive comments for `mail_deep_search` and `mail_wait`) are not built.
+  A wait of at most 60 seconds and a deep search of at most 30 run inside one JSON response.
+- **Output schemas** are built at run time from the same OpenAPI document that `/openapi.json` serves:
+  `$ref`s inlined, a top-level `allOf` merged into one object, and the cut flags of § 4.2 declared
+  (`truncated`, and `<field>_truncated` beside every `text` and `extracted_text`). `mail_search`
+  declares `SearchResponse`, whose `partial` and `failed_identities` are optional, so identity and
+  tenant scope both validate (MCP Inspector checks `structuredContent` against `outputSchema`, which is
+  how a stricter first choice was caught). `mail_find_related` answers the REST `{ data }`, not
+  `{ hits, degraded }`.
+- **Size cap.** When a result is still over 96 KB after the text cuts, items are dropped from the end and
+  `next_cursor` is left as REST gave it, so paging does not reach the dropped items. With the MCP caps
+  this needs a page of very large items.
+- **Identity argument.** An address is resolved from the `addresses` table (`active` or `retiring`); the
+  REST route then applies the key's scope, so an identity outside it answers `identity_not_found`, the
+  same as an unknown one.
+- **Errors.** A failure inside a tool is always a tool error (`isError: true` with the envelope and
+  `details.http_status`); `RL_*` refusals add `details.retry_after`. A REST validation error keeps the
+  REST shape `details.errors[] = {path, message}`.
+- **Inspector replay.** `it::mcp::inspector_replay` replays a session recorded with MCP Inspector 2.12.0
+  (`--cli --transport http`): six CLI runs, each an `initialize`, `notifications/initialized`, the `GET`
+  stream it tries (`405`) and one method. It checks every status and the response's shape to three
+  levels. `it::mcp::inspector_record` records it again when `PM_INSPECTOR` names the Inspector binary.
+
 ## Tests
 
 | Test | Proves | Covers |

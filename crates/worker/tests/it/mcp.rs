@@ -1024,3 +1024,29 @@ fn inspector_replay() {
         }
     }
 }
+
+/// MCP § 4: `RL_API` is charged once per MCP request, so 600 tool calls in one minute succeed and the
+/// 601st request gets `429`; the bucket is the key's REST bucket too.
+#[test]
+fn rl_api_once_per_call() {
+    let (s, _, _) = fixture("mcp rate");
+    let (_, key) = mint(
+        &platform(),
+        json!({ "name": "rl", "level": "tenant", "tenant_id": s.tid, "permissions": ["identities:read"] }),
+    );
+    crate::fresh_minute(45);
+    for n in 0..600 {
+        let r = tool(&key, "mail_list_identities", json!({ "limit": 1 }));
+        assert_eq!(r["isError"], false, "call {n}: {r}");
+    }
+    let r = rpc(
+        &key,
+        "tools/call",
+        json!({ "name": "mail_list_identities", "arguments": {} }),
+    );
+    assert_eq!(r.status, 429, "{}", r.body);
+    assert_eq!(r.body["error"]["code"], -32000);
+    assert_eq!(r.body["error"]["data"]["error"]["code"], "rate_limited");
+    assert!(r.header("retry-after").is_some());
+    assert_eq!(get("/v1/identities", &key).status, 429);
+}

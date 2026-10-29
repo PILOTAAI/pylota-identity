@@ -1033,7 +1033,9 @@ test it names:
 
 **Implements:** FR-MCP-1 and the tool list in [MCP reference](../reference/mcp.md), including the two
 signing tools of M25 (`mail_sign_assertion`, `mail_sign_http_request`). M27 later adds
-`mail_request_account` and `mail_list_accounts` to the same table and its table test.
+`mail_request_account` and `mail_list_accounts` to the same table and its table test. Built in numeric order, M15 lands the
+tools whose REST routes exist; `mail_get_usage` is accepted with the `GET /v1/usage` it calls
+(`it::mcp::get_usage`, M22), and the two signing tools with their routes (`it::mcp::sign_tools`, M25).
 
 **Acceptance:**
 

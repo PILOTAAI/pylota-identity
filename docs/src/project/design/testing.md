@@ -356,6 +356,12 @@ failures (`fakes::Reset` calls it too). `fakes::advance_to_minute(m)` moves the 
 minute `m` of the UTC day, for the crons that act in one window. The `r2.delete` fault fails R2
 deletes. A test checks an alert by its `alert` line in `target/itest/worker.log`.
 
+**As built (M15).** `it::mcp` drives `/mcp` with the harness client (`crate::client()` is public for
+the raw-body cases). `it::mcp::inspector_record` runs only when `PM_INSPECTOR` names an MCP Inspector
+binary: a proxy inside the test logs the Inspector CLI's exchanges with the Worker into
+`crates/worker/tests/it/mcp_inspector_session.json`, with the key and IDs replaced by placeholders and
+each response kept as its shape.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request
