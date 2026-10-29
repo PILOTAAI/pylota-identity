@@ -336,7 +336,10 @@ async fn create_request<P: Platform>(
             kind: "erasure".into(),
             tenant_id: Some(plan.tenant.id.clone()),
             params: start_params,
-            resume_job_id: resumes.as_ref().map(|l| l.job_id.clone()),
+            resume_job_id: resumes
+                .as_ref()
+                .filter(|l| l.status == "failed")
+                .map(|l| l.job_id.clone()),
         },
         Some(&plan.tenant.id),
     )

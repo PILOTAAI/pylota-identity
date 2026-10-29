@@ -411,7 +411,7 @@ pub async fn continuation<P: Platform>(
     scope: &str,
     identity: Option<&str>,
     resumes: &str,
-    resumes_job: &str,
+    _resumes_job: &str,
     now: i64,
 ) -> Result<(), StepErr> {
     let ids = p.ids();
@@ -464,7 +464,8 @@ pub async fn continuation<P: Platform>(
             kind: "erasure".into(),
             tenant_id: Some(tenant.to_owned()),
             params,
-            resume_job_id: Some(resumes_job.to_owned()),
+            // A continuation runs every step again (only a failed request's resumption copies progress).
+            resume_job_id: None,
         },
         Some(tenant),
     )

@@ -207,7 +207,8 @@ pub fn start() {
                     Some(target) => (receive(target, headers, raw), String::new()),
                     None => {
                         let body: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
-                        if let Some((st, v)) = crate::cloud::cf(&method, &path, &body)
+                        if let Some((st, v)) = suppressions(&method, &path)
+                            .or_else(|| crate::cloud::cf(&method, &path, &body))
                             .or_else(|| crate::cloud::ses(&method, &path, &body))
                             .or_else(|| crate::cloud::rdap_call(&path))
                         {
@@ -444,19 +445,80 @@ pub fn mail_sent(recipient: &str) -> Vec<Value> {
 
 /// An Email Sending suppression of `address` with `scope` (`account` or a sending domain).
 pub fn cf_suppress(address: &str, scope: &str) {
+    cf_suppress_with(address, scope, false);
+}
+
+/// As [`cf_suppress`], `read_only` like Cloudflare's own `policy` entries.
+pub fn cf_suppress_with(address: &str, scope: &str, read_only: bool) {
     start();
+    let mut s = STATE.lock().unwrap();
+    let n: usize = s.cf_suppressions.values().map(Vec::len).sum();
+    let id = format!("sup{n}{}", crate::slug(address));
     let item = if scope == "account" {
-        json!({ "email": address, "scope": "account", "reason": "hard_bounce" })
+        json!({ "id": id, "email": address, "scope": "account", "reason": "hard_bounce", "read_only": read_only })
     } else {
-        json!({ "email": address, "scope": "sending_domain", "domain": scope, "reason": "hard_bounce" })
+        json!({ "id": id, "email": address, "scope": "sending_domain", "domain": scope, "reason": "hard_bounce", "read_only": read_only })
     };
+    s.cf_suppressions
+        .entry(address.to_owned())
+        .or_default()
+        .push(item);
+}
+
+/// The Email Sending suppressions of `address` still held by the fake.
+pub fn cf_suppressions_of(address: &str) -> Vec<Value> {
+    start();
     STATE
         .lock()
         .unwrap()
         .cf_suppressions
-        .entry(address.to_owned())
-        .or_default()
-        .push(item);
+        .get(address)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// `GET …/email/sending/suppressions?email=` or `?scope_type=sending_domain&scope_value=`, and
+/// `DELETE …/suppressions/{id}`.
+fn suppressions(method: &str, path: &str) -> Option<(u16, Value)> {
+    let rest = path.strip_prefix("/__http/api.cloudflare.com/client/v4/accounts/")?;
+    let i = rest.find("/email/sending/suppressions")?;
+    let tail = &rest[i + "/email/sending/suppressions".len()..];
+    let mut s = STATE.lock().unwrap();
+    if method == "DELETE" {
+        let id = tail.trim_start_matches('/').to_owned();
+        let mut found = false;
+        for list in s.cf_suppressions.values_mut() {
+            let before = list.len();
+            list.retain(|x| x["id"] != id.as_str() || x["read_only"] == true);
+            found |= list.len() != before;
+        }
+        return Some(if found {
+            (200, json!({ "success": true, "result": {} }))
+        } else {
+            (
+                404,
+                json!({ "success": false, "errors": [{ "code": 1000, "message": "not found" }] }),
+            )
+        });
+    }
+    let q = tail.split_once('?').map_or("", |(_, q)| q);
+    let param = |k: &str| {
+        q.split('&')
+            .find_map(|kv| kv.strip_prefix(&format!("{k}=")))
+            .map(|v| v.replace("%40", "@").replace("%2B", "+"))
+    };
+    let items: Vec<Value> = match (param("email"), param("scope_value")) {
+        (Some(e), _) => s.cf_suppressions.get(&e).cloned().unwrap_or_default(),
+        (None, Some(d)) => s
+            .cf_suppressions
+            .values()
+            .flatten()
+            .filter(|x| x["domain"] == d.as_str())
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+    Some((200, json!({ "success": true, "result": items })))
 }
 
 // ---- Workers AI and Vectorize (Testing § 6.3) ------------------------------------------------------
