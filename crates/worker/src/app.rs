@@ -18,6 +18,15 @@ use crate::errors::{ApiError, envelope};
 use crate::router::{self, Handler, Idempotency, Scope};
 use crate::{handlers, ratelimit, request_id};
 
+/// One request to run as an authenticated key: what `serve_as` needs of an HTTP request.
+pub(crate) struct Call {
+    pub method: String,
+    pub path: String,
+    pub query: Vec<(String, String)>,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
 /// The Worker logic, generic over the platform so native tests run it on `platform::fakes`.
 pub struct App<P: Platform> {
     pub p: Rc<P>,
@@ -186,27 +195,47 @@ impl<P: Platform> App<P> {
         if path.starts_with("/__test/") {
             return crate::hooks::serve(&self.p, req, request_id, &path).await;
         }
+        if path == "/mcp" {
+            *authenticated = true;
+            return Ok(crate::mcp::serve(self, req, request_id).await);
+        }
         let route = router::find(&req.method, &path)?;
-        let spec = route.spec;
-        let mut c = Ctx {
-            p: self.p.clone(),
-            request_id: request_id.to_owned(),
-            now: self.p.clock().now_ms(),
-            method: req.method.clone(),
-            path,
-            query,
-            headers: req.headers.clone(),
-            body: req.body.as_ref().map(|b| b.to_vec()),
-            route,
-            key: None,
-        };
-        if spec.scope == Scope::Public {
+        if route.spec.scope == Scope::Public {
+            let c = Ctx {
+                p: self.p.clone(),
+                request_id: request_id.to_owned(),
+                now: self.p.clock().now_ms(),
+                method: req.method.clone(),
+                path,
+                query,
+                headers: req.headers.clone(),
+                body: req.body.as_ref().map(|b| b.to_vec()),
+                route,
+                key: None,
+            };
             return handlers::dispatch(&c).await;
         }
 
         let key = auth::authenticate(&self.p, req.header("authorization")).await?;
         *authenticated = true;
         *rl_limit = Some(ratelimit::limit(RlBucket::Api));
+        self.charge(&key).await?;
+        self.serve_as(
+            key,
+            Call {
+                method: req.method.clone(),
+                path,
+                query,
+                headers: req.headers.clone(),
+                body: req.body.as_ref().map(|b| b.to_vec()),
+            },
+            request_id,
+        )
+        .await
+    }
+
+    /// The request-level rate limits: `RL_API` per key, then the tenant's or the partner's bucket.
+    pub(crate) async fn charge(&self, key: &auth::KeyScope) -> Result<(), ApiError> {
         ratelimit::check(self.p.as_ref(), RlBucket::Api, &key.key_id).await?;
         match key.level {
             Level::Tenant | Level::Identity => {
@@ -227,6 +256,33 @@ impl<P: Platform> App<P> {
             }
             Level::Platform => {}
         }
+        Ok(())
+    }
+
+    /// Everything after authentication and the request-level rate limits: freeze and read-only, the
+    /// route's levels and permissions, idempotency and the handler. MCP tools call it with the key
+    /// their request authenticated, so `RL_API` is charged once per MCP request (MCP § 4).
+    pub(crate) async fn serve_as(
+        &self,
+        key: auth::KeyScope,
+        call: Call,
+        request_id: &str,
+    ) -> Result<Reply, ApiError> {
+        let cfg = self.p.config();
+        let route = router::find(&call.method, &call.path)?;
+        let spec = route.spec;
+        let mut c = Ctx {
+            p: self.p.clone(),
+            request_id: request_id.to_owned(),
+            now: self.p.clock().now_ms(),
+            method: call.method,
+            path: call.path,
+            query: call.query,
+            headers: call.headers,
+            body: call.body,
+            route,
+            key: None,
+        };
         if key.level != Level::Platform {
             if cfg.frozen {
                 return Err(ApiError::new(
@@ -235,7 +291,7 @@ impl<P: Platform> App<P> {
                 )
                 .details(json!({ "reason": "frozen" })));
             }
-            if req.method != "GET" && req.method != "HEAD" {
+            if c.method != "GET" && c.method != "HEAD" {
                 #[derive(serde::Deserialize)]
                 struct S {
                     state: String,

@@ -26,6 +26,7 @@ pub mod jobs;
 pub mod keyring;
 pub mod log;
 pub mod mailbox;
+pub mod mcp;
 pub mod metrics;
 pub mod net;
 pub mod objects;
