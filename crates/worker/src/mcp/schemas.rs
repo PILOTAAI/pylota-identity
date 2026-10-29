@@ -114,6 +114,8 @@ pub struct InitializeResult {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoverResult {
+    /// `complete`: a modern-only result, so the type carries it (other results get it in transport).
+    pub result_type: String,
     pub supported_versions: Vec<String>,
     pub capabilities: ServerCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -247,6 +249,99 @@ mod tests {
         assert_eq!(
             serde_json::to_value(t).unwrap(),
             json!({ "content": [{ "type": "text", "text": "{}" }], "structuredContent": {}, "isError": false })
+        );
+    }
+}
+
+/// `it::mcp::rmcp_roundtrip` (ADR 0009): every local protocol type the server sends reads back through
+/// `rmcp::model` 3.4.1 and serialises to the same JSON, so the local types cannot drift from the SDK.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod rmcp_roundtrip {
+    use rmcp::model;
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+    use serde_json::json;
+
+    use super::*;
+
+    /// `local` as JSON equals what `rmcp`'s `T` makes of it.
+    fn round<T: DeserializeOwned + Serialize>(what: &str, local: &impl Serialize) {
+        let v = serde_json::to_value(local).unwrap();
+        let theirs: T = serde_json::from_value(v.clone())
+            .unwrap_or_else(|e| panic!("{what}: rmcp refuses {v}: {e}"));
+        assert_eq!(serde_json::to_value(theirs).unwrap(), v, "{what}");
+    }
+
+    #[test]
+    fn rmcp_roundtrip() {
+        for d in crate::mcp::tools::TOOLS {
+            round::<model::Tool>(d.name, &crate::mcp::tools::listed(d));
+        }
+        round::<model::CallToolResult>(
+            "success",
+            &CallToolResult {
+                content: vec![Content::Text {
+                    text: "{\"a\":1}".into(),
+                }],
+                structured_content: Some(json!({ "a": 1 })),
+                is_error: false,
+            },
+        );
+        round::<model::CallToolResult>(
+            "tool error",
+            &CallToolResult {
+                content: vec![Content::Text { text: "{}".into() }],
+                structured_content: None,
+                is_error: true,
+            },
+        );
+        let info = Implementation {
+            name: "pylota-identity".into(),
+            title: Some("Pylota Identity".into()),
+            version: "1.0.0".into(),
+        };
+        round::<model::Implementation>("implementation", &info);
+        let caps = ServerCapabilities {
+            tools: ListChanged {
+                list_changed: false,
+            },
+            prompts: ListChanged {
+                list_changed: false,
+            },
+        };
+        round::<model::InitializeResult>(
+            "initialize",
+            &InitializeResult {
+                protocol_version: "2025-11-25".into(),
+                capabilities: caps.clone(),
+                server_info: info.clone(),
+                instructions: Some(crate::mcp::prompts::INSTRUCTIONS.into()),
+            },
+        );
+        round::<model::DiscoverResult>(
+            "server/discover",
+            &DiscoverResult {
+                result_type: "complete".into(),
+                supported_versions: crate::mcp::SUPPORTED_VERSIONS
+                    .iter()
+                    .map(|v| (*v).to_owned())
+                    .collect(),
+                capabilities: caps,
+                instructions: Some(crate::mcp::prompts::INSTRUCTIONS.into()),
+                ttl_ms: 3_600_000,
+                cache_scope: "public".into(),
+                meta: json!({ "io.modelcontextprotocol/serverInfo": info }),
+            },
+        );
+        round::<model::Prompt>("prompt", &crate::mcp::prompts::listed());
+        round::<model::GetPromptResult>("prompts/get", &crate::mcp::prompts::get(Some("x")));
+        round::<model::JsonRpcError>(
+            "error",
+            &JsonRpcError::new(
+                Some(RequestId::Number(3)),
+                code::INVALID_PARAMS,
+                "Unknown tool: x",
+            ),
         );
     }
 }

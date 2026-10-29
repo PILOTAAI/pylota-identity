@@ -340,6 +340,7 @@ async fn dispatch<P: Platform>(
             })))
         }
         ("server/discover", Era::Modern) => Ok(Done::of(val(&DiscoverResult {
+            result_type: "complete".into(),
             supported_versions: SUPPORTED_VERSIONS.iter().map(|v| (*v).to_owned()).collect(),
             capabilities: capabilities(),
             instructions: Some(prompts::INSTRUCTIONS.into()),
