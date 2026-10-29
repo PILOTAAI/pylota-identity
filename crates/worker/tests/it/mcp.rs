@@ -775,3 +775,252 @@ fn annotations_complete() {
         assert!(d.len() <= 4096, "{name}");
     }
 }
+
+/// Where the recorded MCP Inspector session lives.
+const SESSION: &str = "tests/it/mcp_inspector_session.json";
+
+/// The shape of a JSON value to three levels (the JSON-RPC envelope, the result's members and the
+/// items of its lists); deeper values, whose keys depend on the data (facets, triage), become their
+/// type, as every scalar does.
+fn skeleton(v: &Value) -> Value {
+    fn at(v: &Value, depth: u8) -> Value {
+        match v {
+            Value::Object(_) if depth >= 3 => "object".into(),
+            Value::Array(_) if depth >= 3 => "array".into(),
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, x)| (k.clone(), at(x, depth + 1)))
+                    .collect(),
+            ),
+            Value::Array(a) => Value::Array(a.iter().map(|x| at(x, depth + 1)).collect()),
+            Value::String(_) => "string".into(),
+            Value::Number(_) => "number".into(),
+            Value::Bool(b) => (*b).into(),
+            Value::Null => Value::Null,
+        }
+    }
+    at(v, 0)
+}
+
+/// Records an MCP Inspector session (`PM_INSPECTOR` names its binary, for example
+/// `node_modules/.bin/mcp-inspector` of `@modelcontextprotocol/inspector`): a local proxy logs every
+/// exchange between the Inspector CLI and `/mcp` into [`SESSION`], with the key and IDs replaced by
+/// placeholders. Without `PM_INSPECTOR` it does nothing.
+#[test]
+fn inspector_record() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let Ok(bin) = std::env::var("PM_INSPECTOR") else {
+        return;
+    };
+    let (s, key, _) = fixture("mcp inspector");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let sink = log.clone();
+    let (k, iid) = (key.clone(), s.iid.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut r = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            if r.read_line(&mut line).unwrap_or(0) == 0 {
+                continue;
+            }
+            let method = line.split(' ').next().unwrap_or("").to_owned();
+            let mut headers = Vec::new();
+            let mut len = 0;
+            loop {
+                let mut h = String::new();
+                r.read_line(&mut h).unwrap();
+                let h = h.trim_end().to_owned();
+                if h.is_empty() {
+                    break;
+                }
+                if let Some((n, v)) = h.split_once(':') {
+                    let (n, v) = (n.trim().to_ascii_lowercase(), v.trim().to_owned());
+                    if n == "content-length" {
+                        len = v.parse().unwrap_or(0);
+                    }
+                    headers.push((n, v));
+                }
+            }
+            let mut body = vec![0u8; len];
+            r.read_exact(&mut body).unwrap();
+            let mut req = crate::client().request(
+                reqwest::Method::from_bytes(method.as_bytes()).unwrap(),
+                format!("{}/mcp", std::env::var("PM_ITEST_URL").unwrap()),
+            );
+            for (n, v) in &headers {
+                if !matches!(
+                    n.as_str(),
+                    "host" | "content-length" | "connection" | "accept-encoding"
+                ) {
+                    req = req.header(n.as_str(), v.as_str());
+                }
+            }
+            let resp = req.body(body.clone()).send().unwrap();
+            let status = resp.status().as_u16();
+            let rh: Vec<(String, String)> = resp
+                .headers()
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_str().unwrap_or("").to_owned()))
+                .collect();
+            let bytes = resp.bytes().unwrap().to_vec();
+            let anon = |t: &str| t.replace(&k, "{key}").replace(&iid, "{identity}");
+            let kept: Vec<Value> = headers
+                .iter()
+                .filter(|(n, _)| {
+                    n.starts_with("mcp-") || matches!(n.as_str(), "content-type" | "accept")
+                })
+                .map(|(n, v)| json!([n, anon(v)]))
+                .collect();
+            sink.lock().unwrap().push(json!({
+                "request": { "method": method, "headers": kept,
+                    "body": serde_json::from_slice::<Value>(&body).ok().map(|b| serde_json::from_str::<Value>(&anon(&b.to_string())).unwrap()) },
+                "response": { "status": status,
+                    "body": serde_json::from_slice::<Value>(&bytes).ok().map(|b| skeleton(&b)) }
+            }));
+            let ct = rh
+                .iter()
+                .find(|(n, _)| n == "content-type")
+                .map_or("application/json", |(_, v)| v.as_str());
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\ncontent-type: {ct}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                bytes.len()
+            );
+            let _ = stream.write_all(&bytes);
+        }
+    });
+    let url = format!("http://127.0.0.1:{port}/mcp");
+    let auth = format!("Authorization: Bearer {key}");
+    let runs: Vec<Vec<String>> = vec![
+        vec!["--method".into(), "tools/list".into()],
+        vec![
+            "--method".into(),
+            "tools/call".into(),
+            "--tool-name".into(),
+            "mail_list_identities".into(),
+        ],
+        vec![
+            "--method".into(),
+            "tools/call".into(),
+            "--tool-name".into(),
+            "mail_search".into(),
+            "--tool-arg".into(),
+            format!("identity={}", s.iid),
+            "q=booking".into(),
+            "mode=keyword".into(),
+        ],
+        vec![
+            "--method".into(),
+            "tools/call".into(),
+            "--tool-name".into(),
+            "mail_get_message".into(),
+            "--tool-arg".into(),
+            format!("identity={}", s.iid),
+            "message_id=msg_01ARYZ6S41TSV4RRFFQ69G5FAV".into(),
+        ],
+        vec!["--method".into(), "prompts/list".into()],
+        vec![
+            "--method".into(),
+            "prompts/get".into(),
+            "--prompt-name".into(),
+            "mail_search_strategy".into(),
+        ],
+    ];
+    crate::eventually(60, "the message to be searchable", || {
+        let r = post(
+            &format!("/v1/identities/{}/search", s.iid),
+            &key,
+            json!({ "q": "booking", "mode": "keyword" }),
+        );
+        (r.body["hits"].as_array().is_some_and(|h| !h.is_empty())).then_some(())
+    });
+    for args in runs {
+        let out = std::process::Command::new(&bin)
+            .arg("--cli")
+            .arg(&url)
+            .args(["--transport", "http", "--header", &auth])
+            .args(&args)
+            .output()
+            .expect("the Inspector runs");
+        // The not-found message is recorded on purpose: the Inspector exits non-zero on a tool error.
+        let said = |b: &[u8]| String::from_utf8_lossy(b).contains("tool_is_error");
+        let expected = args.iter().any(|a| a == "mail_get_message");
+        assert!(
+            out.status.success() || (expected && (said(&out.stdout) || said(&out.stderr))),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // One exchange per line keeps the recording small and its diffs readable.
+    let lines: Vec<String> = log.lock().unwrap().iter().map(Value::to_string).collect();
+    let text = format!(
+        "{{\n\"client\": \"MCP Inspector (CLI, --transport http)\",\n\"exchanges\": [\n{}\n]\n}}\n",
+        lines.join(",\n")
+    );
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SESSION),
+        text,
+    )
+    .unwrap();
+}
+
+/// M15: the recorded MCP Inspector session replays green: every request gets the recorded status and
+/// a response of the recorded shape.
+#[test]
+fn inspector_replay() {
+    let (s, key, _) = fixture("mcp replay");
+    crate::eventually(60, "the message to be searchable", || {
+        let r = post(
+            &format!("/v1/identities/{}/search", s.iid),
+            &key,
+            json!({ "q": "booking", "mode": "keyword" }),
+        );
+        (r.body["hits"].as_array().is_some_and(|h| !h.is_empty())).then_some(())
+    });
+    let text =
+        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SESSION))
+            .expect("the recorded session");
+    let text = text.replace("{identity}", &s.iid);
+    let session: Value = serde_json::from_str(&text).unwrap();
+    let exchanges = session["exchanges"].as_array().unwrap();
+    assert!(exchanges.len() >= 6, "{session}");
+    for (n, x) in exchanges.iter().enumerate() {
+        let headers: Vec<(String, String)> = x["request"]["headers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| {
+                (
+                    h[0].as_str().unwrap().to_owned(),
+                    h[1].as_str().unwrap().to_owned(),
+                )
+            })
+            // `call` sets the content type of a body itself.
+            .filter(|(n, _)| n != "content-type")
+            .collect();
+        let hs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let body = x["request"]["body"].clone();
+        let r = call(
+            x["request"]["method"].as_str().unwrap(),
+            "/mcp",
+            Some(&key),
+            (!body.is_null()).then_some(body),
+            &hs,
+        );
+        assert_eq!(
+            r.status as u64,
+            x["response"]["status"].as_u64().unwrap(),
+            "exchange {n}: {}",
+            r.body
+        );
+        if !x["response"]["body"].is_null() {
+            assert_eq!(skeleton(&r.body), x["response"]["body"], "exchange {n}");
+        }
+    }
+}
