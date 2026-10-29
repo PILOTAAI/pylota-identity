@@ -363,32 +363,44 @@ async fn claim_seen<P: Platform>(p: &P, tenant_id: &str, name: &str) -> bool {
 async fn evict<P: Platform>(c: &Ctx<P>, h: &Holder, claimant: &str) -> Result<(), ApiError> {
     let p = c.p.as_ref();
     let now = c.now;
-    p.db()
-        .batch(vec![
-            Stmt::new(
-                "UPDATE domains SET state = 'removing', state_reason = 'evicted', state_changed_at = ?2, updated_at = ?2 WHERE id = ?1 AND ownership_verified_at IS NULL",
-                vec![h.id.clone().into(), now.into()],
-            ),
-            Stmt::new(
-                "DELETE FROM addresses WHERE domain_id = ?1 AND status = 'pending'",
-                vec![h.id.clone().into()],
-            ),
-            super::remove_job(p, &h.id, h.tenant_id.as_deref(), "evicted", &[], now)?,
-            audit::insert(
-                &p.ids().new_id(IdPrefix::Audit),
-                h.tenant_id.as_deref(),
-                Some(&c.key().key_id),
-                "domain.evict",
-                "domain",
-                &h.id,
-                &json!({ "evicted_tenant_id": h.tenant_id, "claimant_tenant_id": claimant }),
-                &c.request_id,
-                now,
-            ),
-        ])
+    let monitor: Option<MonitorId> = p
+        .db()
+        .first(Stmt::new(
+            "SELECT monitor_do_id FROM domains WHERE id = ?1",
+            vec![h.id.clone().into()],
+        ))
         .await?;
-    crate::jobs::domain_remove::start_for(p, &h.id).await;
+    // The monitor moves the domain to `removing`, deletes its pending addresses and starts the job.
+    let v = super::monitor::call(
+        p,
+        &monitor.map(|m| m.monitor_do_id).unwrap_or_default(),
+        super::monitor::DomainRequest::Evict {
+            domain_id: h.id.clone(),
+        },
+    )
+    .await?;
+    if v["refused"].is_string() {
+        return Ok(());
+    }
+    p.db()
+        .execute(audit::insert(
+            &p.ids().new_id(IdPrefix::Audit),
+            h.tenant_id.as_deref(),
+            Some(&c.key().key_id),
+            "domain.evict",
+            "domain",
+            &h.id,
+            &json!({ "evicted_tenant_id": h.tenant_id, "claimant_tenant_id": claimant }),
+            &c.request_id,
+            now,
+        ))
+        .await?;
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct MonitorId {
+    monitor_do_id: String,
 }
 
 fn map_zone_error(e: &CfError, step: &str) -> ApiError {

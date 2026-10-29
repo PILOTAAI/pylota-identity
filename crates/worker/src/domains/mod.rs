@@ -166,6 +166,54 @@ pub fn validate_policy(policy: &Value) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// A zone (or exact name) dropped from `domains.cloudflare_zones` while the tenant still has a
+/// domain in it: `409 domain_in_use` with `zone_has_domains` (H13).
+pub async fn check_zone_drop<P: Platform>(
+    p: &P,
+    tenant_id: &str,
+    before: &Value,
+    after: &Value,
+) -> Result<(), ApiError> {
+    let kept = listed_zones(after);
+    let dropped: Vec<String> = listed_zones(before)
+        .into_iter()
+        .filter(|z| !kept.contains(z))
+        .collect();
+    if dropped.is_empty() {
+        return Ok(());
+    }
+    #[derive(Deserialize)]
+    struct D {
+        id: String,
+        name: String,
+    }
+    let rows: Vec<D> = p
+        .db()
+        .query(Stmt::new(
+            "SELECT id, name FROM domains WHERE tenant_id = ?1 AND method = 'cloudflare_zone' AND state <> 'removed'",
+            vec![tenant_id.into()],
+        ))
+        .await?;
+    let ids: Vec<String> = rows
+        .into_iter()
+        .filter(|d| {
+            dropped.iter().any(|z| match z.strip_prefix('=') {
+                Some(host) => d.name == host,
+                None => d.name == *z || under(&d.name, z),
+            })
+        })
+        .map(|d| d.id)
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        ErrorCode::DomainInUse,
+        "The tenant still has domains in this zone.",
+    )
+    .details(json!({ "reason": "zone_has_domains", "domain_ids": ids })))
+}
+
 /// The zone permission by name (§ Zone permission, check 1), before any Cloudflare call.
 pub fn check_name(
     name: &str,

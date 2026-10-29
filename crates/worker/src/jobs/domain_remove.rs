@@ -8,7 +8,7 @@
 
 use pylota_identity_platform::d1::Stmt;
 use pylota_identity_platform::durable::Sql;
-use pylota_identity_platform::{ControlDb as _, Platform};
+use pylota_identity_platform::{Clock as _, ControlDb as _, Platform};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -208,7 +208,7 @@ async fn step<P: Platform>(
                     let still = cf
                         .sending_domains(&zone)
                         .await
-                        .map(|l| l.iter().any(|(t, _)| t == tag));
+                        .map(|l| l.iter().any(|(_, t)| t == tag));
                     match still {
                         Ok(false) => Ok(Outcome::Done),
                         _ => on_cf(&cf, row, e).await,
@@ -436,16 +436,36 @@ pub async fn restart_failed<P: Platform>(p: &P) {
     else {
         return;
     };
+    let now = p.clock().now_ms();
     for d in rows {
         let reason = d.state_reason.unwrap_or_else(|| "requested".into());
-        let _ = super::create(
-            p,
-            "domain_remove",
-            d.tenant_id.as_deref(),
-            &json!({ "domain_id": d.id, "reason": reason, "pending_rules": [] }),
-        )
-        .await;
+        let Ok(stmt) =
+            crate::domains::remove_job(p, &d.id, d.tenant_id.as_deref(), &reason, &[], now)
+        else {
+            continue;
+        };
+        if p.db().execute(stmt).await.is_ok() {
+            start_for(p, &d.id).await;
+        }
     }
+}
+
+/// The domain's last failed removal job other than `except`: a new job resumes from its first step
+/// not done (H12).
+pub async fn resume_of<P: Platform>(p: &P, domain_id: &str, except: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct I {
+        id: String,
+    }
+    p.db()
+        .first::<I>(Stmt::new(
+            "SELECT id FROM jobs WHERE kind = 'domain_remove' AND status = 'failed' AND id <> ?2 AND json_extract(params_json, '$.domain_id') = ?1 ORDER BY created_at DESC LIMIT 1",
+            vec![domain_id.into(), except.into()],
+        ))
+        .await
+        .ok()
+        .flatten()
+        .map(|i| i.id)
 }
 
 /// Starts the domain's queued removal jobs now (the rows M13's monitor and eviction write); the
@@ -469,6 +489,7 @@ pub async fn start_for<P: Platform>(p: &P, domain_id: &str) {
         return;
     };
     for j in rows {
+        let resume = resume_of(p, domain_id, &j.id).await;
         super::start(
             p,
             &j.runner_do_id,
@@ -477,7 +498,7 @@ pub async fn start_for<P: Platform>(p: &P, domain_id: &str) {
                 kind: "domain_remove".into(),
                 tenant_id: j.tenant_id.clone(),
                 params: serde_json::from_str(&j.params_json).unwrap_or_else(|_| json!({})),
-                resume_job_id: None,
+                resume_job_id: resume,
             },
             j.tenant_id.as_deref(),
         )

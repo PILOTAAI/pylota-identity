@@ -119,6 +119,16 @@ pub fn zone(name: &str) -> String {
     })
 }
 
+/// The zone leaves the account (deleted or moved out of band).
+pub fn drop_zone(name: &str) {
+    with(|c| c.zones.retain(|z| z.name != name));
+}
+
+/// The SES identity is gone from the provider (deleted out of band).
+pub fn ses_forget(name: &str) {
+    with(|c| c.ses.remove(name));
+}
+
 /// A DNS record in the account (a pre-existing MX, an SPF record, …).
 pub fn record(zone_name: &str, rtype: &str, name: &str, content: &str, priority: Option<u64>) {
     let zid = zone(zone_name);
@@ -192,6 +202,11 @@ pub fn dnssec_bogus(name: &str) {
 /// `status`.
 pub fn fail(method: &str, contains: &str, status: u16, count: u32) {
     with(|c| c.fail.push((method.into(), contains.into(), status, count)));
+}
+
+/// Clears the armed failures.
+pub fn unfail() {
+    with(|c| c.fail.clear());
 }
 
 /// With the next injected failure, the zone fills up to `n` mail domains (a limit reached meanwhile).

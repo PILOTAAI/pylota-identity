@@ -706,6 +706,10 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
                 "fired",
             );
         }
+        if outcome == "failed" && c.kind == "domain_remove" {
+            let domain = c.params["domain_id"].as_str().unwrap_or("");
+            alert(self.p, "domain_remove_failed", domain, "fired");
+        }
         if self.get("stalled")?.is_some() {
             alert(self.p, "erasure_stalled", &c.job_id, "resolved");
         }
@@ -927,15 +931,23 @@ pub async fn restart_queued<P: Platform>(p: &P) {
     };
     for r in rows {
         let params: Value = serde_json::from_str(&r.params_json).unwrap_or_else(|_| json!({}));
-        let resume: Option<IdRow> = p
+        let resume: Option<String> = p
             .db()
-            .first(Stmt::new(
+            .first::<IdRow>(Stmt::new(
                 "SELECT j.id FROM erasure_requests e JOIN erasure_requests f ON f.id = e.resumes_id JOIN jobs j ON j.id = f.job_id WHERE e.job_id = ?1 AND f.status = 'failed'",
                 vec![r.id.clone().into()],
             ))
             .await
             .ok()
-            .flatten();
+            .flatten()
+            .map(|x| x.id);
+        let resume = match (resume, r.kind.as_str()) {
+            (None, "domain_remove") => {
+                let did = params["domain_id"].as_str().unwrap_or("");
+                domain_remove::resume_of(p, did, &r.id).await
+            }
+            (r, _) => r,
+        };
         start(
             p,
             &r.runner_do_id,
@@ -944,7 +956,7 @@ pub async fn restart_queued<P: Platform>(p: &P) {
                 kind: r.kind,
                 tenant_id: r.tenant_id.clone(),
                 params,
-                resume_job_id: resume.map(|x| x.id),
+                resume_job_id: resume,
             },
             r.tenant_id.as_deref(),
         )

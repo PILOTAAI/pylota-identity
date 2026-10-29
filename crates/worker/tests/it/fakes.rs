@@ -336,6 +336,24 @@ pub fn advance(ms: i64) {
     STATE.lock().unwrap().offset += ms;
 }
 
+/// The Worker's clock now, in ms.
+pub fn worker_now() -> i64 {
+    start();
+    let real = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    real + STATE.lock().unwrap().offset
+}
+
+/// Moves the Worker's clock forward to the next `minute` of the UTC day (`0..1440`).
+pub fn advance_to_minute(minute: i64) {
+    let day = 86_400_000;
+    let now = worker_now();
+    let target = now.div_euclid(day) * day + minute * 60_000 + 30_000;
+    advance((target - now).rem_euclid(day));
+}
+
 /// Arms a fault: `target` (`do.call`), `binding` (`QUOTA`), `mode`, `count`.
 pub fn fault(target: &str, binding: &str, mode: &str, count: u32) {
     start();
@@ -412,6 +430,8 @@ pub struct Reset;
 impl Drop for Reset {
     fn drop(&mut self) {
         reset();
+        // A test that panicked with failures still armed must not fail the next one.
+        crate::cloud::unfail();
     }
 }
 

@@ -141,6 +141,15 @@ pub async fn write<P: Platform>(
                 .ok_or_else(|| ApiError::not_found(ErrorCode::TenantNotFound))?;
         let writer = check(c, &t, patch)?;
         let dep = deployment_defaults(c.p.as_ref());
+        let mut after = t.stored_policy();
+        policy::merge(&mut after, patch);
+        crate::domains::check_zone_drop(
+            c.p.as_ref(),
+            tenant_id,
+            &effective(c.p.as_ref(), &t),
+            &policy::effective(&dep, &after),
+        )
+        .await?;
         let (policy_json, pc, ptc) = policy::apply_write(
             writer,
             &t.stored_policy(),

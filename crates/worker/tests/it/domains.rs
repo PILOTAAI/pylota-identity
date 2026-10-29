@@ -869,3 +869,464 @@ fn h9_platform_domain_failing() {
     assert_eq!(r.status, 200, "{}", r.body);
     until(&p, &did, "healthy", 4);
 }
+
+/// The domain's state in D1.
+fn state_of(id: &str) -> String {
+    d1(&format!("SELECT state FROM domains WHERE id = '{id}'"))[0]["state"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned()
+}
+
+/// The domain's latest removal job.
+fn removal_job(id: &str) -> String {
+    crate::eventually(30, "the removal job", || {
+        d1(&format!(
+            "SELECT id FROM jobs WHERE kind = 'domain_remove' AND json_extract(params_json, '$.domain_id') = '{id}' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+        ))
+        .get(0)
+        .and_then(|r| r["id"].as_str().map(str::to_owned))
+    })
+}
+
+/// Drives a job to its end; answers its status.
+fn drive(job: &str) -> String {
+    crate::eventually(120, "the removal to end", || {
+        crate::erasure::job_alarm(job);
+        let s = d1(&format!("SELECT status FROM jobs WHERE id = '{job}'"))[0]["status"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        matches!(s.as_str(), "completed" | "failed" | "canceled").then_some(s)
+    })
+}
+
+/// `DELETE` the domain and drive its removal job: `(job id, status)`.
+fn remove(key: &str, id: &str) -> (String, String) {
+    let r = crate::delete(&format!("/v1/domains/{id}"), key);
+    assert_eq!(r.status, 202, "{}", r.body);
+    let job = removal_job(id);
+    let st = drive(&job);
+    (job, st)
+}
+
+/// The steps of a job: `(name, status, attempts, counts)`.
+fn job_steps(job: &str) -> Vec<(String, String, i64, String)> {
+    crate::erasure::job_alarm(job)["steps"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|s| {
+            (
+                s["name"].as_str().unwrap_or("").to_owned(),
+                s["status"].as_str().unwrap_or("").to_owned(),
+                s["attempts"].as_i64().unwrap_or(0),
+                s["counts_json"].as_str().unwrap_or("").to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Whether Email Routing's MX records are at `name`.
+fn routed(name: &str) -> bool {
+    cloud::records_at(name).iter().any(|r| r.rtype == "MX")
+}
+
+/// A healthy domain at `name` in an already listed zone.
+fn healthy_at(key: &str, tid: &str, zone: &str, name: &str) -> String {
+    dmarc(zone, name);
+    let r = add(
+        key,
+        tid,
+        json!({ "name": name, "method": "cloudflare_zone" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    let id = r.body["id"].as_str().unwrap().to_owned();
+    until(key, &id, "healthy", 6);
+    id
+}
+
+fn zone_wide_disables(since: usize) -> usize {
+    cloud::calls()[since..]
+        .iter()
+        .filter(|(m, p)| m == "DELETE" && p.ends_with("/email/routing/dns"))
+        .count()
+}
+
+/// Removing a domain with a failover SES identity deletes the identity and its DKIM CNAMEs; an
+/// identity already gone at SES counts as done.
+#[test]
+fn remove_deletes_ses_identity() {
+    let _reset = fakes::Reset;
+    let (_, key, _, name, id) = healthy("remove ses");
+    let identity = cloud::ses_identity(&name).expect("the failover identity");
+    let tokens: Vec<String> = identity["DkimAttributes"]["Tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap().to_owned())
+        .collect();
+    let cnames = |n: &str| {
+        tokens
+            .iter()
+            .map(|t| cloud::records_at(&format!("{t}._domainkey.{n}")).len())
+            .sum::<usize>()
+    };
+    assert_eq!(cnames(&name), 3);
+    let (_, st) = remove(&key, &id);
+    assert_eq!(st, "completed");
+    assert_eq!(state_of(&id), "removed");
+    assert!(cloud::ses_identity(&name).is_none());
+    assert_eq!(cnames(&name), 0);
+    // An identity deleted out of band: `NotFoundException` is done.
+    let (_, key2, _, name2, id2) = healthy("remove ses gone");
+    cloud::ses_forget(&name2);
+    let (_, st) = remove(&key2, &id2);
+    assert_eq!(st, "completed");
+    assert_eq!(state_of(&id2), "removed");
+}
+
+/// H11: removal stays per name while other routing domains remain in the zone; the zone-wide disable
+/// runs once, for the last routing domain at the apex; a gone zone skips the zone-bound steps.
+#[test]
+fn h11_remove_keeps_zone_routing() {
+    let _reset = fakes::Reset;
+    let (tid, key) = tenant_key("h11");
+    let zone = zone_name("h11");
+    cloud::zone(&zone);
+    list_zones(&tid, &[&zone, &format!("={zone}")]);
+    let (a, b) = (format!("a.{zone}"), format!("b.{zone}"));
+    let apex = healthy_at(&key, &tid, &zone, &zone);
+    let ida = healthy_at(&key, &tid, &zone, &a);
+    let idb = healthy_at(&key, &tid, &zone, &b);
+    assert!(routed(&zone) && routed(&a) && routed(&b));
+    let since = cloud::calls().len();
+    assert_eq!(remove(&key, &ida).1, "completed");
+    assert!(!routed(&a), "a's routing records are gone");
+    assert!(routed(&zone) && routed(&b), "the others keep theirs");
+    assert_eq!(zone_wide_disables(since), 0);
+    // The apex while a subdomain remains: still per name.
+    assert_eq!(remove(&key, &apex).1, "completed");
+    assert!(!routed(&zone) && routed(&b));
+    assert_eq!(zone_wide_disables(since), 0);
+    assert_eq!(remove(&key, &idb).1, "completed");
+    assert_eq!(zone_wide_disables(since), 0);
+    // The zone's last routing domain, at its apex: one zone-wide disable.
+    let (tid2, key2) = tenant_key("h11 apex");
+    let zone2 = zone_name("h11 apex");
+    cloud::zone(&zone2);
+    list_zones(&tid2, &[&format!("={zone2}")]);
+    let only = healthy_at(&key2, &tid2, &zone2, &zone2);
+    let since = cloud::calls().len();
+    assert_eq!(remove(&key2, &only).1, "completed");
+    assert_eq!(zone_wide_disables(since), 1);
+    // A zone deleted out of band.
+    let (_, key3, zone3, _, gone) = healthy("h11 gone");
+    cloud::drop_zone(&zone3);
+    let (job, st) = remove(&key3, &gone);
+    assert_eq!(st, "completed");
+    assert_eq!(state_of(&gone), "removed");
+    let steps = job_steps(&job);
+    for s in ["disable_sending", "delete_ownership_record", "delete_zone"] {
+        let (_, status, _, counts) = steps.iter().find(|x| x.0 == s).unwrap();
+        assert_eq!(status, "done", "{s}");
+        assert!(counts.contains("skipped_zone_gone"), "{s}: {counts}");
+    }
+}
+
+/// H12: a step failing 10 times fails the job; the domain stays `removing`; the daily run restarts
+/// it from the failed step; `DELETE` restarts a failed job at once.
+#[test]
+fn h12_remove_failed_restart() {
+    let _reset = fakes::Reset;
+    let (_, key, _, name, id) = healthy("h12");
+    cloud::fail("DELETE", "/email/sending/subdomains", 503, 1000);
+    let (job, st) = remove(&key, &id);
+    assert_eq!(st, "failed");
+    assert_eq!(state_of(&id), "removing");
+    let steps = job_steps(&job);
+    let failed = steps.iter().find(|s| s.0 == "disable_sending").unwrap();
+    assert_eq!(failed.2, 10, "{steps:?}");
+    // The daily run (04:00 UTC) restarts it from `disable_sending` once the provider recovers.
+    cloud::unfail();
+    let since = cloud::calls().len();
+    fakes::advance_to_minute(4 * 60);
+    crate::cron("*/15 * * * *");
+    let again = removal_job(&id);
+    assert_ne!(again, job);
+    assert_eq!(drive(&again), "completed");
+    assert_eq!(state_of(&id), "removed");
+    let calls = &cloud::calls()[since..];
+    assert!(
+        !calls.iter().any(|(_, p)| p.contains("/email/routing")),
+        "earlier steps are not re-run: {calls:?}"
+    );
+    assert!(!cloud::sending_names().contains(&name));
+    // `DELETE` on a `removing` domain whose job failed restarts it at once.
+    let (_, key2, _, _, id2) = healthy("h12 delete");
+    cloud::fail("DELETE", "/email/sending/subdomains", 503, 1000);
+    let (first, st) = remove(&key2, &id2);
+    assert_eq!(st, "failed");
+    cloud::unfail();
+    let r = crate::delete(&format!("/v1/domains/{id2}"), &key2);
+    assert_eq!(r.status, 202, "{}", r.body);
+    let second = removal_job(&id2);
+    assert_ne!(second, first);
+    assert_eq!(drive(&second), "completed");
+    assert_eq!(state_of(&id2), "removed");
+}
+
+/// H13: a removed name added again gets a new row and monitor; the old monitor is retired; a retired
+/// address stays with the old tenant; a zone with domains cannot leave the tenant's list.
+#[test]
+fn h13_readd_new_row() {
+    let _reset = fakes::Reset;
+    let (tid, key, zone, name, id) = healthy("h13");
+    let s = crate::send::sender_in(&tid, "h13 a", json!({}));
+    let x = crate::addresses::create(&s, "desk", &id);
+    assert_eq!(x.status, 201, "{}", x.body);
+    let xid = x.body["id"].as_str().unwrap().to_owned();
+    d1(&format!(
+        "UPDATE addresses SET status = 'retired', routing_rule_id = NULL WHERE id = '{xid}'"
+    ));
+    // The zone cannot leave A's list while A has a domain in it.
+    let r = patch(
+        &format!("/v1/tenants/{tid}/policy"),
+        &platform(),
+        json!({ "domains": { "cloudflare_zones": [] } }),
+    );
+    assert_eq!((r.status, r.code()), (409, "domain_in_use"), "{}", r.body);
+    assert_eq!(r.details()["reason"], "zone_has_domains");
+    assert_eq!(r.details()["domain_ids"], json!([id]));
+    let old_monitor = d1(&format!(
+        "SELECT monitor_do_id FROM domains WHERE id = '{id}'"
+    ))[0]["monitor_do_id"]
+        .clone();
+    assert_eq!(remove(&key, &id).1, "completed");
+    let r = hook(
+        "POST",
+        "/__test/domain-alarm",
+        Some(json!({ "domain_id": id })),
+    );
+    assert!(
+        r.body.to_string().contains("\"retired\":true"),
+        "{}",
+        r.body
+    );
+    // Tenant B adds the same name.
+    let (tidb, keyb) = tenant_key("h13 b");
+    list_zones(&tidb, &[&zone]);
+    let r = add(
+        &keyb,
+        &tidb,
+        json!({ "name": name, "method": "cloudflare_zone" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    let idb = r.body["id"].as_str().unwrap().to_owned();
+    assert_ne!(idb, id);
+    let row = d1(&format!(
+        "SELECT monitor_do_id FROM domains WHERE id = '{idb}'"
+    ));
+    assert_ne!(row[0]["monitor_do_id"], old_monitor);
+    until(&keyb, &idb, "healthy", 6);
+    // A's retired address stays A's.
+    let a = d1(&format!(
+        "SELECT domain_id, status FROM addresses WHERE id = '{xid}'"
+    ));
+    assert_eq!(
+        (a[0]["domain_id"].as_str(), a[0]["status"].as_str()),
+        (Some(id.as_str()), Some("retired"))
+    );
+    let sb = crate::send::sender_in(&tidb, "h13 b", json!({}));
+    let r = crate::addresses::create(&sb, "desk", &idb);
+    assert_eq!((r.status, r.code()), (409, "address_taken"), "{}", r.body);
+    // A's tenant erasure leaves B's domain alone.
+    let e = crate::erasure::erase(
+        &crate::erasure::eraser(&tid),
+        json!({ "tenant_id": tid, "scope": "tenant" }),
+    );
+    assert_eq!(e.status, 202, "{}", e.body);
+    let done = crate::erasure::run(e.body["id"].as_str().unwrap());
+    assert_eq!(done["status"], "completed", "{done}");
+    assert_eq!(domain(&keyb, &idb)["state"], "healthy");
+}
+
+/// H14: an unverified holder is evicted by a proved claim, a verified one never; unverified domains
+/// expire after 14 days; a tenant holds 5 unverified domains at most.
+#[test]
+fn h14_unverified_claims() {
+    let _reset = fakes::Reset;
+    let (tida, keya) = tenant_key("h14 a");
+    let zone = zone_name("h14");
+    cloud::zone(&zone);
+    list_zones(&tida, &[&zone]);
+    let victim = format!("victim.{zone}");
+    let own = format!("_pylota-identity.{victim}");
+    cloud::hide(&own, "TXT", true);
+    dmarc(&zone, &victim);
+    let r = add(
+        &keya,
+        &tida,
+        json!({ "name": victim, "method": "cloudflare_zone" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    let ida = r.body["id"].as_str().unwrap().to_owned();
+    check(&ida);
+    assert_ne!(domain(&keya, &ida)["state"], "healthy");
+    let (tidb, keyb) = tenant_key("h14 b");
+    list_zones(&tidb, &[&zone]);
+    let r = add(
+        &keyb,
+        &tidb,
+        json!({ "name": victim, "method": "cloudflare_zone" }),
+    );
+    assert_eq!((r.status, r.code()), (409, "domain_exists"), "{}", r.body);
+    let claim = r.details()["claim"].clone();
+    assert_eq!(claim["name"], own.as_str());
+    // The same body for a verified holder, but for the claim value.
+    let (_, _, czone, cname, cid) = healthy("h14 c");
+    list_zones(&tidb, &[&zone, &czone]);
+    let rc = add(
+        &keyb,
+        &tidb,
+        json!({ "name": cname, "method": "cloudflare_zone" }),
+    );
+    assert_eq!((rc.status, rc.code()), (409, "domain_exists"));
+    let strip = |mut b: Value| {
+        b["error"]["details"]["claim"]["value"] = Value::Null;
+        b["error"]["details"]["claim"]["name"] = Value::Null;
+        b["error"]["request_id"] = Value::Null;
+        b
+    };
+    assert_eq!(strip(r.body.clone()), strip(rc.body.clone()));
+    // A verified holder is never evicted.
+    cloud::dns_extra(
+        &format!("_pylota-identity.{cname}"),
+        "TXT",
+        rc.details()["claim"]["value"].as_str().unwrap(),
+    );
+    let rc = add(
+        &keyb,
+        &tidb,
+        json!({ "name": cname, "method": "cloudflare_zone", "claim": true }),
+    );
+    assert_eq!((rc.status, rc.code()), (409, "domain_exists"));
+    assert_eq!(state_of(&cid), "healthy");
+    // The claim TXT on both resolvers evicts A.
+    cloud::dns_extra(&own, "TXT", claim["value"].as_str().unwrap());
+    let r = add(
+        &keyb,
+        &tidb,
+        json!({ "name": victim, "method": "cloudflare_zone", "claim": true }),
+    );
+    assert_eq!(
+        (r.status, r.code()),
+        (409, "domain_claim_pending"),
+        "{}",
+        r.body
+    );
+    assert_eq!(state_of(&ida), "removing");
+    assert_eq!(drive(&removal_job(&ida)), "completed");
+    assert_eq!(state_of(&ida), "removed");
+    let removed = d1(&format!(
+        "SELECT payload_json FROM event_index WHERE tenant_id = '{tida}' AND type = 'domain.removed'"
+    ));
+    assert!(removed.to_string().contains("evicted"), "{removed}");
+    cloud::dns_extra_clear(&own);
+    cloud::hide(&own, "TXT", false);
+    let r = add(
+        &keyb,
+        &tidb,
+        json!({ "name": victim, "method": "cloudflare_zone" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    // 14 days unverified: removed with `unverified_expired`.
+    let (tidd, keyd) = tenant_key("h14 d");
+    let dzone = zone_name("h14 d");
+    cloud::zone(&dzone);
+    list_zones(&tidd, &[&dzone]);
+    let names: Vec<String> = (0..6).map(|i| format!("n{i}.{dzone}")).collect();
+    for n in &names {
+        cloud::hide(&format!("_pylota-identity.{n}"), "TXT", true);
+    }
+    let mut ids = Vec::new();
+    for n in &names[..5] {
+        let r = add(
+            &keyd,
+            &tidd,
+            json!({ "name": n, "method": "cloudflare_zone" }),
+        );
+        assert_eq!(r.status, 201, "{}", r.body);
+        ids.push(r.body["id"].as_str().unwrap().to_owned());
+    }
+    let r = add(
+        &keyd,
+        &tidd,
+        json!({ "name": names[5], "method": "cloudflare_zone" }),
+    );
+    assert_eq!(
+        (r.status, r.code()),
+        (422, "unverified_domain_limit"),
+        "{}",
+        r.body
+    );
+    fakes::advance(14 * 86_400_000);
+    check(&ids[0]);
+    assert_eq!(state_of(&ids[0]), "removing");
+    let reason = d1(&format!(
+        "SELECT state_reason FROM domains WHERE id = '{}'",
+        ids[0]
+    ));
+    assert_eq!(reason[0]["state_reason"], "unverified_expired");
+    assert_eq!(drive(&removal_job(&ids[0])), "completed");
+    assert_eq!(state_of(&ids[0]), "removed");
+}
+
+/// H16: a failed add's journal objects are deleted by the hourly cleanup, with the journal row.
+#[test]
+fn h16_failed_add_cleanup() {
+    let _reset = fakes::Reset;
+    let (tid, key) = tenant_key("h16");
+    let zone = zone_name("h16");
+    cloud::zone(&zone);
+    list_zones(&tid, &[&zone]);
+    let name = format!("mail.{zone}");
+    cloud::fail("POST", "/event_subscriptions/subscriptions", 503, 1);
+    let r = add(
+        &key,
+        &tid,
+        json!({ "name": name, "method": "cloudflare_zone" }),
+    );
+    assert_eq!((r.status, r.code()), (502, "upstream_error"), "{}", r.body);
+    let rows = d1(&format!("SELECT id FROM domains WHERE name = '{name}'"));
+    assert!(rows.as_array().unwrap().is_empty());
+    let journal = |n: &str| {
+        d1(&format!(
+            "SELECT COUNT(*) AS n FROM domain_onboarding WHERE name = '{n}'"
+        ))[0]["n"]
+            .as_i64()
+            .unwrap()
+    };
+    assert_eq!(journal(&name), 1);
+    let own = format!("_pylota-identity.{name}");
+    assert!(cloud::sending_names().contains(&name));
+    assert_eq!(cloud::records_at(&own).len(), 1);
+    assert!(cloud::ses_identity(&name).is_some());
+    // Before the hour nothing is touched.
+    fakes::advance_to_minute(fakes_minute_now() + 20);
+    crate::cron("*/15 * * * *");
+    assert_eq!(journal(&name), 1);
+    fakes::advance(3_600_000);
+    fakes::advance_to_minute((fakes_minute_now() / 60 + 1) * 60 % 1440);
+    crate::cron("*/15 * * * *");
+    assert_eq!(journal(&name), 0);
+    assert!(!cloud::sending_names().contains(&name));
+    assert!(cloud::records_at(&own).is_empty());
+    assert!(cloud::ses_identity(&name).is_none());
+}
+
+/// The Worker's minute of the UTC day.
+fn fakes_minute_now() -> i64 {
+    fakes::worker_now().rem_euclid(86_400_000) / 60_000
+}
