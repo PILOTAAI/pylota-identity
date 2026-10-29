@@ -119,6 +119,9 @@ const CASES: &[(&str, Case)] = &[
     ("rotateSigningKey", |_| {
         ("POST", "/v1/platform/keys/thread/rotate".into(), None)
     }),
+    ("getPlatformStatus", |_| {
+        ("GET", "/v1/platform/status".into(), None)
+    }),
     ("createIdentity", |t| {
         (
             "POST",
@@ -636,6 +639,7 @@ const OWN_SCOPE: &[&str] = &[
     "createPartner",
     "listPartners",
     "rotateSigningKey",
+    "getPlatformStatus",
     "createPlatformWebhook",
     "listWebhooks",
 ];

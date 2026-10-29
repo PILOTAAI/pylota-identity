@@ -238,6 +238,7 @@ fn every_served_operation() {
         // Jobs, signing keys, audit.
         let job = seen.ok("createJob", p.create_job(&body(json!({ "kind": "reindex", "tenant_id": tid })), None).await);
         seen.ok("getJob", p.get_job(&field(&job, "id")).await);
+        seen.ok("getPlatformStatus", p.get_platform_status().await);
         seen.ok("rotateSigningKey", p.rotate_signing_key("cursor", &Default::default(), None).await);
         let q = pylota_identity::ListAuditEventsQuery { tenant_id: Some(types::TenantId(tid.clone())), ..Default::default() };
         seen.ok("listAuditEvents", p.list_audit_events(&q).await);

@@ -90,7 +90,11 @@ fn alert_evaluator_transitions() {
     assert_eq!(actions("dlq:pm-screen"), ["alert.fired", "alert.resolved"]);
     assert!(evaluator_state()["keys"].get("dlq:pm-screen").is_none());
 
-    // Reported: the reporter's row is the fired row; two runs without a report resolve it.
+    // Reported: the reporter's row is the fired row; two runs without a report resolve it. Earlier
+    // suites' reconciliations may have reported it already, so only the rows from here on count.
+    minute();
+    minute();
+    let earlier = actions("vector_drift").len();
     report("alert.fired", "vector_drift", "ticket");
     minute();
     assert_eq!(
@@ -98,13 +102,16 @@ fn alert_evaluator_transitions() {
         "ticket"
     );
     assert_eq!(
-        actions("vector_drift"),
+        actions("vector_drift")[earlier..],
         ["alert.fired"],
         "no second fired row"
     );
     minute();
     minute();
-    assert_eq!(actions("vector_drift"), ["alert.fired", "alert.resolved"]);
+    assert_eq!(
+        actions("vector_drift")[earlier..],
+        ["alert.fired", "alert.resolved"]
+    );
 
     // Self-resolved: firing until the erasure job resolves it.
     let stalled = format!("erasure_stalled:era_{}", crate::slug("s"));

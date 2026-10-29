@@ -1052,14 +1052,13 @@ fn h12_remove_failed_restart() {
     let steps = job_steps(&job);
     let failed = steps.iter().find(|s| s.0 == "disable_sending").unwrap();
     assert_eq!(failed.2, 10, "{steps:?}");
+    // The state alert evaluator raises `domain_remove_failed:{id}` from the failed job (M17).
     crate::eventually(30, "the domain_remove_failed alert", || {
-        let log = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/itest/worker.log"),
-        )
-        .unwrap_or_default();
-        log.lines()
-            .any(|l| l.contains("\"domain_remove_failed\"") && l.contains(id.as_str()))
-            .then_some(())
+        crate::cron("* * * * *");
+        let rows = crate::d1(&format!(
+            "SELECT 1 FROM audit_log WHERE action = 'alert.fired' AND target_id = 'domain_remove_failed:{id}'"
+        ));
+        (!rows.as_array().unwrap().is_empty()).then_some(())
     });
     // The daily run (04:00 UTC) restarts it from `disable_sending` once the provider recovers.
     cloud::unfail();
