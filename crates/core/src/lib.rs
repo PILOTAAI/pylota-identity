@@ -23,6 +23,7 @@ pub mod httpsig;
 pub mod ids;
 pub mod inbound;
 pub mod injection;
+pub mod jobs;
 pub mod jwk;
 pub mod keys;
 pub mod links;

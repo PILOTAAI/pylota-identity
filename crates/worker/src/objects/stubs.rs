@@ -154,27 +154,38 @@ impl ObjectApp for MailboxObject {
     }
 }
 
-/// `JobRunner`, a stub until M14: `Start` is accepted and runs nothing.
+/// `JobRunner`.
 pub struct RunnerObject {
     platform: CfPlatform,
+    sql: CfSql,
+    storage: CfStorage,
+}
+
+impl RunnerObject {
+    fn runner(&self) -> crate::jobs::Runner<'_, CfPlatform, CfSql, CfStorage> {
+        crate::jobs::Runner {
+            p: &self.platform,
+            sql: &self.sql,
+            state: &self.storage,
+        }
+    }
 }
 
 impl ObjectApp for RunnerObject {
-    fn new(_state: CfObjectState, platform: CfPlatform) -> Self {
-        Self { platform }
+    fn new(state: CfObjectState, platform: CfPlatform) -> Self {
+        Self {
+            sql: state.sql(),
+            storage: state.storage(),
+            platform,
+        }
     }
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
-        let env = body_of(&req);
-        let out = match crate::jobs::stub(&env) {
-            Ok(v) => serde_json::json!({ "ok": v }),
-            Err(e) => {
-                let rid = env["request_id"].as_str().unwrap_or("");
-                serde_json::to_value(error_body::<()>(&e, rid, &self.platform.config().docs_url))
-                    .unwrap_or(Value::Null)
-            }
-        };
-        json(200, &out)
+        json(200, &self.runner().handle(&body_of(&req)).await)
+    }
+
+    async fn alarm(&self) {
+        self.runner().alarm().await;
     }
 }
 

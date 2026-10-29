@@ -175,6 +175,43 @@ pub async fn serve<P: Platform>(
             .await?;
             Ok(Reply::json(200, out))
         }
+        ("POST", "/__test/job-alarm") => {
+            // Runs one alarm of a job's runner now; answers its meta, steps and next alarm.
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            #[derive(serde::Deserialize)]
+            struct J {
+                tenant_id: Option<String>,
+                runner_do_id: String,
+            }
+            let j: J = p
+                .db()
+                .first(pylota_identity_platform::d1::Stmt::new(
+                    "SELECT tenant_id, runner_do_id FROM jobs WHERE id = ?1",
+                    vec![body["job_id"].as_str().unwrap_or("").into()],
+                ))
+                .await?
+                .ok_or_else(|| ApiError::invalid("job_id", "No such job."))?;
+            let env = crate::rpc::envelope_for(
+                p.as_ref(),
+                Some(j.tenant_id.as_deref().unwrap_or("")),
+                None,
+                "req_test",
+                None,
+                crate::jobs::JobRequest::TestAlarm,
+            );
+            let out = p
+                .objects()
+                .call::<_, Value>(DoClass::Job, &j.runner_do_id, &env)
+                .await?;
+            Ok(Reply::json(
+                200,
+                serde_json::to_value(out).unwrap_or(Value::Null),
+            ))
+        }
         ("POST", "/__test/queue-send") => {
             let body: Value = req
                 .body

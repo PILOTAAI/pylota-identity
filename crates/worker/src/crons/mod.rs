@@ -24,9 +24,11 @@ pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
         crate::intents::resend(p, request_id).await;
         domains::retire(p).await;
         outbox_sweep::run(p).await;
+        crate::jobs::restart_queued(p).await;
     }
     if cron == "*/15 * * * *" {
         index_reconcile::run(p).await;
+        crate::jobs::retention::schedule(p).await;
         let minute = (p.clock().now_ms() / 60_000) % 60;
         if minute < 15 {
             domains::cleanup_failed_adds(p).await;

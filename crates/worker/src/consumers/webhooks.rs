@@ -385,14 +385,17 @@ async fn fanout<P: Platform>(
             return Done::Retry;
         }
     }
-    if matches!(owner_kind, OwnerKind::Platform | OwnerKind::Domain)
-        && p.db()
-            .execute(Stmt::new(
-                "UPDATE event_index SET fanned_out_at = ?2 WHERE id = ?1 AND fanned_out_at IS NULL",
-                vec![event_id.into(), now.into()],
-            ))
-            .await
-            .is_err()
+    if matches!(
+        owner_kind,
+        OwnerKind::Platform | OwnerKind::Domain | OwnerKind::Job
+    ) && p
+        .db()
+        .execute(Stmt::new(
+            "UPDATE event_index SET fanned_out_at = ?2 WHERE id = ?1 AND fanned_out_at IS NULL",
+            vec![event_id.into(), now.into()],
+        ))
+        .await
+        .is_err()
     {
         return Done::Retry;
     }
@@ -509,22 +512,23 @@ async fn deliver<P: Platform>(p: &P, job: WebhookJob, payloads: &HashMap<String,
     }
     // 3. The payload.
     let payload = match owner_kind {
-        // Domain events keep their payload in the index too (a removed domain's monitor keeps nothing).
-        OwnerKind::Platform | OwnerKind::Domain => match index_row(p, &event_id).await {
-            Ok(Some(IndexRow {
-                payload_json: Some(b),
-                occurred_at,
-                ..
-            })) => Some((b, occurred_at)),
-            Ok(_) => None,
-            Err(_) => return Done::Retry,
-        },
+        // Domain and job events keep their payload in the index too (a removed domain's monitor and a
+        // finished job keep nothing).
+        OwnerKind::Platform | OwnerKind::Domain | OwnerKind::Job => {
+            match index_row(p, &event_id).await {
+                Ok(Some(IndexRow {
+                    payload_json: Some(b),
+                    occurred_at,
+                    ..
+                })) => Some((b, occurred_at)),
+                Ok(_) => None,
+                Err(_) => return Done::Retry,
+            }
+        }
         OwnerKind::Mailbox => match payloads.get(&event_id) {
             Some(Payload::Found(f)) => Some(f.clone()),
             _ => None,
         },
-        // Job owners arrive with M14.
-        OwnerKind::Job => None,
     };
     let Some((body, occurred_at)) = payload else {
         crate::metrics::count(p, "webhook_dead_total", tenant_id.as_deref(), 1);

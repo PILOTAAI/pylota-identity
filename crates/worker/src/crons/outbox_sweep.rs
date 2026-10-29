@@ -50,7 +50,7 @@ async fn refan<P: Platform>(p: &P, now: i64) {
         .db()
         .query(Stmt::new(
             "SELECT id, tenant_id, type, owner_kind, owner_id, occurred_at FROM event_index \
-             WHERE owner_kind IN ('platform', 'domain') AND occurred_at > ?1 AND fanned_out_at IS NULL AND type <> 'webhook.test' LIMIT 100",
+             WHERE owner_kind IN ('platform', 'domain', 'job') AND occurred_at > ?1 AND fanned_out_at IS NULL AND type <> 'webhook.test' LIMIT 100",
             vec![(now - HOUR_MS).into()],
         ))
         .await
@@ -66,11 +66,7 @@ async fn refan<P: Platform>(p: &P, now: i64) {
             event_type: r.event_type,
             tenant_id: r.tenant_id,
             identity_id: None,
-            owner_kind: if r.owner_kind == "domain" {
-                OwnerKind::Domain
-            } else {
-                OwnerKind::Platform
-            },
+            owner_kind: OwnerKind::parse(&r.owner_kind).unwrap_or(OwnerKind::Platform),
             owner_id: r.owner_id,
             occurred_at: r.occurred_at,
         })

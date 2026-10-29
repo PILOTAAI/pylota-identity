@@ -91,11 +91,20 @@ impl Harness {
                 .await)
             }
         });
-        app.p.objects.on(DoClass::Job, |_id, env| async move {
-            Ok(match crate::jobs::stub(&env) {
-                Ok(v) => json!({ "ok": v }),
-                Err(_) => json!({ "err": { "error": { "code": "unavailable", "message": "", "retryable": true, "fix": "", "docs": "", "request_id": "" } } }),
-            })
+        let runners: Rc<RefCell<HashMap<String, FakeState>>> = Rc::default();
+        let weak = Rc::downgrade(&app.p);
+        app.p.objects.on(DoClass::Job, move |id, env| {
+            let state = runners.borrow_mut().entry(id).or_default().clone();
+            let p = weak.upgrade().expect("the platform outlives the call");
+            async move {
+                Ok(crate::jobs::Runner {
+                    p: p.as_ref(),
+                    sql: &state.sql,
+                    state: &state,
+                }
+                .handle(&env)
+                .await)
+            }
         });
         Self {
             app,
