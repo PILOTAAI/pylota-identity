@@ -6,10 +6,7 @@
 //! A value of either type re-seals in place: the envelope is read as text and written back as the
 //! column's own type, and only if it still holds the envelope that was read (a concurrent write wins).
 
-use std::sync::OnceLock;
-
 use pylota_identity_core::crypto;
-use pylota_identity_core::sealed::{SEALED, Sealed};
 use pylota_identity_platform::config::MasterSlot;
 use pylota_identity_platform::d1::Stmt;
 use pylota_identity_platform::ids::IdPrefix;
@@ -22,35 +19,76 @@ use crate::db::audit;
 /// Values re-sealed per run (about 720,000 a day).
 pub const PER_RUN: usize = 500;
 
-/// The SQL of one registered column, built once.
+/// The SQL of one registered column: literals, written by [`column!`] from the registry's names.
 struct ColumnSql {
-    count: String,
-    select: String,
-    update: String,
+    table: &'static str,
+    column: &'static str,
+    count: &'static str,
+    select: &'static str,
+    update: &'static str,
 }
 
+macro_rules! column {
+    ($table:literal, $column:literal, $rid:literal) => {
+        ColumnSql {
+            table: $table,
+            column: $column,
+            count: concat!(
+                "SELECT COUNT(*) AS n FROM ",
+                $table,
+                " WHERE ",
+                $column,
+                " IS NOT NULL AND substr(CAST(",
+                $column,
+                " AS TEXT), 5, 16) <> ?1"
+            ),
+            select: concat!(
+                "SELECT ",
+                $rid,
+                " AS rid, CAST(",
+                $column,
+                " AS TEXT) AS env FROM ",
+                $table,
+                " WHERE ",
+                $column,
+                " IS NOT NULL AND substr(CAST(",
+                $column,
+                " AS TEXT), 5, 16) <> ?1 LIMIT ?2"
+            ),
+            update: concat!(
+                "UPDATE ",
+                $table,
+                " SET ",
+                $column,
+                " = CASE WHEN typeof(",
+                $column,
+                ") = 'blob' THEN CAST(?1 AS BLOB) ELSE ?1 END WHERE (",
+                $rid,
+                ") = ?2 AND CAST(",
+                $column,
+                " AS TEXT) = ?3"
+            ),
+        }
+    };
+}
+
+/// One entry per `core::sealed::SEALED` entry, in its order (`registry_in_step` checks).
+const COLUMNS: &[ColumnSql] = &[
+    column!("webhook_endpoints", "secret_enc", "id"),
+    column!("webhook_endpoints", "prev_secret_enc", "id"),
+    column!("webhook_endpoints", "headers_sealed", "id"),
+    column!("identity_keys", "private_enc", "id"),
+    column!("signing_keys", "ciphertext", "purpose || ':' || kid"),
+    column!("domains", "smtp_sealed", "id"),
+    column!("domains", "smtp_pending_sealed", "id"),
+    column!("users", "totp_sealed", "id"),
+    column!("users", "recovery_codes_sealed", "id"),
+    column!("users", "totp_pending_sealed", "id"),
+    column!("oauth_states", "pkce_sealed", "state_hash"),
+];
+
 fn sql() -> &'static [ColumnSql] {
-    static SQL: OnceLock<Vec<ColumnSql>> = OnceLock::new();
-    SQL.get_or_init(|| {
-        SEALED
-            .iter()
-            .map(|Sealed { table, column, row_id }| {
-                let stale = format!(
-                    "{column} IS NOT NULL AND substr(CAST({column} AS TEXT), 5, 16) <> ?1"
-                );
-                ColumnSql {
-                    count: format!("SELECT COUNT(*) AS n FROM {table} WHERE {stale}"),
-                    select: format!(
-                        "SELECT {row_id} AS rid, CAST({column} AS TEXT) AS env FROM {table} WHERE {stale} LIMIT ?2"
-                    ),
-                    update: format!(
-                        "UPDATE {table} SET {column} = CASE WHEN typeof({column}) = 'blob' THEN CAST(?1 AS BLOB) ELSE ?1 END \
-                         WHERE ({row_id}) = ?2 AND CAST({column} AS TEXT) = ?3"
-                    ),
-                }
-            })
-            .collect()
-    })
+    COLUMNS
 }
 
 /// The active slot's key ID.
@@ -77,7 +115,7 @@ pub async fn remaining<P: Platform>(p: &P) -> Result<u64, PlatformError> {
     for c in sql() {
         let n: Option<N> = p
             .db()
-            .first(Stmt::new(&c.count, vec![kid.clone().into()]))
+            .first(Stmt::new(c.count, vec![kid.clone().into()]))
             .await?;
         total += n.map_or(0, |n| n.n.max(0) as u64);
     }
@@ -175,7 +213,7 @@ async fn sweep<P: Platform>(p: &P, kid: &str) -> (usize, usize) {
     let keys = slots(p);
     let active = p.secrets().active_master_key();
     let (mut resealed, mut unopenable) = (0, 0);
-    for (s, c) in SEALED.iter().zip(sql()) {
+    for c in sql() {
         let budget = PER_RUN - resealed - unopenable;
         if budget == 0 {
             break;
@@ -183,7 +221,7 @@ async fn sweep<P: Platform>(p: &P, kid: &str) -> (usize, usize) {
         let rows: Vec<R> = match p
             .db()
             .query(Stmt::new(
-                &c.select,
+                c.select,
                 vec![kid.into(), (budget as i64).into()],
             ))
             .await
@@ -192,7 +230,7 @@ async fn sweep<P: Platform>(p: &P, kid: &str) -> (usize, usize) {
             Err(_) => continue,
         };
         for r in rows {
-            let aad = crypto::aad(s.table, s.column, &r.rid);
+            let aad = crypto::aad(c.table, c.column, &r.rid);
             let Ok(plain) = crypto::open(&keys, &aad, &r.env) else {
                 unopenable += 1;
                 continue;
@@ -201,7 +239,7 @@ async fn sweep<P: Platform>(p: &P, kid: &str) -> (usize, usize) {
             let fresh = crypto::seal(active, nonce, &aad, &plain);
             if p.db()
                 .execute(Stmt::new(
-                    &c.update,
+                    c.update,
                     vec![fresh.into(), r.rid.into(), r.env.into()],
                 ))
                 .await
@@ -232,4 +270,22 @@ pub async fn status<P: Platform>(p: &P) -> Result<Value, PlatformError> {
         "activated_at": at(activated),
         "resealed_at": at(resealed),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use pylota_identity_core::sealed::SEALED;
+
+    use super::*;
+
+    /// The literal SQL covers exactly the registry, in its order, with its row-ID expressions.
+    #[test]
+    fn registry_in_step() {
+        assert_eq!(COLUMNS.len(), SEALED.len());
+        for (c, s) in COLUMNS.iter().zip(SEALED) {
+            assert_eq!((c.table, c.column), (s.table, s.column));
+            assert!(c.select.contains(&format!("{} AS rid,", s.row_id)));
+            assert!(c.update.contains(&format!("WHERE ({}) = ?2", s.row_id)));
+        }
+    }
 }
