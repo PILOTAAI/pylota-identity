@@ -198,6 +198,11 @@ pub struct State {
     pub api_requests: Vec<(String, String, Option<String>)>,
     pub seq: u64,
     pub runner_calls: Vec<Cmd>,
+    /// `remaining` of `GET /v1/platform/status` while the active key's re-seal is unfinished, one
+    /// per read (the last repeats; empty is 0).
+    pub reseal_script: Vec<u64>,
+    /// The key ID whose re-seal finished, and when (Unix ms).
+    pub resealed: Option<(String, i64)>,
 }
 
 impl State {
@@ -309,6 +314,8 @@ impl Fake {
             api_requests: vec![],
             seq: 0,
             runner_calls: vec![],
+            reseal_script: vec![],
+            resealed: None,
         }));
         {
             let mut s = state.lock().unwrap();
@@ -888,6 +895,7 @@ fn worker(
     let now = 1_793_000_000_000i64;
     match (method, seg) {
         ("GET", ["v1", "me"]) => api(200, me),
+        ("GET", ["v1", "platform", "status"]) => api(200, json!({ "master_key": master_key(s) })),
         ("GET", ["v1", "tenants"]) => api(200, json!({ "data": s.tenants, "next_cursor": null })),
         ("POST", ["v1", "tenants"]) => {
             if let Some(t) = h.get("idempotency-key").and_then(|k| s.idempotency.get(k)) {
@@ -950,6 +958,65 @@ fn worker(
             api_err(404, "route_not_found")
         }
     }
+}
+
+/// The `master_key` block as the Worker derives it from the uploaded secrets: the re-seal's
+/// `remaining` comes from `reseal_script`, and reaching 0 records `resealed_at` for the active key.
+fn master_key(s: &mut State) -> Value {
+    let secrets = s
+        .scripts
+        .values()
+        .find(|sc| sc.secrets.contains_key("PM_MASTER_KEY"))
+        .map(|sc| sc.secrets.clone())
+        .unwrap_or_default();
+    let kid = |name: &str| {
+        secrets
+            .get(name)
+            .and_then(|v| STANDARD.decode(v).ok())
+            .and_then(|b| <[u8; 32]>::try_from(b).ok())
+            .map(|k| pylota_identity_core::crypto::kid(&k))
+    };
+    let active = secrets
+        .get("PM_MASTER_KEY_ACTIVE")
+        .cloned()
+        .unwrap_or_else(|| "a".to_owned());
+    let active_kid = kid(if active == "b" {
+        "PM_MASTER_KEY_B"
+    } else {
+        "PM_MASTER_KEY"
+    });
+    // The script runs only while the active key's re-seal is unfinished.
+    let done = s.resealed.as_ref().map(|(k, _)| k) == active_kid.as_ref();
+    let remaining = if done {
+        0
+    } else if s.reseal_script.len() > 1 {
+        s.reseal_script.remove(0)
+    } else {
+        s.reseal_script.first().copied().unwrap_or(0)
+    };
+    if remaining == 0
+        && let Some(k) = &active_kid
+        && s.resealed.as_ref().is_none_or(|(r, _)| r != k)
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        s.resealed = Some((k.clone(), now));
+    }
+    let resealed_at = s
+        .resealed
+        .as_ref()
+        .filter(|(k, _)| Some(k) == active_kid.as_ref())
+        .map(|(_, t)| pylota_identity_core::days::rfc3339(*t));
+    let slot = |slot: &str, name: &str| json!({ "slot": slot, "present": kid(name).is_some(), "kid": kid(name) });
+    json!({
+        "active_slot": active,
+        "slots": [slot("a", "PM_MASTER_KEY"), slot("b", "PM_MASTER_KEY_B")],
+        "remaining": remaining,
+        "activated_at": null,
+        "resealed_at": resealed_at,
+    })
 }
 
 /// A domain row as the API's object (`delivery_events` derived as the Worker derives it).
@@ -1227,6 +1294,7 @@ impl Cli {
             runner,
             now_ms: None,
             release_keys: Some(vec![self.key.public()]),
+            poll_ms: Some(5),
             hosts: BTreeMap::from([
                 (API_HOST.to_owned(), base.clone()),
                 ("cloudflare-dns.com".to_owned(), base.clone()),
@@ -1324,6 +1392,8 @@ impl Fake {
             api_requests: vec![],
             seq: 0,
             runner_calls: vec![],
+            reseal_script: vec![],
+            resealed: None,
         }
     }
 }

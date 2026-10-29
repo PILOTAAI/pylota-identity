@@ -28,6 +28,7 @@ mod logs;
 mod mailbox;
 mod mcp;
 mod messages;
+mod ops;
 mod partners;
 mod policy;
 mod quarantine;

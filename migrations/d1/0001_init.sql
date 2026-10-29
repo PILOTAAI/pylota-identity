@@ -986,11 +986,15 @@ CREATE TABLE billing_events (                              -- Stripe webhook ded
 
 -- Deployment-wide switches written by crons (Cloud sign-up § 10.3).
 CREATE TABLE platform_state (
-  key        TEXT PRIMARY KEY CHECK (key IN ('send_breaker','phone_account')),
+  key        TEXT PRIMARY KEY CHECK (key IN ('send_breaker','phone_account','alert_evaluator')),
   value_json TEXT NOT NULL,                                -- send_breaker: {"stage": 1 | 2, "until": <ms>, "share": <0..1>}
                                                            -- phone_account: {"level": "paid" | "verified" | "unknown",
                                                            -- "probed_at": <ms>, "us_enabled": bool}, written by
                                                            -- POST /v1/platform/phone/probe (Phone numbers § 2.1)
+                                                           -- alert_evaluator: {"run", "last_run_at", "keys": {alert key:
+                                                           -- {severity, fired_at, notified_at, notices, false_runs,
+                                                           -- tenant_id}}}, the evaluator's memory between runs
+                                                           -- (Observability § 5.4)
   updated_at INTEGER NOT NULL
 );
 

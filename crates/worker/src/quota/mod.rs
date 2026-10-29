@@ -946,8 +946,17 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
             QuotaRequest::OutcomeRates { .. } => to_v(&OutcomeRatesAnswer::default()),
             QuotaRequest::CountSignupOutcome { .. } => to_v(&OutcomeRatesAnswer::default()),
             QuotaRequest::SystemMail { .. } => to_v(&SystemMailAnswer::Ok),
-            QuotaRequest::DeploymentReserve { .. } => json!({ "kind": "ok" }),
-            QuotaRequest::DeploymentStatus { .. } => json!({ "count": 0, "stage": "none" }),
+            // `deployment_day` (Cloud sign-up § 10.3): counted here; the breaker's stage refusals
+            // arrive with M22.
+            QuotaRequest::DeploymentReserve { recipients, .. } => {
+                self.sql.transaction_sync(|s| {
+                    Self::add(s, "deployment_day", &utc, i64::from(recipients))
+                })?;
+                json!({ "kind": "ok" })
+            }
+            QuotaRequest::DeploymentStatus { .. } => {
+                json!({ "count": self.counter("deployment_day", &utc)?, "stage": "none" })
+            }
             // One agentic search against the tenant's daily cap (Search § 11.2 Init): a spent cap
             // counts nothing and answers when it resets.
             QuotaRequest::CountAgentic { tz, cap } => {

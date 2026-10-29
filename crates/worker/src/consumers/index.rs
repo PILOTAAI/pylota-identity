@@ -260,7 +260,13 @@ async fn attachment_text<P: Platform>(
             }
             Outcome::Unavailable => items.push(unavailable(a)),
             Outcome::Failed if attempt >= LAST_TEXT_ATTEMPT => {
-                crate::metrics::count(p, "attachment_text_unavailable_total", Some(tenant_id), 1);
+                crate::metrics::count_with(
+                    p,
+                    "index_jobs_total",
+                    Some(tenant_id),
+                    &["attachment_text", "unavailable"],
+                    1,
+                );
                 items.push(unavailable(a));
             }
             Outcome::Failed => failed = true,

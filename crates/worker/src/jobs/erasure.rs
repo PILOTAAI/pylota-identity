@@ -14,7 +14,7 @@ use pylota_identity_platform::{
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{Ctx, Slice, StepErr, StepResult, alert};
+use super::{Ctx, Slice, StepErr, StepResult};
 use crate::db::identities as idb;
 use crate::errors::ApiError;
 use crate::mailbox::MailboxRequest;
@@ -990,7 +990,6 @@ pub async fn on_end<P: Platform, S: Sql>(
                 ))
                 .await?;
             let (step, code) = failed.unwrap_or(("", ""));
-            alert(c.p, "erasure_failed", &era, "fired");
             super::emit(
                 c.p,
                 c.tenant_id.as_deref(),

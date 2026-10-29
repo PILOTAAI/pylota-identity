@@ -47,7 +47,9 @@ impl ObjectApp for QuotaObject {
             p: self.platform.as_ref(),
             sql: &self.sql,
         };
-        json(200, &q.handle(&body))
+        let r = json(200, &q.handle(&body));
+        crate::metrics::flush(self.platform.as_ref());
+        r
     }
 }
 
@@ -85,11 +87,14 @@ impl ObjectApp for MonitorObject {
     }
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
-        json(200, &self.monitor().handle(&body_of(&req)).await)
+        let r = json(200, &self.monitor().handle(&body_of(&req)).await);
+        crate::metrics::flush(&self.platform);
+        r
     }
 
     async fn alarm(&self) {
         self.monitor().alarm().await;
+        crate::metrics::flush(&self.platform);
     }
 }
 
@@ -112,7 +117,9 @@ impl ObjectApp for SesControlObject {
             p: &self.platform,
             sql: &self.sql,
         };
-        json(200, &c.handle(&body_of(&req)))
+        let r = json(200, &c.handle(&body_of(&req)));
+        crate::metrics::flush(&self.platform);
+        r
     }
 }
 
@@ -146,11 +153,14 @@ impl ObjectApp for MailboxObject {
     }
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
-        json(200, &self.mailbox().handle(&body_of(&req)).await)
+        let r = json(200, &self.mailbox().handle(&body_of(&req)).await);
+        crate::metrics::flush(self.platform.as_ref());
+        r
     }
 
     async fn alarm(&self) {
         self.mailbox().alarm().await;
+        crate::metrics::flush(self.platform.as_ref());
     }
 }
 
@@ -181,11 +191,14 @@ impl ObjectApp for RunnerObject {
     }
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
-        json(200, &self.runner().handle(&body_of(&req)).await)
+        let r = json(200, &self.runner().handle(&body_of(&req)).await);
+        crate::metrics::flush(&self.platform);
+        r
     }
 
     async fn alarm(&self) {
         self.runner().alarm().await;
+        crate::metrics::flush(&self.platform);
     }
 }
 

@@ -30,6 +30,7 @@ pub mod mcp;
 pub mod metrics;
 pub mod net;
 pub mod objects;
+pub mod ops;
 pub mod policy;
 pub mod quota;
 pub mod ratelimit;
@@ -68,14 +69,18 @@ mod entry {
         }
 
         async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
-            self.0.fetch(req).await
+            let r = self.0.fetch(req).await;
+            crate::metrics::flush(self.0.p.as_ref());
+            r
         }
 
         async fn email(
             &self,
             msg: pylota_identity_platform::app::EmailIn,
         ) -> pylota_identity_platform::app::EmailOutcome {
-            crate::email::handle(self.0.p.as_ref(), &msg).await
+            let r = crate::email::handle(self.0.p.as_ref(), &msg).await;
+            crate::metrics::flush(self.0.p.as_ref());
+            r
         }
 
         /// The itest build hands the messages of two dead-letter queues to the fake server, so the
@@ -98,11 +103,13 @@ mod entry {
                 return;
             }
             crate::consumers::run(self.0.p.as_ref(), queue, dead_letter, batch).await;
+            crate::metrics::flush(self.0.p.as_ref());
         }
 
         async fn scheduled(&self, ev: ScheduledIn) {
             let request_id = crate::request_id::new(self.0.p.as_ref());
             crate::crons::run(self.0.p.as_ref(), &ev.cron, &request_id).await;
+            crate::metrics::flush(self.0.p.as_ref());
         }
     }
 

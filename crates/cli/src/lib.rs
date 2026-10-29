@@ -83,6 +83,8 @@ pub struct Env {
     pub release_keys: Option<Vec<String>>,
     /// Base URLs for hosts the CLI would reach as `https://{host}` (the deployment's own host in tests).
     pub hosts: BTreeMap<String, String>,
+    /// How often a command polls the deployment's state; `None` is 60 seconds (tests shorten it).
+    pub poll_ms: Option<u64>,
 }
 
 impl Env {
@@ -105,6 +107,7 @@ impl Env {
             now_ms: None,
             release_keys: None,
             hosts: BTreeMap::new(),
+            poll_ms: None,
         }
     }
 }
@@ -130,6 +133,7 @@ pub struct Ctx {
     pub now_ms: Option<i64>,
     pub release_keys: Option<Vec<String>>,
     pub hosts: BTreeMap<String, String>,
+    pub poll_ms: Option<u64>,
     api: OnceCell<http::Api>,
     pub(crate) me: RefCell<Option<serde_json::Value>>,
 }
@@ -265,6 +269,7 @@ pub async fn run(args: Vec<String>, env: Env) -> i32 {
         now_ms,
         release_keys,
         hosts,
+        poll_ms,
     } = env;
     let parsed = match cli::Cli::try_parse_from(&args) {
         Ok(p) => p,
@@ -326,6 +331,7 @@ pub async fn run(args: Vec<String>, env: Env) -> i32 {
         now_ms,
         release_keys,
         hosts,
+        poll_ms,
         api: OnceCell::new(),
         me: RefCell::new(None),
     };

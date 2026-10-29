@@ -15,6 +15,8 @@ use serde_json::{Value, json};
 
 struct State {
     offset: i64,
+    /// Worker variables and secrets read instead of the configured ones (`None` unsets one).
+    config: BTreeMap<String, Option<String>>,
     faults: Vec<Value>,
     /// Messages the itest build's queue consumer handed over: `(queue, body)`.
     queued: Vec<(String, Value)>,
@@ -73,6 +75,7 @@ pub const RECEIVERS: &str = ".hooks.example.com";
 
 static STATE: Mutex<State> = Mutex::new(State {
     offset: 0,
+    config: BTreeMap::new(),
     faults: Vec::new(),
     queued: Vec::new(),
     txt: BTreeMap::new(),
@@ -234,7 +237,9 @@ pub fn start() {
 fn handle(path: &str, body: &Value) -> Value {
     let mut s = STATE.lock().unwrap();
     match path {
-        "/state" => json!({ "clock_offset_ms": s.offset, "faults_armed": !s.faults.is_empty() }),
+        "/state" => {
+            json!({ "clock_offset_ms": s.offset, "faults_armed": !s.faults.is_empty(), "config_overrides": s.config })
+        }
         "/faults/take" => {
             let pos = s.faults.iter().position(|f| {
                 f["target"] == body["target"]
@@ -413,10 +418,23 @@ pub fn fault_any(target: &str, mode: &str, count: u32) {
         .push(json!({ "target": target, "binding": null, "mode": mode, "count": count }));
 }
 
-/// Resets the clock and the faults (a guard in each test that changes them).
+/// Overrides a Worker variable or secret from the next invocation on (`None` unsets it); objects keep
+/// the configuration they started with. `Reset` restores the configured values.
+pub fn set_config(name: &str, value: Option<&str>) {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .config
+        .insert(name.to_owned(), value.map(str::to_owned));
+}
+
+/// Resets the clock, the configuration overrides and the faults (a guard in each test that changes
+/// them).
 pub fn reset() {
     let mut s = STATE.lock().unwrap();
     s.offset = 0;
+    s.config.clear();
     s.faults.clear();
     s.ai_fail.clear();
     s.ai_script.clear();

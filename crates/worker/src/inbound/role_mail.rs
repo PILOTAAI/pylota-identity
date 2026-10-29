@@ -278,7 +278,7 @@ pub async fn accept<P: Platform>(
         let _ = p.blobs().delete(std::slice::from_ref(&key)).await;
         return Err(Decision::Temp(TempFail::Queue));
     }
-    crate::metrics::count(p, "role_mail_accepted_total", None, 1);
+    crate::metrics::count_with(p, "inbound_received_total", None, &["accepted"], 1);
     Ok(())
 }
 
@@ -522,7 +522,7 @@ pub async fn relay<P: Platform>(p: &P, ptr: RoleMailPointer) -> Done {
         .await
     {
         Ok(RpcResult::Ok(_)) => {
-            crate::metrics::count(p, "role_mail_relayed_total", None, 1);
+            crate::log::info("role_mail_relayed", &[]);
         }
         Ok(RpcResult::Err(e)) => {
             crate::log::warn(

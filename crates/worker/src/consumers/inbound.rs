@@ -928,7 +928,13 @@ pub async fn message<P: Platform>(p: &P, ptr: InboundPointer) -> Done {
             .call::<_, Value>(DoClass::Quota, &t.quota_do_id, &env)
             .await;
     }
-    crate::metrics::count(p, "inbound_stored_total", Some(&tenant_id), 1);
+    crate::metrics::count_with(
+        p,
+        "inbound_processed_total",
+        Some(&tenant_id),
+        &["stored"],
+        1,
+    );
     Done::Ack
 }
 

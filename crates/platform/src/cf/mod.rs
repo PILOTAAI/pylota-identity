@@ -91,6 +91,8 @@ pub struct CfPlatform {
     dns: DohClient<CfHttp>,
     metrics: CfMetrics,
     background: CfBackground,
+    #[cfg(feature = "itest-hooks")]
+    env: worker::Env,
 }
 
 impl CfPlatform {
@@ -127,10 +129,46 @@ impl CfPlatform {
                 http: CfHttp,
                 resolvers: config.doh_resolvers.clone(),
             },
+            #[cfg(feature = "itest-hooks")]
+            env: env.clone(),
             metrics: CfMetrics { env },
             background,
             config,
         })
+    }
+
+    /// `itest-hooks` only: the configuration read again with the fake server's overrides of
+    /// variables and secrets (a test switching `PM_MASTER_KEY_ACTIVE`), cached per override set.
+    #[cfg(feature = "itest-hooks")]
+    pub(crate) fn apply_itest_overrides(&mut self) {
+        let Some(overrides) = itest::config_overrides() else {
+            return;
+        };
+        if let Some(c) = itest::cached_config(&overrides) {
+            self.config = c;
+            return;
+        }
+        let map: std::collections::BTreeMap<String, Option<String>> =
+            serde_json::from_str(&overrides).unwrap_or_default();
+        let env = self.env.clone();
+        let lookup = |name: &str| match map.get(name) {
+            Some(v) => v.clone(),
+            None => env
+                .secret(name)
+                .map(|s| s.to_string())
+                .or_else(|_| env.var(name).map(|v| v.to_string()))
+                .ok(),
+        };
+        match Config::read(&lookup, Build::RELEASE) {
+            Ok(c) => {
+                let c = Rc::new(c);
+                itest::cache_config(&overrides, c.clone());
+                self.config = c;
+            }
+            Err(e) => {
+                worker::console_error!("event=config_invalid name={} reason={}", e.name, e.reason)
+            }
+        }
     }
 }
 

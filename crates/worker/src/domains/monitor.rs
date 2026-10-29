@@ -956,7 +956,6 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
                             ("domain_id", row.id.clone().into()),
                         ],
                     );
-                    crate::metrics::count(p, "domain_alert_total", row.tenant_id.as_deref(), 1);
                 }
             }
         }

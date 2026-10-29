@@ -204,7 +204,8 @@ pub async fn evaluate<P: Platform>(p: &P, run_date: &str, hour: i64, minute: i64
         ))
         .await
         .unwrap_or(None);
-    if drift_alert(drift, prev.and_then(|s| s.drift_pct)) {
+    let previous = prev.and_then(|s| s.drift_pct);
+    if drift_alert(drift, previous) {
         crate::log::error(
             "alert",
             &[
@@ -213,7 +214,15 @@ pub async fn evaluate<P: Platform>(p: &P, run_date: &str, hour: i64, minute: i64
                 ("drift_pct", format!("{drift:.2}").into()),
             ],
         );
-        crate::metrics::count(p, "vector_drift_alert_total", None, 1);
+        crate::ops::alerts::report(
+            p,
+            "vector_drift",
+            None,
+            None,
+            &serde_json::json!({ "drift_pct": drift, "previous_drift_pct": previous }),
+            "index_reconcile",
+        )
+        .await;
     }
     let week_ago = rfc3339(now - 7 * DAY_MS)[..10].to_owned();
     let _ = p

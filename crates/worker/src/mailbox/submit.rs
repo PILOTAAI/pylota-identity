@@ -273,6 +273,37 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                 );
             }
         };
+        // Step 18, continued: Cloudflare-transport recipients count against `PM_DAILY_SEND_QUOTA` in
+        // the default tenant's object, taken at accept and never given back (Cloud sign-up § 10.3).
+        if let Some(dq) = ctx.deployment_quota.as_ref()
+            && queued > 0
+            && plan.from.transport == "cloudflare"
+        {
+            let counted = quota::call(
+                self.p,
+                &dq.quota_do_id,
+                &dq.tenant_id,
+                &inp.request_id,
+                QuotaRequest::DeploymentReserve {
+                    recipients: queued,
+                    restricted: false,
+                    quota: dq.quota,
+                },
+            )
+            .await;
+            if counted.is_err() {
+                self.release(
+                    owner,
+                    ctx,
+                    &inp.request_id,
+                    &day,
+                    tenant_cap.is_some(),
+                    &plan.message_id,
+                )
+                .await;
+                return Err(err(ErrorCode::Unavailable, "The quota did not answer."));
+            }
+        }
         // Step 19 and submit step 5: the lock (and a new thread) with the compose marker.
         let started = self.p.clock().now_ms();
         let seq = loop {

@@ -1,6 +1,7 @@
 //! Cron triggers (Configuration › Cron triggers). Every minute: mint the mailboxes setup left to the
 //! Worker (the system identity's, Identities and domains › The system identity), then re-send the
-//! `rpc_intents` rows (Design conventions § 9), then the webhook sweep (`outbox_sweep`). Every 15
+//! `rpc_intents` rows (Design conventions § 9), then the webhook sweep (`outbox_sweep`), the
+//! master-key re-seal sweep and the state alert evaluator (Observability § 5.4). Every 15
 //! minutes: the semantic index's nightly reconciliation (`index_reconcile`). The other steps arrive
 //! with their milestones.
 
@@ -25,6 +26,8 @@ pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
         domains::retire(p).await;
         outbox_sweep::run(p).await;
         crate::jobs::restart_queued(p).await;
+        crate::ops::reseal::run(p, request_id).await;
+        crate::ops::alerts::evaluate(p, request_id).await;
     }
     if cron == "*/15 * * * *" {
         index_reconcile::run(p).await;

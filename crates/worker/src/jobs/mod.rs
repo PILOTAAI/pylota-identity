@@ -597,12 +597,12 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
         match run_step(&c, &step.name, step.cursor.as_deref()).await {
             Ok(Slice::More { cursor, counts }) => {
                 self.save(&step, "running", Some(&cursor), &counts, 0, None)?;
-                self.resolve_stalled(&c, &step)?;
+                self.resolve_stalled(&c).await?;
                 self.state.set_alarm(now).await?;
             }
             Ok(Slice::Done { counts }) => {
                 self.save(&step, "done", None, &counts, 0, None)?;
-                self.resolve_stalled(&c, &step)?;
+                self.resolve_stalled(&c).await?;
                 self.state.set_alarm(now).await?;
             }
             Ok(Slice::Wait { after_ms }) => {
@@ -626,7 +626,15 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
                     return self.end(&c, "failed", Some((&step.name, &code))).await;
                 }
                 if erasure && attempts == rules::STALLED_AT {
-                    alert(self.p, "erasure_stalled", &c.job_id, "fired");
+                    crate::ops::alerts::report(
+                        self.p,
+                        &stalled_key(&c),
+                        c.tenant_id.as_deref(),
+                        None,
+                        &json!({ "job_id": c.job_id, "step": step.name, "code": code, "attempts": attempts }),
+                        &c.job_id,
+                    )
+                    .await;
                     self.set("stalled", "1")?;
                 }
                 self.state
@@ -637,9 +645,16 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
         Ok(())
     }
 
-    fn resolve_stalled(&self, c: &Ctx<'_, P, S>, _step: &StepRow) -> PResult<()> {
+    /// `erasure_stalled` resolves when the step next succeeds or the job ends (Observability § 5.4).
+    async fn resolve_stalled(&self, c: &Ctx<'_, P, S>) -> PResult<()> {
         if self.get("stalled")?.is_some() {
-            alert(self.p, "erasure_stalled", &c.job_id, "resolved");
+            crate::ops::alerts::resolve_reported(
+                self.p,
+                &stalled_key(c),
+                c.tenant_id.as_deref(),
+                &c.job_id,
+            )
+            .await;
             self.sql.exec("DELETE FROM meta WHERE k = 'stalled'", &[])?;
         }
         Ok(())
@@ -698,20 +713,24 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
                 r
             }
         };
-        if outcome == "failed" && c.kind != "erasure" {
-            alert(
-                self.p,
-                &format!("job_failed:{}", c.kind),
-                &c.job_id,
-                "fired",
+        // `job_failed:{kind}` and `domain_remove_failed` are read from D1 by the alert evaluator.
+        if outcome == "failed" {
+            crate::log::error(
+                "job_failed",
+                &[
+                    ("job_id", c.job_id.clone().into()),
+                    ("detail", c.kind.clone().into()),
+                ],
             );
         }
-        if outcome == "failed" && c.kind == "domain_remove" {
-            let domain = c.params["domain_id"].as_str().unwrap_or("");
-            alert(self.p, "domain_remove_failed", domain, "fired");
-        }
         if self.get("stalled")?.is_some() {
-            alert(self.p, "erasure_stalled", &c.job_id, "resolved");
+            crate::ops::alerts::resolve_reported(
+                self.p,
+                &stalled_key(c),
+                c.tenant_id.as_deref(),
+                &c.job_id,
+            )
+            .await;
         }
         self.p
             .db()
@@ -751,17 +770,12 @@ async fn mirror_running<P: Platform, S: Sql>(p: &P, c: &Ctx<'_, P, S>) -> Result
     Ok(())
 }
 
-/// An alert until M17's evaluator: a `warn` log line and a metric.
-pub fn alert<P: Platform>(p: &P, name: &str, subject: &str, state: &str) {
-    crate::log::warn(
-        "alert",
-        &[
-            ("alert", name.to_owned().into()),
-            ("subject", subject.to_owned().into()),
-            ("state", state.to_owned().into()),
-        ],
-    );
-    crate::metrics::count(p, "job_alert_total", None, 1);
+/// The `erasure_stalled` key of an erasure job: its erasure request's ID.
+fn stalled_key<P: Platform, S: Sql>(c: &Ctx<'_, P, S>) -> String {
+    format!(
+        "erasure_stalled:{}",
+        c.params["erasure_request_id"].as_str().unwrap_or(&c.job_id)
+    )
 }
 
 /// A job event: written to D1 `event_index` (`owner_kind = 'job'`, the payload kept in the index)

@@ -62,6 +62,18 @@ pub struct SendContext {
     pub addresses: Vec<AddressCtx>,
     pub platform_domain: String,
     pub ses_configured: bool,
+    /// With `PM_DAILY_SEND_QUOTA` set: the default tenant's `TenantQuota`, which counts
+    /// `deployment_day` (Cloud sign-up § 10.3).
+    #[serde(default)]
+    pub deployment_quota: Option<DeploymentQuota>,
+}
+
+/// Where Cloudflare-transport recipients are counted against `PM_DAILY_SEND_QUOTA`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeploymentQuota {
+    pub tenant_id: String,
+    pub quota_do_id: String,
+    pub quota: u32,
 }
 
 impl SendContext {

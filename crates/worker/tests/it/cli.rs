@@ -138,6 +138,7 @@ fn idvy(home: &std::path::Path, args: &[String]) -> (i32, String, String) {
         now_ms: None,
         release_keys: None,
         hosts: BTreeMap::new(),
+        poll_ms: None,
     };
     let code = rt.block_on(pylota_identity_cli::run(args.to_vec(), env));
     let s = |b: &Buf| String::from_utf8_lossy(&b.0.lock().unwrap()).into_owned();

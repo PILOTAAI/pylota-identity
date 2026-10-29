@@ -143,9 +143,13 @@ pub async fn fetch<A: WorkerApp>(
 ) -> Result<JsValue, JsValue> {
     let ctx = worker::Context::new(ctx);
     let response = match CfPlatform::new(env, CfBackground::Worker(ctx)) {
-        Ok(platform) => {
+        #[allow(unused_mut)]
+        Ok(mut platform) => {
             #[cfg(feature = "itest-hooks")]
-            super::itest::sync(crate::Platform::config(&platform)).await;
+            {
+                super::itest::sync(crate::Platform::config(&platform)).await;
+                platform.apply_itest_overrides();
+            }
             let app = A::new(platform);
             handle_http(req, "fetch", |input| app.fetch(input)).await
         }
@@ -161,11 +165,15 @@ pub async fn email<A: WorkerApp>(
     ctx: RawContext,
 ) -> Result<JsValue, JsValue> {
     let ctx = worker::Context::new(ctx);
-    let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
+    #[allow(unused_mut)]
+    let Ok(mut platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
         return Err(JsValue::from_str("temporary failure"));
     };
     #[cfg(feature = "itest-hooks")]
-    super::itest::sync(crate::Platform::config(&platform)).await;
+    {
+        super::itest::sync(crate::Platform::config(&platform)).await;
+        platform.apply_itest_overrides();
+    }
     let app = A::new(platform);
     let input = match email_in(&message).await {
         Ok(input) => input,
@@ -197,12 +205,16 @@ pub async fn queue<A: WorkerApp>(
             let _ = js::call(m, "retry", &[]);
         }
     };
-    let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
+    #[allow(unused_mut)]
+    let Ok(mut platform) = CfPlatform::new(env, CfBackground::Worker(ctx)) else {
         retry_all(&raw);
         return Ok(JsValue::UNDEFINED);
     };
     #[cfg(feature = "itest-hooks")]
-    super::itest::sync(crate::Platform::config(&platform)).await;
+    {
+        super::itest::sync(crate::Platform::config(&platform)).await;
+        platform.apply_itest_overrides();
+    }
     let name = batch.queue()?.as_string().unwrap_or_default();
     let Some((queue, dead_letter)) = QueueName::from_queue_name(&name) else {
         worker::console_error!("event=glue_error handler=queue reason=unknown_queue");
@@ -236,12 +248,17 @@ pub async fn scheduled<A: WorkerApp>(
     ctx: RawScheduleContext,
 ) -> Result<JsValue, JsValue> {
     let background: worker::worker_sys::Context = ctx.unchecked_into();
-    let Ok(platform) = CfPlatform::new(env, CfBackground::Worker(worker::Context::new(background)))
+    #[allow(unused_mut)]
+    let Ok(mut platform) =
+        CfPlatform::new(env, CfBackground::Worker(worker::Context::new(background)))
     else {
         return Ok(JsValue::UNDEFINED);
     };
     #[cfg(feature = "itest-hooks")]
-    super::itest::sync(crate::Platform::config(&platform)).await;
+    {
+        super::itest::sync(crate::Platform::config(&platform)).await;
+        platform.apply_itest_overrides();
+    }
     let event = worker::ScheduledEvent::from(event);
     A::new(platform)
         .scheduled(ScheduledIn {

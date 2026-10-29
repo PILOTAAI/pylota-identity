@@ -131,6 +131,7 @@ pub enum Handler {
     ExportDelete,
     JobCreate,
     JobGet,
+    PlatformStatus,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -424,6 +425,17 @@ pub static ROUTES: &[RouteSpec] = &[
         I::None,
         TENANT_UP,
         Handler::AuditList,
+    ),
+    route(
+        M::Get,
+        "/v1/platform/status",
+        "getPlatformStatus",
+        &["audit:read"],
+        &[],
+        Scope::PlatformOnly,
+        I::None,
+        PLATFORM,
+        Handler::PlatformStatus,
     ),
     route(
         M::Post,

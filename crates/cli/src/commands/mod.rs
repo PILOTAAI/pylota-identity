@@ -10,6 +10,7 @@ pub mod mail;
 pub mod privacy;
 pub mod profile;
 pub mod search;
+pub mod secrets;
 pub mod setup;
 pub mod webhooks;
 
@@ -33,6 +34,7 @@ pub async fn dispatch(ctx: &Ctx, cmd: Command) -> Result<Output, CliError> {
         Command::Tenants(c) => admin::tenants(ctx, c).await,
         Command::Partners(c) => admin::partners(ctx, c).await,
         Command::Keys(c) => admin::keys(ctx, c).await,
+        Command::Secrets(c) => secrets::secrets(ctx, c).await,
         Command::Audit(a) => admin::audit(ctx, a).await,
         Command::Identities(c) => identities::identities(ctx, c).await,
         Command::Addresses(c) => identities::addresses(ctx, c).await,

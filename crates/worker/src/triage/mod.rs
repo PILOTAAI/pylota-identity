@@ -436,7 +436,7 @@ pub async fn run<P: Platform>(p: &P, job: IndexJob) -> Done {
             Err(_) => break,
         }
     }
-    crate::metrics::count(p, "triage_invalid_output_total", Some(tenant_id), 1);
+    crate::metrics::count_with(p, "triage_total", Some(tenant_id), &["invalid_output"], 1);
     j.commit(
         unfinished("failed", "invalid_output", &o.risk_flags, &o.matched),
         Vec::new(),

@@ -437,7 +437,15 @@ async fn send<P: Platform>(
                 breaker::record(p, scope, result.definitive(), p.clock().now_ms()).await
         {
             crate::log::error("transport_breaker_open", &[("scope", scope.into())]);
-            crate::metrics::count(p, "transport_breaker_open_total", None, 1);
+            crate::ops::alerts::report(
+                p,
+                &format!("transport_breaker_open:{scope}"),
+                None,
+                None,
+                &serde_json::json!({ "unknown_in_a_row": 3 }),
+                "outbound",
+            )
+            .await;
         }
         (Provider::Cloudflare, result, Vec::new())
     } else {

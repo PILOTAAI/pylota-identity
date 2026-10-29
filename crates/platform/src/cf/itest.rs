@@ -16,6 +16,29 @@ thread_local! {
     /// Whether the fake server holds any armed fault (from the last sync), so an unarmed run never
     /// asks it on each call.
     static ARMED: Cell<bool> = const { Cell::new(false) };
+    /// The fake server's configuration overrides (a JSON object), when it has any.
+    static OVERRIDES: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The configuration last read with an override set.
+    static OVERRIDDEN: std::cell::RefCell<Option<(String, std::rc::Rc<Config>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The override set of the last sync, if any.
+pub fn config_overrides() -> Option<String> {
+    OVERRIDES.with(|o| o.borrow().clone())
+}
+
+pub fn cached_config(overrides: &str) -> Option<std::rc::Rc<Config>> {
+    OVERRIDDEN.with(|o| {
+        o.borrow()
+            .as_ref()
+            .filter(|(k, _)| k == overrides)
+            .map(|(_, c)| c.clone())
+    })
+}
+
+pub fn cache_config(overrides: &str, c: std::rc::Rc<Config>) {
+    OVERRIDDEN.with(|o| *o.borrow_mut() = Some((overrides.to_owned(), c)));
 }
 
 /// The fake clock's offset from `Date.now()`.
@@ -35,6 +58,11 @@ pub async fn sync(cfg: &Config) {
         && let Ok(v) = serde_json::from_slice::<Value>(&r.body)
     {
         OFFSET.with(|o| o.set(v["clock_offset_ms"].as_i64().unwrap_or(0)));
+        let overrides = v["config_overrides"]
+            .as_object()
+            .filter(|m| !m.is_empty())
+            .map(|m| Value::Object(m.clone()).to_string());
+        OVERRIDES.with(|o| *o.borrow_mut() = overrides);
         ARMED.with(|a| a.set(v["faults_armed"].as_bool().unwrap_or(true)));
     }
 }

@@ -387,10 +387,11 @@ pub async fn embed<P: Platform>(p: &P, job: IndexJob) -> Done {
             .call::<Value>(SearchOp::DropDeleting { ids: put.delete })
             .await;
     }
-    crate::metrics::count(
+    crate::metrics::count_with(
         p,
-        "vectors_upserted_total",
+        "index_jobs_total",
         Some(tenant_id),
+        &["embed", "upserted"],
         embedded.len() as u32,
     );
     if deferred {

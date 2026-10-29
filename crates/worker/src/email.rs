@@ -243,7 +243,16 @@ pub async fn handle<P: Platform>(p: &P, msg: &EmailIn) -> EmailOutcome {
         },
         Err(Decision::Temp(t)) => {
             crate::log::warn("inbound_temp_fail", &[("reason", t.as_str().into())]);
-            crate::metrics::count(p, "inbound_temp_fail_total", None, 1);
+            crate::metrics::count_with(
+                p,
+                "inbound_received_total",
+                None,
+                &[match t {
+                    TempFail::TenantSuspended => "tempfail_suspended",
+                    _ => "tempfail_storage",
+                }],
+                1,
+            );
             EmailOutcome::TempFail
         }
     }
@@ -374,7 +383,13 @@ async fn handle_email<P: Platform>(p: &P, msg: &EmailIn) -> Result<(), Decision>
             ),
         ],
     );
-    crate::metrics::count(p, "inbound_accepted_total", Some(&e.tenant_id), 1);
+    crate::metrics::count_with(
+        p,
+        "inbound_received_total",
+        Some(&e.tenant_id),
+        &["accepted"],
+        1,
+    );
     Ok(())
 }
 
@@ -469,7 +484,7 @@ async fn stage<P: Platform>(
         let _ = p.blobs().delete(std::slice::from_ref(&key)).await;
         return Err(Decision::Temp(TempFail::Queue));
     }
-    crate::metrics::count(p, "inbound_staged_total", None, 1);
+    crate::metrics::count_with(p, "inbound_received_total", None, &["staged"], 1);
     Ok(())
 }
 

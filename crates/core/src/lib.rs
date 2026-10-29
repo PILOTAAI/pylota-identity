@@ -38,6 +38,7 @@ pub mod sanitize;
 pub mod sealed;
 pub mod search;
 pub mod ses;
+pub mod slo;
 pub mod sns;
 pub mod ssrf;
 pub mod standard_webhooks;

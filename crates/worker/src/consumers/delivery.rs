@@ -310,7 +310,15 @@ async fn pause<P: Platform>(p: &P, r: &Route, d: &OutcomeDecision, request_id: &
                 if reason == "abuse_burst" { "containment_tenant_paused" } else { "sending_pause" },
                 &[("tenant", r.tenant_id.clone().into())],
             );
-            crate::metrics::count(p, "sending_pause_total", None, 1);
+            crate::ops::alerts::report(
+                p,
+                &format!("sending_pause:{}", r.tenant_id),
+                Some(&r.tenant_id),
+                None,
+                &json!({ "reason": reason }),
+                "delivery",
+            )
+            .await;
         }
     }
     if d.pause_domain

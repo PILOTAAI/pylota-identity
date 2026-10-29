@@ -114,6 +114,8 @@ pub enum Command {
     #[command(subcommand)]
     Keys(KeysCmd),
     #[command(subcommand)]
+    Secrets(SecretsCmd),
+    #[command(subcommand)]
     Suppressions(SuppressionsCmd),
     #[command(subcommand)]
     Lists(ListsCmd),
@@ -232,6 +234,27 @@ pub struct WranglerArgs {
     pub dir: DirArg,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
+}
+
+// ---- Secrets ----------------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum SecretsCmd {
+    /// Rotate PM_MASTER_KEY into the other slot and wait for the re-seal.
+    #[command(name = "rotate-master")]
+    RotateMaster(RotateMasterArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RotateMasterArgs {
+    /// Poll an unfinished rotation instead of starting one.
+    #[arg(long)]
+    pub resume: bool,
+    /// Overwrite the previous key within 30 days of its re-seal (after a suspected leak).
+    #[arg(long = "discard-previous")]
+    pub discard_previous: bool,
+    #[command(flatten)]
+    pub dir: DirArg,
 }
 
 // ---- Profiles ---------------------------------------------------------------------------------

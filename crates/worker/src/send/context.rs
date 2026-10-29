@@ -39,6 +39,21 @@ pub async fn load<P: Platform>(
         ))
         .await
         .map_err(|_| ApiError::new(ErrorCode::Unavailable, "D1 did not answer."))?;
+    let deployment_quota = match p.config().daily_send_quota {
+        Some(quota) => db
+            .first::<DefaultTenant>(Stmt::new(
+                "SELECT id, quota_do_id FROM tenants WHERE address_suffix = '' AND quota_do_id <> '' LIMIT 1",
+                vec![],
+            ))
+            .await
+            .map_err(|_| ApiError::new(ErrorCode::Unavailable, "D1 did not answer."))?
+            .map(|d| super::DeploymentQuota {
+                tenant_id: d.id,
+                quota_do_id: d.quota_do_id,
+                quota,
+            }),
+        None => None,
+    };
     let extra = extra.unwrap_or(Extra {
         sending_pause_reason: None,
         partner_status: None,
@@ -72,7 +87,14 @@ pub async fn load<P: Platform>(
         addresses,
         platform_domain: p.config().platform_domain.clone(),
         ses_configured: p.secrets().ses.is_some(),
+        deployment_quota,
     })
+}
+
+#[derive(Deserialize)]
+struct DefaultTenant {
+    id: String,
+    quota_do_id: String,
 }
 
 #[derive(Deserialize)]
