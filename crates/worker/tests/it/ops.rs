@@ -170,8 +170,14 @@ fn provider_quota_80() {
         send::send_ok(&s, &to, "Quota");
     };
     // Unset: nothing counted, so the first sends below start from zero today.
-    send_to(&rcpt(3));
     let before = actions("provider_quota_80").len();
+    send_to(&rcpt(3));
+    minute();
+    assert_eq!(
+        actions("provider_quota_80").len(),
+        before,
+        "unset: never fires"
+    );
 
     fakes::set_config("PM_DAILY_SEND_QUOTA", Some("10"));
     let quota = 10;

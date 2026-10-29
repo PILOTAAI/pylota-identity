@@ -368,6 +368,15 @@ compares the operations it called with `/__test/routes`. `it::cli::landing_examp
 library (`pylota_identity_cli::run`) with a profile for the harness. The worker's native
 dev-dependencies gain `pylota-identity`, `pylota-identity-cli` and `tokio`.
 
+**As built (M17 Foundation).** A test can change the Worker's variables and secrets:
+`fakes::set_config(name, value)` stores an override on the fake server, `/state` returns the set as
+`config_overrides`, and from the next `fetch`, `email`, `queue` or `scheduled` invocation on the isolate
+reads its configuration again with the overrides over its bindings (cached per override set);
+`fakes::Reset` clears them. Durable Objects keep the configuration they started with.
+`it::secrets::master_key_rotation` switches `PM_MASTER_KEY_ACTIVE` this way and rotates back before
+it ends, so it reads the harness key from `PM_ITEST_MASTER_KEY`, which `cargo xtask itest` now passes
+to the suite like the pepper. `it::ops::provider_quota_80` sets `PM_DAILY_SEND_QUOTA` the same way.
+
 ### 6.2 Test hooks
 
 Compiled only with `itest-hooks`, honoured only when `PM_ENV = "local"`, and refused unless the request

@@ -1454,6 +1454,42 @@ drill.
 6. **Reopen** by turning the switch back on, then watch `vault_redemptions_total{result=refused}` and the
    consumer reports for a day.
 
+**As built (M17 Foundation).** The metrics writer, log scrubbing, the alert list and the state alert
+evaluator run as designed, with these settlements until M17 Completion (accepted at M20):
+
+- **Metrics.** `worker::metrics::CATALOGUE` is the § 3.2 table as data (a unit test compares the two,
+  and another fails on any name the Worker counts that the catalogue lacks). Counters are summed in an
+  isolate buffer that every entry point (`fetch`, `email`, `queue`, `scheduled`, and each Durable
+  Object's request and alarm) flushes when it ends; a flush writes at most 240 points, the overflow
+  counted in `metrics_dropped_total`. Concurrent invocations on one isolate share the buffer, so the cap
+  applies per flush. With `PM_ENV = "local"` each point is also a `metric` line at debug level.
+- **Logs.** Every string value is scrubbed on the way out: a value of a content field (`subject`,
+  `body`, `text`, `html`, `from`, `to`, `cc`, `bcc`, `address`, `email`, `q`, `snippet`, `filename`,
+  …), a value that holds an address, and prose (more than three words) are written as `[redacted]`;
+  control characters are dropped and values are cut at 256 characters. The `ts`, `env`, `version`,
+  `handler` and `request_id` fields of § 2.1 are not yet added to every line.
+- **Evaluator memory.** The evaluator's working state (the firing keys, consecutive false runs and
+  re-notifications) is the `platform_state` row `alert_evaluator`; each run claims the next run number
+  with a compare-and-set before it writes anything, so overlapping runs act once. Audit rows remain the
+  record. Reporters call `ops::alerts::report`, which writes the `alert.fired` row with
+  `details.reported = true`; the evaluator reads the reports written since its last run. Reporting so
+  far: `vector_drift` (the reconciliation), `transport_breaker_open` (the outbound consumer),
+  `sending_pause` (the delivery consumer) and `erasure_stalled` (the erasure job, which also resolves it).
+- **Conditions read now:** `dlq:{queue}` (also the `dlq_items` observation), `webhook_failing`,
+  `webhook_disabled`, `domain_failing`, `platform_domain_failing`, `domain_remove_failed`,
+  `delivery_events_manual`, `erasure_failed`, `erasure_overdue`, `job_failed:{kind}`,
+  `heartbeat_missing` (with `PM_HEARTBEAT_KEY_ID`) and `provider_quota_80` (with
+  `PM_DAILY_SEND_QUOTA`). For the last, policy step 18 now counts Cloudflare-transport recipients in the
+  default tenant's `deployment_day` (`QuotaRequest::DeploymentReserve`, system mail included because it
+  goes through the same submit), and `DeploymentStatus` answers the count; the breaker's stage refusals
+  remain with [Cloud sign-up § 10.3](cloud-signup.md#103-shared-domain-breaker) (M22).
+- **M17 Completion:** alert email and the heartbeat workflow, capacity, automatic containment and the
+  switches, the break-glass alert, the dead-letter consumer and its API, and the restore tooling.
+  `GET /v1/platform/status` already serves every block: the switches from `ops_switches` (defaults
+  when no row), `firing` from the evaluator's state, `master_key` from the re-seal sweep
+  ([Security § 6.2](security.md#62-rotation-procedures)), and `capacity` with the tenant count, its D1
+  and Vectorize figures `null` until the capacity check runs.
+
 ## 10. Tests
 
 | Test | Proves | Covers |

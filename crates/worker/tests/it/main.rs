@@ -36,6 +36,7 @@ mod retention;
 mod routes;
 mod sdk;
 mod search;
+mod secrets;
 mod security;
 mod send;
 mod ses;

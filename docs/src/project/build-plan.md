@@ -1102,8 +1102,9 @@ M17 is accepted in two halves, without renumbering ([Dependency graph](#dependen
 - The alert table (the [alert list](design/observability.md#53-alert-list) as data in `ops/alerts.rs`:
   each alert's key, class, severity and runbook) and the state alert evaluator
   ([Observability §5.4](design/observability.md#54-the-state-alert-evaluator)): `core::slo::alert_state_machine`
-  and `it::ops::alert_evaluator_transitions`. M9's G3 (`it::ops::provider_quota_80`) and M23's N26
-  (`ses_identities_90pct`, checked by `it::ops::ses_alerts`) fire through them and are accepted there.
+  and `it::ops::alert_evaluator_transitions`. G3's alert part, which M9 hands to this evaluator, fires
+  through them (`it::ops::provider_quota_80`, with the `deployment_day` count it reads). N26 is accepted in M23
+  (its `ses_identities_90pct` alert, `it::ops::ses_alerts`, M23).
 - The master-key rotation ([Security §6.2](design/security.md#62-rotation-procedures)):
   the two master-key slots (`PM_MASTER_KEY`, `PM_MASTER_KEY_B`, `PM_MASTER_KEY_ACTIVE`), the
   every-minute re-seal sweep over the registry in `crates/core/src/sealed.rs`, the `master_key` block of

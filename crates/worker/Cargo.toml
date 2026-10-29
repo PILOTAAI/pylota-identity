@@ -23,6 +23,7 @@ regex = { workspace = true }
 
 
 [dev-dependencies]
+base64 = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 toml = { workspace = true }
 mail-auth = { workspace = true }

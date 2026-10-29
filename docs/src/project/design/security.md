@@ -1029,7 +1029,7 @@ previous key stays in the other slot until the next rotation overwrites it.
    `webhook_endpoints.secret_enc`, `webhook_endpoints.prev_secret_enc`, `webhook_endpoints.headers_sealed`
    (aad `pm1|webhook_endpoints|headers_sealed|{endpoint_id}`), `identity_keys.private_enc`,
    `signing_keys.ciphertext`, `domains.smtp_sealed`, `domains.smtp_pending_sealed`, `users.totp_sealed`,
-   `users.recovery_codes_sealed` and `oauth_states.pkce_sealed` (section 7.2). It logs
+   `users.recovery_codes_sealed`, `users.totp_pending_sealed` and `oauth_states.pkce_sealed` (section 7.2). It logs
    `secrets_reseal_progress` counts. The CLI polls `GET /v1/platform/status` every 60 seconds and prints
    `remaining` with an estimate (`remaining / 500` minutes) until it is 0. There is no deadline:
    interrupting the CLI changes nothing, and `--resume` goes back to polling.
@@ -1068,6 +1068,22 @@ call is refused with `422 web_bot_auth_disabled` while `PM_WEB_BOT_AUTH=off`
 Residual risk: without `revoke_previous`, a leaked signing key keeps verifying for its window (90 days,
 7 days or 24 hours). After a suspected leak, rotate that purpose with `revoke_previous=true`, then rotate
 `PM_MASTER_KEY`, which sealed it.
+
+**As built (M17 Foundation).** The Worker half of the master-key rotation is `ops/reseal.rs`, run by
+the every-minute cron before the alert evaluator, with these settlements:
+
+- The sweep selects, per registered column, rows whose envelope's key ID (characters 5–20 of the value
+  read as text) is not the active key's, opens each with whichever slot matches, seals it under the
+  active key with the same associated data, and writes it back as the column's own type (text or blob)
+  only where the column still holds the envelope it read, so a concurrent write wins. A value that
+  opens with neither slot is left in place and stays counted in `remaining`, so `resealed_at` is not
+  written while one is left; the run logs it in `secrets_reseal_progress` (`detail = unopenable:{n}`).
+- `master_key.activated` and `master_key.resealed` are audit rows with the key ID as `target_id`;
+  `activated_at` and `resealed_at` in `GET /v1/platform/status` are the latest such rows for the active
+  key only, so both are `null` right after a switch until the next cron run.
+- The registry in `core::sealed` also names `users.totp_pending_sealed` (a two-step enrolment's candidate
+  secret), which the lists above now include; `core::sealed::registry_matches_schema` checks that the
+  registry names exactly the sealed columns of `0001_init.sql`.
 
 ## 7. Cryptography
 
@@ -1117,7 +1133,7 @@ Sealed columns: `webhook_endpoints.secret_enc` and `prev_secret_enc`, `webhook_e
 (aad `pm1|webhook_endpoints|headers_sealed|{endpoint_id}`, [Parity additions § 8](parity-additions.md#8-webhook-delivery-headers-fr-wh-7)),
 `identity_keys.private_enc` (the
 32-byte Ed25519 seed), `signing_keys.ciphertext` (the `web_bot_auth` seed included), `domains.smtp_sealed` (aad `pm1|domains|smtp_sealed|{domain_id}`) and
-`domains.smtp_pending_sealed`, `users.totp_sealed`, `users.recovery_codes_sealed`, `oauth_states.pkce_sealed`; for phone numbers
+`domains.smtp_pending_sealed`, `users.totp_sealed`, `users.recovery_codes_sealed`, `users.totp_pending_sealed`, `oauth_states.pkce_sealed`; for phone numbers
 `phone_tenants.sip_sealed`, `phone_compliance_profiles.tax_ids_sealed`, `phone_compliance_profiles.representative_sealed`,
 `phone_compliance_documents.key_sealed`, `phone_requests.secrets_sealed`, `phone_voice_connectors.api_key_sealed` and
 `phone_voice_routes.server_secret_sealed` ([Phone numbers § 23](phone-numbers.md#23-security-t2)); and for the vault

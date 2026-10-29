@@ -60,6 +60,11 @@ pub const SEALED: &[Sealed] = &[
         row_id: "id",
     },
     Sealed {
+        table: "users",
+        column: "totp_pending_sealed",
+        row_id: "id",
+    },
+    Sealed {
         table: "oauth_states",
         column: "pkce_sealed",
         row_id: "state_hash",
@@ -70,10 +75,31 @@ pub const SEALED: &[Sealed] = &[
 mod tests {
     use super::SEALED;
 
-    /// Every registered column exists in `0001_init.sql`, in its table.
+    /// The registry names exactly the sealed columns of `0001_init.sql`: those ending `_enc` or
+    /// `_sealed`, and `signing_keys.ciphertext`, each in its table.
     #[test]
     fn registry_matches_schema() {
         let sql = include_str!("../../../migrations/d1/0001_init.sql");
+        let mut table = "";
+        let mut in_schema = vec![("signing_keys".to_owned(), "ciphertext".to_owned())];
+        for line in sql.lines() {
+            if let Some(rest) = line.strip_prefix("CREATE TABLE ") {
+                table = rest.split_whitespace().next().unwrap_or("");
+            } else if let Some(col) = line
+                .strip_prefix("  ")
+                .and_then(|l| l.split_whitespace().next())
+                && (col.ends_with("_enc") || col.ends_with("_sealed"))
+            {
+                in_schema.push((table.to_owned(), col.to_owned()));
+            }
+        }
+        let mut registered: Vec<(String, String)> = SEALED
+            .iter()
+            .map(|s| (s.table.to_owned(), s.column.to_owned()))
+            .collect();
+        in_schema.sort();
+        registered.sort();
+        assert_eq!(registered, in_schema);
         for s in SEALED {
             let start = sql
                 .find(&format!("CREATE TABLE {} (", s.table))

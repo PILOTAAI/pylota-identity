@@ -169,6 +169,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
     // 2. The configuration and the secrets.
     let token = hex(&random::<16>()?);
     let pepper = random::<32>()?;
+    let master = random::<32>()?;
     let template = std::fs::read_to_string(root.join("deploy/wrangler.toml.tmpl"))
         .map_err(|e| e.to_string())?;
     let config = dir.join("wrangler.itest.toml");
@@ -177,7 +178,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
         dir.join(".dev.vars"),
         format!(
             "PM_MASTER_KEY={}\nPM_KEY_PEPPER={}\nPM_HASH_KEY={}\nPM_CF_API_TOKEN=itest-cf-token\nPM_SES_ACCESS_KEY_ID=AKIAITESTITESTITEST\nPM_SES_SECRET_ACCESS_KEY=itest-ses-secret\n",
-            STANDARD.encode(random::<32>()?),
+            STANDARD.encode(master),
             STANDARD.encode(pepper),
             STANDARD.encode(random::<32>()?)
         ),
@@ -437,6 +438,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
         .env("PM_ITEST_KEY", &suite_key)
         .env("PM_ITEST_TOKEN", &token)
         .env("PM_ITEST_PEPPER", hex(&pepper))
+        .env("PM_ITEST_MASTER_KEY", STANDARD.encode(master))
         .env("PM_ITEST_STATE", &state)
         .env("PM_ITEST_CONFIG", &config)
         .env("PM_ITEST_WRANGLER", &w)

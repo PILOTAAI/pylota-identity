@@ -2059,6 +2059,20 @@ milestones that need more:
   and the harness test names identities it creates where the page writes `@acme.example.com`. The other
   M16 rows of the table below are integration tests in `crates/cli/tests`, with the names given.
 
+## As built (M17 Foundation)
+
+`idvy secrets rotate-master` runs as [§12.1](#121-secrets-rotate-master) describes, with these
+settlements:
+
+- The new key goes through the deployment's pinned Wrangler (installed from the bundle the rendered
+  `wrangler.toml` names, as `idvy wrangler` does), on stdin only; the CLI prints its key ID, never the
+  key. The polling interval is 60 seconds; `Env` gains `poll_ms`, which tests shorten.
+- Polling ends when the switched slot is the active one, `remaining` is 0 and `resealed_at` is set;
+  until the new version serves the switched slot it prints that it is waiting. The `--json` document is
+  `{ active_slot, kid, resealed_at, next_rotation_from }`; a refusal within 30 days carries
+  `details.allowed_from`.
+- `dlq`, `ops`, `jobs` and `erasure retry|reapply` remain with M17 Completion.
+
 ## Tests
 
 | Test | Proves | Covers |
