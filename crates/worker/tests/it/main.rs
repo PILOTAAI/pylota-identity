@@ -25,6 +25,7 @@ mod keys;
 mod lists;
 mod logs;
 mod mailbox;
+mod mcp;
 mod messages;
 mod partners;
 mod policy;
@@ -81,7 +82,7 @@ fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} is set by `cargo xtask itest`"))
 }
 
-fn client() -> &'static reqwest::blocking::Client {
+pub fn client() -> &'static reqwest::blocking::Client {
     static C: OnceLock<reqwest::blocking::Client> = OnceLock::new();
     C.get_or_init(|| {
         let pem = std::fs::read(env("PM_ITEST_CA")).expect("the run's certificate");

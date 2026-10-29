@@ -1,0 +1,777 @@
+//! The MCP server through workerd (MCP server › Tests): the tool list and its schemas, the mapping of
+//! each tool onto its REST route, tool and protocol errors, both eras and the transport's refusals.
+
+use serde_json::{Value, json};
+
+use crate::send::{Sender, open_sender};
+use crate::{Resp, call, get, inbound, mail, mint, platform, post};
+
+/// The tool permissions of M15, all of them.
+const ALL: &[&str] = &[
+    "identities:read",
+    "messages:read",
+    "messages:write",
+    "messages:send",
+    "search:read",
+    "search:agentic",
+    "attachments:read",
+];
+
+const LEGACY: &str = "2025-11-25";
+const MODERN: &str = "2026-07-28";
+
+/// A JSON-RPC request in the legacy era (no handshake needed: the server keeps no session).
+fn rpc(key: &str, method: &str, params: Value) -> Resp {
+    call(
+        "POST",
+        "/mcp",
+        Some(key),
+        Some(json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params })),
+        &[
+            ("mcp-protocol-version", LEGACY),
+            ("accept", "application/json, text/event-stream"),
+        ],
+    )
+}
+
+/// A modern request: `_meta` in the body and the mirrored headers.
+fn modern(key: &str, method: &str, mut params: Value, headers: &[(&str, &str)]) -> Resp {
+    params["_meta"] = json!({
+        "io.modelcontextprotocol/protocolVersion": MODERN,
+        "io.modelcontextprotocol/clientInfo": { "name": "it", "version": "1" },
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
+    call(
+        "POST",
+        "/mcp",
+        Some(key),
+        Some(json!({ "jsonrpc": "2.0", "id": "m1", "method": method, "params": params })),
+        headers,
+    )
+}
+
+/// `tools/call`: the result object (`content`, `structuredContent`, `isError`).
+fn tool(key: &str, name: &str, args: Value) -> Value {
+    let r = rpc(
+        key,
+        "tools/call",
+        json!({ "name": name, "arguments": args }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.get("error").is_none(), "{name}: {}", r.body);
+    r.body["result"].clone()
+}
+
+/// A tool's success: its `structuredContent`, after checking that the text block holds the same JSON.
+fn ok(key: &str, name: &str, args: Value) -> Value {
+    let r = tool(key, name, args);
+    assert_eq!(r["isError"], false, "{name}: {r}");
+    let text: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text, r["structuredContent"], "{name}");
+    r["structuredContent"].clone()
+}
+
+/// A tool's error envelope.
+fn err(key: &str, name: &str, args: Value) -> Value {
+    let r = tool(key, name, args);
+    assert_eq!(r["isError"], true, "{name}: {r}");
+    assert!(r.get("structuredContent").is_none());
+    serde_json::from_str::<Value>(r["content"][0]["text"].as_str().unwrap()).unwrap()["error"]
+        .clone()
+}
+
+fn names(key: &str) -> Vec<String> {
+    let r = rpc(key, "tools/list", json!({}));
+    assert_eq!(r.status, 200, "{}", r.body);
+    r.body["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// A sender with one received message, and a tenant key holding every tool permission.
+fn fixture(tag: &str) -> (Sender, String, Value) {
+    let s = open_sender(tag, "live");
+    let (_, key) = mint(
+        &platform(),
+        json!({ "name": tag, "level": "tenant", "tenant_id": s.tid, "permissions": ALL }),
+    );
+    let from = "ola@mcp.example";
+    let subject = format!("{tag} plate AB12CDE");
+    let (o, _) = inbound(
+        from,
+        &s.addr,
+        &mail(from, &s.addr, &subject, "About the booking."),
+    );
+    assert_eq!(o, "accepted");
+    let m = crate::wait_stored(&s.iid, &s.key, "received", 1)[0].clone();
+    (s, key, m)
+}
+
+/// `it::mcp::input_schemas_plain_objects`: every listed tool's `inputSchema` is a plain object at the
+/// top level; `mail_update_labels` with both or neither target is refused and changes nothing.
+#[test]
+fn input_schemas_plain_objects() {
+    let (s, key, m) = fixture("mcp schemas");
+    let r = rpc(&key, "tools/list", json!({}));
+    let list = r.body["result"]["tools"].as_array().unwrap().clone();
+    assert_eq!(list.len(), 14, "{}", r.body);
+    for t in &list {
+        let s = &t["inputSchema"];
+        assert_eq!(s["type"], "object", "{}", t["name"]);
+        for k in ["oneOf", "anyOf", "allOf", "not"] {
+            assert!(s.get(k).is_none(), "{} has {k} at the top", t["name"]);
+        }
+        assert_eq!(t["outputSchema"]["type"], "object", "{}", t["name"]);
+        assert!(
+            !t["outputSchema"].to_string().contains("$ref"),
+            "{}",
+            t["name"]
+        );
+    }
+    let id = m["id"].as_str().unwrap();
+    let thread = m["thread_id"].as_str().unwrap();
+    let both = err(
+        &key,
+        "mail_update_labels",
+        json!({ "identity": s.iid, "message_id": id, "thread_id": thread, "labels_add": ["x"] }),
+    );
+    assert_eq!(both["code"], "invalid_request");
+    assert_eq!(both["details"]["errors"][0]["path"], "thread_id");
+    let none = err(
+        &key,
+        "mail_update_labels",
+        json!({ "identity": s.iid, "labels_add": ["x"] }),
+    );
+    assert_eq!(none["details"]["errors"][0]["path"], "message_id");
+    let nothing = err(
+        &key,
+        "mail_update_labels",
+        json!({ "identity": s.iid, "message_id": id }),
+    );
+    assert_eq!(nothing["details"]["errors"][0]["path"], "labels_add");
+    let after = get(&format!("/v1/identities/{}/messages/{id}", s.iid), &key);
+    assert_eq!(after.body["labels"], m["labels"], "nothing changed");
+    let done = ok(
+        &key,
+        "mail_update_labels",
+        json!({ "identity": s.iid, "message_id": id, "labels_add": ["claimed"], "read": true }),
+    );
+    assert_eq!(done["id"], id);
+    assert!(
+        done["labels"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("claimed"))
+    );
+    assert_eq!(done["read"], true);
+}
+
+/// FR-MCP-1: each permission set lists exactly its tools; a hidden and a missing tool get the same
+/// `-32602`; a key's `mcp_tools` narrows the list ([Y49], [Y51]).
+#[test]
+fn tools_list_filtered_by_permission() {
+    let s = open_sender("mcp filter", "live");
+    let mk = |perms: &[&str], extra: Value| {
+        let mut b =
+            json!({ "name": "f", "level": "tenant", "tenant_id": s.tid, "permissions": perms });
+        if let Some(o) = extra.as_object() {
+            for (k, v) in o {
+                b[k] = v.clone();
+            }
+        }
+        mint(&platform(), b).1
+    };
+    let read = mk(&["messages:read"], json!({}));
+    assert_eq!(
+        names(&read),
+        ["mail_list_threads", "mail_get_thread", "mail_get_message"]
+    );
+    let search = mk(&["search:read"], json!({}));
+    assert_eq!(
+        names(&search),
+        [
+            "mail_search",
+            "mail_find_related",
+            "mail_search_contacts",
+            "mail_wait"
+        ]
+    );
+    let deep = mk(&["search:read", "search:agentic"], json!({}));
+    assert!(names(&deep).contains(&"mail_deep_search".to_owned()));
+    let sender = mk(&["messages:send"], json!({}));
+    assert_eq!(names(&sender), ["mail_send", "mail_reply", "mail_forward"]);
+    let hidden = rpc(
+        &read,
+        "tools/call",
+        json!({ "name": "mail_search", "arguments": { "q": "x" } }),
+    );
+    let missing = rpc(
+        &read,
+        "tools/call",
+        json!({ "name": "mail_nope", "arguments": {} }),
+    );
+    assert_eq!(hidden.status, 200);
+    assert_eq!(hidden.body["error"]["code"], -32602);
+    assert_eq!(hidden.body["error"]["message"], "Unknown tool: mail_search");
+    assert_eq!(missing.body["error"]["message"], "Unknown tool: mail_nope");
+    // Y49 and Y51: the allow-list narrows, and a name the release does not have is ignored.
+    let narrow = mk(
+        &["messages:read", "search:read"],
+        json!({ "mcp_tools": ["mail_get_message", "mail_search", "mail_retired_tool"] }),
+    );
+    assert_eq!(names(&narrow), ["mail_search", "mail_get_message"]);
+    let blocked = rpc(
+        &narrow,
+        "tools/call",
+        json!({ "name": "mail_list_threads", "arguments": { "identity": s.iid } }),
+    );
+    assert_eq!(
+        blocked.body["error"]["message"],
+        "Unknown tool: mail_list_threads"
+    );
+    // The prompt needs search:read.
+    let p = rpc(&read, "prompts/list", json!({}));
+    assert_eq!(p.body["result"]["prompts"], json!([]));
+    let p = rpc(
+        &search,
+        "prompts/get",
+        json!({ "name": "mail_search_strategy", "arguments": { "goal": "find the claim" } }),
+    );
+    let text = p.body["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap();
+    assert!(text.ends_with("Your current goal: find the claim"));
+    let p = rpc(
+        &read,
+        "prompts/get",
+        json!({ "name": "mail_search_strategy" }),
+    );
+    assert_eq!(
+        p.body["error"]["message"],
+        "Unknown prompt: mail_search_strategy"
+    );
+}
+
+/// Without volatile members (`as_of`).
+fn stable(mut v: Value) -> Value {
+    if let Some(o) = v.as_object_mut() {
+        o.remove("as_of");
+    }
+    v
+}
+
+/// FR-MCP-1, FR-OUT-1: every tool answers what its REST route answers for the same inputs, including
+/// the idempotent replay of the send tools.
+#[test]
+fn call_maps_to_rest() {
+    let (s, key, m) = fixture("mcp table");
+    let i = &s.iid;
+    let id = m["id"].as_str().unwrap();
+    let thread = m["thread_id"].as_str().unwrap();
+    let rest_post = |path: &str, body: Value| {
+        let r = post(path, &key, body);
+        assert_eq!(r.status, 200, "{path}: {}", r.body);
+        r.body
+    };
+    // Searchable once indexed.
+    crate::eventually(60, "the message to be searchable", || {
+        let r = post(
+            &format!("/v1/identities/{i}/search"),
+            &key,
+            json!({ "q": "booking", "mode": "keyword" }),
+        );
+        (r.body["hits"].as_array().is_some_and(|h| !h.is_empty())).then_some(())
+    });
+    let rest_get = |path: &str| {
+        let r = get(path, &key);
+        assert_eq!(r.status, 200, "{path}: {}", r.body);
+        r.body
+    };
+    // (tool, arguments, the REST answer for the same inputs)
+    let table: Vec<(&str, Value, Value)> = vec![
+        (
+            "mail_list_identities",
+            json!({}),
+            rest_get("/v1/identities?limit=25"),
+        ),
+        (
+            "mail_list_threads",
+            json!({ "identity": s.addr }),
+            rest_get(&format!(
+                "/v1/identities/{i}/threads?archived=false&limit=20"
+            )),
+        ),
+        (
+            "mail_get_thread",
+            json!({ "identity": i, "thread_id": thread }),
+            rest_get(&format!(
+                "/v1/identities/{i}/threads/{thread}?messages_limit=10"
+            )),
+        ),
+        (
+            "mail_get_message",
+            json!({ "identity": i, "message_id": id, "include_headers": true }),
+            rest_get(&format!("/v1/identities/{i}/messages/{id}?include=headers")),
+        ),
+        (
+            "mail_find_related",
+            json!({ "identity": i, "message_id": id }),
+            rest_get(&format!("/v1/identities/{i}/messages/{id}/related?limit=5")),
+        ),
+        (
+            "mail_search_contacts",
+            json!({ "identity": i, "q": "ola" }),
+            rest_get(&format!("/v1/identities/{i}/contacts?q=ola&limit=10")),
+        ),
+        (
+            "mail_search",
+            json!({ "identity": i, "q": "booking", "mode": "keyword" }),
+            rest_post(
+                &format!("/v1/identities/{i}/search"),
+                json!({ "q": "booking", "mode": "keyword", "group_by": "message", "limit": 10, "snippet_chars": 200, "include_quarantined": false }),
+            ),
+        ),
+        (
+            "mail_search",
+            json!({ "scope": "tenant", "q": "booking", "mode": "keyword" }),
+            rest_post(
+                &format!("/v1/tenants/{}/search", s.tid),
+                json!({ "q": "booking", "mode": "keyword", "group_by": "message", "limit": 10, "snippet_chars": 200, "include_quarantined": false }),
+            ),
+        ),
+    ];
+    for (name, args, rest) in table {
+        assert_eq!(
+            stable(ok(&key, name, args.clone())),
+            stable(rest),
+            "{name} {args}"
+        );
+    }
+    let hits = ok(
+        &key,
+        "mail_search",
+        json!({ "identity": i, "q": "booking", "mode": "keyword" }),
+    );
+    assert_eq!(hits["hits"][0]["message_id"], id, "{hits}");
+    let w = ok(
+        &key,
+        "mail_wait",
+        json!({ "identity": i, "thread_id": thread, "timeout_seconds": 1, "since": "2099-01-01T00:00:00Z" }),
+    );
+    assert_eq!(w["timed_out"], true, "{w}");
+    // The send tools: the queued message, and the same result on a replay.
+    let args = json!({ "identity": i, "to": ["pia@mcp.example"], "subject": "MCP send", "text": "Hi", "idempotency_key": "mcp-table-1" });
+    let first = ok(&key, "mail_send", args.clone());
+    assert_eq!(first["deduplicated"], false, "{first}");
+    let again = ok(&key, "mail_send", args);
+    assert_eq!(
+        (again["id"].clone(), again["deduplicated"].clone()),
+        (first["id"].clone(), json!(true))
+    );
+    let sent = rest_get(&format!(
+        "/v1/identities/{i}/messages/{}",
+        first["id"].as_str().unwrap()
+    ));
+    assert_eq!(sent["subject"], "MCP send");
+    let reply = ok(
+        &key,
+        "mail_reply",
+        json!({ "identity": i, "message_id": id, "text": "Thanks", "idempotency_key": "mcp-table-2" }),
+    );
+    assert_eq!(reply["thread_id"], thread);
+    let fwd = ok(
+        &key,
+        "mail_forward",
+        json!({ "identity": i, "message_id": id, "to": ["rex@mcp.example"], "text": "FYI", "idempotency_key": "mcp-table-3" }),
+    );
+    assert_eq!(fwd["direction"], "outbound");
+    // An identity key acts as its own identity and cannot name another.
+    let (_, own) = mint(
+        &platform(),
+        json!({ "name": "own", "level": "identity", "tenant_id": s.tid, "identity_id": i, "permissions": ["messages:read"] }),
+    );
+    let threads = ok(&own, "mail_list_threads", json!({}));
+    assert_eq!(
+        threads,
+        rest_get(&format!(
+            "/v1/identities/{i}/threads?archived=false&limit=20"
+        ))
+    );
+    let other = crate::identity(&platform(), &s.tid, "mcpother");
+    let e = err(
+        &own,
+        "mail_list_threads",
+        json!({ "identity": other["id"] }),
+    );
+    assert_eq!(e["code"], "identity_not_found");
+    let e = err(
+        &own,
+        "mail_list_threads",
+        json!({ "identity": other["primary_address"] }),
+    );
+    assert_eq!(e["code"], "identity_not_found");
+}
+
+/// FR-API-2: schema failures, REST errors and rate limits are `isError` results carrying the envelope;
+/// protocol errors use the codes and statuses of MCP § 2.4.
+#[test]
+fn error_mapping() {
+    let (s, key, _) = fixture("mcp errors");
+    let e = err(
+        &key,
+        "mail_get_message",
+        json!({ "identity": s.iid, "message_id": "nope", "x": 1 }),
+    );
+    assert_eq!(e["code"], "invalid_request");
+    let paths: Vec<&str> = e["details"]["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["path"].as_str().unwrap())
+        .collect();
+    assert!(paths.contains(&"message_id") && paths.contains(&"x"), "{e}");
+    let send = json!({ "identity": s.iid, "to": ["a@mcp.example"], "subject": "x", "text": "y" });
+    assert_eq!(
+        err(&key, "mail_send", send.clone())["code"],
+        "idempotency_key_required"
+    );
+    let mut bad = send.clone();
+    bad["idempotency_key"] = "\u{1}".into();
+    assert_eq!(
+        err(&key, "mail_send", bad)["code"],
+        "invalid_idempotency_key"
+    );
+    let e = err(
+        &key,
+        "mail_get_message",
+        json!({ "identity": s.iid, "message_id": "msg_01ARYZ6S41TSV4RRFFQ69G5FAV" }),
+    );
+    assert_eq!(e["code"], "message_not_found");
+    assert_eq!(e["details"]["http_status"], 404);
+    assert!(
+        e["docs"]
+            .as_str()
+            .unwrap()
+            .ends_with("#code-message_not_found")
+    );
+    let e = err(&key, "mail_list_threads", json!({}));
+    assert_eq!(
+        (
+            e["code"].as_str(),
+            e["details"]["errors"][0]["path"].as_str()
+        ),
+        (Some("invalid_request"), Some("identity"))
+    );
+    let e = err(
+        &key,
+        "mail_search",
+        json!({ "q": "x", "identity_ids": [s.iid] }),
+    );
+    assert_eq!(e["code"], "invalid_request");
+    // Protocol errors.
+    let raw = |body: &str, ct: &str| {
+        let r = crate::client()
+            .post(format!("{}/mcp", std::env::var("PM_ITEST_URL").unwrap()))
+            .bearer_auth(&key)
+            .header("content-type", ct)
+            .header("mcp-protocol-version", LEGACY)
+            .body(body.to_owned())
+            .send()
+            .unwrap();
+        let status = r.status().as_u16();
+        (status, r.json::<Value>().unwrap_or(Value::Null))
+    };
+    let (st, b) = raw("{not json", "application/json");
+    assert_eq!(
+        (st, b["error"]["code"].as_i64(), b["id"].is_null()),
+        (400, Some(-32700), true)
+    );
+    let (st, b) = raw(
+        "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}]",
+        "application/json",
+    );
+    assert_eq!((st, b["error"]["code"].as_i64()), (400, Some(-32600)));
+    let (st, b) = raw("{}", "text/plain");
+    assert_eq!((st, b["error"]["code"].as_i64()), (415, Some(-32600)));
+    let r = rpc(&key, "resources/list", json!({}));
+    assert_eq!(
+        (r.status, r.body["error"]["code"].as_i64()),
+        (200, Some(-32601))
+    );
+    let r = modern(
+        &key,
+        "resources/list",
+        json!({}),
+        &[
+            ("mcp-protocol-version", MODERN),
+            ("mcp-method", "resources/list"),
+        ],
+    );
+    assert_eq!(
+        (r.status, r.body["error"]["code"].as_i64()),
+        (404, Some(-32601))
+    );
+    let r = rpc(
+        &key,
+        "tools/call",
+        json!({ "name": "mail_search", "arguments": [1] }),
+    );
+    assert_eq!(r.body["error"]["code"], -32602);
+    // A notification is accepted with no body.
+    let n = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })),
+        &[("mcp-protocol-version", LEGACY)],
+    );
+    assert_eq!(n.status, 202);
+}
+
+/// M15: `initialize` mints no session; a sent session ID is ignored; `GET` and `DELETE` answer `405`.
+#[test]
+fn legacy_session() {
+    let (_, key, _) = fixture("mcp legacy");
+    let r = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(
+            json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "it", "version": "1" } } }),
+        ),
+        &[],
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.header("mcp-session-id").is_none());
+    let res = &r.body["result"];
+    assert_eq!(res["protocolVersion"], "2025-06-18");
+    assert_eq!(res["serverInfo"]["name"], "pylota-identity");
+    assert_eq!(res["capabilities"]["tools"]["listChanged"], false);
+    assert!(res["instructions"].as_str().unwrap().contains("untrusted"));
+    let old = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(
+            json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2024-11-05" } }),
+        ),
+        &[],
+    );
+    assert_eq!(
+        (old.status, old.body["result"]["protocolVersion"].as_str()),
+        (200, Some("2025-11-25"))
+    );
+    let r = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(json!({ "jsonrpc": "2.0", "id": 2, "method": "ping" })),
+        &[
+            ("mcp-protocol-version", LEGACY),
+            ("mcp-session-id", "made-up"),
+        ],
+    );
+    assert_eq!((r.status, &r.body["result"]), (200, &json!({})));
+    assert!(r.header("mcp-session-id").is_none());
+    for m in ["GET", "DELETE", "PUT"] {
+        let r = call(m, "/mcp", Some(&key), None, &[]);
+        assert_eq!((r.status, r.header("allow")), (405, Some("POST")), "{m}");
+    }
+    assert_eq!(call("OPTIONS", "/mcp", None, None, &[]).status, 204);
+}
+
+/// MCP § 2.2: the mirrored headers must match the body; `Mcp-Name` may be base64-encoded.
+#[test]
+fn modern_headers() {
+    let (_, key, _) = fixture("mcp modern");
+    let h = [
+        ("mcp-protocol-version", MODERN),
+        ("mcp-method", "tools/list"),
+    ];
+    let r = modern(&key, "tools/list", json!({}), &h);
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["result"]["resultType"], "complete");
+    assert_eq!(r.body["result"]["cacheScope"], "private");
+    let d = modern(
+        &key,
+        "server/discover",
+        json!({}),
+        &[
+            ("mcp-protocol-version", MODERN),
+            ("mcp-method", "server/discover"),
+        ],
+    );
+    assert_eq!(
+        d.body["result"]["supportedVersions"],
+        json!([MODERN, "2025-11-25", "2025-06-18"])
+    );
+    assert_eq!(
+        d.body["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+        "pylota-identity"
+    );
+    for headers in [
+        vec![("mcp-method", "tools/list")],
+        vec![("mcp-protocol-version", MODERN)],
+        vec![("mcp-protocol-version", MODERN), ("mcp-method", "ping")],
+    ] {
+        let r = modern(&key, "tools/list", json!({}), &headers);
+        assert_eq!(
+            (r.status, r.body["error"]["code"].as_i64()),
+            (400, Some(-32020)),
+            "{headers:?}"
+        );
+    }
+    fn call_h(name: &str) -> [(&'static str, &str); 3] {
+        [
+            ("mcp-protocol-version", MODERN),
+            ("mcp-method", "tools/call"),
+            ("mcp-name", name),
+        ]
+    }
+    let args = json!({ "name": "mail_list_identities", "arguments": {} });
+    let r = modern(&key, "tools/call", args.clone(), &call_h("mail_search"));
+    assert_eq!(r.body["error"]["code"], -32020);
+    let encoded = format!("=?base64?{}?=", "bWFpbF9saXN0X2lkZW50aXRpZXM=");
+    let r = modern(&key, "tools/call", args, &call_h(&encoded));
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["result"]["isError"], false);
+}
+
+/// MCP § 2.2, § 2.3: an unknown version is `400`/`-32022` with the supported list.
+#[test]
+fn unsupported_version() {
+    let (_, key, _) = fixture("mcp versions");
+    let mut body = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "params": { "_meta": { "io.modelcontextprotocol/protocolVersion": "2099-01-01" } } });
+    let r = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(body.clone()),
+        &[
+            ("mcp-protocol-version", "2099-01-01"),
+            ("mcp-method", "ping"),
+        ],
+    );
+    assert_eq!(
+        (r.status, r.body["error"]["code"].as_i64()),
+        (400, Some(-32022))
+    );
+    assert_eq!(r.body["error"]["data"]["supported"][0], MODERN);
+    assert_eq!(r.body["error"]["data"]["requested"], "2099-01-01");
+    body["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = LEGACY.into();
+    let r = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(body),
+        &[("mcp-protocol-version", LEGACY), ("mcp-method", "ping")],
+    );
+    assert_eq!(
+        r.body["error"]["code"], -32022,
+        "a legacy version with modern _meta"
+    );
+    let r = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" })),
+        &[("mcp-protocol-version", "2025-03-26")],
+    );
+    assert_eq!(
+        (r.status, r.body["error"]["code"].as_i64()),
+        (400, Some(-32022))
+    );
+}
+
+/// MCP § 2.1: a foreign `Origin` is refused with an error that has no `id`.
+#[test]
+fn origin_403() {
+    let (_, key, _) = fixture("mcp origin");
+    let r = call(
+        "POST",
+        "/mcp",
+        Some(&key),
+        Some(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" })),
+        &[
+            ("mcp-protocol-version", LEGACY),
+            ("origin", "https://evil.example"),
+        ],
+    );
+    assert_eq!(r.status, 403);
+    assert!(r.body.get("id").is_none(), "{}", r.body);
+    assert_eq!(r.body["error"]["code"], -32000);
+}
+
+/// FR-MCP-1: missing, unknown and revoked keys get `401` with `WWW-Authenticate`.
+#[test]
+fn auth_401() {
+    let (s, _, _) = fixture("mcp auth");
+    let (kid, key) = mint(
+        &platform(),
+        json!({ "name": "r", "level": "tenant", "tenant_id": s.tid, "permissions": ["messages:read"] }),
+    );
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" });
+    let h = [("mcp-protocol-version", LEGACY)];
+    let none = call("POST", "/mcp", None, Some(body.clone()), &h);
+    let made_up = call(
+        "POST",
+        "/mcp",
+        Some("pmk_live_nope"),
+        Some(body.clone()),
+        &h,
+    );
+    let r = crate::delete(&format!("/v1/keys/{kid}"), &platform());
+    assert!(r.status < 300, "{}", r.body);
+    let revoked = call("POST", "/mcp", Some(&key), Some(body), &h);
+    for (what, r) in [("none", none), ("unknown", made_up), ("revoked", revoked)] {
+        assert_eq!(r.status, 401, "{what}: {}", r.body);
+        assert!(
+            r.header("www-authenticate")
+                .unwrap()
+                .starts_with("Bearer realm=\"pylota-identity\"")
+        );
+        assert_eq!(r.body["error"]["code"], -32000);
+        let code = r.body["error"]["data"]["error"]["code"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            ["unauthenticated", "key_revoked", "key_expired"].contains(&code),
+            "{what}: {}",
+            r.body
+        );
+    }
+}
+
+/// MCP § 4.1, § 4.2, § 4.3: every tool's four annotations follow its effect class, carries the result
+/// size hint, and every description fits its budget with the safety rule early.
+#[test]
+fn annotations_complete() {
+    let (_, key, _) = fixture("mcp annotations");
+    let r = rpc(&key, "tools/list", json!({}));
+    for t in r.body["result"]["tools"].as_array().unwrap() {
+        let name = t["name"].as_str().unwrap();
+        let class = match name {
+            "mail_send" | "mail_reply" | "mail_forward" => (false, false, true, true),
+            "mail_update_labels" => (false, true, true, false),
+            _ => (true, false, true, false),
+        };
+        let a = &t["annotations"];
+        let got = (
+            a["readOnlyHint"].as_bool().unwrap(),
+            a["destructiveHint"].as_bool().unwrap(),
+            a["idempotentHint"].as_bool().unwrap(),
+            a["openWorldHint"].as_bool().unwrap(),
+        );
+        assert_eq!(got, class, "{name}");
+        assert_eq!(
+            t["_meta"]["anthropic/maxResultSizeChars"], 100_000,
+            "{name}"
+        );
+        let d = t["description"].as_str().unwrap();
+        assert!(d.len() <= 4096, "{name}");
+    }
+}

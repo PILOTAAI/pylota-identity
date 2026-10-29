@@ -742,7 +742,7 @@ fn invalid(errors: Vec<(String, String)>) -> ApiError {
         .collect();
     let first = errors.first().map(|(p, _)| p.as_str()).unwrap_or("");
     ApiError::invalid(first, "The arguments do not match the tool's input schema.")
-        .details(json!({ "field": first, "errors": list }))
+        .details(json!({ "errors": list }))
 }
 
 // ---- Calling a tool --------------------------------------------------------------------------
