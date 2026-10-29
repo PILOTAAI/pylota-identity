@@ -12,20 +12,24 @@ mod delivery;
 mod dkim;
 mod domains;
 mod erasure;
+mod export;
 mod fakes;
 mod idempotency;
 mod identities;
 mod inbound;
 mod index;
 mod intents;
+mod jobs;
 mod keyring;
 mod keys;
 mod lists;
+mod logs;
 mod mailbox;
 mod messages;
 mod partners;
 mod policy;
 mod quarantine;
+mod retention;
 mod routes;
 mod search;
 mod security;
@@ -134,6 +138,17 @@ pub fn call(
         headers,
         body,
     }
+}
+
+/// A `GET` without a key whose body is kept as bytes (downloads): `(status, body)`.
+pub fn fetch_bytes(path: &str) -> (u16, Vec<u8>) {
+    fakes::start();
+    let r = client()
+        .get(format!("{}{path}", env("PM_ITEST_URL")))
+        .send()
+        .expect("the Worker answers");
+    let status = r.status().as_u16();
+    (status, r.bytes().map(|b| b.to_vec()).unwrap_or_default())
 }
 
 pub fn get(path: &str, key: &str) -> Resp {

@@ -384,11 +384,22 @@ pub async fn serve<P: Platform>(
                         body["body_base64"].as_str().unwrap_or(""),
                     )
                     .unwrap_or_default();
+                    let custom: Vec<(String, String)> = body["custom"]
+                        .as_object()
+                        .map(|o| {
+                            o.iter()
+                                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_owned()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     store
                         .put(
                             &key,
                             pylota_identity_platform::r2::BlobBody::Bytes(bytes),
-                            &Default::default(),
+                            &pylota_identity_platform::r2::BlobMeta {
+                                content_type: None,
+                                custom,
+                            },
                         )
                         .await?;
                     Ok(Reply::json(200, json!({})))
