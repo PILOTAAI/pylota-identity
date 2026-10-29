@@ -10,11 +10,11 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Dead-letter item ID (`dlq_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DlqItemId(pub String);
 
 /// Job ID (`job_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct JobId(pub String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -624,4 +624,16 @@ pub struct AgentSignupPage {
     pub data: Vec<AgentSignupListItem>,
     #[schema(required = true)]
     pub next_cursor: Option<String>,
+}
+
+impl std::fmt::Display for DlqItemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for JobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

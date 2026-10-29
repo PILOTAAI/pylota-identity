@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Message IDs of one identity. A repeated ID is processed once, at its first position.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct BatchMessageIds(pub Vec<MessageId>);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]

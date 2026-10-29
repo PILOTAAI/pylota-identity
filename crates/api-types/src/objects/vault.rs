@@ -8,12 +8,13 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Vault consumer ID (`vcn_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultConsumerId(pub String);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultOkpJwkKty {
     #[serde(rename = "OKP")]
+    #[default]
     OKP,
 }
 
@@ -22,9 +23,10 @@ fn schema_vault_okp_jwk_kty_property() -> utoipa::openapi::RefOr<utoipa::openapi
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultOkpJwkCrv {
     #[serde(rename = "Ed25519")]
+    #[default]
     Ed25519,
     #[serde(rename = "X25519")]
     X25519,
@@ -36,7 +38,7 @@ fn schema_vault_okp_jwk_crv_property() -> utoipa::openapi::RefOr<utoipa::openapi
 }
 
 /// A public OKP JWK. A JWK with a private member (`d`) is refused.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultOkpJwk {
     #[schema(schema_with = schema_vault_okp_jwk_kty_property)]
     pub kty: VaultOkpJwkKty,
@@ -226,9 +228,10 @@ pub struct VaultSignature {
     pub x_amz_content_sha256: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerDeclarationsSessionRecording {
     #[serde(rename = "off")]
+    #[default]
     Off,
 }
 
@@ -238,9 +241,10 @@ fn schema_vault_consumer_declarations_session_recording_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerDeclarationsSessionLogging {
     #[serde(rename = "off")]
+    #[default]
     Off,
 }
 
@@ -250,9 +254,10 @@ fn schema_vault_consumer_declarations_session_logging_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerDeclarationsCaptchaSolving {
     #[serde(rename = "off")]
+    #[default]
     Off,
 }
 
@@ -262,9 +267,10 @@ fn schema_vault_consumer_declarations_captcha_solving_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerDeclarationsExtensions {
     #[serde(rename = "none")]
+    #[default]
     None,
 }
 
@@ -274,9 +280,10 @@ fn schema_vault_consumer_declarations_extensions_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerDeclarationsHonestIdentity {
     #[serde(rename = "web_bot_auth")]
+    #[default]
     WebBotAuth,
     #[serde(rename = "user_agent")]
     UserAgent,
@@ -317,7 +324,7 @@ fn schema_vault_consumer_declarations_modes_property()
     serde_json::from_str(r###"{"items": {"enum": ["cdp", "proxy"], "type": "string"}, "minItems": 1, "type": "array"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultConsumerDeclarations {
     #[schema(schema_with = schema_vault_consumer_declarations_session_recording_property)]
     pub session_recording: VaultConsumerDeclarationsSessionRecording,
@@ -668,9 +675,10 @@ fn schema_vault_redeem_context_form_kind_property()
     serde_json::from_str(r###"{"enum": ["login", "signup", "password_change", "otp", "reauth", null], "type": ["string", "null"]}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultRedeemContextMode {
     #[serde(rename = "cdp")]
+    #[default]
     Cdp,
     #[serde(rename = "proxy")]
     Proxy,
@@ -727,7 +735,7 @@ fn schema_vault_redeem_context_browser_property()
     serde_json::from_str(r###"{"properties": {"captcha_solving": {"type": "string"}, "extensions": {"type": "string"}, "hosting": {"enum": ["self_hosted", "third_party"], "type": "string"}, "provider": {"type": ["string", "null"]}, "session_logging": {"type": "string"}, "session_recording": {"type": "string"}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultRedeemContext {
     pub run_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -810,4 +818,10 @@ pub struct VaultUseStatus {
     #[schema(required = true)]
     pub closes_at: Option<String>,
     pub remaining_phases: Vec<VaultPhase>,
+}
+
+impl std::fmt::Display for VaultConsumerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

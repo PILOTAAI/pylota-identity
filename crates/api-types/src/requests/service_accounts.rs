@@ -24,7 +24,7 @@ fn schema_service_account_create_request_vault_login_password_generate_classes_p
     serde_json::from_str(r###"{"items": {"enum": ["lower", "upper", "digit", "symbol"], "type": "string"}, "type": "array", "uniqueItems": true}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServiceAccountCreateRequestVaultLoginPasswordGenerate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = i64)]
@@ -39,7 +39,7 @@ fn schema_service_account_create_request_vault_login_password_generate_property(
     serde_json::from_str(r###"{"additionalProperties": false, "properties": {"classes": {"items": {"enum": ["lower", "upper", "digit", "symbol"], "type": "string"}, "type": "array", "uniqueItems": true}, "length": {"default": 24, "maximum": 128, "minimum": 16, "type": "integer"}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServiceAccountCreateRequestVaultLoginPassword {
     #[schema(schema_with = schema_service_account_create_request_vault_login_password_generate_property)]
     pub generate: ServiceAccountCreateRequestVaultLoginPasswordGenerate,
@@ -51,7 +51,7 @@ fn schema_service_account_create_request_vault_login_password_property()
 }
 
 /// Optional: when the entry is approved, the same batch creates an identity-scoped vault login with a generated password and an active `fill` grant to the requesting identity for 90 days (docs › Agent credential vault § 3.5). Not stored on the entry.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServiceAccountCreateRequestVaultLogin {
     pub origins: Vec<VaultOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -70,7 +70,7 @@ fn schema_service_account_create_request_vault_login_property()
     serde_json::from_str(r###"{"additionalProperties": false, "description": "Optional: when the entry is approved, the same batch creates an identity-scoped vault login with a generated password and an active `fill` grant to the requesting identity for 90 days (docs › Agent credential vault § 3.5). Not stored on the entry.", "properties": {"approval": {"$ref": "#/components/schemas/VaultApprovalLevel"}, "email_otp": {"default": false, "type": "boolean"}, "origins": {"items": {"$ref": "#/components/schemas/VaultOrigin"}, "maxItems": 10, "minItems": 1, "type": "array", "uniqueItems": true}, "password": {"additionalProperties": false, "properties": {"generate": {"additionalProperties": false, "properties": {"classes": {"items": {"enum": ["lower", "upper", "digit", "symbol"], "type": "string"}, "type": "array", "uniqueItems": true}, "length": {"default": 24, "maximum": 128, "minimum": 16, "type": "integer"}}, "type": "object"}}, "required": ["generate"], "type": "object"}}, "required": ["origins"], "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServiceAccountCreateRequest {
     /// The service's domain; it is reduced to its organisational domain. A public suffix or this deployment's own domain is refused.
     pub service_domain: String,
@@ -108,7 +108,7 @@ pub struct ServiceAccountCreateRequest {
     pub vault_login: Option<ServiceAccountCreateRequestVaultLogin>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServiceAccountNoteRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]

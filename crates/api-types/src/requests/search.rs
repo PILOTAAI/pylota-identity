@@ -39,7 +39,7 @@ fn schema_search_request_group_by_property()
 }
 
 /// A `keyword`, `semantic` or `hybrid` search.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct SearchRequest {
     /// The query, in the query language described on `searchIdentity`. At most 1,024 characters; `""` matches all messages.
     pub q: String,
@@ -83,7 +83,7 @@ pub struct SearchRequest {
 }
 
 /// A `keyword`, `semantic` or `hybrid` search across a tenant's identities.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantSearchRequest {
     #[serde(flatten)]
     pub base: SearchRequest,
@@ -92,9 +92,10 @@ pub struct TenantSearchRequest {
     pub identity_ids: Option<IdentityIdFilter>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum AgenticRequestMode {
     #[serde(rename = "agentic")]
+    #[default]
     Agentic,
 }
 
@@ -105,7 +106,7 @@ fn schema_agentic_request_mode_property() -> utoipa::openapi::RefOr<utoipa::open
 }
 
 /// An agentic search. The planner's tools are read-only and cannot widen the caller's scope or filters ([F10]).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AgenticRequest {
     /// The question, in natural language, at most 1,024 characters.
     pub q: String,
@@ -132,7 +133,7 @@ pub struct AgenticRequest {
 }
 
 /// An agentic search across a tenant's identities.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantAgenticRequest {
     #[serde(flatten)]
     pub base: AgenticRequest,

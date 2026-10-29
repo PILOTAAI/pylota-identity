@@ -69,7 +69,7 @@ pub struct Jwk {
 }
 
 /// An identity key's ID: the base64url RFC 7638 thumbprint of its public JWK (RFC 8037, appendix A.3). A deleted identity's key IDs are tombstoned and never published again.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct IdentityKeyKid(pub String);
 
 /// `active` (signs and is published; at most one per identity), `retiring` (published, does not sign, until `verify_until`) or `retired` (not published; kept until the identity is deleted, so its thumbprint is never reused).
@@ -170,4 +170,10 @@ pub struct HttpSignatureResponse {
     pub headers: HttpSignatureResponseHeaders,
     /// When the signature expires (`expires` in `Signature-Input`).
     pub expires_at: String,
+}
+
+impl std::fmt::Display for IdentityKeyKid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

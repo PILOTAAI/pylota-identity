@@ -5,6 +5,7 @@
 
 mod build_worker;
 mod fuzz;
+mod gen_sdk;
 mod itest;
 mod layering;
 mod openapi;
@@ -27,6 +28,7 @@ fn main() -> ExitCode {
         Some("openapi") => openapi::run(&root),
         Some("fuzz") => fuzz::run(&root, &args[1..]),
         Some("itest") => itest::run(&root, &args[1..]),
+        Some("gen-sdk") => gen_sdk::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         Some("gen-unicode") => unicode::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         _ => {
             eprintln!("{USAGE}");

@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct WebhookCreateRequest {
     /// HTTPS only. Private, loopback and reserved addresses are refused; redirects are not followed.
     pub url: String,
@@ -31,7 +31,7 @@ pub struct WebhookCreateRequest {
     pub headers: Option<WebhookHeaderMap>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct WebhookUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]
@@ -58,7 +58,7 @@ pub struct WebhookUpdateRequest {
     pub enabled: Option<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct WebhookHeadersUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = WebhookHeaderMap)]
@@ -68,7 +68,7 @@ pub struct WebhookHeadersUpdateRequest {
     pub remove: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct RotateRequest {
     /// Hours the previous secret stays valid.
     #[serde(default, skip_serializing_if = "Option::is_none")]

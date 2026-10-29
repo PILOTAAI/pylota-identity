@@ -9,9 +9,10 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum ScreeningFeedbackVerdict {
     #[serde(rename = "correct")]
+    #[default]
     Correct,
     #[serde(rename = "false_positive")]
     FalsePositive,

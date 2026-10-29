@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct MessageUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Vec<Label>)]
@@ -20,7 +20,7 @@ pub struct MessageUpdateRequest {
     pub read: Option<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct BatchGetRequest {
     pub message_ids: BatchMessageIds,
     /// `extracted_text` of each message is cut at a UTF-8 character boundary to this many bytes.
@@ -30,7 +30,7 @@ pub struct BatchGetRequest {
 }
 
 /// At least one of `labels_add`, `labels_remove`, `read` and `archived` is required (checked by the service).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct BatchUpdateRequest {
     pub message_ids: BatchMessageIds,
     #[serde(default, skip_serializing_if = "Option::is_none")]

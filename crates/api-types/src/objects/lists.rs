@@ -24,7 +24,7 @@ pub enum ListKind {
 }
 
 /// An address (`user@example.com`) or a whole domain (`@example.com`).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ListEntryValue(pub String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -60,4 +60,10 @@ pub struct ListEntryPage {
     pub data: Vec<ListEntry>,
     #[schema(required = true)]
     pub next_cursor: Option<String>,
+}
+
+impl std::fmt::Display for ListEntryValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

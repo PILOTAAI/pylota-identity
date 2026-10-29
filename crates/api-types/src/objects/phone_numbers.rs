@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// A phone number in E.164 form.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct E164(pub String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -442,7 +442,7 @@ pub struct PhoneSetupList {
 }
 
 /// The fields of a phone onboarding draft, shared by the request and the stored draft.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneSetupDraftFields {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]
@@ -1430,4 +1430,10 @@ pub struct PhoneAccountProbe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = bool)]
     pub us_enabled: Option<bool>,
+}
+
+impl std::fmt::Display for E164 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

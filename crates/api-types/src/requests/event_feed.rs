@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EventConsumerCreateRequest {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -26,13 +26,13 @@ pub struct EventConsumerCreateRequest {
     pub start: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EventConsumerCommitRequest {
     pub cursor: EventCursor,
 }
 
 /// Exactly one of `to` and `since`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EventConsumerResetRequest {
     /// `earliest`, `latest` or a cursor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,7 +73,7 @@ fn schema_phone_request_approved_by_property()
     serde_json::from_str(r###"{"enum": ["person", "key", "standing_budget", "purchase", null], "type": ["string", "null"]}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneRequestDetails {
     #[serde(
         default,
@@ -97,7 +97,7 @@ fn schema_phone_request_result_property() -> utoipa::openapi::RefOr<utoipa::open
     serde_json::from_str(r###"{"type": ["object", "null"]}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneRequest {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

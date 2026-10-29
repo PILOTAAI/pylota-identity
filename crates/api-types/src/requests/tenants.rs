@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Creates the workspace's console owner and emails them a sign-in link. Without it, a platform or partner key can add an owner later with an invitation and an ownership transfer in the console.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantCreateRequestOwner {
     pub email: EmailAddress,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -22,7 +22,7 @@ fn schema_tenant_create_request_owner_property()
 }
 
 /// The workspace's billing account. Platform keys only: a partner key gets `403 scope_denied`, and its tenants take the partner's `default_billing_mode`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantCreateRequestBilling {
     /// Defaults to `metered` (plan `free`) on a deployment with billing on, and to `disabled` otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -35,7 +35,7 @@ fn schema_tenant_create_request_billing_property()
     serde_json::from_str(r###"{"description": "The workspace's billing account. Platform keys only: a partner key gets `403 scope_denied`, and its tenants take the partner's `default_billing_mode`.", "properties": {"mode": {"$ref": "#/components/schemas/BillingMode", "description": "Defaults to `metered` (plan `free`) on a deployment with billing on, and to `disabled` otherwise."}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantCreateRequest {
     pub slug: TenantSlug,
     pub name: String,
@@ -78,7 +78,7 @@ fn schema_tenant_update_request_sending_paused_property()
     serde_json::from_str(r###"{"description": "`false` lifts an automatic sending pause ([G12]), audit-logged. Platform keys only: any other key gets `403 scope_denied` with `details.field = \"sending_paused\"`. A pause is never set by hand.", "enum": [false], "type": "boolean"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]

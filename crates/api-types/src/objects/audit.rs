@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Audit entry ID (`aud_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AuditEventId(pub String);
 
 fn schema_audit_event_details_property() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>
@@ -45,4 +45,10 @@ pub struct AuditEventPage {
     pub data: Vec<AuditEvent>,
     #[schema(required = true)]
     pub next_cursor: Option<String>,
+}
+
+impl std::fmt::Display for AuditEventId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

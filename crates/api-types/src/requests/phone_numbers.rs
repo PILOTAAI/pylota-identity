@@ -8,13 +8,13 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// A draft's fields; no other property is accepted.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneSetupDraftRequest {
     #[serde(flatten)]
     pub base: PhoneSetupDraftFields,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneBudgetRequest {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,7 +59,7 @@ fn schema_phone_buy_request_primary_for_property()
     .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneBuyRequest {
     pub country: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,7 +98,7 @@ pub struct PhoneBuyRequest {
     pub client_reference: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhonePortabilityRequest {
     pub numbers: Vec<E164>,
 }
@@ -119,7 +119,7 @@ fn schema_phone_number_update_request_primary_for_property()
     .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneNumberUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(schema_with = schema_phone_number_update_request_primary_for_property)]
@@ -133,12 +133,12 @@ pub struct PhoneNumberUpdateRequest {
     pub expires_at: Option<Option<String>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneNumberMoveRequest {
     pub to_identity_id: IdentityId,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneRequestApproveRequest {
     pub digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -149,14 +149,15 @@ pub struct PhoneRequestApproveRequest {
     pub on_behalf_of: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneRequestRejectRequest {
     pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum PhoneRequestResolveRequestOutcome {
     #[serde(rename = "ordered")]
+    #[default]
     Ordered,
     #[serde(rename = "not_ordered")]
     NotOrdered,
@@ -168,7 +169,7 @@ fn schema_phone_request_resolve_request_outcome_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneRequestResolveRequest {
     #[schema(schema_with = schema_phone_request_resolve_request_outcome_property)]
     pub outcome: PhoneRequestResolveRequestOutcome,
@@ -177,17 +178,17 @@ pub struct PhoneRequestResolveRequest {
     pub provider_order_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneExportRequest {
     pub reason: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneOtpRequest {
     pub pin: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneAdoptRequest {
     pub identity_id: IdentityId,
     pub phone_number: E164,

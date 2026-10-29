@@ -6,27 +6,27 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Tenant ID (`ten_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantId(pub String);
 
 /// Partner ID (`ptn_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PartnerId(pub String);
 
 /// Identity ID (`idn_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct IdentityId(pub String);
 
 /// Message ID (`msg_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct MessageId(pub String);
 
 /// API key ID (`key_` + ULID). Not secret.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct KeyId(pub String);
 
 /// Request ID (`req_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct RequestId(pub String);
 
 /// `details.reason` of `422 transport_unavailable`.
@@ -227,9 +227,10 @@ pub enum Permission {
 }
 
 /// From widest to narrowest: `platform` reaches every tenant; `partner` reaches the tenants its partner's keys created and its partner's webhook endpoints (FR-KEY-4); `tenant` reaches its own tenant; `identity` reaches its own identity, plus its tenant's domains read-only with `domains:read` and its tenant's webhook endpoints and deliveries read-only with `webhooks:read`. A route or field that needs a higher level returns `403 scope_denied`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum KeyLevel {
     #[serde(rename = "platform")]
+    #[default]
     Platform,
     #[serde(rename = "partner")]
     Partner,
@@ -240,9 +241,10 @@ pub enum KeyLevel {
 }
 
 /// `live` or `test`. Mail a `test` tenant sends never leaves the deployment (FR-TEN-2).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum Mode {
     #[serde(rename = "live")]
+    #[default]
     Live,
     #[serde(rename = "test")]
     Test,
@@ -362,7 +364,7 @@ pub struct Health {
 }
 
 /// Service-ledger entry ID (`sac_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ServiceAccountId(pub String);
 
 /// `pending_approval` (expires after 7 days), `approved`, `rejected` or `closed`.
@@ -476,7 +478,7 @@ pub enum UploadStatus {
 }
 
 /// An MCP tool name, as listed by `tools/list`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct McpToolName(pub String);
 
 /// The MCP tools the key may see, narrowing what its permissions and level allow. `null` means every allowed tool; `[]` means none. MCP only: REST access follows the permissions.
@@ -507,4 +509,52 @@ pub enum UsageFeatureName {
     StorageGb,
     #[serde(rename = "seats")]
     Seats,
+}
+
+impl std::fmt::Display for TenantId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for PartnerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for IdentityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for MessageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for KeyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for RequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for ServiceAccountId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for McpToolName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

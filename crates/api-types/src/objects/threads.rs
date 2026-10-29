@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Attachment ID (`att_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AttachmentId(pub String);
 
 /// An address with its display name. Display names are untrusted content.
@@ -1500,11 +1500,11 @@ pub struct MessageCalendar {
 }
 
 /// Draft ID (`drf_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DraftId(pub String);
 
 /// Upload ID (`upl_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct UploadId(pub String);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -1512,4 +1512,22 @@ pub struct ThreadPage {
     pub data: Vec<ThreadSummary>,
     #[schema(required = true)]
     pub next_cursor: Option<String>,
+}
+
+impl std::fmt::Display for AttachmentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for DraftId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for UploadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

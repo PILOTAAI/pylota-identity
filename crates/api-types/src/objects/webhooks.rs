@@ -10,15 +10,15 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Webhook endpoint ID (`whk_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct WebhookId(pub String);
 
 /// Webhook delivery attempt ID (`dlv_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DeliveryId(pub String);
 
 /// Event ID (`evt_` + ULID). Also sent as the `webhook-id` header.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EventId(pub String);
 
 /// An event type, or `*` for every event type that is not opt-in, including types added later. The opt-in type `message.labels_changed` is delivered only to endpoints that name it.
@@ -194,4 +194,28 @@ pub struct WebhookDeliveryPage {
     pub data: Vec<WebhookDelivery>,
     #[schema(required = true)]
     pub next_cursor: Option<String>,
+}
+
+impl std::fmt::Display for WebhookId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for DeliveryId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for EventId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for WebhookEventFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

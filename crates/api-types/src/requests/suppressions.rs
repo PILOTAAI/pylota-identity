@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct SuppressionCreateRequest {
     pub address: EmailAddress,
     /// Defaults to `manual`.
@@ -19,7 +19,7 @@ pub struct SuppressionCreateRequest {
     pub note: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct SuppressionDeleteRequest {
     /// Required (`true`) to remove a `complaint` suppression. Audit-logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]

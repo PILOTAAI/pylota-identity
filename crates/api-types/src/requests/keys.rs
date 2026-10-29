@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// `tenant_id` is required for `tenant` and `identity` keys, and `identity_id` for `identity` keys; neither is allowed on `platform` or `partner` keys. `partner_id` is required for `partner` keys, which only a platform key may create, and refused on every other level. `permissions` is required at every level, `platform` included (no implicit full set). Level, tenant, identity and permissions must lie within the caller's own (`403 key_scope_exceeded`), and each permission must be one the level can hold (`400 invalid_request`, `details.reason = "permission_not_allowed_for_level"`; see `Permission`).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ApiKeyCreateRequest {
     pub name: String,
     pub level: KeyLevel,

@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ScreeningFeedbackRequest {
     /// Must fit the record's status (`400 invalid_request`, `details.reason = "feedback_not_applicable"`).
     pub verdict: ScreeningFeedbackVerdict,

@@ -8,11 +8,11 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Export ID (`exp_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ExportId(pub String);
 
 /// Invitation ID (`inv_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct InvitationId(pub String);
 
 /// The roll-up status of an outbound message. Per-recipient status is in `deliveries`.
@@ -88,11 +88,11 @@ pub struct MessageSummary {
 }
 
 /// Durable event consumer ID (`evc_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EventConsumerId(pub String);
 
 /// Opaque event-log cursor. Valid until retention removes the events behind it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EventCursor(pub String);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -195,9 +195,10 @@ pub enum MemberRole {
     Viewer,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum InvitationRole {
     #[serde(rename = "admin")]
+    #[default]
     Admin,
     #[serde(rename = "member")]
     Member,
@@ -2331,9 +2332,10 @@ pub struct PhoneQuote {
     pub provider: Option<Option<serde_json::Value>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum PhoneRequestKind {
     #[serde(rename = "purchase_number")]
+    #[default]
     PurchaseNumber,
     #[serde(rename = "port_in")]
     PortIn,
@@ -2353,9 +2355,10 @@ pub enum PhoneRequestKind {
     OutboundCall,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum PhoneRequestStatus {
     #[serde(rename = "pending_approval")]
+    #[default]
     PendingApproval,
     #[serde(rename = "approved")]
     Approved,
@@ -2466,15 +2469,15 @@ pub struct Call {
 }
 
 /// Vault item ID (`vit_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemId(pub String);
 
 /// Vault grant ID (`vgr_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultGrantId(pub String);
 
 /// Vault use ID (`vus_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultUseId(pub String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -2489,9 +2492,10 @@ pub enum VaultItemKind {
     ManagedSecret,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultOperation {
     #[serde(rename = "fill")]
+    #[default]
     Fill,
     #[serde(rename = "rotate_fill")]
     RotateFill,
@@ -2505,9 +2509,10 @@ pub enum VaultOperation {
     Sign,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultPhase {
     #[serde(rename = "credentials")]
+    #[default]
     Credentials,
     #[serde(rename = "totp")]
     Totp,
@@ -2523,9 +2528,10 @@ pub enum VaultPhase {
     NewPassword,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultTrigger {
     #[serde(rename = "login_form")]
+    #[default]
     LoginForm,
     #[serde(rename = "signup_form")]
     SignupForm,
@@ -2996,4 +3002,46 @@ pub struct VaultUse {
     pub on_behalf_of: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl std::fmt::Display for ExportId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for InvitationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for EventConsumerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for EventCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for VaultItemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for VaultGrantId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for VaultUseId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

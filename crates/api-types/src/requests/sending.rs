@@ -22,7 +22,7 @@ fn schema_send_request_kind_property() -> utoipa::openapi::RefOr<utoipa::openapi
 }
 
 /// A new message. At most `policy.max_recipients` (default 10, hard maximum 49) across `to`, `cc` and `bcc` (`400 too_many_recipients`); duplicates are removed.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct SendRequest {
     pub to: Vec<Recipient>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,21 +33,13 @@ pub struct SendRequest {
     pub bcc: Option<Vec<Recipient>>,
     pub subject: String,
     /// Plain-text body. Derived from `html` when missing.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "crate::nullable"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
-    pub text: Option<Option<String>>,
+    pub text: Option<String>,
     /// HTML body.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "crate::nullable"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
-    pub html: Option<Option<String>>,
+    pub html: Option<String>,
     /// At most 32, each inline or from an upload of the same identity; 26,214,400 decoded bytes in total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Vec<SendAttachment>)]
@@ -107,22 +99,14 @@ fn schema_reply_request_kind_property() -> utoipa::openapi::RefOr<utoipa::openap
 }
 
 /// The body of a reply or reply-all. Recipients, subject, `From`, `In-Reply-To` and `References` are derived from the original message. At least one of `text` and `html` is required. `calendar` is accepted on a reply and refused on a reply-all (`400 invalid_request`).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ReplyRequest {
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "crate::nullable"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
-    pub text: Option<Option<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "crate::nullable"
-    )]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
-    pub html: Option<Option<String>>,
+    pub html: Option<String>,
     /// At most 32, each inline or from an upload of the same identity; 26,214,400 decoded bytes in total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Vec<SendAttachment>)]
@@ -152,7 +136,7 @@ pub struct ReplyRequest {
 }
 
 /// The body of a forward. The original message is attached with its `References` kept. Recipients count against `policy.max_recipients` as for a new message.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ForwardRequest {
     pub to: Vec<Recipient>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,20 +146,12 @@ pub struct ForwardRequest {
     #[schema(value_type = Vec<Recipient>)]
     pub bcc: Option<Vec<Recipient>>,
     /// A note placed above the forwarded message.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "crate::nullable"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
-    pub text: Option<Option<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "crate::nullable"
-    )]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
-    pub html: Option<Option<String>>,
+    pub html: Option<String>,
     /// Attach the original's attachments (never those with a `risk`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = bool)]
@@ -195,9 +171,10 @@ pub struct ForwardRequest {
     pub metadata: Option<Metadata>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum ResolveRequestOutcome {
     #[serde(rename = "sent")]
+    #[default]
     Sent,
     #[serde(rename = "not_sent")]
     NotSent,
@@ -208,16 +185,17 @@ fn schema_resolve_request_outcome_property()
     serde_json::from_str(r###"{"description": "`sent` moves the message and its uncertain deliveries to `submitted` and emits `message.sent`; `not_sent` marks the message `failed` with reason `resolved_not_sent`.", "enum": ["sent", "not_sent"], "type": "string"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ResolveRequest {
     /// `sent` moves the message and its uncertain deliveries to `submitted` and emits `message.sent`; `not_sent` marks the message `failed` with reason `resolved_not_sent`.
     #[schema(schema_with = schema_resolve_request_outcome_property)]
     pub outcome: ResolveRequestOutcome,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum CalendarReplyRequestPartstat {
     #[serde(rename = "accepted")]
+    #[default]
     Accepted,
     #[serde(rename = "declined")]
     Declined,
@@ -231,7 +209,7 @@ fn schema_calendar_reply_request_partstat_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct CalendarReplyRequest {
     #[schema(schema_with = schema_calendar_reply_request_partstat_property)]
     pub partstat: CalendarReplyRequestPartstat,

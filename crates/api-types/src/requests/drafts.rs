@@ -23,7 +23,7 @@ fn schema_draft_create_request_kind_property()
 }
 
 /// The fields of `SendRequest`, or `in_reply_to` (with `reply_all`) or `forward_of` with the fields of a reply or forward, plus `send_at`, `client_id` and `request_approval`. A field the kind does not take is `400 invalid_request`: `new` takes every content field; `reply` takes `text`, `html`, `attachments`, `kind` (`transactional` or `auto_reply`), `headers`, `calendar`, `labels`, `metadata` and `send_at`; `reply_all` the same without `calendar`; `forward` takes `to`, `cc`, `bcc`, `text`, `html`, `attachments`, `include_attachments`, `from_address`, `headers`, `labels`, `metadata` and `send_at`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DraftCreateRequest {
     /// Makes the create idempotent per identity. Printable ASCII without `@`; it appears in events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,7 +146,7 @@ fn schema_draft_update_request_kind_property()
 }
 
 /// A field left out is unchanged; `null` clears a nullable field. `to`, `cc`, `bcc`, `headers` and `metadata` are replaced whole; attachments change only through `attachments_add` and `attachments_remove`, labels through `labels`, or `labels_add` and `labels_remove`. `client_id`, `in_reply_to`, `reply_all` and `forward_of` cannot change.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DraftUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Vec<Recipient>)]
@@ -252,7 +252,7 @@ pub struct DraftUpdateRequest {
     pub labels_remove: Option<Vec<Label>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DraftSendRequest {
     /// A time schedules; `null` sends now; left out, the draft's future `send_at` is used, or it is sent now.
     #[serde(
@@ -274,7 +274,7 @@ pub struct DraftSendRequest {
     pub labels_remove: Option<Vec<Label>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DraftApproveRequest {
     pub revision: i64,
     /// When given, the revision's content digest must match (`409 draft_revision_mismatch`, `details.reason = "digest"`).
@@ -292,7 +292,7 @@ pub struct DraftApproveRequest {
     pub on_behalf_of: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DraftRejectRequest {
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

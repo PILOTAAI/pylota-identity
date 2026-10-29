@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct IdentityCreateRequest {
     pub username: UsernameInput,
     pub display_name: DisplayName,
@@ -55,7 +55,7 @@ fn schema_identity_update_request_status_property()
     serde_json::from_str(r###"{"description": "`paused` pauses with reason `manual`; `active` resumes (an `abuse_threshold` pause on a tenant a partner's key created needs a platform key).", "enum": ["active", "paused"], "type": "string"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct IdentityUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = DisplayName)]
@@ -89,7 +89,7 @@ pub struct IdentityUpdateRequest {
     pub status: Option<IdentityUpdateRequestStatus>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ErasureRequest {
     pub id: ErasureRequestId,
     pub tenant_id: TenantId,

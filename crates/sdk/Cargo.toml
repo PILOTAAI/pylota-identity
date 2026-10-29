@@ -7,3 +7,24 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "pylota_identity"
+
+[dependencies]
+pylota-identity-api-types = { path = "../api-types" }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+base64 = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+yaml_serde = { workspace = true }
+
+# The landing page's example has no `main`: it builds as a library.
+[[example]]
+name = "confirm_booking"
+crate-type = ["lib"]

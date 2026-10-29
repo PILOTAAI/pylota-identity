@@ -7,9 +7,10 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum JobCreateRequestKind {
     #[serde(rename = "reparse")]
+    #[default]
     Reparse,
     #[serde(rename = "reembed")]
     Reembed,
@@ -26,7 +27,7 @@ fn schema_job_create_request_kind_property()
     serde_json::from_str(r###"{"description": "`restore_reconcile` needs `after` and `identity_ids`. `event_log_rebuild` takes `tenant_id` only.", "enum": ["reparse", "reembed", "reindex", "restore_reconcile", "event_log_rebuild"], "type": "string"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct JobCreateRequest {
     /// `restore_reconcile` needs `after` and `identity_ids`. `event_log_rebuild` takes `tenant_id` only.
     #[schema(schema_with = schema_job_create_request_kind_property)]
@@ -72,7 +73,7 @@ pub enum MailboxRestoreRequest {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct WaitlistInviteRequest {
     /// How many entries to invite, oldest confirmed first.
     pub count: i64,

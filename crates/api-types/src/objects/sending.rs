@@ -131,7 +131,7 @@ impl utoipa::ToSchema for SendHeaders {}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SendResponse {
     #[serde(flatten)]
-    pub base: Message,
+    pub message: Message,
     /// `true` when this is the stored response of an earlier request with the same `Idempotency-Key`.
     pub deduplicated: bool,
 }
@@ -260,4 +260,18 @@ pub struct AttachmentUploadInput {
 pub enum SendAttachment {
     AttachmentInput(AttachmentInput),
     AttachmentUploadInput(AttachmentUploadInput),
+}
+
+impl From<&str> for Recipient {
+    /// A bare address.
+    fn from(address: &str) -> Self {
+        Recipient::EmailAddress(EmailAddress(address.to_owned()))
+    }
+}
+
+impl From<String> for Recipient {
+    /// A bare address.
+    fn from(address: String) -> Self {
+        Recipient::EmailAddress(EmailAddress(address))
+    }
 }

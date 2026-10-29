@@ -55,7 +55,7 @@ fn schema_domain_create_request_inbound_property()
 }
 
 /// `method` is required for new clients. When it is absent, the old `kind` is mapped: `zone` → `cloudflare_zone`, `external` → `send_only`; `kind: zone` with `create_zone: true` is the old spelling of `nameservers`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DomainCreateRequest {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,7 +116,7 @@ fn schema_domain_update_request_transport_property()
 }
 
 /// `transport` (platform keys only), `smtp` (`smtp_relay` domains), `sending_paused` (platform keys only), or several.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DomainUpdateRequest {
     /// `false` lifts an automatic sending pause of this domain ([G12]), audit-logged. Platform keys only: any other key gets `403 scope_denied` with `details.field = "sending_paused"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

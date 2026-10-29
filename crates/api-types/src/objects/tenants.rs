@@ -8,11 +8,11 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// An RFC 5321 address. Stored lower-cased with the domain as an IDNA A-label; dots in the local part are significant ([A1]). SMTPUTF8 (non-ASCII) local parts are refused with `address_unsupported`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct EmailAddress(pub String);
 
 /// A label. At most 64 per message.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct Label(pub String);
 
 /// `erasing` and `erased` are set by a tenant-scope erasure.
@@ -28,11 +28,11 @@ pub enum TenantStatus {
     Erased,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct TenantSlug(pub String);
 
 /// Appended to usernames on the platform domain (`bookings` + `.acme` → `bookings.acme@agents.example`). Defaults to `"." + slug`. Only the default tenant made by `idvy setup` can have an empty suffix. A suffix that folds to a reserved name gets `400 address_reserved`, and one that folds to another tenant's suffix gets `409 suffix_taken` ([D12]).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AddressSuffix(pub String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -2140,4 +2140,28 @@ pub enum VaultApprovalLevel {
     PerRun,
     #[serde(rename = "per_use")]
     PerUse,
+}
+
+impl std::fmt::Display for EmailAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for Label {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for TenantSlug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for AddressSuffix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PartnerCreateRequest {
     pub name: String,
     /// Defaults to `metered`.
@@ -35,7 +35,7 @@ fn schema_partner_update_request_status_property()
     serde_json::from_str(r###"{"description": "`deleted` cannot be set here: use `DELETE /v1/partners/{partner_id}`.", "enum": ["active", "suspended"], "type": "string"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PartnerUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]

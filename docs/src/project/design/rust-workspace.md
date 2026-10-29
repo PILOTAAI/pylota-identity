@@ -1133,6 +1133,7 @@ dataset = "pylota_identity_metrics"
 | `cargo xtask trace` | Checks the edge-case register and the PRD against the test names and `Covers:` lines, and prints the traceability matrix ([Testing](testing.md#112-cargo-xtask-trace)); `ts::` names are checked against `sdks/typescript-tests.json`, and one it lacks is `pending (SDK)`, never a failure |
 | `cargo xtask fuzz --target <t> --time <s>` | Runs `cargo +nightly fuzz run <t> -- -max_total_time=<s>` in `fuzz/` |
 | `cargo xtask openapi` | Generates `openapi.json` from `api-types` and compares it semantically with `docs/src/reference/openapi.yaml` |
+| `cargo xtask gen-sdk [--check]` | Writes `crates/sdk/src/generated.rs` from `api-types`' operation table: one `Client` method per operation that is not `x-sdk: false`, a `_dry_run` method beside each operation with a `dry_run` query parameter, the `…Query` structs, the `_stream` pagers of list operations and the `OPERATIONS` table; `--check` fails when the file would change (CI `openapi` job) |
 | `cargo xtask gen-unicode` | Regenerates `crates/core/src/address/confusables_table.rs` from the pinned UTS #39 data files checked into `crates/core/data/` |
 | `cargo xtask cldr-windows-zones --cldr <tag>` | Reads `common/supplemental/windowsZones.xml` at the pinned CLDR release tag and writes `crates/core/src/ical/windows_zones.rs`: the `territory="001"` entries only, each value resolved through the tzdb `backward` file when `chrono_tz::Tz::from_str` does not parse it, with the tag in the file header ([Calendar invitations §2.5](calendar-invitations.md#25-times-and-time-zones)) |
 | `cargo xtask gen-skills` | Rewrites the generated blocks of every skill under `integrations/` and writes each rule of `integrations/skills-rules.toml` into the skills it names ([§ 4.4 of that page](sdk-and-skills.md#44-staying-true-to-the-api)). The checks `xtask::skills_generated_current`, `xtask::skills_match_contract` (a `pulldown-cmark` scan of every tool, route, field, error code, command, flag, event type and permission against the same commit's contract), `xtask::skills_rules_present`, `xtask::skills_format` and `xtask::skills_no_secrets` run in the `skills` CI job |
@@ -1312,10 +1313,10 @@ feature.
   and that example builds with `cargo build -p pylota-identity --examples`.
 
   ```rust,no_run
-  use pylota_identity::{Client, IdempotencyKey};
   use pylota_identity::types::{Recipient, SendRequest};
+  use pylota_identity::{Client, IdempotencyKey};
 
-  async fn confirm_booking(key: String) -> Result<(), pylota_identity::Error> {
+  pub async fn confirm_booking(key: String) -> Result<(), pylota_identity::Error> {
       let client = Client::builder()
           .base_url("https://mail.example.com")
           .api_key(key)
@@ -1328,7 +1329,9 @@ feature.
       };
       let key = IdempotencyKey::new("bk-2291-confirm")?;
       // a retry with the same key returns this same message
-      let sent = client.send_message("idn_01J9Z3K8V4", &request, &key).await?;
+      let sent = client
+          .send_message("idn_01J9Z3K8V4", &request, &key)
+          .await?;
       println!("{} deduplicated={}", sent.message.id, sent.deduplicated);
       Ok(())
   }

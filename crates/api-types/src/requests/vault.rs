@@ -9,9 +9,10 @@ use utoipa::ToSchema;
 
 use crate::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultItemCreateRequestKind {
     #[serde(rename = "login")]
+    #[default]
     Login,
     #[serde(rename = "api_key")]
     ApiKey,
@@ -25,9 +26,10 @@ fn schema_vault_item_create_request_kind_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultItemCreateRequestInjectScheme {
     #[serde(rename = "bearer")]
+    #[default]
     Bearer,
     #[serde(rename = "basic")]
     Basic,
@@ -41,7 +43,7 @@ fn schema_vault_item_create_request_inject_scheme_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemCreateRequestInject {
     #[schema(schema_with = schema_vault_item_create_request_inject_scheme_property)]
     pub scheme: VaultItemCreateRequestInjectScheme,
@@ -87,7 +89,7 @@ fn schema_vault_item_create_request_sign_encoding_property()
 }
 
 /// P1.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemCreateRequestSign {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(schema_with = schema_vault_item_create_request_sign_scheme_property)]
@@ -111,7 +113,7 @@ fn schema_vault_item_create_request_sign_property()
     serde_json::from_str(r###"{"description": "P1.", "properties": {"access_key_id": {"type": "string"}, "encoding": {"enum": ["hex", "base64"], "type": "string"}, "region": {"type": "string"}, "scheme": {"enum": ["hmac_sha256", "aws_sigv4"], "type": "string"}, "service": {"type": "string"}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemCreateRequestSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = i64)]
@@ -123,9 +125,10 @@ fn schema_vault_item_create_request_session_property()
     serde_json::from_str(r###"{"properties": {"ttl_seconds": {"minimum": 3600, "type": "integer"}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultItemCreateRequestImportSource {
     #[serde(rename = "pylota_sealed_session")]
+    #[default]
     PylotaSealedSession,
 }
 
@@ -135,7 +138,7 @@ fn schema_vault_item_create_request_import_source_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemCreateRequestImport {
     #[schema(schema_with = schema_vault_item_create_request_import_source_property)]
     pub source: VaultItemCreateRequestImportSource,
@@ -147,7 +150,7 @@ fn schema_vault_item_create_request_import_property()
     serde_json::from_str(r###"{"properties": {"source": {"enum": ["pylota_sealed_session"], "type": "string"}, "source_ref": {"maxLength": 64, "type": "string"}}, "required": ["source", "source_ref"], "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemCreateRequestRotation {
     #[serde(
         default,
@@ -164,7 +167,7 @@ fn schema_vault_item_create_request_rotation_property()
 }
 
 /// One request shape for the three kinds; fields that do not belong to `kind` are refused. Values (`password`, `totp`, `recovery_codes`, `secret`, `state`) are write-only.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemCreateRequest {
     #[schema(schema_with = schema_vault_item_create_request_kind_property)]
     pub kind: VaultItemCreateRequestKind,
@@ -233,7 +236,7 @@ fn schema_vault_item_update_request_state_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemUpdateRequestRotation {
     #[serde(
         default,
@@ -249,7 +252,7 @@ fn schema_vault_item_update_request_rotation_property()
     serde_json::from_str(r###"{"properties": {"remind_after_days": {"maximum": 730, "minimum": 7, "type": ["integer", "null"]}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemUpdateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]
@@ -276,7 +279,7 @@ pub struct VaultItemUpdateRequest {
 }
 
 /// The kind's values (write-only) and the overlap for the previous version.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultItemVersionRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = VaultPasswordInput)]
@@ -298,7 +301,7 @@ pub struct VaultItemVersionRequest {
     pub overlap_hours: Option<i64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultGrantRequest {
     pub item_id: VaultItemId,
     pub operations: Vec<VaultOperation>,
@@ -339,7 +342,7 @@ fn schema_vault_use_create_request_version_property()
 }
 
 /// P1, for `operation = sign` only.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultUseCreateRequestSignRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]
@@ -366,7 +369,7 @@ fn schema_vault_use_create_request_sign_request_property()
     serde_json::from_str(r###"{"description": "P1, for `operation = sign` only.", "properties": {"body_sha256": {"type": "string"}, "headers": {"additionalProperties": {"type": "string"}, "maxProperties": 50, "type": "object"}, "message_base64": {"maxLength": 87384, "type": "string"}, "method": {"type": "string"}, "timestamp": {"format": "date-time", "type": "string"}, "url": {"format": "uri", "type": "string"}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultUseCreateRequest {
     pub item_id: VaultItemId,
     pub operation: VaultOperation,
@@ -405,7 +408,7 @@ pub struct VaultUseCreateRequest {
     pub sign_request: Option<VaultUseCreateRequestSignRequest>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultUseApproveRequest {
     pub digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -416,9 +419,10 @@ pub struct VaultUseApproveRequest {
     pub on_behalf_of: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerCreateRequestKind {
     #[serde(rename = "browser")]
+    #[default]
     Browser,
     #[serde(rename = "egress_proxy")]
     EgressProxy,
@@ -434,9 +438,10 @@ fn schema_vault_consumer_create_request_kind_property()
     .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerCreateRequestLevel {
     #[serde(rename = "platform")]
+    #[default]
     Platform,
     #[serde(rename = "partner")]
     Partner,
@@ -450,9 +455,10 @@ fn schema_vault_consumer_create_request_level_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerCreateRequestHosting {
     #[serde(rename = "self_hosted")]
+    #[default]
     SelfHosted,
     #[serde(rename = "third_party")]
     ThirdParty,
@@ -464,9 +470,10 @@ fn schema_vault_consumer_create_request_hosting_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultConsumerCreateRequestContract {
     #[serde(rename = "vault-consumer/1")]
+    #[default]
     VaultConsumer1,
 }
 
@@ -476,7 +483,7 @@ fn schema_vault_consumer_create_request_contract_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultConsumerCreateRequest {
     #[schema(schema_with = schema_vault_consumer_create_request_kind_property)]
     pub kind: VaultConsumerCreateRequestKind,
@@ -502,12 +509,12 @@ pub struct VaultConsumerCreateRequest {
     pub declarations: VaultConsumerDeclarations,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultConsumerActivateRequest {
     pub note: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultConsumerKeysRequest {
     pub signing_jwk: VaultOkpJwk,
     pub encryption_jwk: VaultOkpJwk,
@@ -522,13 +529,13 @@ fn schema_vault_custody_request_slots_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultCustodyRequest {
     #[schema(schema_with = schema_vault_custody_request_slots_property)]
     pub slots: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultRevokeAllRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = bool)]
@@ -538,7 +545,7 @@ pub struct VaultRevokeAllRequest {
     pub archive_items: Option<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultRedeemRequest {
     pub ticket: String,
     pub phase: VaultPhase,
@@ -548,9 +555,10 @@ pub struct VaultRedeemRequest {
     pub context: VaultRedeemContext,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultReportRequestOutcome {
     #[serde(rename = "filled")]
+    #[default]
     Filled,
     #[serde(rename = "submitted")]
     Submitted,
@@ -589,7 +597,7 @@ fn schema_vault_report_request_outcome_property()
     serde_json::from_str(r###"{"enum": ["filled", "submitted", "signed_in", "signed_up", "credentials_rejected", "otp_rejected", "session_rejected", "value_exposed", "value_exposed_unscannable", "placeholder_misplaced", "origin_mismatch", "frame_mismatch", "form_not_found", "aborted", "password_changed", "password_change_failed"], "type": "string"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultReportRequest {
     pub ticket: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -602,9 +610,10 @@ pub struct VaultReportRequest {
     pub r#final: Option<bool>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum VaultWriteBackRequestKind {
     #[serde(rename = "session")]
+    #[default]
     Session,
     #[serde(rename = "secret")]
     Secret,
@@ -620,7 +629,7 @@ fn schema_vault_write_back_request_kind_property()
     .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct VaultWriteBackRequest {
     pub ticket: String,
     #[schema(schema_with = schema_vault_write_back_request_kind_property)]

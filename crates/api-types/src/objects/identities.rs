@@ -10,19 +10,19 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Address ID (`adr_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AddressId(pub String);
 
 /// Domain ID (`dom_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DomainId(pub String);
 
 /// Thread ID (`thr_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ThreadId(pub String);
 
 /// Erasure request ID (`era_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct ErasureRequestId(pub String);
 
 /// Integrator metadata. At most 16 keys; each value is a string of at most 512 bytes.
@@ -51,15 +51,15 @@ pub enum IdentityStatus {
 }
 
 /// The stored form of a username: the lower-case local-part stem. Requests send a `UsernameInput`, which the service validates and lower-cases into this form.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct Username(pub String);
 
 /// A username as sent in a request. The schema does not constrain it: the service validates it with the username rules ([A1], [A3], [A4], [A12]) and returns their own codes, never a generic `invalid_request`. A reserved name, a confusable one (homoglyphs, mixed scripts, right-to-left characters) or a name that folds to a reserved one gets `400 address_reserved`; any other non-ASCII character `400 address_unsupported`; a name whose lower-cased form does not match the stored form `^[a-z0-9][a-z0-9._-]{0,23}$` (at most 24 characters, no `..`, not ending in `.`) gets `400 address_invalid`; username plus tenant suffix over 40 characters gets `400 local_part_too_long`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct UsernameInput(pub String);
 
 /// At most 78 characters, no CR or LF. Unicode is allowed.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct DisplayName(pub String);
 
 /// The accountable human for the identity (FR-IDN-2). Required before the identity can send.
@@ -226,9 +226,10 @@ pub struct Address {
     pub created_at: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum ErasureScope {
     #[serde(rename = "message")]
+    #[default]
     Message,
     #[serde(rename = "thread")]
     Thread,
@@ -241,9 +242,10 @@ pub enum ErasureScope {
 }
 
 /// `completed_with_holds`: the erasure finished but skipped held threads, listed in the receipt's `held` (a tenant then stays `erasing` until no hold remains). `failed`: a step still failed 20 hours after the first request. `canceled`: a tenant erasure superseded it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum ErasureStatus {
     #[serde(rename = "queued")]
+    #[default]
     Queued,
     #[serde(rename = "running")]
     Running,
@@ -310,4 +312,46 @@ pub struct IdentityPage {
     pub data: Vec<Identity>,
     #[schema(required = true)]
     pub next_cursor: Option<String>,
+}
+
+impl std::fmt::Display for AddressId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for DomainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for ThreadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for ErasureRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for Username {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for UsernameInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::fmt::Display for DisplayName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

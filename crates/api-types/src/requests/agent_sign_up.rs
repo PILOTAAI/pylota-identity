@@ -11,7 +11,7 @@ fn schema_agent_signup_create_request_accept_terms_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AgentSignupCreateRequest {
     /// 2–32 characters of `[a-z0-9-]` after lower-casing; checked by the address-suffix rules, not a schema pattern. The inbox is `agent.{username}@{platform domain}`.
     pub username: String,
@@ -28,12 +28,12 @@ pub struct AgentSignupCreateRequest {
     pub accept_terms: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AgentSignupVerifyRequest {
     pub code: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AgentSignupHumanRequest {
     pub human_email: String,
 }

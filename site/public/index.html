@@ -821,10 +821,10 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
               <h3 class="tab-label" data-tab-label>Rust</h3>
               <div class="code">
                 <div class="code-head"><span class="code-file">src/booking.rs</span><button class="copy" type="button" data-copy="code-rust"><svg class="i" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg><span class="copy-label">Copy</span><span class="visually-hidden"> Rust example</span></button></div>
-<pre tabindex="0"><code id="code-rust"><span class="t-kw">use</span> pylota_identity::{Client, IdempotencyKey};
-<span class="t-kw">use</span> pylota_identity::types::{Recipient, SendRequest};
+<pre tabindex="0"><code id="code-rust"><span class="t-kw">use</span> pylota_identity::types::{Recipient, SendRequest};
+<span class="t-kw">use</span> pylota_identity::{Client, IdempotencyKey};
 
-<span class="t-kw">async fn</span> <span class="t-f">confirm_booking</span>(key: String) -&gt; Result&lt;(), pylota_identity::Error&gt; {
+<span class="t-kw">pub async fn</span> <span class="t-f">confirm_booking</span>(key: String) -&gt; Result&lt;(), pylota_identity::Error&gt; {
     <span class="t-kw">let</span> client = Client::<span class="t-f">builder</span>()
         .<span class="t-f">base_url</span>(<span class="t-s">"https://mail.example.com"</span>)
         .<span class="t-f">api_key</span>(key)
@@ -837,7 +837,9 @@ idvy ask <span class="t-s">"Did the insurer accept the Golf claim?"</span> --ide
     };
     <span class="t-kw">let</span> key = IdempotencyKey::<span class="t-f">new</span>(<span class="t-s">"bk-2291-confirm"</span>)?;
     <span class="t-c">// a retry with the same key returns this same message</span>
-    <span class="t-kw">let</span> sent = client.<span class="t-f">send_message</span>(<span class="t-s">"idn_01J9Z3K8V4"</span>, &amp;request, &amp;key).<span class="t-kw">await</span>?;
+    <span class="t-kw">let</span> sent = client
+        .<span class="t-f">send_message</span>(<span class="t-s">"idn_01J9Z3K8V4"</span>, &amp;request, &amp;key)
+        .<span class="t-kw">await</span>?;
     println!(<span class="t-s">"{} deduplicated={}"</span>, sent.message.id, sent.deduplicated);
     Ok(())
 }</code></pre>

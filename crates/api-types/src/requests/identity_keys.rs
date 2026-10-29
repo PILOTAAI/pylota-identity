@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// A request for an agent assertion.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AssertionRequest {
     /// The verifier's expected audience, a URL or an identifier: 1–256 characters of printable ASCII. Becomes the `aud` claim ([O4]).
     pub audience: String,
@@ -46,7 +46,7 @@ fn schema_http_signature_request_components_property()
 }
 
 /// A request for Web Bot Auth signature headers.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct HttpSignatureRequest {
     /// The URL the agent will request: `https` only, at most 2,048 characters. An internationalised host is converted to its A-label for `@authority` ([O10]).
     pub url: String,

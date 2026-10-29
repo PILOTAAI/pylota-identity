@@ -22,7 +22,7 @@ fn schema_sms_send_request_kind_property() -> utoipa::openapi::RefOr<utoipa::ope
     serde_json::from_str(r###"{"default": "transactional", "enum": ["transactional", "marketing", "verification"], "type": "string"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct SmsSendRequest {
     /// A number ID or E.164 of this identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -45,9 +45,10 @@ pub struct SmsSendRequest {
     pub client_reference: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum SmsResolveRequestOutcome {
     #[serde(rename = "sent")]
+    #[default]
     Sent,
     #[serde(rename = "not_sent")]
     NotSent,
@@ -59,13 +60,13 @@ fn schema_sms_resolve_request_outcome_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct SmsResolveRequest {
     #[schema(schema_with = schema_sms_resolve_request_outcome_property)]
     pub outcome: SmsResolveRequestOutcome,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct CallCreateRequestAssistant {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]
@@ -80,7 +81,7 @@ fn schema_call_create_request_assistant_property()
     serde_json::from_str(r###"{"properties": {"assistant_id": {"type": "string"}, "variables": {"type": "object"}}, "type": "object"}"###).expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct CallCreateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = String)]
@@ -99,9 +100,10 @@ pub enum CallOrRequest {
     PhoneRequest(Box<PhoneRequest>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, Default)]
 pub enum PhoneConsentRequestState {
     #[serde(rename = "opted_out")]
+    #[default]
     OptedOut,
     #[serde(rename = "opted_in")]
     OptedIn,
@@ -127,7 +129,7 @@ fn schema_phone_consent_request_purpose_property()
         .expect("the contract's schema")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct PhoneConsentRequest {
     pub number: E164,
     #[schema(schema_with = schema_phone_consent_request_state_property)]

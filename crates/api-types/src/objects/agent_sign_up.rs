@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 use crate::*;
 
 /// Agent sign-up ID (`asu_` + ULID).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema, Default)]
 pub struct AgentSignupId(pub String);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -253,4 +253,10 @@ pub struct AgentSignupEnded {
     #[schema(schema_with = schema_agent_signup_ended_state_property)]
     pub state: AgentSignupEndedState,
     pub erasure_request_id: ErasureRequestId,
+}
+
+impl std::fmt::Display for AgentSignupId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
