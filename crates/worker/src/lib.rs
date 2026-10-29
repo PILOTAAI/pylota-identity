@@ -83,8 +83,8 @@ mod entry {
             r
         }
 
-        /// The itest build hands the messages of two dead-letter queues to the fake server, so the
-        /// suite can redrive a dead-lettered pointer and see that nothing was dead-lettered.
+        /// The itest build taps the messages of two dead-letter queues to the fake server first, so
+        /// the suite can redrive a dead-lettered pointer and see that nothing was dead-lettered.
         async fn queue(
             &self,
             queue: pylota_identity_platform::queues::QueueName,
@@ -99,8 +99,8 @@ mod entry {
                         | pylota_identity_platform::queues::QueueName::Index
                 )
             {
-                crate::hooks::capture_queue(self.0.p.as_ref(), queue, dead_letter, batch).await;
-                return;
+                let name = format!("{}-dlq", queue.queue_name());
+                crate::hooks::tap_queue(self.0.p.as_ref(), &name, &batch).await;
             }
             crate::consumers::run(self.0.p.as_ref(), queue, dead_letter, batch).await;
             crate::metrics::flush(self.0.p.as_ref());

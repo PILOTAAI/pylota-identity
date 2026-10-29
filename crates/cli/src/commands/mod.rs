@@ -7,6 +7,7 @@ pub mod doctor;
 pub mod domains;
 pub mod identities;
 pub mod mail;
+pub mod ops;
 pub mod privacy;
 pub mod profile;
 pub mod search;
@@ -35,6 +36,8 @@ pub async fn dispatch(ctx: &Ctx, cmd: Command) -> Result<Output, CliError> {
         Command::Partners(c) => admin::partners(ctx, c).await,
         Command::Keys(c) => admin::keys(ctx, c).await,
         Command::Secrets(c) => secrets::secrets(ctx, c).await,
+        Command::Dlq(c) => ops::dlq(ctx, c).await,
+        Command::Jobs(c) => ops::jobs(ctx, c).await,
         Command::Audit(a) => admin::audit(ctx, a).await,
         Command::Identities(c) => identities::identities(ctx, c).await,
         Command::Addresses(c) => identities::addresses(ctx, c).await,

@@ -495,6 +495,62 @@ mod tests {
         assert!(!out.contains('{') || !out.contains("{agents.example}"));
     }
 
+    /// `xtask::template_no_idle_compute` (NFR-COST-1): the template declares only the Worker, Durable
+    /// Objects (SQLite-backed), D1, R2, Queues, Vectorize, Workers AI, Email Sending, rate limits,
+    /// Analytics Engine and cron triggers: no Containers, no Hyperdrive, Browser Rendering, Workflows,
+    /// dispatch namespaces, services or anything else that bills while idle beyond storage.
+    #[test]
+    fn template_no_idle_compute() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let tmpl: toml::Table = toml::from_str(
+            &std::fs::read_to_string(root.join("deploy/wrangler.toml.tmpl")).unwrap(),
+        )
+        .unwrap();
+        const ALLOWED: &[&str] = &[
+            // The Worker itself.
+            "name",
+            "main",
+            "compatibility_date",
+            "compatibility_flags",
+            "workers_dev",
+            "routes",
+            "limits",
+            "observability",
+            "vars",
+            "triggers",
+            "migrations",
+            // Storage and messaging, billed by use or by what is stored.
+            "durable_objects",
+            "d1_databases",
+            "r2_buckets",
+            "queues",
+            "vectorize",
+            "ai",
+            "send_email",
+            "ratelimits",
+            "analytics_engine_datasets",
+        ];
+        let extra: Vec<&String> = tmpl
+            .keys()
+            .filter(|k| !ALLOWED.contains(&k.as_str()))
+            .collect();
+        assert!(
+            extra.is_empty(),
+            "declarations that may bill while idle: {extra:?}"
+        );
+        assert!(!tmpl.contains_key("containers"));
+        // Durable Objects are SQLite-backed (no key-value-storage classes) and hibernate between requests.
+        for m in tmpl["migrations"].as_array().unwrap() {
+            assert!(m.get("new_classes").is_none(), "{m}");
+        }
+        let crons = tmpl["triggers"]["crons"].as_array().unwrap();
+        assert!(
+            crons
+                .iter()
+                .all(|c| c.as_str().is_some_and(|c| c.split(' ').count() == 5))
+        );
+    }
+
     /// The compiled-in limits of `crates/worker/src/ratelimit.rs` equal the template's `[[ratelimits]]`.
     #[test]
     fn ratelimit_limits_match_template() {

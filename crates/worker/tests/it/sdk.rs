@@ -239,6 +239,12 @@ fn every_served_operation() {
         let job = seen.ok("createJob", p.create_job(&body(json!({ "kind": "reindex", "tenant_id": tid })), None).await);
         seen.ok("getJob", p.get_job(&field(&job, "id")).await);
         seen.ok("getPlatformStatus", p.get_platform_status().await);
+        seen.ok("listDlqItems", p.list_dlq_items(&Default::default()).await);
+        seen.any(
+            "redriveDlqItem",
+            p.redrive_dlq_item("dlq_01ARYZ6S41TSV4RRFFQ69G5FAV", None).await,
+            &["dlq_item_not_found"],
+        );
         seen.ok("rotateSigningKey", p.rotate_signing_key("cursor", &Default::default(), None).await);
         let q = pylota_identity::ListAuditEventsQuery { tenant_id: Some(types::TenantId(tid.clone())), ..Default::default() };
         seen.ok("listAuditEvents", p.list_audit_events(&q).await);

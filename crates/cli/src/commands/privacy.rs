@@ -249,6 +249,61 @@ pub async fn erasure(ctx: &Ctx, c: ErasureCmd) -> Result<Output, CliError> {
                 ERASURE_COLS,
             ))
         }
+        ErasureCmd::Retry { erasure, address } => {
+            let e = api
+                .get(ctx, &format!("/v1/erasure-requests/{}", seg(&erasure)), &[])
+                .await?;
+            let scope = e["scope"].as_str().unwrap_or("").to_owned();
+            let id = e["id"].as_str().unwrap_or(&erasure).to_owned();
+            let mut body = Obj::new()
+                .set("tenant_id", e["tenant_id"].clone())
+                .set("scope", scope.clone())
+                .set("reason", format!("retry:{id}"));
+            match scope.as_str() {
+                "message" => {
+                    body = body
+                        .set("identity_id", e["identity_id"].clone())
+                        .set("message_id", e["target_id"].clone())
+                }
+                "thread" => {
+                    body = body
+                        .set("identity_id", e["identity_id"].clone())
+                        .set("thread_id", e["target_id"].clone())
+                }
+                "counterparty" => {
+                    let a = address.ok_or_else(|| {
+                        CliError::usage(
+                            "A counterparty erasure stores only the address's hash: pass --address.",
+                        )
+                    })?;
+                    body = body.set("counterparty_address", a)
+                }
+                "identity" => body = body.set("identity_id", e["identity_id"].clone()),
+                _ => {}
+            }
+            Ok(Output::object(
+                api.call(
+                    ctx,
+                    "POST",
+                    "/v1/erasure-requests",
+                    &[],
+                    Some(&body.value()),
+                    Idem::Generated,
+                )
+                .await?,
+            ))
+        }
+        ErasureCmd::Reapply { erasure } => Ok(Output::object(
+            api.call(
+                ctx,
+                "POST",
+                &format!("/v1/platform/erasure-requests/{}/reapply", seg(&erasure)),
+                &[],
+                None,
+                Idem::Generated,
+            )
+            .await?,
+        )),
     }
 }
 

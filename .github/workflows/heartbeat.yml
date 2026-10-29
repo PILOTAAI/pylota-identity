@@ -1,0 +1,75 @@
+# The external heartbeat (Observability § 5.5): every 15 minutes, outside the Cloudflare account it
+# watches, `idvy doctor` checks `GET /health` and the state alerts of production; once a day (the 06:00
+# UTC run) it also proves mail flow end to end with `--mail-test`. A failed run is GitHub's failure
+# notification to the owner. The Worker watches the watcher: `heartbeat_missing` pages when the
+# heartbeat key has not been used for an hour.
+#
+# It runs only once the repository variable HEARTBEAT_ENABLED is `true` (set after the first signed
+# release, M19, and the `ops` environment's secrets). The keys live in the GitHub Environment `ops`:
+# HEARTBEAT_KEY (a platform key holding only `audit:read`) and HEARTBEAT_MAIL_TEST_KEY (an identity key
+# of `idvy-doctor`). The variables PYLOTA_IDENTITY_API_URL and IDVY_RELEASE_PUBKEY (the minisign
+# public key the release is signed with) are set on the environment too.
+name: Heartbeat
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: heartbeat
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    if: vars.HEARTBEAT_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ops
+    permissions:
+      contents: read
+    env:
+      PYLOTA_IDENTITY_URL: ${{ vars.PYLOTA_IDENTITY_API_URL }}
+    steps:
+      - name: The deployed version
+        id: version
+        run: |
+          set -euo pipefail
+          health=$(curl -fsS --max-time 20 "$PYLOTA_IDENTITY_URL/health")
+          version=$(jq -r '.version' <<<"$health")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          frozen_since=$(jq -r '.frozen_since // empty' <<<"$health")
+          if [ -n "$frozen_since" ] && [ $(( $(date -u +%s) - $(date -u -d "$frozen_since" +%s) )) -gt 14400 ]; then
+            echo "frozen for more than 4 hours (since $frozen_since)"; exit 1
+          fi
+      - name: Install the released idvy and verify its signature
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          PUBKEY: ${{ vars.IDVY_RELEASE_PUBKEY }}
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends minisign
+          mkdir -p "$RUNNER_TEMP/idvy" && cd "$RUNNER_TEMP/idvy"
+          asset="idvy-x86_64-unknown-linux-gnu.tar.gz"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --pattern "$asset.minisig"
+          minisign -Vm "$asset" -P "$PUBKEY"
+          tar -xzf "$asset"
+          echo "$RUNNER_TEMP/idvy" >> "$GITHUB_PATH"
+      - name: Health and alerts
+        env:
+          PYLOTA_IDENTITY_KEY: ${{ secrets.HEARTBEAT_KEY }}
+        run: idvy doctor --json --check health --check alerts
+      - name: Mail test
+        env:
+          PYLOTA_IDENTITY_KEY: ${{ secrets.HEARTBEAT_MAIL_TEST_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "$(date -u +%H)" = "06" ] && [ "$(date -u +%M)" -lt 15 ]; then
+            idvy doctor --json --mail-test --check mail_test
+          else
+            echo "The mail test runs in the 06:00 UTC run only."
+          fi

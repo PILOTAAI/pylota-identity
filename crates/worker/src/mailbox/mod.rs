@@ -77,6 +77,12 @@ pub enum MailboxRequest {
     GetEvents {
         event_ids: Vec<String>,
     },
+    /// A re-parse's inputs (J3): the raw object and the ready attachment texts.
+    ReparseSource {
+        message_id: String,
+    },
+    /// Stores a re-parse and re-emits `message.received` with `reprocessed: true`.
+    Reparse(Box<attachments::Reparsed>),
     /// The attachments an `AttachmentText` job extracts.
     PendingAttachmentText {
         message_id: String,
@@ -433,6 +439,15 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             }
             MailboxRequest::PendingAttachmentText { message_id } => {
                 Ok(attachments::pending(self.sql, &message_id)?)
+            }
+            MailboxRequest::ReparseSource { message_id } => {
+                Ok(attachments::reparse_source(self.sql, &message_id)?)
+            }
+            MailboxRequest::Reparse(r) => {
+                let event_id = outbox::new_event_id(self.p);
+                Ok(self.sql.transaction_sync(|s| {
+                    attachments::reparse(s, owner, &r, &event_id, is_system, now)
+                })?)
             }
             MailboxRequest::AttachmentTextReady(r) => Ok(self
                 .sql

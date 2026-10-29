@@ -103,3 +103,73 @@ fn i13_export_cancel_leaves_nothing() {
     );
     assert_eq!(r2_list(&format!("t/{}/exports/", s.tid)), json!([]));
 }
+
+/// `it::jobs::j3_reparse` (J3): a `reparse` job started with `POST /v1/platform/jobs` (`platform:ops`)
+/// re-parses a stored inbound message from its raw MIME: the parsed text, `parser_version` and the
+/// keyword index come back from raw, the message carries the `reprocessed` flag, and
+/// `message.received` is emitted again with `reprocessed: true`. A non-platform key gets `403`.
+#[test]
+fn j3_reparse() {
+    let (tid, idn, addr, key) = crate::mailbox_fixture("j3reparse");
+    crate::inbound(
+        "ana@sender.example",
+        &addr,
+        &crate::mail(
+            "ana@sender.example",
+            &addr,
+            "J3 invoice",
+            "Invoice INV-7731 attached",
+        ),
+    );
+    let m = crate::wait_stored(&idn, &key, "received", 1);
+    let mid = m[0]["id"].as_str().unwrap().to_owned();
+    // A parser bug: the stored text is wrong and the parser version old.
+    crate::mailbox_query(
+        &idn,
+        &format!(
+            "UPDATE messages SET text = 'garbled', extracted_text = 'garbled', parser_version = 0 WHERE id = '{mid}'"
+        ),
+    );
+    let before = crate::send::events_of(&idn, "message.received").len();
+
+    let tenant_key = crate::owner_key(&tid, &["messages:read"]);
+    let denied = crate::post(
+        "/v1/platform/jobs",
+        &tenant_key,
+        json!({ "kind": "reparse", "tenant_id": tid }),
+    );
+    assert_eq!(denied.status, 403, "{}", denied.body);
+    let r = crate::post(
+        "/v1/platform/jobs",
+        &crate::platform(),
+        json!({ "kind": "reparse", "tenant_id": tid, "identity_ids": [idn] }),
+    );
+    assert_eq!(r.status, 202, "{}", r.body);
+    let job = r.body["id"].as_str().unwrap().to_owned();
+    crate::eventually(60, "the reparse job to complete", || {
+        let j = crate::get(&format!("/v1/platform/jobs/{job}"), &crate::platform()).body;
+        (j["status"] == "completed").then_some(j)
+    });
+    let row = crate::eventually(60, "the re-parsed message", || {
+        let rows = crate::mailbox_query(
+            &idn,
+            &format!("SELECT text, parser_version, flags_json FROM messages WHERE id = '{mid}'"),
+        );
+        (rows[0]["parser_version"] == 1).then(|| rows[0].clone())
+    });
+    assert!(row["text"].as_str().unwrap().contains("INV-7731"), "{row}");
+    assert!(row["flags_json"].as_str().unwrap().contains("reprocessed"));
+    let events = crate::send::events_of(&idn, "message.received");
+    assert_eq!(events.len(), before + 1);
+    let last = events.last().unwrap();
+    assert_eq!(last["reprocessed"], true);
+    assert_eq!(last["message"]["id"], mid.as_str());
+    // The keyword index matches the re-parsed text again.
+    let hits = crate::post(
+        &format!("/v1/identities/{idn}/search"),
+        &key,
+        json!({ "q": "INV-7731", "mode": "keyword" }),
+    );
+    assert_eq!(hits.status, 200, "{}", hits.body);
+    assert!(hits.body.to_string().contains(&mid), "{}", hits.body);
+}

@@ -205,3 +205,201 @@ fn provider_quota_80() {
     assert_eq!(details["values"]["quota"], quota);
     assert_eq!(details["values"]["count"], 8);
 }
+
+const QUEUES: [&str; 6] = [
+    "pm-inbound",
+    "pm-outbound",
+    "pm-delivery-events",
+    "pm-webhooks",
+    "pm-index",
+    "pm-screen",
+];
+
+/// `it::ops::j8_dlq_consumer` (J8, Observability § 8): a message of each dead-letter queue is recorded
+/// in `dlq_items` once (a repeat is absorbed) and acked; it is counted in the `dlq_items` observation
+/// and raises `dlq:{queue}` after 15 minutes; `GET /v1/platform/dlq` lists it without its body, with
+/// the queue, status and tenant filters; `POST …/redrive` publishes it back, sets `redriven_at`,
+/// increments `redrive_count` and writes `dlq.redrive`; a damaged body is refused with `500`; a
+/// non-platform key gets `403`.
+#[test]
+fn j8_dlq_consumer() {
+    let _r = fakes::Reset;
+    let t = crate::tenant(&crate::platform(), "dlq tenant")["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let tag = crate::slug("j8");
+    let mut ids = Vec::new();
+    for q in QUEUES {
+        let msg = format!("{tag}-{q}");
+        let body =
+            json!({ "kind": "probe", "tenant_id": t, "envelope_to": "secret@recipient.example" });
+        for _ in 0..2 {
+            let r = crate::hook(
+                "POST",
+                "/__test/dlq",
+                Some(json!({ "queue": q, "messages": [{ "id": msg, "body": body }] })),
+            );
+            assert_eq!(r.body["settled"], json!(["ack"]), "{q}: {}", r.body);
+        }
+        let rows = d1(&format!(
+            "SELECT id, kind, tenant_id, body_sha256 FROM dlq_items WHERE queue = '{q}' AND message_id = '{msg}'"
+        ));
+        assert_eq!(
+            rows.as_array().unwrap().len(),
+            1,
+            "{q}: a repeat is absorbed"
+        );
+        assert_eq!(rows[0]["kind"], "probe");
+        assert_eq!(rows[0]["tenant_id"], t.as_str());
+        ids.push((q, rows[0]["id"].as_str().unwrap().to_owned()));
+    }
+
+    // Listed without the body, filtered by queue, status and tenant.
+    let p = crate::platform();
+    let r = crate::get(&format!("/v1/platform/dlq?tenant_id={t}"), &p);
+    assert_eq!(r.status, 200, "{}", r.body);
+    let data = r.body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 6);
+    assert!(
+        !r.body.to_string().contains("secret@recipient.example"),
+        "never the body"
+    );
+    assert!(
+        data.iter()
+            .all(|i| i.get("body_json").is_none() && i["redriven_at"].is_null())
+    );
+    let r = crate::get(
+        &format!("/v1/platform/dlq?tenant_id={t}&queue=pm-index"),
+        &p,
+    );
+    assert_eq!(r.body["data"].as_array().unwrap().len(), 1);
+    assert_eq!(crate::get("/v1/platform/dlq?queue=nope", &p).status, 400);
+    let partner = crate::partner("dlq partner", &["audit:read"]).1;
+    assert_eq!(crate::get("/v1/platform/dlq", &partner).status, 403);
+
+    // 15 minutes later every queue alerts.
+    fakes::advance(16 * 60_000);
+    minute();
+    for (q, _) in &ids {
+        assert!(
+            actions(&format!("dlq:{q}")).contains(&"alert.fired".to_owned()),
+            "{q}"
+        );
+    }
+
+    // Redrive: published back (pm-webhooks is tapped before its consumer), then recorded.
+    let (_, wid) = ids.iter().find(|(q, _)| *q == "pm-webhooks").unwrap();
+    let before = fakes::queued("pm-webhooks").len();
+    let r = crate::post(&format!("/v1/platform/dlq/{wid}/redrive"), &p, json!({}));
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["redrive_count"], 1);
+    assert!(r.body["redriven_at"].is_string());
+    crate::eventually(30, "the redriven body", || {
+        fakes::queued("pm-webhooks")[before..]
+            .iter()
+            .any(|b| b["kind"] == "probe" && b["tenant_id"] == t.as_str())
+            .then_some(())
+    });
+    assert_eq!(
+        d1(&format!(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'dlq.redrive' AND target_id = '{wid}'"
+        ))[0]["n"],
+        1
+    );
+    let r = crate::get(
+        &format!("/v1/platform/dlq?tenant_id={t}&status=redriven"),
+        &p,
+    );
+    assert_eq!(r.body["data"].as_array().unwrap().len(), 1);
+
+    // A damaged body is refused and nothing is published.
+    let (_, oid) = ids.iter().find(|(q, _)| *q == "pm-outbound").unwrap();
+    d1(&format!(
+        "UPDATE dlq_items SET body_json = '{{\"kind\":\"edited\"}}' WHERE id = '{oid}'"
+    ));
+    let r = crate::post(&format!("/v1/platform/dlq/{oid}/redrive"), &p, json!({}));
+    assert_eq!(r.status, 500, "{}", r.body);
+    assert_eq!(
+        crate::post(
+            "/v1/platform/dlq/dlq_01ARYZ6S41TSV4RRFFQ69G5FAV/redrive",
+            &p,
+            json!({})
+        )
+        .status,
+        404
+    );
+
+    // Closed again so the alerts resolve for the rest of the suite.
+    d1(&format!(
+        "UPDATE dlq_items SET redriven_at = {} WHERE tenant_id = '{t}'",
+        fakes::worker_now()
+    ));
+}
+
+/// `it::ops::platform_status` (Observability § 5.5): with a platform key holding `audit:read`,
+/// `GET /v1/platform/status` returns the freeze flag, the switches, `alert_email`, the firing alerts,
+/// the master-key slots with `remaining`, `activated_at` and `resealed_at`, and capacity; a partner key
+/// and a platform key without `audit:read` get `403`.
+#[test]
+fn platform_status() {
+    let _r = fakes::Reset;
+    let (_, audit) = crate::mint(
+        &crate::platform(),
+        json!({ "name": "heartbeat", "level": "platform", "permissions": ["audit:read"] }),
+    );
+    cron("* * * * *");
+    let r = crate::get("/v1/platform/status", &audit);
+    assert_eq!(r.status, 200, "{}", r.body);
+    let s = &r.body;
+    assert_eq!(s["frozen"], false);
+    assert!(s["frozen_since"].is_null());
+    assert_eq!(
+        s["switches"],
+        json!({ "read_only": "off", "free_sending": "on", "emergency_prune": "off", "agent_signup": "on" })
+    );
+    assert!(
+        ["configured", "missing"].contains(&s["alert_email"].as_str().unwrap()),
+        "{s}"
+    );
+    assert!(s["firing"].is_array());
+    assert_eq!(s["master_key"]["active_slot"], "a");
+    assert_eq!(s["master_key"]["remaining"], 0);
+    assert!(
+        s["master_key"]["activated_at"].is_string() && s["master_key"]["resealed_at"].is_string()
+    );
+    assert!(s["capacity"]["tenants"].as_u64().unwrap() >= 1);
+    assert!(s["capacity"]["namespaces_pct"].is_number());
+    assert!(
+        !s.to_string()
+            .contains(&std::env::var("PM_ITEST_MASTER_KEY").unwrap())
+    );
+    // A firing alert is listed with its severity.
+    let key = format!("job_failed:{}", crate::slug("kind"));
+    d1(&format!(
+        "INSERT INTO audit_log (id, action, target_type, target_id, details_json, created_at) VALUES ('aud_{}', 'alert.fired', 'alert', '{key}', '{{\"severity\":\"ticket\",\"values\":{{}},\"reported\":true}}', {})",
+        crate::slug("a"),
+        fakes::worker_now()
+    ));
+    cron("* * * * *");
+    let firing = crate::get("/v1/platform/status", &audit).body["firing"].clone();
+    assert!(
+        firing
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["alert"] == key.as_str()
+                && f["severity"] == "ticket"
+                && f["fired_at"].is_string()),
+        "{firing}"
+    );
+    let partner = crate::partner("status partner", &["audit:read"]).1;
+    assert_eq!(crate::get("/v1/platform/status", &partner).status, 403);
+    let (_, ops) = crate::mint(
+        &crate::platform(),
+        json!({ "name": "ops only", "level": "platform", "permissions": ["platform:ops"] }),
+    );
+    assert_eq!(crate::get("/v1/platform/status", &ops).status, 403);
+    cron("* * * * *");
+    cron("* * * * *");
+}

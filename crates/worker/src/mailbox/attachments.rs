@@ -201,3 +201,97 @@ pub fn index_text(md: &str) -> String {
     }
     md[..end].to_owned()
 }
+
+#[derive(Deserialize, Serialize)]
+struct ReadyText {
+    attachment_id: String,
+    text_r2_key: String,
+}
+
+/// The re-parse's inputs (J3): the raw object and the attachments whose extracted text is ready, so
+/// the keyword index keeps their text; `{"erased": true}` when the message is gone.
+pub fn reparse_source<S: Sql>(s: &S, message_id: &str) -> PResult<Value> {
+    let Some(m) = message(s, message_id)?.filter(|_| !erased(s, message_id).unwrap_or(true)) else {
+        return Ok(json!({ "erased": true }));
+    };
+    let ready: Vec<ReadyText> = s.query(
+        "SELECT id AS attachment_id, text_r2_key FROM attachments WHERE message_rowid = ?1 AND text_status = 'ready' AND text_r2_key IS NOT NULL ORDER BY rowid",
+        &[m.rowid.into()],
+    )?;
+    Ok(json!({
+        "erased": false, "direction": m.direction, "status": m.status, "raw_r2_key": m.raw_r2_key,
+        "attachments": ready,
+    }))
+}
+
+/// A message parsed again from its raw MIME by the current parser.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reparsed {
+    pub message_id: String,
+    pub subject: String,
+    pub text: Option<String>,
+    pub html_sanitized: Option<String>,
+    pub extracted_text: Option<String>,
+    pub parser_version: u32,
+    /// The ready attachments' text, for the keyword index.
+    pub items: Vec<TextItem>,
+    pub text_bytes: usize,
+}
+
+/// Stores a re-parse (J3): the parsed fields, the snippet, `parser_version` and the `reprocessed`
+/// flag; rebuilds the keyword index; and, for a received message, re-emits `message.received` with
+/// `reprocessed: true`. A message erased meanwhile is left alone.
+pub fn reparse<S: Sql>(
+    s: &S,
+    owner: &super::outbox::Owner<'_>,
+    r: &Reparsed,
+    event_id: &str,
+    is_system: bool,
+    now: i64,
+) -> PResult<Value> {
+    let Some(m) = message(s, &r.message_id)?.filter(|_| !erased(s, &r.message_id).unwrap_or(true))
+    else {
+        return Ok(json!({ "erased": true }));
+    };
+    let snippet = pylota_identity_core::text::snippet(r.extracted_text.as_deref().unwrap_or(""));
+    s.exec(
+        "UPDATE messages SET subject = ?2, text = ?3, html_sanitized = ?4, extracted_text = ?5, snippet = ?6, parser_version = ?7, \
+         flags_json = CASE WHEN EXISTS (SELECT 1 FROM json_each(flags_json) WHERE value = 'reprocessed') THEN flags_json \
+         ELSE json_insert(COALESCE(flags_json, '[]'), '$[#]', 'reprocessed') END WHERE rowid = ?1",
+        &[
+            m.rowid.into(),
+            r.subject.clone().into(),
+            r.text.clone().into(),
+            r.html_sanitized.clone().into(),
+            r.extracted_text.clone().into(),
+            snippet.into(),
+            i64::from(r.parser_version).into(),
+        ],
+    )?;
+    let m = message(s, &r.message_id)?.ok_or_else(|| {
+        pylota_identity_platform::PlatformError::invalid("reparse", "message vanished")
+    })?;
+    if !is_system {
+        reindex(s, &m, &r.items)?;
+    }
+    if m.status == "received" {
+        let atts: Vec<messages::AttachmentRow> =
+            s.query(messages::ATTACHMENTS_OF, &[m.rowid.into()])?;
+        let labels: Vec<Label> = s.query(
+            "SELECT label FROM labels WHERE message_rowid = ?1 ORDER BY label",
+            &[m.rowid.into()],
+        )?;
+        let labels: Vec<String> = labels.into_iter().map(|l| l.label).collect();
+        let mut data =
+            crate::webhooks::payloads::message_received(&m, &atts, &labels, r.text_bytes, false);
+        data["reprocessed"] = true.into();
+        super::outbox::append(s, owner, event_id, "message.received", now, &data, now)?;
+        super::set_wake(s, "outbox", now)?;
+    }
+    Ok(json!({ "erased": false, "reprocessed": true }))
+}
+
+#[derive(Deserialize)]
+struct Label {
+    label: String,
+}

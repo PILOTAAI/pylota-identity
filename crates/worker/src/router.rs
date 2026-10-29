@@ -132,6 +132,8 @@ pub enum Handler {
     JobCreate,
     JobGet,
     PlatformStatus,
+    DlqList,
+    DlqRedrive,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -425,6 +427,28 @@ pub static ROUTES: &[RouteSpec] = &[
         I::None,
         TENANT_UP,
         Handler::AuditList,
+    ),
+    route(
+        M::Get,
+        "/v1/platform/dlq",
+        "listDlqItems",
+        &["platform:ops"],
+        &[],
+        Scope::PlatformOnly,
+        I::None,
+        PLATFORM,
+        Handler::DlqList,
+    ),
+    route(
+        M::Post,
+        "/v1/platform/dlq/{dlq_id}/redrive",
+        "redriveDlqItem",
+        &["platform:ops"],
+        &[],
+        Scope::PlatformOnly,
+        I::Optional,
+        PLATFORM,
+        Handler::DlqRedrive,
     ),
     route(
         M::Get,

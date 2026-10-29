@@ -545,6 +545,22 @@ fn j7_staging_outlives_dlq() {
     });
     assert_eq!(pointer["kind"], "staged", "{pointer}");
     crate::fakes::reset();
+    // The dead-letter consumer recorded it (J8).
+    crate::eventually(30, "the dlq_items row", || {
+        let rows = crate::d1(
+            "SELECT body_json FROM dlq_items WHERE queue = 'pm-inbound' AND kind = 'staged'",
+        );
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .any(|r| {
+                r["body_json"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains(addr.as_str())
+            })
+            .then_some(())
+    });
     // Redriven 14 days later: the staged object is still there, and the message is stored.
     crate::fakes::advance(14 * 86_400_000);
     crate::queue_send("pm-inbound", pointer);

@@ -116,6 +116,10 @@ pub enum Command {
     #[command(subcommand)]
     Secrets(SecretsCmd),
     #[command(subcommand)]
+    Dlq(DlqCmd),
+    #[command(subcommand)]
+    Jobs(JobsCmd),
+    #[command(subcommand)]
     Suppressions(SuppressionsCmd),
     #[command(subcommand)]
     Lists(ListsCmd),
@@ -234,6 +238,47 @@ pub struct WranglerArgs {
     pub dir: DirArg,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
+}
+
+// ---- Dead letters and jobs --------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum DlqCmd {
+    /// List dead-letter items (never their bodies).
+    List {
+        #[arg(long)]
+        queue: Option<String>,
+        #[arg(long, value_parser = ["open", "redriven"])]
+        status: Option<String>,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    /// Publish items back to their source queue.
+    Redrive {
+        ids: Vec<String>,
+        /// Every open item of this queue (with --tenant, of that tenant only).
+        #[arg(long)]
+        queue: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum JobsCmd {
+    /// Start a maintenance job over one tenant (--tenant is required).
+    Start {
+        #[arg(value_parser = ["reparse", "reembed", "reindex", "event_log_rebuild"])]
+        kind: String,
+        /// Only these identities (comma-separated IDs or addresses).
+        #[arg(long = "identity-ids", value_delimiter = ',')]
+        identities: Vec<String>,
+        #[arg(long)]
+        after: Option<String>,
+        #[arg(long)]
+        before: Option<String>,
+    },
+    Get {
+        job: String,
+    },
 }
 
 // ---- Secrets ----------------------------------------------------------------------------------
@@ -1091,6 +1136,17 @@ pub enum ErasureCmd {
         status: Option<String>,
         #[command(flatten)]
         paging: Paging,
+    },
+    /// Submit a failed request's scope and target again, which resumes it.
+    Retry {
+        erasure: String,
+        /// The counterparty's address (counterparty scope; only its hash is stored).
+        #[arg(long)]
+        address: Option<String>,
+    },
+    /// Re-apply a completed erasure after a restore (platform key).
+    Reapply {
+        erasure: String,
     },
 }
 

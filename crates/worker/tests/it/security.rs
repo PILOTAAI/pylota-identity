@@ -122,6 +122,16 @@ const CASES: &[(&str, Case)] = &[
     ("getPlatformStatus", |_| {
         ("GET", "/v1/platform/status".into(), None)
     }),
+    ("listDlqItems", |t| {
+        (
+            "GET",
+            format!("/v1/platform/dlq?tenant_id={}", t.tenant),
+            None,
+        )
+    }),
+    ("redriveDlqItem", |_| {
+        ("POST", format!("/v1/platform/dlq/{JOB}/redrive"), None)
+    }),
     ("createIdentity", |t| {
         (
             "POST",
@@ -640,6 +650,8 @@ const OWN_SCOPE: &[&str] = &[
     "listPartners",
     "rotateSigningKey",
     "getPlatformStatus",
+    "listDlqItems",
+    "redriveDlqItem",
     "createPlatformWebhook",
     "listWebhooks",
 ];

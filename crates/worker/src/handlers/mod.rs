@@ -133,6 +133,8 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::JobCreate => platform::job_create(c).await,
         Handler::JobGet => platform::job_get(c).await,
         Handler::PlatformStatus => platform::status(c).await,
+        Handler::DlqList => platform::dlq_list(c).await,
+        Handler::DlqRedrive => platform::dlq_redrive(c).await,
         Handler::SearchIdentity => search::identity(c).await,
         Handler::SearchTenant => search::tenant(c).await,
         Handler::Related => search::related(c).await,

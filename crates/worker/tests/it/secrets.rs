@@ -333,3 +333,104 @@ fn master_key_rotation() {
          DELETE FROM signing_keys WHERE purpose = 'web_bot_auth' AND kid = '{wba}'; UPDATE domains SET smtp_sealed = NULL, smtp_pending_sealed = NULL WHERE id = '{dom}'"
     ));
 }
+
+/// A cursor of `GET /v1/tenants` (one tenant per page) and its kid.
+fn tenants_cursor() -> (String, String) {
+    let r = get("/v1/tenants?limit=1", &platform());
+    assert_eq!(r.status, 200, "{}", r.body);
+    let c = r.body["next_cursor"].as_str().unwrap().to_owned();
+    let kid = c[2..3].to_owned();
+    (c, kid)
+}
+
+fn page(cursor: &str) -> u16 {
+    get(&format!("/v1/tenants?limit=1&cursor={cursor}"), &platform()).status
+}
+
+fn rotate(purpose: &str, revoke: bool) -> Value {
+    let q = if revoke { "?revoke_previous=true" } else { "" };
+    let r = post(
+        &format!("/v1/platform/keys/{purpose}/rotate{q}"),
+        &platform(),
+        json!({}),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    r.body
+}
+
+/// `it::secrets::signing_key_rotation` (Security § 6.2): for `cursor`, a rotation makes new cursors
+/// carry the new kid while old ones verify until `verify_until` (24 hours) and fail after it; with
+/// `?revoke_previous=true` they fail at once and the response has `previous.revoked: true`. For
+/// `thread` and `link` the response names the next kid and the previous key's window (90 and 7 days).
+/// No response holds key material, and a 33rd rotation inside the window retires the oldest kid, so a
+/// purpose never holds more than 32 keys.
+#[test]
+fn signing_key_rotation() {
+    let _r = fakes::Reset;
+    for _ in 0..2 {
+        tenant(&platform(), "cursor pages");
+    }
+    let (old, kid0) = tenants_cursor();
+    let r = rotate("cursor", false);
+    assert_eq!(r["purpose"], "cursor");
+    assert_eq!(r["previous"]["kid"], kid0.as_str());
+    assert_eq!(r["previous"]["revoked"], false);
+    let created =
+        pylota_identity_core::days::parse_rfc3339(r["created_at"].as_str().unwrap()).unwrap();
+    let until =
+        pylota_identity_core::days::parse_rfc3339(r["previous"]["verify_until"].as_str().unwrap())
+            .unwrap();
+    assert_eq!(until - created, 86_400_000);
+    let keys: Vec<&String> = r.as_object().unwrap().keys().collect();
+    assert_eq!(
+        keys,
+        ["created_at", "kid", "previous", "purpose"],
+        "no key material"
+    );
+    let kid1 = r["kid"].as_str().unwrap().to_owned();
+    assert_ne!(kid1, kid0);
+
+    // Past the 60-second key cache: new cursors carry the new kid; the old one still verifies.
+    fakes::advance(61_000);
+    let (new, k) = tenants_cursor();
+    assert_eq!(k, kid1);
+    assert_eq!(page(&old), 200);
+    assert_eq!(page(&new), 200);
+    // After its window the old kid's cursors fail.
+    fakes::advance(86_400_000);
+    assert_ne!(page(&old), 200);
+
+    // Revoked at once.
+    let (fresh, _) = tenants_cursor();
+    let r = rotate("cursor", true);
+    assert_eq!(r["previous"]["revoked"], true);
+    assert_eq!(r["previous"]["verify_until"], r["created_at"]);
+    fakes::advance(61_000);
+    assert_ne!(page(&fresh), 200);
+    assert_eq!(tenants_cursor().1, r["kid"].as_str().unwrap());
+
+    // Thread and link: the next kid and the previous window.
+    for (purpose, window) in [("thread", 90 * 86_400_000i64), ("link", 7 * 86_400_000)] {
+        let r = rotate(purpose, false);
+        let c =
+            pylota_identity_core::days::parse_rfc3339(r["created_at"].as_str().unwrap()).unwrap();
+        let u = pylota_identity_core::days::parse_rfc3339(
+            r["previous"]["verify_until"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(u - c, window, "{purpose}");
+        assert_eq!(r["kid"].as_str().unwrap().len(), 1);
+        assert!(!r.to_string().contains("ciphertext"));
+    }
+
+    // 33 rotations inside the window: never more than 32 keys of the purpose.
+    for _ in 0..33 {
+        rotate("cursor", false);
+    }
+    let n = d1("SELECT COUNT(*) AS n FROM signing_keys WHERE purpose = 'cursor'")[0]["n"]
+        .as_u64()
+        .unwrap();
+    assert!(n <= 32, "{n} cursor keys");
+    fakes::advance(61_000);
+    tenants_cursor();
+}

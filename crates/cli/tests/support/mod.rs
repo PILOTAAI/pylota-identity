@@ -196,6 +196,10 @@ pub struct State {
     pub drop_next: Option<String>,
     /// Requests seen by the generic API: method, path and `Idempotency-Key`.
     pub api_requests: Vec<(String, String, Option<String>)>,
+    /// Their JSON bodies, in the same order (`null` without one).
+    pub api_bodies: Vec<Value>,
+    /// Answers of the generic API by `"METHOD /path"`, in order (the last repeats).
+    pub scripted: BTreeMap<String, Vec<(u16, Value)>>,
     pub seq: u64,
     pub runner_calls: Vec<Cmd>,
     /// `remaining` of `GET /v1/platform/status` while the active key's re-seal is unfinished, one
@@ -312,6 +316,8 @@ impl Fake {
             generic_api: false,
             drop_next: None,
             api_requests: vec![],
+            api_bodies: vec![],
+            scripted: BTreeMap::new(),
             seq: 0,
             runner_calls: vec![],
             reseal_script: vec![],
@@ -881,11 +887,25 @@ fn worker(
         .unwrap_or("")
         .to_owned();
     if s.generic_api && seg.first() == Some(&"v1") {
+        let path = format!("/{}", seg.join("/"));
         s.api_requests.push((
             method.to_owned(),
-            format!("/{}", seg.join("/")),
+            path.clone(),
             h.get("idempotency-key").cloned(),
         ));
+        s.api_bodies.push(b.clone());
+        if let Some(answers) = s.scripted.get_mut(&format!("{method} {path}")) {
+            let (status, doc) = if answers.len() > 1 {
+                answers.remove(0)
+            } else {
+                answers[0].clone()
+            };
+            return if status < 300 {
+                api(status, doc)
+            } else {
+                api_err(status, doc.as_str().unwrap_or("invalid_request"))
+            };
+        }
         return generic(seg);
     }
     let me = match authenticate(s, &key) {
@@ -1390,6 +1410,8 @@ impl Fake {
             generic_api: false,
             drop_next: None,
             api_requests: vec![],
+            api_bodies: vec![],
+            scripted: BTreeMap::new(),
             seq: 0,
             runner_calls: vec![],
             reseal_script: vec![],

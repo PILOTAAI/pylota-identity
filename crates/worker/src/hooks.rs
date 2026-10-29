@@ -228,6 +228,44 @@ pub async fn serve<P: Platform>(
             .await?;
             Ok(Reply::json(200, json!({ "job_id": id })))
         }
+        ("POST", "/__test/dlq") => {
+            // `{"queue": "pm-outbound", "messages": [{"id", "body"}]}`: the dead-letter consumer of
+            // that queue on these messages, as if the runtime delivered them; answers how each settled.
+            struct Record(std::cell::RefCell<&'static str>);
+            impl pylota_identity_platform::queues::Settle for Record {
+                fn ack(&self) {
+                    *self.0.borrow_mut() = "ack";
+                }
+                fn retry(&self, _: Option<u32>) {
+                    *self.0.borrow_mut() = "retry";
+                }
+            }
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let q = pylota_identity_platform::queues::QueueName::ALL
+                .into_iter()
+                .find(|q| Some(q.queue_name()) == body["queue"].as_str())
+                .ok_or_else(|| ApiError::invalid("queue", "Unknown queue."))?;
+            let mut handles = Vec::new();
+            let mut batch = Vec::new();
+            for m in body["messages"].as_array().cloned().unwrap_or_default() {
+                let h = std::rc::Rc::new(Record(std::cell::RefCell::new("none")));
+                handles.push(h.clone());
+                batch.push(pylota_identity_platform::queues::Incoming::new(
+                    m["id"].as_str().unwrap_or("").to_owned(),
+                    0,
+                    1,
+                    m["body"].clone(),
+                    h,
+                ));
+            }
+            crate::consumers::dlq::batch(p.as_ref(), q, batch).await;
+            let settled: Vec<&str> = handles.iter().map(|h| *h.0.borrow()).collect();
+            Ok(Reply::json(200, json!({ "settled": settled })))
+        }
         ("POST", "/__test/queue-send") => {
             let body: Value = req
                 .body
@@ -415,33 +453,6 @@ pub async fn serve<P: Platform>(
             }
         }
         _ => Err(not_found()),
-    }
-}
-
-/// The itest build's queue consumer: each message is posted to `{fakes}/queues/{queue}` and acked.
-pub async fn capture_queue<P: Platform>(
-    p: &P,
-    queue: pylota_identity_platform::queues::QueueName,
-    dead_letter: bool,
-    batch: Vec<pylota_identity_platform::queues::Incoming<Value>>,
-) {
-    use pylota_identity_platform::HttpClient as _;
-    use pylota_identity_platform::http::HttpRequest;
-    let Some(fakes) = p.config().itest_fakes_url.clone() else {
-        return;
-    };
-    for m in &batch {
-        let dlq = if dead_letter { "-dlq" } else { "" };
-        let mut req = HttpRequest::get(format!("{fakes}/queues/{}{dlq}", queue.queue_name()));
-        req.method = "POST";
-        req.timeout_ms = 2_000;
-        req.headers
-            .push(("content-type".into(), "application/json".into()));
-        req.body = Some(m.body.to_string().into_bytes());
-        match p.http().send(req).await {
-            Ok(_) => m.ack(),
-            Err(_) => m.retry(None),
-        }
     }
 }
 

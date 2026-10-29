@@ -121,8 +121,7 @@ pub async fn batch<P: Platform>(p: &P, mut batch: Vec<Incoming<Value>>) {
             Ok(InboundJob::Message(ptr)) => message(p, ptr).await,
             Ok(InboundJob::Staged(ptr)) => staged(p, ptr).await,
             Ok(InboundJob::RoleMail(ptr)) => crate::inbound::role_mail::relay(p, ptr).await,
-            // Re-parse pointers (M14): nothing to do until then.
-            Ok(InboundJob::Reparse(_)) => Done::Ack,
+            Ok(InboundJob::Reparse(job)) => reparse(p, &job).await,
             Err(_) => {
                 crate::log::warn("inbound_bad_pointer", &[]);
                 Done::Ack
@@ -133,6 +132,115 @@ pub async fn batch<P: Platform>(p: &P, mut batch: Vec<Incoming<Value>>) {
             Done::Retry => m.retry(Some(RETRY_S)),
             Done::Later(s) => m.retry(Some(s)),
         }
+    }
+}
+
+/// A `reparse` pointer (J3): the stored message parsed again from its raw MIME by this build's
+/// parser; the mailbox stores the new fields and re-emits `message.received` with `reprocessed: true`.
+/// A message whose raw object or mailbox is gone, or that is not inbound, is acked without work.
+pub async fn reparse<P: Platform>(p: &P, job: &Value) -> Done {
+    let (Some(identity_id), Some(message_id)) =
+        (job["identity_id"].as_str(), job["message_id"].as_str())
+    else {
+        return Done::Ack;
+    };
+    let idn = match p.db().first::<idb::Row>(idb::get(identity_id)).await {
+        Ok(Some(i)) => i,
+        Ok(None) => return Done::Ack,
+        Err(_) => return Done::Retry,
+    };
+    if idn.mailbox_do_id.is_empty() || matches!(idn.status.as_str(), "deleting" | "deleted") {
+        return Done::Ack;
+    }
+    let t = match p.db().first::<tdb::Row>(tdb::get(&idn.tenant_id)).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return Done::Ack,
+        Err(_) => return Done::Retry,
+    };
+    let request_id = job["job_id"].as_str().unwrap_or("reparse").to_owned();
+    let mailbox = idn.mailbox_do_id.clone();
+    let call = |req: MailboxRequest| {
+        let env = envelope_for(
+            p,
+            Some(&idn.tenant_id),
+            Some(identity_id),
+            &request_id,
+            None,
+            req,
+        );
+        let mailbox = mailbox.clone();
+        async move {
+            p.objects()
+                .call::<_, Value>(DoClass::Mailbox, &mailbox, &env)
+                .await
+        }
+    };
+    let src = match call(MailboxRequest::ReparseSource {
+        message_id: message_id.to_owned(),
+    })
+    .await
+    {
+        Ok(RpcResult::Ok(v)) => v,
+        _ => return Done::Retry,
+    };
+    let Some(raw_key) = src["raw_r2_key"]
+        .as_str()
+        .filter(|_| src["erased"] == false && src["direction"] == "inbound")
+    else {
+        return Done::Ack;
+    };
+    let raw = match p.blobs().get(raw_key).await {
+        Ok(Some(b)) => b.body.to_vec(),
+        Ok(None) => return Done::Ack,
+        Err(_) => return Done::Retry,
+    };
+    let mut items = Vec::new();
+    for a in src["attachments"].as_array().into_iter().flatten() {
+        let (Some(id), Some(key)) = (a["attachment_id"].as_str(), a["text_r2_key"].as_str()) else {
+            continue;
+        };
+        let text = match p.blobs().get(key).await {
+            Ok(Some(b)) => String::from_utf8_lossy(&b.body.to_vec()).into_owned(),
+            Ok(None) => String::new(),
+            Err(_) => return Done::Retry,
+        };
+        items.push(crate::mailbox::attachments::TextItem {
+            attachment_id: id.to_owned(),
+            status: "ready".into(),
+            pages: None,
+            text_r2_key: Some(key.to_owned()),
+            refs: Vec::new(),
+            text,
+        });
+    }
+    let parsed = mime::parse(&raw, &Caps::default());
+    let content = inbound::content(&parsed);
+    let policy = crate::policy::effective(p, &t);
+    let text_bytes = pylota_identity_core::policy::get_path(&policy, "webhook_text_bytes")
+        .and_then(Value::as_u64)
+        .unwrap_or(16_384) as usize;
+    let r = crate::mailbox::attachments::Reparsed {
+        message_id: message_id.to_owned(),
+        subject: mime::clean_display(parsed.subject.as_deref().unwrap_or(""), 998),
+        text: content.text,
+        html_sanitized: content.html_sanitized,
+        extracted_text: Some(content.extracted_text),
+        parser_version: PARSER_VERSION,
+        items,
+        text_bytes,
+    };
+    match call(MailboxRequest::Reparse(Box::new(r))).await {
+        Ok(RpcResult::Ok(_)) => {
+            crate::metrics::count_with(
+                p,
+                "inbound_processed_total",
+                Some(&idn.tenant_id),
+                &["reprocessed"],
+                1,
+            );
+            Done::Ack
+        }
+        _ => Done::Retry,
     }
 }
 
