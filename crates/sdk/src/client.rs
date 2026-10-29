@@ -363,11 +363,7 @@ impl Client {
             match self.once(&req).await {
                 Ok(r) => return Ok(r),
                 Err((e, retry_after)) => {
-                    let retryable = match &e {
-                        Error::Api(a) => a.retryable,
-                        Error::Transport { .. } => true,
-                        _ => false,
-                    };
+                    let retryable = retryable(&req, &e);
                     match self.retry {
                         Some(p) if retryable && attempt < p.max_retries => {
                             tokio::time::sleep(p.delay(attempt, retry_after)).await;
@@ -441,6 +437,21 @@ impl Client {
             .find(|(n, _)| n.eq_ignore_ascii_case("retry-after"))
             .and_then(|(_, v)| v.parse::<u64>().ok());
         Err((Error::from_response(status, &body), retry_after))
+    }
+}
+
+/// Whether a failed call may be sent again ([Errors › How a client should retry]): an envelope that
+/// says so; a network error or a proxy `502`, `503` or `504` only for a `GET` or a request with an
+/// idempotency key, so a keyless `PATCH`, `DELETE` or `PUT` is sent once.
+///
+/// [Errors › How a client should retry]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/reference/errors.md
+fn retryable(req: &Req, e: &Error) -> bool {
+    let safe = req.method == "GET" || req.idempotency_key.is_some();
+    match e {
+        Error::Api(a) => a.retryable,
+        Error::Transport { .. } => safe,
+        Error::Status { status, .. } => safe && matches!(status, 502..=504),
+        _ => false,
     }
 }
 
@@ -546,6 +557,40 @@ mod tests {
             "https://h/v1/identities/idn_1/threads?labels=a%20b&labels=c&limit=10&is_unread=true"
         );
         assert_eq!(segment("jo@example.net"), "jo%40example.net");
+    }
+
+    /// A network error or a proxy `503` is retried for a `GET` or a keyed request, never for a keyless
+    /// `PATCH` or `DELETE`; an envelope's `retryable` decides for every method.
+    #[test]
+    fn retry_rules() {
+        let transport = Error::Transport {
+            message: "reset".into(),
+            idempotency_key: None,
+        };
+        let proxy = Error::Status {
+            status: 503,
+            body: String::new(),
+        };
+        let get = Req::new("GET", "/v1/me".into(), true);
+        let patch = Req::new("PATCH", "/v1/identities/idn_1".into(), true);
+        let mut post = Req::new("POST", "/v1/identities/idn_1/messages".into(), true);
+        post.idempotency(None, true);
+        for r in [&get, &post] {
+            assert!(retryable(r, &transport) && retryable(r, &proxy));
+        }
+        assert!(!retryable(&patch, &transport) && !retryable(&patch, &proxy));
+        let limited = Error::from_response(
+            429,
+            br#"{"error":{"code":"rate_limited","message":"x","retryable":true}}"#,
+        );
+        assert!(retryable(&patch, &limited));
+        assert!(!retryable(
+            &get,
+            &Error::Status {
+                status: 404,
+                body: String::new()
+            }
+        ));
     }
 
     #[test]

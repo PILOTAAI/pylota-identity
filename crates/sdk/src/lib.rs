@@ -24,7 +24,7 @@ mod generated;
 pub mod webhooks;
 
 pub use client::{
-    Body, Client, ClientBuilder, IdempotencyKey, Pages, Raw, Req, Response, RetryPolicy,
+    Body, Client, ClientBuilder, IdempotencyKey, Pages, Raw, Req, Response, RetryPolicy, segment,
 };
 pub use generated::*;
 
@@ -78,7 +78,7 @@ pub enum Error {
 
 impl Error {
     /// A non-success answer: the envelope when there is one.
-    pub(crate) fn from_response(status: u16, body: &[u8]) -> Self {
+    pub fn from_response(status: u16, body: &[u8]) -> Self {
         let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
         let e = &v["error"];
         match e["code"].as_str() {

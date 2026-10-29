@@ -46,6 +46,17 @@ pub fn verify(
     body: &[u8],
     now_s: i64,
 ) -> Result<(), VerifyError> {
+    verify_with(secret, headers, body, now_s, TOLERANCE_S)
+}
+
+/// [`verify`] with another tolerance for `webhook-timestamp` (seconds).
+pub fn verify_with(
+    secret: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+    now_s: i64,
+    tolerance_s: i64,
+) -> Result<(), VerifyError> {
     let header = |name: &'static str| {
         headers
             .iter()
@@ -65,7 +76,7 @@ pub fn verify(
                 .ok_or(VerifyError::BadSecret)?,
         )
         .map_err(|_| VerifyError::BadSecret)?;
-    if (now_s - ts).abs() > TOLERANCE_S {
+    if (now_s - ts).abs() > tolerance_s {
         return Err(VerifyError::Timestamp);
     }
     let mut content = format!("{id}.{ts}.").into_bytes();
