@@ -5,6 +5,7 @@
 pub mod addresses;
 pub mod audit;
 pub mod domains;
+pub mod erasure;
 pub mod identities;
 pub mod keys;
 pub mod links;
@@ -118,6 +119,13 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::ListEntryPut => lists::put(c).await,
         Handler::ListEntryDelete => lists::delete(c).await,
         Handler::SignedLink => links::get(c).await,
+        Handler::ErasureCreate => erasure::create(c).await,
+        Handler::ErasureList => erasure::list(c).await,
+        Handler::ErasureGet => erasure::get(c).await,
+        Handler::ErasureReapply => erasure::reapply(c).await,
+        Handler::HoldSet => erasure::hold_set(c).await,
+        Handler::HoldRemove => erasure::hold_remove(c).await,
+        Handler::MessageDelete => erasure::delete_message(c).await,
         Handler::SearchIdentity => search::identity(c).await,
         Handler::SearchTenant => search::tenant(c).await,
         Handler::Related => search::related(c).await,

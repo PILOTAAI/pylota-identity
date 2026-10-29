@@ -207,6 +207,8 @@ pub enum QuotaRequest {
         metric: UsageMetric,
         n: u64,
     },
+    /// Tenant erasure (Privacy § 6.6, step 5): every counter, hold, allowance and outcome goes.
+    Wipe,
     ForgetIdentity {
         identity_id: String,
     },
@@ -986,6 +988,23 @@ impl<P: Platform, S: Sql> Quota<'_, P, S> {
                     total: self.counter(&name, &utc)? as u64,
                     day: utc,
                 })
+            }
+            QuotaRequest::Wipe => {
+                self.sql
+                    .transaction_sync(|s| -> Result<(), PlatformError> {
+                        for q in [
+                            "DELETE FROM counters",
+                            "DELETE FROM outcome_events",
+                            "DELETE FROM allowances",
+                            "DELETE FROM holds",
+                            "DELETE FROM outcomes",
+                            "DELETE FROM meta WHERE k NOT IN ('schema_version', 'tenant_id')",
+                        ] {
+                            s.exec(q, &[])?;
+                        }
+                        Ok(())
+                    })?;
+                Value::Null
             }
             QuotaRequest::ForgetIdentity { identity_id } => {
                 self.sql

@@ -13,6 +13,7 @@ pub mod ingest;
 pub mod locks;
 pub mod messages;
 pub mod outbox;
+pub mod privacy;
 pub mod read;
 pub mod search;
 #[cfg(feature = "itest-hooks")]
@@ -89,6 +90,8 @@ pub enum MailboxRequest {
     Search(search::SearchOp),
     /// Triage load, re-run and commit (Triage § 1.1, § 10); tagged `tq` inside.
     Triage(triage::TriageOp),
+    /// Erasure, retention, holds and export (Privacy § 4.1).
+    Privacy(privacy::PrivacyOp),
     /// A send, reply, reply-all or forward (Outbound › The submit path).
     Submit(Box<submit::SubmitInput>),
     /// What the outbound consumer reads before D1: status, From and the queued recipients.
@@ -440,6 +443,23 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             MailboxRequest::Triage(op) => {
                 triage::handle(self.p, self.sql, owner, op, now, is_system)
             }
+            MailboxRequest::Privacy(privacy::PrivacyOp::WipeAll) => {
+                // Everything goes; a three-row tombstone then refuses every later request.
+                self.state.delete_all().await?;
+                self.migrate()?;
+                self.sql.exec(
+                    "INSERT OR REPLACE INTO meta (k, v) VALUES ('erased', '1'), ('tenant_id', ?1), ('identity_id', ?2)",
+                    &[owner.tenant_id.into(), owner.identity_id.into()],
+                )?;
+                Ok(Value::Null)
+            }
+            MailboxRequest::Privacy(op) => Ok(privacy::handle(
+                self.sql,
+                owner,
+                op,
+                now,
+                &self.p.secrets().hash_key,
+            )?),
             MailboxRequest::Search(op) => Ok(search::handle(
                 self.sql,
                 op,
