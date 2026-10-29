@@ -33,3 +33,10 @@ minisign-verify = "=0.3.0"   # 2026-09-25; release signatures (CLI and setup § 
 flate2 = "=1.1.10"           # 2026-08-28; the release tarball
 tar = "=0.4.46"              # 2026-05-18; the release tarball
 getrandom = { workspace = true }   # generated secrets and the bootstrap key (OS CSPRNG)
+
+[dev-dependencies]
+# The recorded fakes of tests/support: a loopback HTTP server, a real SQLite D1 and signed bundles.
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
+rusqlite = { workspace = true }
+ed25519-dalek = { workspace = true }
+blake2 = "=0.11.0"   # 2026-08-26 (crates.io API, read 2026-10-29); prehashed minisign test signatures

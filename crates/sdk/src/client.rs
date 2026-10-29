@@ -20,7 +20,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Client {
     http: reqwest::Client,
     base: String,
-    key: String,
+    /// `None` for a client of the routes that need no key (`/health`, `/v1/plans`).
+    key: Option<String>,
     user_agent: String,
     retry: Option<RetryPolicy>,
 }
@@ -79,10 +80,7 @@ impl ClientBuilder {
                 "base_url must be https:// (http:// only for localhost)".into(),
             ));
         }
-        let key = self
-            .api_key
-            .filter(|k| !k.is_empty())
-            .ok_or_else(|| Error::Config("api_key is required".into()))?;
+        let key = self.api_key.filter(|k| !k.is_empty());
         let http = match self.http {
             Some(h) => h,
             None => reqwest::Client::builder()
@@ -394,7 +392,10 @@ impl Client {
             .timeout(timeout)
             .header("user-agent", &self.user_agent);
         if req.auth {
-            r = r.header("authorization", format!("Bearer {}", self.key));
+            let Some(key) = &self.key else {
+                return Err((Error::Config("this call needs an API key".into()), None));
+            };
+            r = r.header("authorization", format!("Bearer {key}"));
         }
         for (k, v) in &req.headers {
             r = r.header(k.as_str(), v.as_str());
@@ -534,12 +535,21 @@ mod tests {
         assert!(ok("https://mail.example.com"));
         assert!(ok("http://localhost:8787") && ok("http://127.0.0.1"));
         assert!(!ok("http://mail.example.com") && !ok("http://localhost.example.com"));
-        assert!(
-            Client::builder()
-                .base_url("https://x.example")
-                .build()
-                .is_err()
-        );
+        assert!(Client::builder().api_key("pmk_test_x").build().is_err());
+    }
+
+    /// A client without a key reaches the routes that need none, and refuses the others before sending.
+    #[tokio::test]
+    async fn keyless_client() {
+        let c = Client::builder()
+            .base_url("http://127.0.0.1:9")
+            .build()
+            .unwrap();
+        let e = c
+            .send(Req::new("GET", "/v1/me".into(), true))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Error::Config(_)), "{e:?}");
     }
 
     #[test]

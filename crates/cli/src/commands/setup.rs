@@ -1039,41 +1039,79 @@ pub async fn run(ctx: &Ctx, a: SetupArgs) -> Result<Output, CliError> {
         p.name = Some(name_for_profile);
     })?;
 
-    // Step 20: the platform domain row.
+    // Step 20: the platform domain row, read first; the objects recorded by the run that made them stay.
     let zone_full = cf.get("zones", &format!("/zones/{zone_id}"), &[]).await?;
     let now = ctx.now_ms();
-    let provider = json!({
-        "routing": { "zone_id": zone_id, "created": true },
-        "catch_all": { "zone_id": zone_id, "created": true },
-        "sending": { "tag": tag, "created": sending_created },
-        "ownership_record": { "id": ownership_id, "created": own_created },
-        "event_subscription": { "id": sub, "created": true },
+    let records_json = Value::Array(records).to_string();
+    let ns_json = zone_full["name_servers"].to_string();
+    let existing = cf
+        .d1_query(
+            &d1,
+            "SELECT zone_id, ownership_token, event_subscription_id, records_json, expected_ns_json, provider_objects_json \
+             FROM domains WHERE name = ?1 AND state <> 'removed'",
+            &[json!(mail_domain)],
+        )
+        .await?;
+    let provider = match existing.first() {
+        Some(row) => row["provider_objects_json"]
+            .as_str()
+            .unwrap_or("{}")
+            .to_owned(),
+        None => json!({
+            "routing": { "zone_id": zone_id, "created": true },
+            "catch_all": { "zone_id": zone_id, "created": true },
+            "sending": { "tag": tag, "created": sending_created },
+            "ownership_record": { "id": ownership_id, "created": own_created },
+            "event_subscription": { "id": sub, "created": true },
+        })
+        .to_string(),
+    };
+    let same = existing.first().is_some_and(|row| {
+        row["zone_id"] == zone_id.as_str()
+            && row["ownership_token"] == ownership_token.as_str()
+            && row["event_subscription_id"] == sub.as_str()
+            && row["records_json"] == records_json.as_str()
+            && row["expected_ns_json"] == ns_json.as_str()
     });
-    cf.d1_query(
-        &d1,
-        "INSERT INTO domains (id, tenant_id, name, kind, method, inbound, zone_id, is_apex, routing_mode, \
-         transport, reply_token, receiving, sending, state, state_changed_at, ownership_token, event_subscription_id, \
-         records_json, expected_ns_json, provider_objects_json, monitor_do_id, created_at, updated_at) \
-         VALUES (?1, NULL, ?2, 'platform', 'platform', 'routing', ?3, 1, 'catch_all', 'cloudflare', 'subaddress', 1, 1, \
-         'pending', ?4, ?5, ?6, ?7, ?8, ?9, '', ?4, ?4) \
-         ON CONFLICT(name) WHERE state <> 'removed' DO UPDATE SET zone_id = excluded.zone_id, \
-         ownership_token = excluded.ownership_token, event_subscription_id = excluded.event_subscription_id, \
-         records_json = excluded.records_json, expected_ns_json = excluded.expected_ns_json, \
-         provider_objects_json = excluded.provider_objects_json, updated_at = excluded.updated_at",
-        &[
-            json!(format!("dom_{}", ulid(now))),
-            json!(mail_domain),
-            json!(zone_id),
-            json!(now),
-            json!(ownership_token),
-            json!(sub),
-            json!(Value::Array(records).to_string()),
-            json!(zone_full["name_servers"].to_string()),
-            json!(provider.to_string()),
-        ],
-    )
-    .await?;
-    steps.add(ctx, "platform_domain", "updated", mail_domain.clone(), "");
+    if same {
+        steps.add(ctx, "platform_domain", "exists", mail_domain.clone(), "");
+    } else {
+        cf.d1_query(
+            &d1,
+            "INSERT INTO domains (id, tenant_id, name, kind, method, inbound, zone_id, is_apex, routing_mode, \
+             transport, reply_token, receiving, sending, state, state_changed_at, ownership_token, event_subscription_id, \
+             records_json, expected_ns_json, provider_objects_json, monitor_do_id, created_at, updated_at) \
+             VALUES (?1, NULL, ?2, 'platform', 'platform', 'routing', ?3, 1, 'catch_all', 'cloudflare', 'subaddress', 1, 1, \
+             'pending', ?4, ?5, ?6, ?7, ?8, ?9, '', ?4, ?4) \
+             ON CONFLICT(name) WHERE state <> 'removed' DO UPDATE SET zone_id = excluded.zone_id, \
+             ownership_token = excluded.ownership_token, event_subscription_id = excluded.event_subscription_id, \
+             records_json = excluded.records_json, expected_ns_json = excluded.expected_ns_json, \
+             provider_objects_json = excluded.provider_objects_json, updated_at = excluded.updated_at",
+            &[
+                json!(format!("dom_{}", ulid(now))),
+                json!(mail_domain),
+                json!(zone_id),
+                json!(now),
+                json!(ownership_token),
+                json!(sub),
+                json!(records_json),
+                json!(ns_json),
+                json!(provider),
+            ],
+        )
+        .await?;
+        steps.add(
+            ctx,
+            "platform_domain",
+            if existing.is_empty() {
+                "created"
+            } else {
+                "updated"
+            },
+            mail_domain.clone(),
+            "",
+        );
+    }
 
     // Step 21: the default tenant.
     let api = Api::new(ctx, &base, Some(&key))?;

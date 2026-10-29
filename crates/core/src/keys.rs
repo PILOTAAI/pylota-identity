@@ -120,7 +120,6 @@ fn decode_hex(s: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-
 /// Key levels, `Identity < Tenant < Partner < Platform`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Level {

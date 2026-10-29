@@ -264,7 +264,14 @@ fn set_vars(text: &str, vars: &BTreeMap<String, String>) -> String {
             && let Some(v) = vars.get(k.trim())
         {
             let k = k.trim().to_owned();
-            out.push(format!("{k:<22} = {v}"));
+            let same = vars_of(&format!("[vars]\n{t}\n"))
+                .first()
+                .is_some_and(|(_, old)| old == v);
+            out.push(if same {
+                line.to_owned()
+            } else {
+                format!("{k:<22} = {v}")
+            });
             seen.insert(k);
             continue;
         }
@@ -408,7 +415,10 @@ mod tests {
         i.console_host = Some("console.example.com".into());
         i.vars.insert("PM_BACKUP_BUCKET".into(), "backup".into());
         let r = render(&template(), None, &i).unwrap();
-        assert!(!r.lines().any(|l| l.trim_start().starts_with("jurisdiction")));
+        assert!(
+            !r.lines()
+                .any(|l| l.trim_start().starts_with("jurisdiction"))
+        );
         assert!(
             r.contains("\"pm-staging-inbound\"") && r.contains("\"pylota-identity-staging-blobs\"")
         );

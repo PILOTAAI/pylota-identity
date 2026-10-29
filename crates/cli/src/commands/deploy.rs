@@ -127,8 +127,14 @@ pub async fn deploy(ctx: &Ctx, a: DeployArgs) -> Result<Output, CliError> {
 ///
 /// [CLI and setup §8.7]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/cli.md#87-index-generation-changes
 fn index_generation(rendered: &str) -> Result<&'static str, CliError> {
-    let next = rendered.contains("binding    = \"VECTORS_NEXT\"")
-        || rendered.contains("binding = \"VECTORS_NEXT\"");
+    let doc: toml::Table = toml::from_str(&render::strip_marker(rendered))
+        .map_err(|e| CliError::config(format!("wrangler.toml: {e}")))?;
+    let next = doc
+        .get("vectorize")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .any(|v| v.get("binding").and_then(|b| b.as_str()) == Some("VECTORS_NEXT"));
     let model = render::var(rendered, "PM_EMBED_MODEL").unwrap_or_default();
     if next || model != "@cf/baai/bge-m3" {
         return Err(CliError::usage(format!(
