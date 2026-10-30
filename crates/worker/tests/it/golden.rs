@@ -97,11 +97,11 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
         fakes::publish_txt(&format!("_dmarc.{d}"), &["v=DMARC1; p=none".to_owned()]);
     }
 
-    // Months of mail arrive in minutes: the per-sender hourly limit (D5) would hide most of it, so the
-    // load lifts it, and only for the load.
+    // Months of mail arrive in minutes: the hourly limits per sender (D5) and per tenant (D13) would
+    // store most of it `throttled`, hidden from search, so the load lifts them, and only for the load.
     fakes::set_config(
         "PM_DEFAULT_POLICY",
-        Some(r#"{"inbound":{"per_sender_per_hour":100000}}"#),
+        Some(r#"{"inbound":{"per_sender_per_hour":100000,"per_tenant_per_hour":100000}}"#),
     );
     for m in &golden.generated {
         let to = &identities[&m.truth.identity].1;
