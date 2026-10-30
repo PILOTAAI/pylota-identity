@@ -133,6 +133,7 @@ pub enum Handler {
     JobGet,
     PlatformStatus,
     DlqList,
+    SetSwitch,
     DlqRedrive,
 }
 
@@ -449,6 +450,17 @@ pub static ROUTES: &[RouteSpec] = &[
         I::Optional,
         PLATFORM,
         Handler::DlqRedrive,
+    ),
+    route(
+        M::Put,
+        "/v1/platform/switches",
+        "setSwitch",
+        &["platform:ops"],
+        &[],
+        Scope::PlatformOnly,
+        I::Optional,
+        PLATFORM,
+        Handler::SetSwitch,
     ),
     route(
         M::Get,

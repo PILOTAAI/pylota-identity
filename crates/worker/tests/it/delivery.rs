@@ -26,7 +26,7 @@ pub fn cf_event(
 }
 
 /// Now as RFC 3339 on the Worker's clock (the fake offset included).
-fn now_rfc3339(offset_ms: i64) -> String {
+pub fn now_rfc3339(offset_ms: i64) -> String {
     let ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -35,7 +35,7 @@ fn now_rfc3339(offset_ms: i64) -> String {
     pylota_identity_core::days::rfc3339(ms)
 }
 
-fn provider_id(iid: &str, mid: &str) -> String {
+pub fn provider_id(iid: &str, mid: &str) -> String {
     mailbox_query(
         iid,
         &format!("SELECT provider_message_id FROM messages WHERE id = '{mid}'"),
@@ -181,7 +181,7 @@ fn g8_race() {
 }
 
 /// `n` outcomes recorded on a tenant's quota object directly (the windows the consumer feeds).
-fn outcomes(tid: &str, identities: &[String], domain: &str, n: usize, outcome: &str) {
+pub fn outcomes(tid: &str, identities: &[String], domain: &str, n: usize, outcome: &str) {
     let qid = crate::d1(&format!(
         "SELECT quota_do_id FROM tenants WHERE id = '{tid}'"
     ))[0]["quota_do_id"]
@@ -206,7 +206,7 @@ fn outcomes(tid: &str, identities: &[String], domain: &str, n: usize, outcome: &
     }
 }
 
-fn domain_of(addr: &str) -> String {
+pub fn domain_of(addr: &str) -> String {
     crate::d1(&format!(
         "SELECT domain_id FROM addresses WHERE address = '{addr}'"
     ))[0]["domain_id"]

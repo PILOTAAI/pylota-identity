@@ -349,3 +349,38 @@ pub async fn dlq_redrive<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         .ok_or_else(ApiError::internal)?;
     Ok(Reply::json(200, row.json()))
 }
+
+/// `PUT /v1/platform/switches` (Observability § 5.6): one switch on or off, with a reason.
+pub async fn set_switch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
+    let body = c.json()?;
+    super::messages::only_fields(&body, &["name", "state", "reason"])?;
+    let name = crate::ops::switches::SWITCHES
+        .iter()
+        .map(|(n, _)| *n)
+        .find(|n| body["name"].as_str() == Some(n))
+        .ok_or_else(|| {
+            ApiError::invalid(
+                "name",
+                "read_only, free_sending, emergency_prune or agent_signup.",
+            )
+        })?;
+    let state = match body["state"].as_str() {
+        Some(s @ ("on" | "off")) => s,
+        _ => return Err(ApiError::invalid("state", "on or off.")),
+    };
+    let reason = body["reason"]
+        .as_str()
+        .filter(|r| !r.trim().is_empty() && r.chars().count() <= 200)
+        .ok_or_else(|| ApiError::invalid("reason", "1 to 200 characters."))?;
+    let row = crate::ops::switches::set(
+        c.p.as_ref(),
+        name,
+        state,
+        "platform",
+        reason,
+        Some(&c.key().key_id),
+        &c.request_id,
+    )
+    .await?;
+    Ok(Reply::json(200, row))
+}

@@ -122,6 +122,13 @@ const CASES: &[(&str, Case)] = &[
     ("getPlatformStatus", |_| {
         ("GET", "/v1/platform/status".into(), None)
     }),
+    ("setSwitch", |_| {
+        (
+            "PUT",
+            "/v1/platform/switches".into(),
+            Some(json!({ "name": "agent_signup", "state": "on", "reason": "x" })),
+        )
+    }),
     ("listDlqItems", |t| {
         (
             "GET",
@@ -652,6 +659,7 @@ const OWN_SCOPE: &[&str] = &[
     "getPlatformStatus",
     "listDlqItems",
     "redriveDlqItem",
+    "setSwitch",
     "createPlatformWebhook",
     "listWebhooks",
 ];

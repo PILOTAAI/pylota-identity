@@ -818,6 +818,12 @@ pub struct EvaluatorState {
     pub last_run_at: i64,
     #[serde(default)]
     pub keys: BTreeMap<String, KeyState>,
+    /// The alert email budget of the current hour and the last daily summary.
+    #[serde(default)]
+    pub email: super::alert_email::Budget,
+    /// The last audit row (D1 rowid) read for reports, so a clock step never hides one.
+    #[serde(default)]
+    pub report_rowid: i64,
 }
 
 /// One true condition of this run.
@@ -902,7 +908,7 @@ pub async fn evaluate<P: Platform>(p: &P, request_id: &str) {
             return;
         }
     };
-    let (reported, resolved_by_reporter) = reports_since(p, prev.last_run_at, now).await;
+    let (reported, resolved_by_reporter, last_rowid) = reports_since(p, prev.report_rowid).await;
     conditions.extend(reported);
 
     // The keys of this run: every true condition and every key still firing.
@@ -917,6 +923,8 @@ pub async fn evaluate<P: Platform>(p: &P, request_id: &str) {
         run: prev.run + 1,
         last_run_at: now,
         keys: BTreeMap::new(),
+        email: prev.email.clone(),
+        report_rowid: last_rowid.max(prev.report_rowid),
     };
     let mut effects: Vec<(String, Transition, Option<Condition>, KeyState)> = Vec::new();
     let mut keys: Vec<String> = prev.keys.keys().cloned().collect();
@@ -954,12 +962,83 @@ pub async fn evaluate<P: Platform>(p: &P, request_id: &str) {
             effects.push((key, t, cond.cloned(), state));
         }
     }
+    let emails = plan_emails(p, &mut next, &effects, now);
     if !claim(p, &prev, existed, &next).await {
         return;
     }
     for (key, t, cond, state) in effects {
         apply(p, &key, &t, cond.as_ref(), &state, request_id, now).await;
     }
+    for e in emails {
+        super::alert_email::send(p, &e, request_id).await;
+    }
+}
+
+/// The alert emails of this run (§ 5.5): one per page notification, at most 20 an hour and then one
+/// that says how many more; and in the 08:00 UTC hour, once a day, the summary of the firing tickets.
+fn plan_emails<P: Platform>(
+    p: &P,
+    next: &mut EvaluatorState,
+    effects: &[(String, Transition, Option<Condition>, KeyState)],
+    now: i64,
+) -> Vec<super::alert_email::Email> {
+    use super::alert_email::{PER_HOUR, capped_email, page_email, summary_email};
+    let cfg = p.config();
+    let env = match cfg.env {
+        pylota_identity_platform::config::DeployEnv::Production => "production",
+        pylota_identity_platform::config::DeployEnv::Staging => "staging",
+        pylota_identity_platform::config::DeployEnv::Local => "local",
+    };
+    let hour = pylota_identity_core::days::utc_hour(now);
+    if next.email.hour != hour {
+        next.email.hour = hour.clone();
+        next.email.sent = 0;
+        next.email.capped = false;
+    }
+    let mut out = Vec::new();
+    let mut over = 0;
+    for (key, t, cond, state) in effects {
+        let notice = match t {
+            Transition::Fire => 0,
+            Transition::Renotify { n } => *n,
+            _ => continue,
+        };
+        if state.severity != Severity::Page {
+            continue;
+        }
+        if next.email.sent >= PER_HOUR {
+            over += 1;
+            continue;
+        }
+        next.email.sent += 1;
+        let values = cond.as_ref().map_or(Value::Null, |c| c.values.clone());
+        out.push(page_email(
+            env,
+            &cfg.docs_url,
+            key,
+            &values,
+            state.fired_at,
+            notice,
+        ));
+    }
+    if over > 0 && !next.email.capped {
+        next.email.capped = true;
+        out.push(capped_email(env, &hour, over));
+    }
+    let day = pylota_identity_core::days::utc_day(now);
+    if hour.ends_with("T08") && next.email.summary_day != day {
+        next.email.summary_day = day.clone();
+        let tickets: Vec<(String, i64)> = next
+            .keys
+            .iter()
+            .filter(|(_, s)| s.severity == Severity::Ticket)
+            .map(|(k, s)| (k.clone(), s.fired_at))
+            .collect();
+        if !tickets.is_empty() {
+            out.push(summary_email(env, &day, &tickets));
+        }
+    }
+    out
 }
 
 async fn apply<P: Platform>(
@@ -1031,10 +1110,12 @@ async fn apply<P: Platform>(
     }
 }
 
-/// The `alert.fired` reports written since the last run, and the keys their reporters resolved.
-async fn reports_since<P: Platform>(p: &P, since: i64, now: i64) -> (Vec<Condition>, Vec<String>) {
+/// The `alert.fired` reports written after audit row `since_rowid`, the keys their reporters resolved,
+/// and the last rowid read.
+async fn reports_since<P: Platform>(p: &P, since_rowid: i64) -> (Vec<Condition>, Vec<String>, i64) {
     #[derive(Deserialize)]
     struct R {
+        rid: i64,
         action: String,
         target_id: String,
         tenant_id: Option<String>,
@@ -1043,14 +1124,16 @@ async fn reports_since<P: Platform>(p: &P, since: i64, now: i64) -> (Vec<Conditi
     let rows: Vec<R> = p
         .db()
         .query(Stmt::new(
-            "SELECT action, target_id, tenant_id, details_json FROM audit_log WHERE action IN ('alert.fired','alert.resolved') AND created_at > ?1 AND created_at <= ?2 AND json_extract(details_json, '$.reported') = 1 ORDER BY created_at, id",
-            vec![since.into(), now.into()],
+            "SELECT rowid AS rid, action, target_id, tenant_id, details_json FROM audit_log WHERE rowid > ?1 AND action IN ('alert.fired','alert.resolved') AND json_extract(details_json, '$.reported') = 1 ORDER BY rowid LIMIT 1000",
+            vec![since_rowid.into()],
         ))
         .await
         .unwrap_or_default();
     let mut fired = Vec::new();
     let mut resolved = Vec::new();
+    let mut last = since_rowid;
     for r in rows {
+        last = last.max(r.rid);
         let d: Value = r
             .details_json
             .as_deref()
@@ -1075,7 +1158,7 @@ async fn reports_since<P: Platform>(p: &P, since: i64, now: i64) -> (Vec<Conditi
             reported: true,
         });
     }
-    (fired, resolved)
+    (fired, resolved, last)
 }
 
 /// The DLQ alert's age bar.
@@ -1287,6 +1370,54 @@ pub async fn conditions<P: Platform>(
         }
     }
 
+    // Automatic containment (§ 5.6): `partner_suspended` acts here, from the audit rows.
+    partner_containment(p, now).await?;
+    // `containment:{rule}` is a level: true while its effect lasts.
+    for (name, rule) in [
+        ("read_only", "read_only"),
+        ("emergency_prune", "emergency_prune"),
+        ("free_sending", "free_sending_off"),
+        ("agent_signup", "agent_signup_off"),
+    ] {
+        if crate::ops::switches::away_from_default(p, name).await {
+            out.push(Condition::new(
+                format!("containment:{rule}"),
+                None,
+                json!({ "switch": name }),
+            ));
+        }
+    }
+    #[derive(Deserialize)]
+    struct Ids {
+        ids: Option<String>,
+    }
+    let paused: Option<Ids> = db
+        .first(Stmt::new(
+            "SELECT group_concat(id) AS ids FROM tenants WHERE sending_paused_at IS NOT NULL AND sending_pause_reason = 'abuse_burst'",
+            vec![],
+        ))
+        .await?;
+    if let Some(ids) = paused.and_then(|p| p.ids) {
+        out.push(Condition::new(
+            "containment:tenant_paused",
+            None,
+            json!({ "tenant_ids": ids.split(',').collect::<Vec<_>>() }),
+        ));
+    }
+    let suspended: Option<Ids> = db
+        .first(Stmt::new(
+            "SELECT group_concat(p.id) AS ids FROM partners p WHERE p.status = 'suspended' AND              (SELECT a.action FROM audit_log a WHERE a.target_id = p.id AND a.action IN ('partner.auto_suspend','partner.update') ORDER BY a.created_at DESC, a.id DESC LIMIT 1) = 'partner.auto_suspend'",
+            vec![],
+        ))
+        .await?;
+    if let Some(ids) = suspended.and_then(|p| p.ids) {
+        out.push(Condition::new(
+            "containment:partner_suspended",
+            None,
+            json!({ "partner_ids": ids.split(',').collect::<Vec<_>>() }),
+        ));
+    }
+
     // `PM_DAILY_SEND_QUOTA`: the default tenant's `deployment_day` at 80% (G3).
     if let Some(quota) = p.config().daily_send_quota {
         #[derive(Deserialize)]
@@ -1321,6 +1452,61 @@ pub async fn conditions<P: Platform>(
         }
     }
     Ok(out)
+}
+
+/// `partner_suspended` (§ 5.6): a partner with 5 or more `identity.auto_pause` rows in the last hour
+/// over at least 3 of its tenants, or 3 or more of its tenants sending-paused automatically in the last
+/// 24 hours, is suspended (`partner.auto_suspend`, with the trigger). One tenant's abuse alone never
+/// suspends its partner, and rows from before the partner's last update (a platform key's
+/// reactivation) do not count again.
+async fn partner_containment<P: Platform>(
+    p: &P,
+    now: i64,
+) -> Result<(), pylota_identity_platform::PlatformError> {
+    #[derive(Deserialize)]
+    struct Hit {
+        partner_id: String,
+        rows: i64,
+        tenants: i64,
+        rule: String,
+    }
+    let hits: Vec<Hit> = p
+        .db()
+        .query(Stmt::new(
+            "SELECT t.partner_id, COUNT(*) AS rows, COUNT(DISTINCT a.tenant_id) AS tenants, 'identity_pauses' AS rule              FROM audit_log a JOIN tenants t ON t.id = a.tenant_id JOIN partners pt ON pt.id = t.partner_id              WHERE a.action = 'identity.auto_pause' AND a.created_at > ?1 AND pt.status <> 'suspended' AND a.created_at > COALESCE((SELECT MAX(u.created_at) FROM audit_log u WHERE u.action = 'partner.update' AND u.target_id = t.partner_id), 0) GROUP BY t.partner_id HAVING COUNT(*) >= 5 AND COUNT(DISTINCT a.tenant_id) >= 3              UNION ALL              SELECT t.partner_id, COUNT(*) AS rows, COUNT(DISTINCT a.tenant_id) AS tenants, 'tenant_pauses' AS rule              FROM audit_log a JOIN tenants t ON t.id = a.tenant_id JOIN partners pt ON pt.id = t.partner_id              WHERE a.action = 'tenant.auto_pause' AND a.created_at > ?2 AND pt.status <> 'suspended' AND a.created_at > COALESCE((SELECT MAX(u.created_at) FROM audit_log u WHERE u.action = 'partner.update' AND u.target_id = t.partner_id), 0) GROUP BY t.partner_id HAVING COUNT(DISTINCT a.tenant_id) >= 3",
+            vec![(now - 3_600_000).into(), (now - DAY_MS).into()],
+        ))
+        .await?;
+    for h in hits {
+        let changed = p
+            .db()
+            .batch(vec![
+                Stmt::new(
+                    "UPDATE partners SET status = 'suspended', updated_at = ?2 WHERE id = ?1 AND status <> 'suspended'",
+                    vec![h.partner_id.clone().into(), now.into()],
+                ),
+                audit::insert(
+                    &p.ids().new_id(IdPrefix::Audit),
+                    None,
+                    None,
+                    "partner.auto_suspend",
+                    "partner",
+                    &h.partner_id,
+                    &json!({ "rule": h.rule, "rows": h.rows, "tenants": h.tenants }),
+                    "containment",
+                    now,
+                ),
+            ])
+            .await?;
+        if changed.first().is_some_and(|m| m.changes == 1) {
+            crate::log::security(
+                "containment_partner_suspended",
+                &[("detail", h.partner_id.clone().into())],
+            );
+            crate::metrics::count_with(p, "containment_total", None, &["partner_suspended"], 1);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

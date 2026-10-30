@@ -70,7 +70,7 @@ mod entry {
 
         async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
             let r = self.0.fetch(req).await;
-            crate::metrics::flush(self.0.p.as_ref());
+            crate::ops::end_invocation(self.0.p.as_ref()).await;
             r
         }
 
@@ -79,7 +79,7 @@ mod entry {
             msg: pylota_identity_platform::app::EmailIn,
         ) -> pylota_identity_platform::app::EmailOutcome {
             let r = crate::email::handle(self.0.p.as_ref(), &msg).await;
-            crate::metrics::flush(self.0.p.as_ref());
+            crate::ops::end_invocation(self.0.p.as_ref()).await;
             r
         }
 
@@ -103,13 +103,13 @@ mod entry {
                 crate::hooks::tap_queue(self.0.p.as_ref(), &name, &batch).await;
             }
             crate::consumers::run(self.0.p.as_ref(), queue, dead_letter, batch).await;
-            crate::metrics::flush(self.0.p.as_ref());
+            crate::ops::end_invocation(self.0.p.as_ref()).await;
         }
 
         async fn scheduled(&self, ev: ScheduledIn) {
             let request_id = crate::request_id::new(self.0.p.as_ref());
             crate::crons::run(self.0.p.as_ref(), &ev.cron, &request_id).await;
-            crate::metrics::flush(self.0.p.as_ref());
+            crate::ops::end_invocation(self.0.p.as_ref()).await;
         }
     }
 

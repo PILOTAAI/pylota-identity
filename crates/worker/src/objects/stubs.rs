@@ -48,7 +48,7 @@ impl ObjectApp for QuotaObject {
             sql: &self.sql,
         };
         let r = json(200, &q.handle(&body));
-        crate::metrics::flush(self.platform.as_ref());
+        crate::ops::end_invocation(self.platform.as_ref()).await;
         r
     }
 }
@@ -88,13 +88,13 @@ impl ObjectApp for MonitorObject {
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
         let r = json(200, &self.monitor().handle(&body_of(&req)).await);
-        crate::metrics::flush(&self.platform);
+        crate::ops::end_invocation(&self.platform).await;
         r
     }
 
     async fn alarm(&self) {
         self.monitor().alarm().await;
-        crate::metrics::flush(&self.platform);
+        crate::ops::end_invocation(&self.platform).await;
     }
 }
 
@@ -118,7 +118,7 @@ impl ObjectApp for SesControlObject {
             sql: &self.sql,
         };
         let r = json(200, &c.handle(&body_of(&req)));
-        crate::metrics::flush(&self.platform);
+        crate::ops::end_invocation(&self.platform).await;
         r
     }
 }
@@ -154,13 +154,13 @@ impl ObjectApp for MailboxObject {
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
         let r = json(200, &self.mailbox().handle(&body_of(&req)).await);
-        crate::metrics::flush(self.platform.as_ref());
+        crate::ops::end_invocation(self.platform.as_ref()).await;
         r
     }
 
     async fn alarm(&self) {
         self.mailbox().alarm().await;
-        crate::metrics::flush(self.platform.as_ref());
+        crate::ops::end_invocation(self.platform.as_ref()).await;
     }
 }
 
@@ -192,13 +192,13 @@ impl ObjectApp for RunnerObject {
 
     async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
         let r = json(200, &self.runner().handle(&body_of(&req)).await);
-        crate::metrics::flush(&self.platform);
+        crate::ops::end_invocation(&self.platform).await;
         r
     }
 
     async fn alarm(&self) {
         self.runner().alarm().await;
-        crate::metrics::flush(&self.platform);
+        crate::ops::end_invocation(&self.platform).await;
     }
 }
 

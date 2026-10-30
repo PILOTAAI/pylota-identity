@@ -164,6 +164,10 @@ pub fn post(path: &str, key: &str, body: Value) -> Resp {
     call("POST", path, Some(key), Some(body), &[])
 }
 
+pub fn put(path: &str, key: &str, body: Value) -> Resp {
+    call("PUT", path, Some(key), Some(body), &[])
+}
+
 pub fn patch(path: &str, key: &str, body: Value) -> Resp {
     call("PATCH", path, Some(key), Some(body), &[])
 }

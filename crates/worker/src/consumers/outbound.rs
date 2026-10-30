@@ -70,6 +70,9 @@ pub async fn enqueue<P: Platform>(
         .is_ok()
 }
 
+/// How long a send waits while the deployment is read-only.
+const READ_ONLY_DELAY_S: u32 = 300;
+
 pub async fn batch<P: Platform>(p: &P, batch: Vec<Incoming<Value>>) {
     #[cfg(feature = "itest-hooks")]
     crate::hooks::tap_queue(p, "pm-outbound", &batch).await;
@@ -88,6 +91,7 @@ pub async fn batch<P: Platform>(p: &P, batch: Vec<Incoming<Value>>) {
         match handled {
             Handled::Ack => m.ack(),
             Handled::Retry(d) => m.retry(Some(d)),
+            Handled::Requeue(d) => delivery::requeue(p, QueueName::Outbound, &m, d).await,
         }
     }
 }
@@ -209,6 +213,11 @@ async fn send<P: Platform>(
     };
     if facts.status.as_deref() != Some("queued") {
         return Handled::Ack;
+    }
+    // The `read_only` switch (Observability § 5.6): sends wait, still `queued`, except the system
+    // identity's, so sign-in, invitation and alert email still leave.
+    if idn.is_system == 0 && crate::ops::switches::state(p, "read_only").await == "on" {
+        return Handled::Requeue(READ_ONLY_DELAY_S);
     }
     let extra: Option<Extra> = db
         .first(Stmt::new(

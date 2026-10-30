@@ -1161,6 +1161,44 @@ mod tests {
                 "deadline_ms": i64::MAX, "req": req })
     }
 
+    /// The per-domain state alerts (Observability § 5.3): 2 bounces in 51 outcomes within the hour set
+    /// `bounce_alert`; 1 complaint in 200 outcomes within 24 hours sets `complaint_alert`; outcomes of
+    /// another domain do not count.
+    #[test]
+    fn domain_rate_alerts() {
+        let p = FakePlatform::new();
+        let sql = FakeSql::new();
+        let q = Quota { p: &p, sql: &sql };
+        let t = "ten_01ARYZ6S410000000000000000";
+        q.handle(&env(t, json!({ "op": "init", "tenant_id": t })));
+        let now = pylota_identity_platform::Clock::now_ms(p.clock());
+        let mut n = 0;
+        let mut record = |domain: &str, outcome: &str| -> Value {
+            n += 1;
+            let v = q.handle(&env(t, json!({ "op": "record_outcome", "identity_id": format!("idn_{}", n % 7),
+                "domain_id": domain, "outcome": outcome, "at": now, "event_id": format!("e{n}"), "counted": true })));
+            v["ok"].clone()
+        };
+        for _ in 0..49 {
+            record("dom_a", "delivered");
+        }
+        assert_eq!(record("dom_a", "bounced")["bounce_alert"], false, "1 of 50");
+        assert_eq!(record("dom_a", "bounced")["bounce_alert"], true, "2 of 51");
+        for _ in 0..60 {
+            record("dom_b", "bounced");
+        }
+        for _ in 0..148 {
+            record("dom_a", "delivered");
+        }
+        let d = record("dom_a", "complained");
+        assert_eq!(d["complaint_alert"], true, "{d}");
+        assert_eq!(
+            record("dom_c", "complained")["complaint_alert"],
+            false,
+            "1 of 1"
+        );
+    }
+
     /// Init stores the owner; a mismatched owner is refused; every other variant answers as the stub
     /// table of build plan M5 says.
     #[test]

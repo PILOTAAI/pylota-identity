@@ -48,7 +48,8 @@ pub fn error_body<T>(e: &ApiError, request_id: &str, docs_url: &str) -> RpcResul
 }
 
 /// The owner check of every object (Security § 5.2 step 6): a mismatch is `internal_error`, logged as
-/// the security event `rpc_owner_mismatch` and counted in `rpc_owner_mismatch_total`.
+/// the security event `rpc_owner_mismatch`, counted in `rpc_owner_mismatch_total`, and contained: the
+/// invocation turns the deployment read-only as it ends (`ops::containment`).
 pub fn check_owner<P: Platform>(
     p: &P,
     stored: Option<&str>,
@@ -67,6 +68,7 @@ pub fn check_owner<P: Platform>(
         ],
     );
     crate::metrics::count(p, "rpc_owner_mismatch_total", None, 1);
+    crate::ops::containment::note_owner_mismatch();
     Err(ApiError::new(
         ErrorCode::InternalError,
         "Something went wrong on our side.",

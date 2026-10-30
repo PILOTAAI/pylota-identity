@@ -9,7 +9,7 @@ use pylota_identity_api_types::ids::{self, IdPrefix};
 use pylota_identity_core::address::address_hash;
 use pylota_identity_platform::d1::Stmt;
 use pylota_identity_platform::durable::DoClass;
-use pylota_identity_platform::queues::Incoming;
+use pylota_identity_platform::queues::{Incoming, QueueName};
 use pylota_identity_platform::{Clock as _, ControlDb as _, Ids as _, ObjectClient as _, Platform};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -124,6 +124,7 @@ pub async fn batch<P: Platform>(p: &P, batch: Vec<Incoming<Value>>) {
             Some(e) => match handle(p, &e).await {
                 Handled::Ack => m.ack(),
                 Handled::Retry(d) => m.retry(Some(d)),
+                Handled::Requeue(d) => requeue(p, QueueName::Delivery, &m, d).await,
             },
             None => {
                 crate::metrics::count(p, "delivery_unknown_type_total", None, 1);
@@ -136,6 +137,8 @@ pub async fn batch<P: Platform>(p: &P, batch: Vec<Incoming<Value>>) {
 pub enum Handled {
     Ack,
     Retry(u32),
+    /// Sent again after this many seconds and acked, so no retry is used up (the `read_only` hold).
+    Requeue(u32),
 }
 
 #[derive(Deserialize)]
@@ -271,6 +274,15 @@ async fn pause<P: Platform>(p: &P, r: &Route, d: &OutcomeDecision, request_id: &
         let _ = db
             .execute(audit("identity.auto_pause", "identity", &r.identity_id, json!({ "reason": "abuse_threshold" })))
             .await;
+        crate::ops::alerts::report(
+            p,
+            &format!("abuse_pause:{}", r.identity_id),
+            Some(&r.tenant_id),
+            None,
+            &json!({ "domain_id": r.domain_id }),
+            request_id,
+        )
+        .await;
         let env = envelope_for(
             p,
             Some(&r.tenant_id),
@@ -319,6 +331,20 @@ async fn pause<P: Platform>(p: &P, r: &Route, d: &OutcomeDecision, request_id: &
                 "delivery",
             )
             .await;
+            // The automatic containment rule `tenant_paused` (Observability § 5.6): the evaluator keeps
+            // `containment:tenant_paused` firing while the pause lasts.
+            if reason == "abuse_burst" {
+                crate::ops::alerts::report(
+                    p,
+                    "containment:tenant_paused",
+                    Some(&r.tenant_id),
+                    None,
+                    &json!({ "tenant_id": r.tenant_id, "domain_id": r.domain_id }),
+                    request_id,
+                )
+                .await;
+                crate::metrics::count_with(p, "containment_total", None, &["tenant_paused"], 1);
+            }
         }
     }
     if d.pause_domain
@@ -336,11 +362,22 @@ async fn pause<P: Platform>(p: &P, r: &Route, d: &OutcomeDecision, request_id: &
             .await;
         crate::log::error("sending_pause", &[("domain", r.domain_id.clone().into())]);
     }
-    if d.bounce_alert || d.complaint_alert {
-        crate::log::warn(
-            "deliverability_alert",
-            &[("tenant", r.tenant_id.clone().into())],
-        );
+    // The per-domain state alerts, from the tenant's hourly counters (Observability § 5.3).
+    for (on, name) in [
+        (d.bounce_alert, "bounce_rate"),
+        (d.complaint_alert, "complaint_rate"),
+    ] {
+        if on {
+            crate::ops::alerts::report(
+                p,
+                &format!("{name}:{}:{}", r.tenant_id, r.domain_id),
+                Some(&r.tenant_id),
+                None,
+                &json!({}),
+                request_id,
+            )
+            .await;
+        }
     }
 }
 
@@ -429,6 +466,14 @@ pub async fn suppress<P: Platform>(
     {
         Ok(RpcResult::Ok(_)) => Ok(()),
         _ => Err(Unavailable),
+    }
+}
+
+/// Sends the message's body again after `delay_s` and acks it; on a failed send it is retried instead.
+pub async fn requeue<P: Platform>(p: &P, q: QueueName, m: &Incoming<Value>, delay_s: u32) {
+    match pylota_identity_platform::QueueProducer::send(p.queues(), q, &m.body, delay_s).await {
+        Ok(()) => m.ack(),
+        Err(_) => m.retry(Some(delay_s)),
     }
 }
 

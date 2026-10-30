@@ -240,6 +240,11 @@ fn every_served_operation() {
         seen.ok("getJob", p.get_job(&field(&job, "id")).await);
         seen.ok("getPlatformStatus", p.get_platform_status().await);
         seen.ok("listDlqItems", p.list_dlq_items(&Default::default()).await);
+        seen.ok(
+            "setSwitch",
+            p.set_switch(&body(json!({ "name": "agent_signup", "state": "on", "reason": "sdk coverage" })), None)
+                .await,
+        );
         seen.any(
             "redriveDlqItem",
             p.redrive_dlq_item("dlq_01ARYZ6S41TSV4RRFFQ69G5FAV", None).await,

@@ -6,7 +6,6 @@ use std::rc::Rc;
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_core::policy::request_fingerprint;
 use pylota_identity_platform::app::{HttpRequestIn, HttpResponseOut};
-use pylota_identity_platform::d1::Stmt;
 use pylota_identity_platform::ratelimit::RlBucket;
 use pylota_identity_platform::{Clock as _, ControlDb as _, Platform};
 use serde_json::{Value, json};
@@ -218,6 +217,41 @@ impl<P: Platform> App<P> {
 
         let key = auth::authenticate(&self.p, req.header("authorization")).await?;
         *authenticated = true;
+        // The break-glass key (Observability § 5.7, J36): any use writes its audit row and pages at
+        // once, from the authentication path itself.
+        if cfg.break_glass_key_id.as_deref() == Some(key.key_id.as_str()) {
+            let ip = req.header("cf-connecting-ip").unwrap_or("");
+            let hash = pylota_identity_core::address::address_hash(&cfg.secrets.hash_key, ip);
+            let ip_hash = hash.get(..16).unwrap_or("");
+            let now = self.p.clock().now_ms();
+            let _ = self
+                .p
+                .db()
+                .execute(crate::db::audit::insert(
+                    &pylota_identity_platform::Ids::new_id(
+                        self.p.ids(),
+                        pylota_identity_platform::ids::IdPrefix::Audit,
+                    ),
+                    None,
+                    Some(&key.key_id),
+                    "key.break_glass_used",
+                    "api_key",
+                    &key.key_id,
+                    &json!({ "method": req.method, "ip_hash": ip_hash }),
+                    request_id,
+                    now,
+                ))
+                .await;
+            crate::ops::alerts::report(
+                self.p.as_ref(),
+                "break_glass_key_used",
+                None,
+                Some(pylota_identity_core::slo::Severity::Page),
+                &json!({ "key_id": key.key_id }),
+                request_id,
+            )
+            .await;
+        }
         *rl_limit = Some(ratelimit::limit(RlBucket::Api));
         self.charge(&key).await?;
         self.serve_as(
@@ -291,26 +325,14 @@ impl<P: Platform> App<P> {
                 )
                 .details(json!({ "reason": "frozen" })));
             }
-            if c.method != "GET" && c.method != "HEAD" {
-                #[derive(serde::Deserialize)]
-                struct S {
-                    state: String,
-                }
-                let ro: Option<S> = self
-                    .p
-                    .db()
-                    .first(Stmt::new(
-                        "SELECT state FROM ops_switches WHERE name = 'read_only'",
-                        vec![],
-                    ))
-                    .await?;
-                if ro.is_some_and(|s| s.state == "on") {
-                    return Err(ApiError::new(
-                        ErrorCode::Unavailable,
-                        "The deployment is read-only.",
-                    )
-                    .details(json!({ "reason": "read_only" })));
-                }
+            if c.method != "GET"
+                && c.method != "HEAD"
+                && crate::ops::switches::state(self.p.as_ref(), "read_only").await == "on"
+            {
+                return Err(
+                    ApiError::new(ErrorCode::Unavailable, "The deployment is read-only.")
+                        .details(json!({ "reason": "read_only" })),
+                );
             }
         }
         let foreign = match spec.scope {

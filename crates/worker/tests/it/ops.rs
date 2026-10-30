@@ -403,3 +403,454 @@ fn platform_status() {
     cron("* * * * *");
     cron("* * * * *");
 }
+
+/// Turns `read_only` off when a test ends, whatever happened, so the rest of the suite can write.
+struct ReadOnlyOff;
+
+impl Drop for ReadOnlyOff {
+    fn drop(&mut self) {
+        let _ = crate::put(
+            "/v1/platform/switches",
+            &crate::platform(),
+            json!({ "name": "read_only", "state": "off", "reason": "test cleanup" }),
+        );
+    }
+}
+
+/// Fires one reported alert of `key` with `severity` now (as its reporter would).
+fn fire(key: &str, severity: &str) {
+    report("alert.fired", key, severity);
+}
+
+/// `it::ops::j32_alert_channels` (J32, Observability § 5.5): a page alert sends one alert email through
+/// the system identity to `PM_ALERT_EMAIL`, with the alert key, the runbook and no content, and another
+/// after 6 hours; ticket alerts arrive in one summary in the 08:00 UTC hour; more than 20 page emails
+/// in an hour collapse into one that says how many more; `GET /v1/platform/status` reports
+/// `alert_email: missing` without an address; with `read_only` on an alert email still leaves while a
+/// tenant's queued send waits.
+#[test]
+fn j32_alert_channels() {
+    let _r = fakes::Reset;
+    let _off = ReadOnlyOff;
+    let ops = format!("ops-{}@operator.example", crate::slug("o"));
+    fakes::set_config("PM_ALERT_EMAIL", Some(&ops));
+    // The status before and after an address is configured.
+    fakes::set_config(
+        "PM_SECURITY_CONTACT",
+        Some("https://operator.example/security"),
+    );
+    let status = |k: &str| crate::get("/v1/platform/status", &crate::platform()).body[k].clone();
+    assert_eq!(status("alert_email"), "configured");
+
+    let key = format!("transport_breaker_open:{}", crate::slug("t"));
+    fire(&key, "page");
+    minute();
+    let mails = crate::eventually(60, "the alert email", || {
+        let m = fakes::mail_sent(&ops);
+        (!m.is_empty()).then_some(m)
+    });
+    assert_eq!(mails.len(), 1);
+    let text = mails[0].to_string();
+    assert!(text.contains(&format!("page: {key}")), "{text}");
+    assert!(
+        text.contains("observability.html#email-sending-outage"),
+        "{text}"
+    );
+
+    // Re-notified 6 hours later.
+    fire(&key, "page");
+    fakes::advance(6 * 3_600_000 + 60_000);
+    fire(&key, "page");
+    minute();
+    crate::eventually(60, "the re-notification", || {
+        (fakes::mail_sent(&ops).len() >= 2).then_some(())
+    });
+
+    // The daily ticket summary, in the 08:00 UTC hour.
+    let ticket = format!("webhook_failing:whk_{}", crate::slug("w"));
+    fire(&ticket, "ticket");
+    minute();
+    fakes::advance_to_minute(8 * 60 + 5);
+    fire(&ticket, "ticket");
+    minute();
+    let summary = crate::eventually(60, "the ticket summary", || {
+        fakes::mail_sent(&ops)
+            .into_iter()
+            .find(|m| m.to_string().contains("ticket: "))
+    });
+    assert!(summary.to_string().contains(&ticket), "{summary}");
+
+    // 25 page alerts in one hour: 20 emails, then one that says 5 more (in a fresh hour).
+    fakes::advance(3_600_000);
+    let before = fakes::mail_sent(&ops).len();
+    for i in 0..25 {
+        fire(
+            &format!("transport_breaker_open:burst{i}{}", crate::slug("b")),
+            "page",
+        );
+    }
+    minute();
+    let all = crate::eventually(90, "the capped emails", || {
+        let m = fakes::mail_sent(&ops);
+        (m.len() >= before + 21).then_some(m)
+    });
+    assert_eq!(all.len(), before + 21, "20 alerts and one more");
+    assert!(all.iter().any(|m| m.to_string().contains("5 more alerts")));
+
+    // read_only: alert email still leaves.
+    let r = crate::put(
+        "/v1/platform/switches",
+        &crate::platform(),
+        json!({ "name": "read_only", "state": "on", "reason": "j32 drill" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    fakes::advance(3_600_000);
+    let n = fakes::mail_sent(&ops).len();
+    fire(
+        &format!("transport_breaker_open:ro{}", crate::slug("r")),
+        "page",
+    );
+    minute();
+    crate::eventually(60, "the alert email while read-only", || {
+        (fakes::mail_sent(&ops).len() > n).then_some(())
+    });
+    let r = crate::put(
+        "/v1/platform/switches",
+        &crate::platform(),
+        json!({ "name": "read_only", "state": "off", "reason": "j32 drill over" }),
+    );
+    assert_eq!(r.status, 200);
+
+    // Without an address: `missing`, and nothing is sent.
+    fakes::set_config("PM_ALERT_EMAIL", None);
+    assert_eq!(status("alert_email"), "missing");
+    for _ in 0..3 {
+        minute();
+    }
+}
+
+/// `it::ops::j33_auto_containment` (J33, Observability § 5.6; the Free-plan rule `free_sending_off`
+/// arrives with billing, M22): an `rpc_owner_mismatch` turns `read_only` on: a non-platform write gets
+/// `503` (`read_only`), a GET still answers, a tenant's queued send waits `queued`, and
+/// `containment:read_only` pages until a platform key turns it off and two runs pass; five
+/// auto-paused identities across three of one partner's tenants within an hour suspend the partner
+/// (`partner.auto_suspend`, `containment:partner_suspended`), five in one tenant do not; a tenant
+/// paused for `abuse_burst` keeps `containment:tenant_paused` firing until it is resumed.
+#[test]
+fn j33_auto_containment() {
+    let _r = fakes::Reset;
+    let _off = ReadOnlyOff;
+    // An owner mismatch: a mailbox called with another tenant's ID.
+    let s = send::open_sender("containment", "live");
+    let other = crate::tenant(&crate::platform(), "other owner")["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mbox = d1(&format!(
+        "SELECT mailbox_do_id FROM identities WHERE id = '{}'",
+        s.iid
+    ))[0]["mailbox_do_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    crate::hook(
+        "POST",
+        "/__test/rpc",
+        Some(json!({ "class": "mailbox", "object_id": mbox,
+            "envelope": { "v": 1, "tenant_id": other, "identity_id": s.iid, "request_id": "req_mismatch",
+                "actor_key_id": null, "deadline_ms": 9_999_999_999_999i64,
+                "req": { "op": "confirm_stored", "message_id": "msg_x" } } })),
+    );
+    crate::eventually(30, "read_only on", || {
+        let r = d1("SELECT state, set_by FROM ops_switches WHERE name = 'read_only'");
+        (r[0]["state"] == "on" && r[0]["set_by"] == "auto").then_some(())
+    });
+    fakes::advance(61_000);
+    let w = crate::post(
+        &format!("/v1/tenants/{}/identities", s.tid),
+        &s.key,
+        json!({ "username": "blocked", "display_name": "Blocked" }),
+    );
+    assert_eq!(w.status, 503, "{}", w.body);
+    assert_eq!(w.body["error"]["details"]["reason"], "read_only");
+    assert_eq!(
+        crate::get(&format!("/v1/identities/{}", s.iid), &s.key).status,
+        200
+    );
+    minute();
+    assert!(actions("containment:read_only").contains(&"alert.fired".to_owned()));
+    assert!(actions("rpc_owner_mismatch").contains(&"alert.fired".to_owned()));
+
+    // Only a platform key undoes it; the page resolves two runs later.
+    let r = crate::put(
+        "/v1/platform/switches",
+        &s.key,
+        json!({ "name": "read_only", "state": "off", "reason": "no" }),
+    );
+    assert_ne!(r.status, 200, "only a platform key: {}", r.body);
+    let r = crate::put(
+        "/v1/platform/switches",
+        &crate::platform(),
+        json!({ "name": "read_only", "state": "off", "reason": "fixed" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.body["set_by"], "platform");
+    fakes::advance(61_000);
+    minute();
+    minute();
+    assert_eq!(
+        actions("containment:read_only").last().map(String::as_str),
+        Some("alert.resolved")
+    );
+
+    // Partner: five auto-pauses across three tenants within an hour.
+    let (pid, _) = crate::partner("contained partner", &["audit:read"]);
+    let mut tenants = Vec::new();
+    for i in 0..3 {
+        let t = format!("ten_{}", crate::slug(&format!("pt{i}")));
+        d1(&format!(
+            "INSERT INTO tenants (id, slug, name, mode, address_suffix, suffix_fold, policy_json, quota_do_id, notify_do_id, partner_id, created_at, updated_at) \
+             VALUES ('{t}', '{t}', 'x', 'live', '{t}', '{t}', '{{}}', '', '', '{pid}', 1, 1)"
+        ));
+        tenants.push(t);
+    }
+    let now = fakes::worker_now();
+    let pause = |tenant: &str, n: usize| {
+        for _ in 0..n {
+            d1(&format!(
+                "INSERT INTO audit_log (id, tenant_id, action, target_type, target_id, created_at) VALUES ('aud_{}', '{tenant}', 'identity.auto_pause', 'identity', 'idn_x', {now})",
+                crate::slug("p")
+            ));
+        }
+    };
+    // Five in one tenant: nothing.
+    pause(&tenants[0], 5);
+    minute();
+    assert_eq!(
+        d1(&format!("SELECT status FROM partners WHERE id = '{pid}'"))[0]["status"],
+        "active"
+    );
+    pause(&tenants[1], 1);
+    pause(&tenants[2], 1);
+    minute();
+    assert_eq!(
+        d1(&format!("SELECT status FROM partners WHERE id = '{pid}'"))[0]["status"],
+        "suspended"
+    );
+    assert_eq!(
+        d1(&format!(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'partner.auto_suspend' AND target_id = '{pid}'"
+        ))[0]["n"],
+        1
+    );
+    minute();
+    assert!(actions("containment:partner_suspended").contains(&"alert.fired".to_owned()));
+    let r = crate::patch(
+        &format!("/v1/partners/{pid}"),
+        &crate::platform(),
+        json!({ "status": "active" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    minute();
+    minute();
+    assert_eq!(
+        actions("containment:partner_suspended")
+            .last()
+            .map(String::as_str),
+        Some("alert.resolved")
+    );
+
+    // A tenant paused for an abuse burst: firing while the pause lasts.
+    d1(&format!(
+        "UPDATE tenants SET sending_paused_at = {now}, sending_pause_reason = 'abuse_burst' WHERE id = '{}'",
+        s.tid
+    ));
+    minute();
+    assert!(actions("containment:tenant_paused").contains(&"alert.fired".to_owned()));
+    d1(&format!(
+        "UPDATE tenants SET sending_paused_at = NULL, sending_pause_reason = NULL WHERE id = '{}'",
+        s.tid
+    ));
+    minute();
+    minute();
+    assert_eq!(
+        actions("containment:tenant_paused")
+            .last()
+            .map(String::as_str),
+        Some("alert.resolved")
+    );
+}
+
+/// `it::ops::j36_break_glass_key` (J36, Observability § 5.7): with `PM_BREAK_GLASS_KEY_ID` set, the
+/// break-glass key mints a new 1-day platform key; the request writes `key.break_glass_used` and fires
+/// `break_glass_key_used` (a page) at once; another key's use fires nothing; a revoked break-glass key
+/// gets `401`; with the variable unset nothing fires.
+#[test]
+fn j36_break_glass_key() {
+    let _r = fakes::Reset;
+    let (id, bg) = crate::mint(
+        &crate::platform(),
+        json!({ "name": "break-glass", "level": "platform", "permissions": ["keys:manage", "audit:read"] }),
+    );
+    let fired = || {
+        d1(&format!(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'key.break_glass_used' AND actor_key_id = '{id}'"
+        ))[0]["n"]
+            .as_u64()
+            .unwrap()
+    };
+    // Unset: nothing.
+    assert_eq!(crate::get("/v1/me", &bg).status, 200);
+    assert_eq!(fired(), 0);
+    fakes::set_config("PM_BREAK_GLASS_KEY_ID", Some(&id));
+    let before = actions("break_glass_key_used").len();
+    let r = crate::post(
+        "/v1/keys",
+        &bg,
+        json!({ "name": "session", "level": "platform", "permissions": ["audit:read"], "expires_at": pylota_identity_core::days::rfc3339(fakes::worker_now() + 86_400_000) }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    assert_eq!(fired(), 1);
+    assert_eq!(
+        actions("break_glass_key_used").len(),
+        before + 1,
+        "fired at once"
+    );
+    // Another key's use fires nothing.
+    let session = r.body["secret"].as_str().unwrap().to_owned();
+    assert_eq!(crate::get("/v1/me", &session).status, 200);
+    assert_eq!(fired(), 1);
+    // Revoked: 401.
+    let r = crate::delete(&format!("/v1/keys/{id}"), &crate::platform());
+    assert!(r.status < 300, "{}", r.body);
+    assert_eq!(crate::get("/v1/me", &bg).status, 401);
+}
+
+/// `it::ops::heartbeat_missing` (J32): with `PM_HEARTBEAT_KEY_ID` set, `heartbeat_missing` stays quiet
+/// in a new key's first hour, fires once the key's `last_used_at` (or, never used, `created_at`) is more
+/// than an hour old, resolves after the key is used again, and fires when the key is revoked.
+#[test]
+fn heartbeat_missing() {
+    let _r = fakes::Reset;
+    let (id, key) = crate::mint(
+        &crate::platform(),
+        json!({ "name": "heartbeat", "level": "platform", "permissions": ["audit:read"] }),
+    );
+    fakes::set_config("PM_HEARTBEAT_KEY_ID", Some(&id));
+    let before = actions("heartbeat_missing");
+    let last = || actions("heartbeat_missing").last().cloned();
+    minute();
+    assert_eq!(
+        actions("heartbeat_missing").len(),
+        before.len(),
+        "not in its first hour"
+    );
+    fakes::advance(61 * 60_000);
+    minute();
+    assert_eq!(last().as_deref(), Some("alert.fired"));
+    assert_eq!(crate::get("/v1/platform/status", &key).status, 200);
+    crate::eventually(30, "last_used_at", || {
+        d1(&format!(
+            "SELECT last_used_at FROM api_keys WHERE id = '{id}'"
+        ))[0]["last_used_at"]
+            .as_i64()
+            .filter(|t| *t > fakes::worker_now() - 120_000)
+    });
+    minute();
+    minute();
+    assert_eq!(last().as_deref(), Some("alert.resolved"));
+    let r = crate::delete(&format!("/v1/keys/{id}"), &crate::platform());
+    assert!(r.status < 300, "{}", r.body);
+    minute();
+    assert_eq!(last().as_deref(), Some("alert.fired"));
+    fakes::set_config("PM_HEARTBEAT_KEY_ID", None);
+    minute();
+    minute();
+}
+
+/// `it::ops::job_failed_alerts` (Observability § 5.3): a failed retention job fires
+/// `job_failed:retention` (a page) and a failed backup `job_failed:backup` (a ticket); each resolves
+/// once a later job of the same kind and tenant completes.
+#[test]
+fn job_failed_alerts() {
+    let _r = fakes::Reset;
+    let t = crate::tenant(&crate::platform(), "job alerts")["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let now = fakes::worker_now();
+    let job = |kind: &str, status: &str, at: i64| {
+        d1(&format!(
+            "INSERT INTO jobs (id, tenant_id, kind, status, runner_do_id, params_json, created_at, updated_at) VALUES ('job_{}', '{t}', '{kind}', '{status}', '', '{{}}', {at}, {at})",
+            crate::slug(kind)
+        ));
+    };
+    job("retention", "failed", now);
+    job("backup", "failed", now);
+    minute();
+    let sev = |k: &str| {
+        rows(k)
+            .last()
+            .map(|r| (r.0.clone(), r.1["severity"].clone()))
+    };
+    assert_eq!(
+        sev("job_failed:retention"),
+        Some(("alert.fired".into(), json!("page")))
+    );
+    assert_eq!(
+        sev("job_failed:backup"),
+        Some(("alert.fired".into(), json!("ticket")))
+    );
+    job("retention", "completed", now + 1);
+    job("backup", "completed", now + 1);
+    minute();
+    minute();
+    assert_eq!(sev("job_failed:retention").unwrap().0, "alert.resolved");
+    assert_eq!(sev("job_failed:backup").unwrap().0, "alert.resolved");
+}
+
+/// `it::ops::domain_rate_state_alerts` (Observability § 5.3): `RecordOutcome` with `domain_id` keeps
+/// per-domain counters; 2 bounces in 51 outcomes within an hour fire `bounce_rate:{tenant}:{domain}`
+/// through the delivery consumer, and another domain of the tenant counts apart (the complaint
+/// decision, 1 in 200 within 24 hours, is `worker::quota::domain_rate_alerts`).
+#[test]
+fn domain_rate_state_alerts() {
+    use crate::delivery::{cf_event, domain_of, now_rfc3339, outcomes, provider_id};
+    let _r = fakes::Reset;
+    let s = send::open_sender("domain rates", "live");
+    let dom = domain_of(&s.addr);
+    let other = format!("dom_{}", crate::slug("od"));
+    let ids: Vec<String> = (0..10).map(|i| format!("idn_rates{i:02}")).collect();
+    // Domain one: 49 delivered and a bounce, then a real bounce event (2 of 51).
+    outcomes(&s.tid, &ids, &dom, 49, "delivered");
+    outcomes(&s.tid, &ids, &dom, 1, "bounced");
+    let mid = send::send_ok(&s, &["bounce-me@example.net"], "rates");
+    send::wait_status(&s, &mid, "submitted");
+    let pid = provider_id(&s.iid, &mid);
+    crate::queue_send(
+        "pm-delivery-events",
+        cf_event(
+            "bounced",
+            &pid,
+            &s.addr,
+            "bounce-me@example.net",
+            None,
+            &now_rfc3339(0),
+        ),
+    );
+    let bounce_key = format!("bounce_rate:{}:{dom}", s.tid);
+    crate::eventually(60, "the bounce_rate report", || {
+        (!rows(&bounce_key).is_empty()).then_some(())
+    });
+    assert!(
+        rows(&format!("bounce_rate:{}:{other}", s.tid)).is_empty(),
+        "per domain"
+    );
+    // The complaint decision (1 in 200 within 24 hours) is the quota's, checked by
+    // `worker::quota::domain_rate_alerts`; the consumer reports whatever it decides, as above.
+    // The tenant's other domain has its own counters: outcomes there fire nothing for this one.
+    outcomes(&s.tid, &ids, &other, 40, "bounced");
+    assert!(rows(&format!("bounce_rate:{}:{other}", s.tid)).is_empty());
+    minute();
+    minute();
+}
