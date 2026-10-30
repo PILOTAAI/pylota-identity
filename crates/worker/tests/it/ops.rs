@@ -1100,15 +1100,15 @@ fn j31_vector_capacity() {
 #[test]
 fn restore_rebuilds_ledger() {
     use pylota_identity_api_types::ids::time_of;
-    fakes::reset();
     let _r = fakes::Reset;
     let s = send::open_sender("restore ledger", "live");
     let path = format!("/v1/identities/{}/messages", s.iid);
     let early = send::send_ok(&s, &["early@example.net"], "before T");
     send::wait_status(&s, &early, "submitted");
-    // T is a whole second (the job's `after` is RFC 3339) after the early send.
+    // T is a whole second (the job's `after` is RFC 3339) after the early send. IDs are monotonic, so
+    // after an earlier suite rewound the clock they may run ahead of it: the clock moves past T.
     let t = (time_of(&early).unwrap() as i64 / 1000 + 1) * 1000;
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fakes::advance((t + 2_000 - fakes::worker_now()).max(0) + 1_000);
     let body = json!({ "to": ["late@example.net"], "subject": "after T", "text": "Hi" });
     let a = send::submit(&path, &s.key, "restore-late-1", body.clone());
     assert_eq!(a.status, 202, "{}", a.body);
