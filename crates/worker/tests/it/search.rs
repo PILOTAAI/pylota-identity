@@ -605,9 +605,16 @@ fn golden_keyword_recall() {
         "keyword recall@10 {:.4}, MRR {:.4}, nDCG@10 {:.4}, zero-result rate {:.4}",
         r.recall_at_10, r.mrr, r.ndcg_at_10, r.zero_result_rate
     );
-    assert!(r.exact_zero.is_empty(), "exact references with no hit: {:?}", r.exact_zero);
+    assert!(
+        r.exact_zero.is_empty(),
+        "exact references with no hit: {:?}",
+        r.exact_zero
+    );
     let baseline = crate::golden::baseline("it.keyword_recall_at_10");
-    assert!(baseline.is_some(), "quality.md has no `it.keyword_recall_at_10` row");
+    assert!(
+        baseline.is_some(),
+        "quality.md has no `it.keyword_recall_at_10` row"
+    );
     if let Err(e) =
         pylota_identity_conformance::golden::policy::gate(r.recall_at_10, None, baseline)
     {

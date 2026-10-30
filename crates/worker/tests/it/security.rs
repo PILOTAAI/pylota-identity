@@ -975,6 +975,8 @@ fn body_scope_ignored() {
 /// A forged envelope reaching an object is refused by its owner check.
 #[test]
 fn rpc_owner_mismatch() {
+    // The mismatch turns `read_only` on (automatic containment); later tests need it off.
+    let _off = crate::ops::ReadOnlyOff;
     let p = platform();
     let t = tenant(&p, "rpc_owner");
     let tid = t["id"].as_str().unwrap();

@@ -863,7 +863,7 @@ async fn measure<P: Platform>(p: &P, now: i64) -> Option<Capacity> {
     let vectors = p
         .db()
         .first::<V>(Stmt::new(
-            "SELECT index_count FROM index_reconcile WHERE identity_id = '*' ORDER BY run_date DESC LIMIT 1",
+            "SELECT index_count FROM index_reconcile WHERE identity_id = '*' AND index_count IS NOT NULL ORDER BY run_date DESC LIMIT 1",
             vec![],
         ))
         .await

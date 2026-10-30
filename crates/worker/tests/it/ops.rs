@@ -16,7 +16,7 @@ fn evaluator_state() -> Value {
 /// The `alert.fired` and `alert.resolved` rows of `key`, oldest first: `(action, details)`.
 fn rows(key: &str) -> Vec<(String, Value)> {
     d1(&format!(
-        "SELECT action, details_json FROM audit_log WHERE action IN ('alert.fired','alert.resolved') AND target_id = '{key}' ORDER BY created_at, id"
+        "SELECT action, details_json FROM audit_log WHERE action IN ('alert.fired','alert.resolved') AND target_id = '{key}' ORDER BY rowid"
     ))
     .as_array()
     .unwrap()
@@ -405,7 +405,8 @@ fn platform_status() {
 }
 
 /// Turns `read_only` off when a test ends, whatever happened, so the rest of the suite can write.
-struct ReadOnlyOff;
+/// Turns `read_only` off when dropped (an owner mismatch turns it on, Observability § 5.8).
+pub struct ReadOnlyOff;
 
 impl Drop for ReadOnlyOff {
     fn drop(&mut self) {
@@ -1036,6 +1037,8 @@ impl Drop for PruneOff {
 #[test]
 fn j31_vector_capacity() {
     let _r = fakes::Reset;
+    // Earlier suites' nightly reconciliations may have written a later day's row.
+    d1("DELETE FROM index_reconcile WHERE identity_id = '*'");
     let today = pylota_identity_core::days::utc_day(fakes::worker_now());
     let row = |n: u64| {
         d1(&format!(
@@ -1085,6 +1088,7 @@ fn j31_vector_capacity() {
         actions("capacity_80:vectors").last().map(String::as_str),
         Some("alert.resolved")
     );
+    d1("DELETE FROM index_reconcile WHERE identity_id = '*'");
 }
 
 /// `it::ops::restore_rebuilds_ledger` (Restore from PITR, step 5): after a simulated mailbox restore
@@ -1096,6 +1100,7 @@ fn j31_vector_capacity() {
 #[test]
 fn restore_rebuilds_ledger() {
     use pylota_identity_api_types::ids::time_of;
+    let _r = fakes::Reset;
     let s = send::open_sender("restore ledger", "live");
     let path = format!("/v1/identities/{}/messages", s.iid);
     let early = send::send_ok(&s, &["early@example.net"], "before T");
