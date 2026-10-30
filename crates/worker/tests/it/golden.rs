@@ -97,6 +97,12 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
         fakes::publish_txt(&format!("_dmarc.{d}"), &["v=DMARC1; p=none".to_owned()]);
     }
 
+    // Months of mail arrive in minutes: the per-sender hourly limit (D5) would hide most of it, so the
+    // load lifts it, and only for the load.
+    fakes::set_config(
+        "PM_DEFAULT_POLICY",
+        Some(r#"{"inbound":{"per_sender_per_hour":100000}}"#),
+    );
     for m in &golden.generated {
         let to = &identities[&m.truth.identity].1;
         deliver(
@@ -162,6 +168,16 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
             break;
         }
         std::thread::sleep(std::time::Duration::from_secs(15));
+    }
+    fakes::set_config("PM_DEFAULT_POLICY", None);
+    for (u, (idn, _)) in &identities {
+        println!(
+            "golden {u}: {:?}",
+            mailbox_query(
+                idn,
+                "SELECT status, quarantine_reason, COUNT(*) AS n FROM messages GROUP BY 1, 2"
+            )
+        );
     }
     let keys = ids.iter().map(|(k, v)| (v.clone(), k.clone())).collect();
     Mailbox {
