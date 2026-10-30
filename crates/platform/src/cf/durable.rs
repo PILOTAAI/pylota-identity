@@ -195,6 +195,7 @@ impl Sql for CfSql {
         // Drain the cursor so every statement runs; never `one()` (it throws on zero or several rows).
         let _: Vec<serde_json::Value> = cursor.to_array().map_err(sql_err)?;
         Ok(ExecMeta {
+            size_after: None,
             changes: cursor.rows_written() as u64,
             last_row_id: None,
         })

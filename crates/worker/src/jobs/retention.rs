@@ -100,7 +100,11 @@ async fn plan<P: Platform, S: Sql>(c: &Ctx<'_, P, S>) -> StepResult {
     let pol = crate::policy::effective(c.p, &t);
     let get = |k: &str| pylota_identity_core::policy::get_path(&pol, k).and_then(Value::as_i64);
     let raw_days = get("retention.raw_days").unwrap_or(90);
-    let events_days = get("retention.events_days").unwrap_or(30);
+    // `emergency_prune` (Observability § 5.6, J30): at most 7 days of events while the switch is on.
+    let mut events_days = get("retention.events_days").unwrap_or(30);
+    if crate::ops::switches::state(c.p, "emergency_prune").await == "on" {
+        events_days = events_days.min(7);
+    }
     c.set("raw_cutoff", &(c.now - raw_days * DAY_MS).to_string())?;
     c.set("events_cutoff", &(c.now - events_days * DAY_MS).to_string())?;
     match get("retention.message_days") {

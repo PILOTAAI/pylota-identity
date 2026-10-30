@@ -346,12 +346,25 @@ pub async fn embed<P: Platform>(p: &P, job: IndexJob) -> Done {
             Embedded::Failed => failed.extend(batch.iter().map(|x| x.row.vector_id.clone())),
         }
     }
+    let mut index_full = false;
     for batch in records.chunks(UPSERT_BATCH) {
         let ids = batch.iter().map(|r| r.id.clone());
         match p.vectors().upsert(batch).await {
             Ok(_) => embedded.extend(ids),
+            // While the index is near its limits an upsert error is "index full" (Observability
+            // § 5.8, J31): the chunks stay `pending` for the nightly reconciliation, no retry.
+            Err(_) if crate::ops::alerts::vectors_full(p).await => index_full = true,
             Err(_) => failed.extend(ids),
         }
+    }
+    if index_full {
+        crate::metrics::count_with(
+            p,
+            "index_jobs_total",
+            Some(tenant_id),
+            &["embed", "index_full"],
+            1,
+        );
     }
     if !embedded.is_empty() {
         let still = mb

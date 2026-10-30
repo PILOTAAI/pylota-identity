@@ -91,6 +91,12 @@ impl ApiError {
 /// caller named is mapped by its handler.
 impl From<PlatformError> for ApiError {
     fn from(e: PlatformError) -> Self {
+        // D1 full (Observability § 5.8, J30): nothing was written, so a retry with the same key is safe.
+        if e.binding == "DB" && e.detail.contains("Exceeded maximum DB size") {
+            crate::log::error("storage_full", &[("binding", e.binding.into())]);
+            return ApiError::new(ErrorCode::Unavailable, "The database is full.")
+                .details(serde_json::json!({ "reason": "storage_full" }));
+        }
         let code = match e.kind {
             PlatformErrorKind::Unavailable | PlatformErrorKind::Conflict => ErrorCode::Unavailable,
             PlatformErrorKind::Timeout => ErrorCode::Timeout,
@@ -164,7 +170,25 @@ pub fn envelope(e: &ApiError, request_id: &str, docs_url: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use pylota_identity_platform::{PlatformError, PlatformErrorKind};
+
     use super::*;
+
+    /// `worker::errors::storage_full` (J30): a D1 write refused with "Exceeded maximum DB size"
+    /// answers `503 unavailable` with `details.reason = "storage_full"`; other D1 errors do not.
+    #[test]
+    fn storage_full() {
+        let full = PlatformError {
+            kind: PlatformErrorKind::Internal,
+            binding: "DB",
+            detail: "D1_ERROR: Exceeded maximum DB size".into(),
+        };
+        let e = ApiError::from(full);
+        assert_eq!(e.code, ErrorCode::Unavailable);
+        assert_eq!(e.details.as_ref().unwrap()["reason"], "storage_full");
+        let other = ApiError::from(PlatformError::invalid("DB", "no such column"));
+        assert_eq!(other.code, ErrorCode::InternalError);
+    }
 
     #[test]
     fn envelope_shape_matches_the_contract() {

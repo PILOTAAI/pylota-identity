@@ -84,6 +84,8 @@ impl Stmt {
 pub struct ExecMeta {
     pub changes: u64,
     pub last_row_id: Option<i64>,
+    /// The database's size in bytes after the statement (D1's `meta.size_after`), when reported.
+    pub size_after: Option<u64>,
 }
 
 pub trait ControlDb {

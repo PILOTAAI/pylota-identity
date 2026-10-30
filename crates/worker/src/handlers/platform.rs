@@ -148,10 +148,13 @@ pub async fn status<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             .find(|r| r.name == name)
             .map_or(default.to_owned(), |r| r.state.clone())
     };
-    let firing: Vec<serde_json::Value> = crate::ops::alerts::load_state(c.p.as_ref())
+    let state = crate::ops::alerts::load_state(c.p.as_ref())
         .await
-        .map(|(s, _)| s.keys)
-        .unwrap_or_default()
+        .map(|(s, _)| s)
+        .unwrap_or_default();
+    let cap = state.capacity.clone();
+    let firing: Vec<serde_json::Value> = state
+        .keys
         .into_iter()
         .map(|(k, s)| json!({ "alert": k, "severity": s.severity.as_str(), "fired_at": rfc3339(s.fired_at) }))
         .collect();
@@ -188,9 +191,13 @@ pub async fn status<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
             "firing": firing,
             "master_key": crate::ops::reseal::status(c.p.as_ref()).await?,
             "capacity": {
-                "d1_bytes": null, "d1_pct": null, "vectors": null, "vectors_pct": null,
-                "tenants": tenants, "namespaces_pct": tenants as f64 * 100.0 / 50_000.0,
-                "measured_at": null,
+                "d1_bytes": cap.as_ref().and_then(|c| c.d1_bytes),
+                "d1_pct": cap.as_ref().and_then(|c| c.d1_bytes).map(|b| b as f64 * 100.0 / crate::ops::alerts::D1_LIMIT_BYTES as f64),
+                "vectors": cap.as_ref().and_then(|c| c.vectors),
+                "vectors_pct": cap.as_ref().and_then(|c| c.vectors).map(|v| v as f64 * 100.0 / crate::ops::alerts::VECTORS_LIMIT as f64),
+                "tenants": tenants,
+                "namespaces_pct": tenants as f64 * 100.0 / crate::ops::alerts::NAMESPACES_LIMIT as f64,
+                "measured_at": cap.as_ref().map(|c| rfc3339(c.measured_at)),
             },
             "agent_signup": {
                 "configured": configured,

@@ -930,3 +930,159 @@ fn freeze_holds_everything() {
     assert_eq!(r.status, 409, "{}", r.body);
     assert_eq!(r.body["error"]["code"], "not_frozen");
 }
+
+/// Runs the evaluator until it has measured capacity again (at most 16 runs: it measures every 15th).
+fn measured(check: impl Fn(&Value) -> bool) -> Value {
+    for _ in 0..16 {
+        minute();
+        let s = evaluator_state();
+        if check(&s["capacity"]) {
+            return s;
+        }
+    }
+    panic!("capacity not measured: {}", evaluator_state());
+}
+
+/// `it::ops::j30_d1_capacity` (J30, Observability § 5.3, 5.6, 5.8): with the D1 size faked through
+/// `meta.size_after`, `capacity_70:d1` (ticket) fires at 70%, `capacity_80:d1` (page) at 80%, and at
+/// 90% the `emergency_prune` switch turns on with `containment:emergency_prune`; the status shows the
+/// figures; all resolve once the size falls and a platform key turns the switch off. A write failing
+/// with "Exceeded maximum DB size" answering `503 storage_full` is `worker::errors::storage_full`.
+#[test]
+fn j30_d1_capacity() {
+    let _r = fakes::Reset;
+    let _off = PruneOff;
+    fakes::set_d1_size(Some(7_100_000_000));
+    measured(|c| c["d1_bytes"] == 7_100_000_000u64);
+    minute();
+    assert_eq!(
+        rows("capacity_70:d1")
+            .last()
+            .map(|r| (r.0.clone(), r.1["severity"].clone())),
+        Some(("alert.fired".into(), json!("ticket")))
+    );
+    assert!(
+        actions("capacity_80:d1")
+            .last()
+            .is_none_or(|a| a == "alert.resolved")
+    );
+    fakes::set_d1_size(Some(8_100_000_000));
+    measured(|c| c["d1_bytes"] == 8_100_000_000u64);
+    assert_eq!(
+        rows("capacity_80:d1")
+            .last()
+            .map(|r| (r.0.clone(), r.1["severity"].clone())),
+        Some(("alert.fired".into(), json!("page")))
+    );
+    fakes::set_d1_size(Some(9_100_000_000));
+    measured(|c| c["d1_bytes"] == 9_100_000_000u64);
+    let sw = d1("SELECT state, set_by, reason FROM ops_switches WHERE name = 'emergency_prune'");
+    assert_eq!(
+        (sw[0]["state"].as_str(), sw[0]["set_by"].as_str()),
+        (Some("on"), Some("auto"))
+    );
+    fakes::advance(61_000);
+    minute();
+    assert!(actions("containment:emergency_prune").contains(&"alert.fired".to_owned()));
+    let status = crate::get("/v1/platform/status", &crate::platform()).body;
+    assert_eq!(status["capacity"]["d1_bytes"], 9_100_000_000u64);
+    assert!(status["capacity"]["d1_pct"].as_f64().unwrap() > 90.0);
+    assert_eq!(status["switches"]["emergency_prune"], "on");
+
+    // Back below the bars, and the switch off: everything resolves.
+    fakes::set_d1_size(Some(1_000_000));
+    let r = crate::put(
+        "/v1/platform/switches",
+        &crate::platform(),
+        json!({ "name": "emergency_prune", "state": "off", "reason": "pruned" }),
+    );
+    assert_eq!(r.status, 200);
+    fakes::advance(61_000);
+    measured(|c| c["d1_bytes"] == 1_000_000u64);
+    minute();
+    minute();
+    for k in [
+        "capacity_70:d1",
+        "capacity_80:d1",
+        "containment:emergency_prune",
+    ] {
+        assert_eq!(
+            actions(k).last().map(String::as_str),
+            Some("alert.resolved"),
+            "{k}"
+        );
+    }
+}
+
+/// Turns `emergency_prune` off when a test ends.
+struct PruneOff;
+
+impl Drop for PruneOff {
+    fn drop(&mut self) {
+        fakes::set_d1_size(None);
+        let _ = crate::put(
+            "/v1/platform/switches",
+            &crate::platform(),
+            json!({ "name": "emergency_prune", "state": "off", "reason": "test cleanup" }),
+        );
+    }
+}
+
+/// `it::ops::j31_vector_capacity` (J31, Observability § 5.3, 5.8): `capacity_70:vectors` and
+/// `capacity_80:vectors` fire from the reconciliation's `index_count`; while `capacity_80:vectors`
+/// fires, a failing upsert leaves the message's chunks `pending`, acks the index job without a retry
+/// and puts nothing in the dead-letter queue. (`capacity_70:namespaces` needs 35,000 tenants; its rule
+/// is `worker::ops::alerts::capacity_rules`.)
+#[test]
+fn j31_vector_capacity() {
+    let _r = fakes::Reset;
+    let today = pylota_identity_core::days::utc_day(fakes::worker_now());
+    let row = |n: u64| {
+        d1(&format!(
+            "INSERT INTO index_reconcile (run_date, identity_id, index_count, reported_at) VALUES ('{today}', '*', {n}, 1) \
+             ON CONFLICT (run_date, identity_id) DO UPDATE SET index_count = excluded.index_count"
+        ));
+    };
+    row(14_100_000);
+    measured(|c| c["vectors"] == 14_100_000u64);
+    assert!(actions("capacity_70:vectors").contains(&"alert.fired".to_owned()));
+    row(16_100_000);
+    measured(|c| c["vectors"] == 16_100_000u64);
+    assert!(actions("capacity_80:vectors").contains(&"alert.fired".to_owned()));
+
+    // A failing upsert while the index is full: chunks stay pending, nothing is dead-lettered.
+    let (_, idn, addr, key) = crate::mailbox_fixture("j31full");
+    let dlq_before =
+        d1("SELECT COUNT(*) AS n FROM dlq_items WHERE queue = 'pm-index'")[0]["n"].clone();
+    fakes::vector_fail("upsert", 100);
+    crate::inbound(
+        "a@j31.example",
+        &addr,
+        &crate::mail("a@j31.example", &addr, "J31 full", "an index that is full"),
+    );
+    crate::wait_stored(&idn, &key, "received", 1);
+    crate::eventually(60, "the chunks of the message", || {
+        let c = crate::mailbox_query(&idn, "SELECT status FROM chunks");
+        (!c.is_empty()).then_some(c)
+    });
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let statuses = crate::mailbox_query(&idn, "SELECT DISTINCT status FROM chunks");
+    assert_eq!(
+        statuses,
+        json!([{ "status": "pending" }]).as_array().unwrap().clone()
+    );
+    assert_eq!(
+        d1("SELECT COUNT(*) AS n FROM dlq_items WHERE queue = 'pm-index'")[0]["n"],
+        dlq_before
+    );
+
+    // Room again: the alerts resolve.
+    row(1_000);
+    measured(|c| c["vectors"] == 1_000u64);
+    minute();
+    minute();
+    assert_eq!(
+        actions("capacity_80:vectors").last().map(String::as_str),
+        Some("alert.resolved")
+    );
+}

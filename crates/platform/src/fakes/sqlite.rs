@@ -74,6 +74,7 @@ fn execute(
         .execute(sql, params_from_iter(params.iter().map(to_sql)))
         .map_err(|e| err(binding, e))?;
     Ok(ExecMeta {
+        size_after: None,
         changes: changes as u64,
         last_row_id: Some(conn.last_insert_rowid()),
     })
@@ -213,6 +214,7 @@ impl Sql for FakeSql {
         if params.is_empty() && sql.trim().trim_end_matches(';').contains(';') {
             conn.execute_batch(sql).map_err(|e| err("sql", e))?;
             return Ok(ExecMeta {
+                size_after: None,
                 changes: conn.changes(),
                 last_row_id: None,
             });

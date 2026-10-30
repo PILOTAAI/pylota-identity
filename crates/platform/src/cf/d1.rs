@@ -48,9 +48,16 @@ impl CfD1 {
 
 fn meta(result: &worker::D1Result) -> PResult<ExecMeta> {
     let m = result.meta().map_err(err)?;
+    #[allow(unused_mut)]
+    let mut size_after = m.as_ref().and_then(|m| m.size_after).map(|s| s as u64);
+    #[cfg(feature = "itest-hooks")]
+    if let Some(s) = super::itest::d1_size() {
+        size_after = Some(s);
+    }
     Ok(ExecMeta {
         changes: m.as_ref().and_then(|m| m.changes).unwrap_or(0) as u64,
         last_row_id: m.and_then(|m| m.last_row_id),
+        size_after,
     })
 }
 

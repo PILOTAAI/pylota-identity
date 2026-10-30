@@ -17,6 +17,8 @@ struct State {
     offset: i64,
     /// Worker variables and secrets read instead of the configured ones (`None` unsets one).
     config: BTreeMap<String, Option<String>>,
+    /// The D1 size every statement reports instead of the real one (J30).
+    d1_size: Option<u64>,
     faults: Vec<Value>,
     /// Messages the itest build's queue consumer handed over: `(queue, body)`.
     queued: Vec<(String, Value)>,
@@ -76,6 +78,7 @@ pub const RECEIVERS: &str = ".hooks.example.com";
 static STATE: Mutex<State> = Mutex::new(State {
     offset: 0,
     config: BTreeMap::new(),
+    d1_size: None,
     faults: Vec::new(),
     queued: Vec::new(),
     txt: BTreeMap::new(),
@@ -238,7 +241,7 @@ fn handle(path: &str, body: &Value) -> Value {
     let mut s = STATE.lock().unwrap();
     match path {
         "/state" => {
-            json!({ "clock_offset_ms": s.offset, "faults_armed": !s.faults.is_empty(), "config_overrides": s.config })
+            json!({ "clock_offset_ms": s.offset, "faults_armed": !s.faults.is_empty(), "config_overrides": s.config, "d1_size_after": s.d1_size })
         }
         "/faults/take" => {
             let pos = s.faults.iter().position(|f| {
@@ -429,12 +432,20 @@ pub fn set_config(name: &str, value: Option<&str>) {
         .insert(name.to_owned(), value.map(str::to_owned));
 }
 
+/// Makes every D1 statement report `bytes` as the database's size (`meta.size_after`), or the real
+/// size again with `None`.
+pub fn set_d1_size(bytes: Option<u64>) {
+    start();
+    STATE.lock().unwrap().d1_size = bytes;
+}
+
 /// Resets the clock, the configuration overrides and the faults (a guard in each test that changes
 /// them).
 pub fn reset() {
     let mut s = STATE.lock().unwrap();
     s.offset = 0;
     s.config.clear();
+    s.d1_size = None;
     s.faults.clear();
     s.ai_fail.clear();
     s.ai_script.clear();

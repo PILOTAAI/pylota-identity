@@ -18,9 +18,16 @@ thread_local! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
     /// The fake server's configuration overrides (a JSON object), when it has any.
     static OVERRIDES: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The D1 size every statement reports instead of the real one (J30), when set.
+    static D1_SIZE: Cell<Option<u64>> = const { Cell::new(None) };
     /// The configuration last read with an override set.
     static OVERRIDDEN: std::cell::RefCell<Option<(String, std::rc::Rc<Config>)>> =
         const { std::cell::RefCell::new(None) };
+}
+
+/// The D1 size the fake server set, if any.
+pub fn d1_size() -> Option<u64> {
+    D1_SIZE.with(Cell::get)
 }
 
 /// The override set of the last sync, if any.
@@ -63,6 +70,7 @@ pub async fn sync(cfg: &Config) {
             .filter(|m| !m.is_empty())
             .map(|m| Value::Object(m.clone()).to_string());
         OVERRIDES.with(|o| *o.borrow_mut() = overrides);
+        D1_SIZE.with(|d| d.set(v["d1_size_after"].as_u64()));
         ARMED.with(|a| a.set(v["faults_armed"].as_bool().unwrap_or(true)));
     }
 }

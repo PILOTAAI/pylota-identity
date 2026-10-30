@@ -824,6 +824,95 @@ pub struct EvaluatorState {
     /// The last audit row (D1 rowid) read for reports, so a clock step never hides one.
     #[serde(default)]
     pub report_rowid: i64,
+    /// The last capacity measurement (every 15th run).
+    #[serde(default)]
+    pub capacity: Option<Capacity>,
+}
+
+/// D1's size, the vector count and the tenants that are not erased (§ 5.4, J30, J31).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capacity {
+    pub d1_bytes: Option<u64>,
+    pub vectors: Option<u64>,
+    pub tenants: u64,
+    pub measured_at: i64,
+}
+
+/// The limits capacity is measured against ([Limits › Storage]).
+pub const D1_LIMIT_BYTES: u64 = 10_000_000_000;
+pub const VECTORS_LIMIT: u64 = 20_000_000;
+pub const NAMESPACES_LIMIT: u64 = 50_000;
+
+/// Measures capacity: D1's size from the `meta.size_after` of the tenant-count query, the vector count
+/// from the latest reconciliation summary.
+async fn measure<P: Platform>(p: &P, now: i64) -> Option<Capacity> {
+    #[derive(Deserialize)]
+    struct N {
+        n: i64,
+    }
+    #[derive(Deserialize)]
+    struct V {
+        index_count: Option<i64>,
+    }
+    let count = Stmt::new(
+        "SELECT COUNT(*) AS n FROM tenants WHERE status <> 'erased'",
+        vec![],
+    );
+    let size = p.db().execute(count.clone()).await.ok()?.size_after;
+    let tenants = p.db().first::<N>(count).await.ok()??.n.max(0) as u64;
+    let vectors = p
+        .db()
+        .first::<V>(Stmt::new(
+            "SELECT index_count FROM index_reconcile WHERE identity_id = '*' ORDER BY run_date DESC LIMIT 1",
+            vec![],
+        ))
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| v.index_count)
+        .map(|n| n.max(0) as u64);
+    Some(Capacity {
+        d1_bytes: size,
+        vectors,
+        tenants,
+        measured_at: now,
+    })
+}
+
+/// Whether `capacity_80:vectors` or `capacity_80:namespaces` fires (J31).
+pub async fn vectors_full<P: Platform>(p: &P) -> bool {
+    load_state(p).await.is_some_and(|(s, _)| {
+        s.keys.contains_key("capacity_80:vectors") || s.keys.contains_key("capacity_80:namespaces")
+    })
+}
+
+/// The capacity alerts of a measurement: `capacity_70:{resource}` (ticket) and `capacity_80:{resource}`
+/// (page).
+pub fn capacity_conditions(c: &Capacity) -> Vec<Condition> {
+    let mut out = Vec::new();
+    for (resource, used, limit) in [
+        ("d1", c.d1_bytes, D1_LIMIT_BYTES),
+        ("vectors", c.vectors, VECTORS_LIMIT),
+        ("namespaces", Some(c.tenants), NAMESPACES_LIMIT),
+    ] {
+        let Some(used) = used else { continue };
+        for pct in [70, 80] {
+            if slo::capacity_at(used, limit, pct) {
+                let mut cond = Condition::new(
+                    format!("capacity_{pct}:{resource}"),
+                    None,
+                    json!({ "used": used, "limit": limit, "pct": used as f64 * 100.0 / limit as f64 }),
+                );
+                cond.severity = if pct == 80 {
+                    Severity::Page
+                } else {
+                    Severity::Ticket
+                };
+                out.push(cond);
+            }
+        }
+    }
+    out
 }
 
 /// One true condition of this run.
@@ -909,6 +998,37 @@ pub async fn evaluate<P: Platform>(p: &P, request_id: &str) {
         }
     };
     let (reported, resolved_by_reporter, last_rowid) = reports_since(p, prev.report_rowid).await;
+    // Capacity: measured on the first run and every 15th after (§ 5.4); its alerts are levels between.
+    let capacity = if prev.capacity.is_none() || prev.run % 15 == 0 {
+        let measured = measure(p, now).await.or_else(|| prev.capacity.clone());
+        if let Some(m) = &measured
+            && m.d1_bytes
+                .is_some_and(|b| slo::capacity_at(b, D1_LIMIT_BYTES, 90))
+            && !crate::ops::switches::away_from_default(p, "emergency_prune").await
+        {
+            // `emergency_prune` (§ 5.6): retention keeps 7 days of events from the next run.
+            if crate::ops::switches::set(
+                p,
+                "emergency_prune",
+                "on",
+                "auto",
+                "capacity_d1_90",
+                None,
+                request_id,
+            )
+            .await
+            .is_ok()
+            {
+                crate::metrics::count_with(p, "containment_total", None, &["emergency_prune"], 1);
+            }
+        }
+        measured
+    } else {
+        prev.capacity.clone()
+    };
+    if let Some(c) = &capacity {
+        conditions.extend(capacity_conditions(c));
+    }
     conditions.extend(reported);
 
     // The keys of this run: every true condition and every key still firing.
@@ -925,6 +1045,7 @@ pub async fn evaluate<P: Platform>(p: &P, request_id: &str) {
         keys: BTreeMap::new(),
         email: prev.email.clone(),
         report_rowid: last_rowid.max(prev.report_rowid),
+        capacity: capacity.clone(),
     };
     let mut effects: Vec<(String, Transition, Option<Condition>, KeyState)> = Vec::new();
     let mut keys: Vec<String> = prev.keys.keys().cloned().collect();
@@ -1559,6 +1680,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `worker::ops::alerts::capacity_rules` (J30, J31): 70% of a limit is a ticket, 80% a page, for D1,
+    /// vectors and namespaces (tenants that are not erased).
+    #[test]
+    fn capacity_rules() {
+        let keys = |c: &Capacity| -> Vec<(String, Severity)> {
+            capacity_conditions(c)
+                .into_iter()
+                .map(|c| (c.key, c.severity))
+                .collect()
+        };
+        let none = Capacity {
+            d1_bytes: Some(1),
+            vectors: None,
+            tenants: 10,
+            measured_at: 0,
+        };
+        assert!(keys(&none).is_empty());
+        let c = Capacity {
+            d1_bytes: Some(8_000_000_000),
+            vectors: Some(14_000_000),
+            tenants: 35_000,
+            measured_at: 0,
+        };
+        assert_eq!(
+            keys(&c),
+            [
+                ("capacity_70:d1".to_owned(), Severity::Ticket),
+                ("capacity_80:d1".to_owned(), Severity::Page),
+                ("capacity_70:vectors".to_owned(), Severity::Ticket),
+                ("capacity_70:namespaces".to_owned(), Severity::Ticket),
+            ]
+        );
     }
 
     #[test]
