@@ -1831,3 +1831,119 @@ impl<S: Sql> reply::Contacts for ContactsOf<'_, S> {
         self.outbound(address) > 0
     }
 }
+
+/// A sent message a mailbox restore lost (Restore from PITR, step 5): its stored MIME and the
+/// metadata the sent copy carries.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReinsertSent {
+    pub message_id: String,
+    pub eml_key: String,
+    /// Base64 of the stored MIME.
+    pub mime_b64: String,
+    pub idem_key_sha256: Option<String>,
+    pub fingerprint: Option<String>,
+    pub operation: Option<String>,
+    /// When it was accepted (the message ID's time).
+    pub sent_at: i64,
+}
+
+/// Re-inserts a lost sent message as `uncertain` with the `reprocessed` flag, its recipients
+/// `uncertain`, in a thread of its own, and its `idempotency` row, so a retry with the same key
+/// replays instead of sending again and the tenant resolves the message as usual. A message the
+/// mailbox already holds, or erased, is left alone.
+pub fn reinsert_sent<P: Platform, S: Sql>(
+    p: &P,
+    tx: &S,
+    owner: &outbox::Owner<'_>,
+    r: &ReinsertSent,
+    now: i64,
+) -> PResult<Value> {
+    #[derive(Deserialize)]
+    struct One {
+        n: i64,
+    }
+    let held: Option<One> = tx.first(
+        "SELECT 1 AS n WHERE EXISTS (SELECT 1 FROM messages WHERE id = ?1) OR EXISTS (SELECT 1 FROM erased_ids WHERE message_id = ?1)",
+        &[r.message_id.clone().into()],
+    )?;
+    if held.is_some() {
+        return Ok(json!({ "inserted": false }));
+    }
+    let bytes = pylota_identity_core::links::decode_base64(&r.mime_b64).unwrap_or_default();
+    let parsed =
+        pylota_identity_core::mime::parse(&bytes, &pylota_identity_core::mime::Caps::default());
+    let content = pylota_identity_core::inbound::content(&parsed);
+    let subject =
+        pylota_identity_core::mime::clean_display(parsed.subject.as_deref().unwrap_or(""), 998);
+    let pairs = |l: &[pylota_identity_core::mime::Mailbox]| -> Vec<(String, String)> {
+        l.iter()
+            .map(|m| (m.address.clone(), m.name.clone()))
+            .collect()
+    };
+    let (to, cc) = (pairs(&parsed.to), pairs(&parsed.cc));
+    let from = parsed.from.clone();
+    let from_address = from.as_ref().map(|f| f.address.clone()).unwrap_or_default();
+    let tid = p.ids().new_id(IdPrefix::Thread);
+    let seq = threads::insert(tx, &tid, &subject, r.sent_at, None)?;
+    let snippet = pylota_identity_core::text::snippet(&content.extracted_text);
+    let row: Option<One> = tx.first(
+        "INSERT INTO messages (id, thread_seq, direction, status, raw_r2_key, raw_size, from_address, from_name, sender_domain, to_json, cc_json, subject, text, html_sanitized, extracted_text, snippet, sent_at, received_at, kind, flags_json, operation, rfc_message_id) \
+         VALUES (?1, ?2, 'outbound', 'uncertain', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, 'normal', '[\"reprocessed\"]', ?16, ?17) RETURNING rowid AS n",
+        &[
+            r.message_id.clone().into(),
+            seq.into(),
+            r.eml_key.clone().into(),
+            (bytes.len() as i64).into(),
+            from_address.clone().into(),
+            from.as_ref().map(|f| f.name.clone()).unwrap_or_default().into(),
+            org_domain(domain_of(&from_address)).to_owned().into(),
+            addr_json(&to).into(),
+            addr_json(&cc).into(),
+            subject.clone().into(),
+            content.text.clone().into(),
+            content.html_sanitized.clone().into(),
+            content.extracted_text.clone().into(),
+            snippet.into(),
+            r.sent_at.into(),
+            r.operation.clone().unwrap_or_else(|| "send".into()).into(),
+            parsed.message_id.clone().into(),
+        ],
+    )?;
+    let rowid = row.map(|r| r.n).unwrap_or_default();
+    for (field, list) in [("to", &to), ("cc", &cc)] {
+        for (address, _) in list {
+            tx.exec(
+                "INSERT INTO deliveries (message_rowid, address, field, status, smtp_response, first_reply, updated_at) VALUES (?1, ?2, ?3, 'uncertain', NULL, 0, ?4)",
+                &[rowid.into(), address.clone().into(), field.into(), now.into()],
+            )?;
+        }
+    }
+    tx.exec(
+        "UPDATE threads SET message_count = 1, last_at = ?2 WHERE seq = ?1",
+        &[seq.into(), r.sent_at.into()],
+    )?;
+    if let (Some(key), Some(fp)) = (&r.idem_key_sha256, &r.fingerprint)
+        && !key.is_empty()
+    {
+        let m: Option<Row> = tx.first(
+            &format!("{} WHERE m.rowid = ?1", messages::SELECT),
+            &[rowid.into()],
+        )?;
+        if let Some(m) = m {
+            let mut v = super::read::message_json(tx, &m, owner.identity_id, Default::default())?;
+            v["extracted_text"] = Value::Null;
+            v["text"] = Value::Null;
+            v["html"] = Value::Null;
+            idempotency::record(
+                tx,
+                key,
+                fp,
+                r.operation.as_deref().unwrap_or("send"),
+                &r.message_id,
+                &v.to_string(),
+                now,
+            )?;
+        }
+    }
+    Ok(json!({ "inserted": true }))
+}

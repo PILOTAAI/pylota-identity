@@ -89,6 +89,8 @@ pub enum MailboxRequest {
     },
     /// Stores a re-parse and re-emits `message.received` with `reprocessed: true`.
     Reparse(Box<attachments::Reparsed>),
+    /// A sent message a restore lost, rebuilt from its sent copy (Restore from PITR, step 5).
+    ReinsertSent(Box<submit::ReinsertSent>),
     /// The attachments an `AttachmentText` job extracts.
     PendingAttachmentText {
         message_id: String,
@@ -428,7 +430,10 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                     "SELECT id AS k, '' AS v FROM messages WHERE id = ?1",
                     &[message_id.into()],
                 )?;
-                Ok(serde_json::json!({ "stored": erased.is_none() && exists.is_some() }))
+                Ok(serde_json::json!({
+                    "stored": erased.is_none() && exists.is_some(),
+                    "erased": erased.is_some(),
+                }))
             }
             MailboxRequest::GetEvents { event_ids } => {
                 #[derive(Deserialize, Serialize)]
@@ -471,6 +476,9 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
                     attachments::reparse(s, owner, &r, &event_id, is_system, now)
                 })?)
             }
+            MailboxRequest::ReinsertSent(r) => Ok(self
+                .sql
+                .transaction_sync(|s| submit::reinsert_sent(self.p, s, owner, &r, now))?),
             MailboxRequest::AttachmentTextReady(r) => Ok(self
                 .sql
                 .transaction_sync(|s| attachments::ready(s, &r, is_system))?),

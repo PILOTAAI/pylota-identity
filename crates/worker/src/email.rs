@@ -347,6 +347,9 @@ async fn handle_email<P: Platform>(p: &P, msg: &EmailIn) -> Result<(), Decision>
             ("tenant".into(), e.tenant_id.clone()),
             ("identity".into(), e.identity_id.clone()),
             ("message".into(), message_id.clone()),
+            // What a restore's reconcile job re-queues the pointer with (Restore from PITR, step 5).
+            ("envelope_from".into(), msg.from.clone()),
+            ("envelope_to".into(), env_to(&env)),
         ],
     };
     put_with_retries(p, &key, msg, &meta).await?;

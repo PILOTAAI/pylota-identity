@@ -47,6 +47,22 @@ prefixes! {
 /// The largest ULID time: 48 bits of milliseconds.
 pub const MAX_TIME_MS: u64 = (1 << 48) - 1;
 
+/// The time (Unix milliseconds) of a `{prefix}_{ulid}` ID, or `None` when it is not one.
+pub fn time_of(id: &str) -> Option<u64> {
+    let (_, ulid) = id.split_once('_')?;
+    if ulid.len() != 26 {
+        return None;
+    }
+    let mut value: u128 = 0;
+    for c in ulid.bytes() {
+        let d = CROCKFORD
+            .iter()
+            .position(|x| *x == c.to_ascii_uppercase())? as u128;
+        value = (value << 5) | d;
+    }
+    Some((value >> 80) as u64)
+}
+
 /// `{prefix}_{ulid}` from a time in Unix milliseconds (48 bits) and 80 random bits (the low 80 bits of
 /// `random`). Times above [`MAX_TIME_MS`] are clamped.
 pub fn format(prefix: IdPrefix, time_ms: u64, random: u128) -> String {
@@ -59,4 +75,16 @@ pub fn format(prefix: IdPrefix, time_ms: u64, random: u128) -> String {
         out.push(char::from(CROCKFORD[((value >> shift) & 31) as usize]));
     }
     out
+}
+
+#[cfg(test)]
+mod time_tests {
+    use super::*;
+
+    #[test]
+    fn time_of_reads_the_ulid_time() {
+        let id = format(IdPrefix::Message, 1_793_000_000_123, 42);
+        assert_eq!(time_of(&id), Some(1_793_000_000_123));
+        assert_eq!(time_of("msg_short"), None);
+    }
 }

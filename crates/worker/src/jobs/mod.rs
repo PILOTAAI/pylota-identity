@@ -4,7 +4,7 @@
 //! that fails or is canceled runs its kind's `finalise` before its status is mirrored to D1.
 //!
 //! The steps of each kind live in their own module: `erasure`, `retention`, `export`, `maintenance`
-//! (`reparse`, `reindex`, `reembed`), `backup` and `domain_remove`.
+//! (`reparse`, `reindex`, `reembed`), `backup`, `domain_remove` and `restore` (`restore_reconcile`).
 //!
 //! [Privacy and erasure § 4]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/privacy.md
 
@@ -13,6 +13,7 @@ pub mod domain_remove;
 pub mod erasure;
 pub mod export;
 pub mod maintenance;
+pub mod restore;
 pub mod retention;
 
 use pylota_identity_api_types::ErrorCode;
@@ -268,6 +269,7 @@ pub fn steps_for(kind: &str, params: &Value) -> Vec<&'static str> {
         "reparse" | "reindex" | "reembed" => maintenance::STEPS.to_vec(),
         "backup" => backup::STEPS.to_vec(),
         "domain_remove" => domain_remove::STEPS.to_vec(),
+        "restore_reconcile" => restore::STEPS.to_vec(),
         _ => Vec::new(),
     }
 }
@@ -284,6 +286,7 @@ async fn run_step<P: Platform, S: Sql>(
         "reparse" | "reindex" | "reembed" => maintenance::run(c, step, cursor).await,
         "backup" => backup::run(c, step, cursor).await,
         "domain_remove" => domain_remove::run(c, step, cursor).await,
+        "restore_reconcile" => restore::run(c, step, cursor).await,
         _ => Err(StepErr::new("unknown_kind")),
     }
 }

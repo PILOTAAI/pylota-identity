@@ -1086,3 +1086,326 @@ fn j31_vector_capacity() {
         Some("alert.resolved")
     );
 }
+
+/// `it::ops::restore_rebuilds_ledger` (Restore from PITR, step 5): after a simulated mailbox restore
+/// to `T` (the rows made after `T` deleted, R2 untouched), the `restore_reconcile` job re-inserts a
+/// send made after `T` as `uncertain` with the `reprocessed` flag, which a retry with its original
+/// Idempotency-Key then replays instead of sending again, and re-queues an inbound message received
+/// after `T`, which is stored again under its ID. A message from before `T` is left alone, and the
+/// job needs `after` and `identity_ids`.
+#[test]
+fn restore_rebuilds_ledger() {
+    use pylota_identity_api_types::ids::time_of;
+    let s = send::open_sender("restore ledger", "live");
+    let path = format!("/v1/identities/{}/messages", s.iid);
+    let early = send::send_ok(&s, &["early@example.net"], "before T");
+    send::wait_status(&s, &early, "submitted");
+    let t = time_of(&early).unwrap() as i64;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let body = json!({ "to": ["late@example.net"], "subject": "after T", "text": "Hi" });
+    let a = send::submit(&path, &s.key, "restore-late-1", body.clone());
+    assert_eq!(a.status, 202, "{}", a.body);
+    let late = a.body["id"].as_str().unwrap().to_owned();
+    send::wait_status(&s, &late, "submitted");
+    let inbound = send::receive(&s, "ana@sender.example", "inbound after T");
+    assert!(time_of(&inbound).unwrap() as i64 > t);
+
+    // The restore: every row of the three messages and their ledger entries is gone.
+    let ids = format!("'{early}','{late}','{inbound}'");
+    for sql in [
+        format!(
+            "DELETE FROM deliveries WHERE message_rowid IN (SELECT rowid FROM messages WHERE id IN ({ids}))"
+        ),
+        format!("DELETE FROM idempotency WHERE message_id IN ({ids})"),
+        format!("DELETE FROM messages WHERE id IN ({ids})"),
+    ] {
+        crate::mailbox_query(&s.iid, &sql);
+    }
+    assert!(crate::messages_of(&s.iid, &s.key, "").is_empty());
+
+    for bad in [
+        json!({ "kind": "restore_reconcile", "tenant_id": s.tid, "identity_ids": [s.iid] }),
+        json!({ "kind": "restore_reconcile", "tenant_id": s.tid, "after": "2026-01-01T00:00:00Z" }),
+    ] {
+        let r = crate::post("/v1/platform/jobs", &crate::platform(), bad);
+        assert_eq!(r.status, 422, "{}", r.body);
+    }
+    let r = crate::post(
+        "/v1/platform/jobs",
+        &crate::platform(),
+        json!({ "kind": "restore_reconcile", "tenant_id": s.tid, "identity_ids": [s.iid],
+                "after": pylota_identity_core::days::rfc3339(t) }),
+    );
+    assert_eq!(r.status, 202, "{}", r.body);
+    let job = r.body["id"].as_str().unwrap().to_owned();
+    let j = crate::eventually(60, "the reconcile job to complete", || {
+        let j = crate::get(&format!("/v1/platform/jobs/{job}"), &crate::platform()).body;
+        if j["status"] == "completed" {
+            return Some(j);
+        }
+        crate::erasure::job_alarm(&job);
+        None
+    });
+    assert_eq!(j["result"]["reinserted"], 1, "{j}");
+    assert_eq!(j["result"]["requeued"], 1, "{j}");
+
+    let m = send::message(&s, &late);
+    assert_eq!(m["status"], "uncertain", "{m}");
+    let flags = crate::mailbox_query(
+        &s.iid,
+        &format!("SELECT flags_json FROM messages WHERE id = '{late}'"),
+    );
+    assert!(
+        flags[0]["flags_json"].to_string().contains("reprocessed"),
+        "{flags:?}"
+    );
+    assert_eq!(m["subject"], "after T");
+    let retry = send::submit(&path, &s.key, "restore-late-1", body);
+    assert_eq!(retry.status, 202, "{}", retry.body);
+    assert_eq!(retry.body["deduplicated"], true, "{}", retry.body);
+    assert_eq!(retry.body["id"], late.as_str());
+    assert_eq!(
+        fakes::mail_sent("late@example.net")
+            .iter()
+            .filter(|m| m["subject"] == "after T")
+            .count(),
+        1,
+        "sent once"
+    );
+    crate::eventually(30, "the re-queued inbound message", || {
+        crate::messages_of(&s.iid, &s.key, "&direction=inbound")
+            .into_iter()
+            .find(|m| m["id"] == inbound.as_str())
+    });
+    let early_rows = crate::mailbox_query(
+        &s.iid,
+        &format!("SELECT id FROM messages WHERE id = '{early}'"),
+    );
+    assert!(early_rows.is_empty(), "before T: not reconciled");
+}
+
+/// One D1 snapshot in `wrangler d1 export`'s form: an `INSERT` per row of the rows `scope` selects
+/// (table → `WHERE`), built with `quote()` so every literal round-trips.
+fn snapshot(scope: &[(&str, String)]) -> pylota_identity_core::sqldump::Dump {
+    let schema = pylota_identity_core::schema::Schema::d1();
+    let mut sql = String::new();
+    for (table, filter) in scope {
+        let cols = &schema.table(table).unwrap().columns;
+        let names = cols
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let values = cols
+            .iter()
+            .map(|c| format!("quote(\"{c}\")"))
+            .collect::<Vec<_>>()
+            .join(" || ',' || ");
+        let rows = send::d1w(
+            &format!(
+                "SELECT 'INSERT INTO \"{table}\" ({names}) VALUES(' || {values} || ');' AS s FROM \"{table}\" WHERE {filter} ORDER BY 1"
+            ),
+            json!([]),
+        );
+        for r in rows {
+            sql.push_str(r["s"].as_str().unwrap());
+            sql.push('\n');
+        }
+    }
+    pylota_identity_core::sqldump::parse(&sql).unwrap()
+}
+
+/// Applies a replay one statement at a time through the D1 binding, without deferring foreign keys,
+/// so a statement out of foreign-key order fails.
+fn apply(r: &pylota_identity_core::sqldump::Replay) {
+    for stmt in r.sql.split(";\n").map(str::trim).filter(|s| !s.is_empty()) {
+        if stmt.starts_with("PRAGMA") {
+            continue;
+        }
+        send::d1w(stmt, json!([]));
+    }
+}
+
+/// `it::ops::restore_replays_changes` (Restore from PITR, step 3; I6): with the D1 export and restore
+/// steps faked by snapshots of the local D1 (the restore to `T` itself applied as a replay the other
+/// way), the replay re-inserts an API key, an identity, a domain, a webhook endpoint, a signing key,
+/// an identity key and a `ses_ingest` row created after `T`; re-applies a suppression added, a member
+/// removed, a session revoked, a tenant suspended, an address tombstoned and a domain removed after
+/// `T`; leaves an `--exclude`d column at its restored value; and orders statements so that, applied
+/// one by one with foreign keys enforced, none fails.
+#[test]
+fn restore_replays_changes() {
+    use pylota_identity_core::schema::Schema;
+    use pylota_identity_core::sqldump::{Excludes, replay};
+    let x = crate::slug("rr");
+    let x = &x[..10];
+    let ten = format!("ten_rr{x}");
+    let usr = format!("usr_rr{x}");
+    let (idn1, idn2) = (format!("idn_rr1{x}"), format!("idn_rr2{x}"));
+    let (dom1, dom2) = (format!("dom_rr1{x}"), format!("dom_rr2{x}"));
+    let kid = format!("{x}{}", "k".repeat(43 - x.len()));
+    let w = |sql: &str| {
+        send::d1w(sql, json!([]));
+    };
+    // Foreign keys are enforced: a dangling row is refused.
+    let dangling = crate::hook(
+        "POST",
+        "/__test/d1",
+        Some(
+            json!({ "sql": format!("INSERT INTO members (tenant_id, user_id, role, created_at) VALUES ('ten_nope{x}', 'usr_nope', 'owner', 1)"), "params": [] }),
+        ),
+    );
+    assert_ne!(dangling.status, 200, "{}", dangling.body);
+
+    // The state at T.
+    w(&format!(
+        "INSERT INTO tenants (id, slug, name, mode, address_suffix, suffix_fold, policy_json, quota_do_id, notify_do_id, created_at, updated_at) VALUES ('{ten}', 'rr-{x}', 'Restore Co', 'live', '.rr{x}', 'rr{x}', '{{}}', 'q', 'n', 1, 1)"
+    ));
+    w(&format!(
+        "INSERT INTO users (id, email, created_at) VALUES ('{usr}', 'ana-{x}@owner.example', 1)"
+    ));
+    w(&format!(
+        "INSERT INTO members (tenant_id, user_id, role, created_at) VALUES ('{ten}', '{usr}', 'admin', 1)"
+    ));
+    w(&format!(
+        "INSERT INTO sessions (id_hash, key_kid, user_id, tenant_id, csrf_secret, authenticated_at, last_seen_at, expires_at) VALUES ('sess{x}', 'A', '{usr}', '{ten}', 'c', 1, 1, 9999999999999)"
+    ));
+    let domain = |id: &str, name: &str| {
+        format!(
+            "INSERT INTO domains (id, tenant_id, name, kind, method, is_apex, routing_mode, inbound, transport, reply_token, receiving, sending, state, state_changed_at, monitor_do_id, created_at, updated_at) VALUES ('{id}', '{ten}', '{name}', 'zone', 'cloudflare_zone', 1, 'catch_all', 'routing', 'cloudflare', 'subaddress', 1, 1, 'healthy', 1, '', 1, 1)"
+        )
+    };
+    w(&domain(&dom1, &format!("rr1-{x}.example")));
+    let identity = |id: &str, user: &str| {
+        format!(
+            "INSERT INTO identities (id, tenant_id, username, display_name, mailbox_do_id, created_at, updated_at) VALUES ('{id}', '{ten}', '{user}', 'Bookings', '', 1, 1)"
+        )
+    };
+    w(&identity(&idn1, "bookings"));
+    w(&format!(
+        "INSERT INTO addresses (id, address, local_part, domain_id, tenant_id, identity_id, role, status, created_at, updated_at) VALUES ('adr_rr{x}', 'bookings@rr1-{x}.example', 'bookings', '{dom1}', '{ten}', '{idn1}', 'primary', 'active', 1, 1)"
+    ));
+    let scope: Vec<(&str, String)> = vec![
+        ("tenants", format!("id = '{ten}'")),
+        ("users", format!("id = '{usr}'")),
+        ("members", format!("tenant_id = '{ten}'")),
+        ("sessions", format!("user_id = '{usr}'")),
+        ("domains", format!("tenant_id = '{ten}'")),
+        ("identities", format!("tenant_id = '{ten}'")),
+        ("addresses", format!("tenant_id = '{ten}'")),
+        ("api_keys", format!("tenant_id = '{ten}'")),
+        ("webhook_endpoints", format!("tenant_id = '{ten}'")),
+        ("suppressions", format!("tenant_id = '{ten}'")),
+        ("identity_keys", format!("tenant_id = '{ten}'")),
+        ("signing_keys", format!("kid = '{kid}'")),
+        ("ses_ingest", format!("object_key = 'ses{x}'")),
+        ("address_tombstones", format!("address_hash = 'tomb{x}'")),
+    ];
+    let at_t = snapshot(&scope);
+
+    // After T.
+    w(&format!(
+        "INSERT INTO api_keys (id, lookup, hash, name, level, tenant_id, mode, permissions_json, created_by_level, created_at) VALUES ('key_rr{x}', 'lk{x}', 'h', 'ops', 'tenant', '{ten}', 'live', '[]', 'platform', 2)"
+    ));
+    w(&identity(&idn2, "frontdesk"));
+    w(&domain(&dom2, &format!("rr2-{x}.example")));
+    w(&format!(
+        "INSERT INTO webhook_endpoints (id, tenant_id, url, event_types_json, secret_enc, created_at, updated_at) VALUES ('whk_rr{x}', '{ten}', 'https://hooks.example/rr', '[\"*\"]', 's', 2, 2)"
+    ));
+    w(&format!(
+        "INSERT INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at) VALUES ('web_bot_auth', '{kid}', X'00ff27', '{{\"kty\":\"OKP\"}}', 2)"
+    ));
+    w(&format!(
+        "INSERT INTO identity_keys (id, identity_id, tenant_id, alg, public_jwk, private_enc, status, created_at) VALUES ('ik{x}', '{idn2}', '{ten}', 'EdDSA', '{{}}', X'01', 'active', 2)"
+    ));
+    w(&format!(
+        "INSERT INTO ses_ingest (object_key, recipient, received_at, status, done_at) VALUES ('ses{x}', 'bookings@rr1-{x}.example', 2, 'done', 2)"
+    ));
+    w(&format!(
+        "INSERT INTO suppressions (tenant_id, address_hash, address_hint, reason, created_at) VALUES ('{ten}', 'sup{x}', 'j***@example.com', 'manual', 2)"
+    ));
+    w(&format!(
+        "DELETE FROM members WHERE tenant_id = '{ten}' AND user_id = '{usr}'"
+    ));
+    w(&format!(
+        "UPDATE sessions SET revoked_at = 2 WHERE id_hash = 'sess{x}'"
+    ));
+    w(&format!(
+        "UPDATE tenants SET status = 'suspended', suspended_at = 2, suspended_by = 'platform', name = 'Damaged Co' WHERE id = '{ten}'"
+    ));
+    w(&format!(
+        "INSERT INTO address_tombstones (address_hash, identity_id, reason) VALUES ('tomb{x}', '{idn1}', 'deleted')"
+    ));
+    w(&format!(
+        "UPDATE domains SET state = 'removed', state_changed_at = 2 WHERE id = '{dom1}'"
+    ));
+    let now = snapshot(&scope);
+
+    // The restore to T, then the replay of everything after it except `tenants.name`.
+    let schema = Schema::d1();
+    apply(&replay(&at_t, &now, schema, &Excludes::default()));
+    let restored = snapshot(&scope);
+    assert_eq!(restored, at_t, "restored to T");
+    let ex = Excludes::parse(schema, &["tenants.name".into()], &[]).unwrap();
+    let r = replay(&now, &restored, schema, &ex);
+    for t in [
+        "api_keys",
+        "identities",
+        "domains",
+        "webhook_endpoints",
+        "signing_keys",
+        "identity_keys",
+        "ses_ingest",
+        "suppressions",
+        "address_tombstones",
+    ] {
+        assert!(
+            r.summary.get(t).is_some_and(|c| c.0 >= 1),
+            "{t} inserted: {:?}",
+            r.summary
+        );
+    }
+    assert_eq!(
+        r.summary.get("members"),
+        Some(&(0, 0, 1)),
+        "{:?}",
+        r.summary
+    );
+    assert!(r.missing_columns.is_empty());
+    apply(&r);
+
+    let fin = snapshot(&scope);
+    for (name, rows) in &now.tables {
+        if name == "tenants" {
+            continue;
+        }
+        assert_eq!(fin.tables.get(name), Some(rows), "{name} replayed");
+    }
+    let t = &send::d1w(
+        &format!("SELECT name, status, suspended_by FROM tenants WHERE id = '{ten}'"),
+        json!([]),
+    )[0];
+    assert_eq!(t["status"], "suspended", "{t}");
+    assert_eq!(t["suspended_by"], "platform");
+    assert_eq!(
+        t["name"], "Restore Co",
+        "the excluded column keeps its restored value"
+    );
+    let s = &send::d1w(
+        &format!("SELECT revoked_at FROM sessions WHERE id_hash = 'sess{x}'"),
+        json!([]),
+    )[0];
+    assert_eq!(s["revoked_at"], 2);
+    let d = &send::d1w(
+        &format!("SELECT state FROM domains WHERE id = '{dom1}'"),
+        json!([]),
+    )[0];
+    assert_eq!(d["state"], "removed");
+    // Leave nothing for the crons of later tests: every row of the scope, children first.
+    apply(&replay(
+        &pylota_identity_core::sqldump::Dump::default(),
+        &fin,
+        schema,
+        &Excludes::default(),
+    ));
+}

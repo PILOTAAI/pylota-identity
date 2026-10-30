@@ -1490,6 +1490,32 @@ evaluator run as designed, with these settlements until M17 Completion (accepted
   ([Security § 6.2](security.md#62-rotation-procedures)), and `capacity` with the tenant count, its D1
   and Vectorize figures `null` until the capacity check runs.
 
+**As built (M17 Completion, ahead of its acceptance at M20).** Everything M17 Completion names that
+does not measure a later milestone is built: the dead-letter consumer and its API (J8), the
+`reparse` job's re-parse (J3), alert email, the heartbeat workflow, the switches, automatic
+containment, the break-glass alert, capacity (J30, J31), the `mail.read` audit, and the restore
+tooling. These settlements apply:
+
+- **Still at M20:** `it::ops::metrics_emitted` and `it::ops::slo_from_metrics` (they measure metrics and
+  SLOs of milestones not yet built), the freeze's `503` on the SES and Stripe hooks (M22, M23) and the
+  shared-domain breaker's `free_sending_off` (M22).
+- **Freeze.** The Worker reads `PM_FREEZE` per invocation. Durable Objects keep the configuration they
+  started with, so their alarm hold (re-arm 300 seconds later) is proven natively; the itest covers
+  `email()`, the API, the queues, the crons and `/health`.
+- **Mailbox restore.** The point-in-time externs (`getBookmarkForTime`, `onNextSessionRestoreBookmark`)
+  live on the platform crate's Durable Object storage, not in `ops/restore.rs`. The object marks
+  `restart_pending` and aborts from an immediate alarm. Local development has no PITR, so the endpoint
+  answers `503 unavailable` there.
+- **`restore_reconcile`** (`jobs/restore.rs`): the steps are `plan`, `inbound` and `outbound`, 100 R2
+  keys per slice. `email()` now stores `envelope_from` and `envelope_to` in the custom metadata of each
+  `raw.eml`, so a re-queued pointer carries the original envelope. A copy written before that change
+  is re-queued to the primary address. Messages recorded in `erased_ids` are never brought back. The
+  result counts `inbound_found`, `requeued`, `outbound_found` and `reinserted`.
+- **D1 replay.** `core::schema` reads tables, keys and foreign keys from the compiled-in migrations, and
+  `core::sqldump` parses exports and writes the replay. The CLI writes `replay.sql`, which starts with
+  `PRAGMA defer_foreign_keys = ON`. `it::ops::restore_replays_changes` applies the statements one at a
+  time without that pragma, which proves the order.
+
 ## 10. Tests
 
 | Test | Proves | Covers |

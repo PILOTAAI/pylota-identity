@@ -57,7 +57,8 @@ pub async fn rotate_signing_key<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiErr
 }
 
 /// `POST /v1/platform/jobs` (J3): a `reparse`, `reembed` or `reindex` job over a tenant's mailboxes,
-/// narrowed by `identity_ids`, `after` and `before`.
+/// narrowed by `identity_ids`, `after` and `before`; or a restore's `restore_reconcile` (Restore from
+/// PITR, step 5), which needs `after` and `identity_ids`.
 pub async fn job_create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     let body = c.json()?;
     super::messages::only_fields(
@@ -65,8 +66,13 @@ pub async fn job_create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         &["kind", "tenant_id", "identity_ids", "after", "before"],
     )?;
     let kind = match body["kind"].as_str() {
-        Some(k @ ("reparse" | "reembed" | "reindex")) => k.to_owned(),
-        _ => return Err(ApiError::invalid("kind", "reparse, reembed or reindex.")),
+        Some(k @ ("reparse" | "reembed" | "reindex" | "restore_reconcile")) => k.to_owned(),
+        _ => {
+            return Err(ApiError::invalid(
+                "kind",
+                "reparse, reembed, reindex or restore_reconcile.",
+            ));
+        }
     };
     let tenant = body["tenant_id"]
         .as_str()
@@ -84,6 +90,18 @@ pub async fn job_create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     let params = json!({
         "identity_ids": body["identity_ids"], "after": time("after")?, "before": time("before")?,
     });
+    if kind == "restore_reconcile" {
+        if params["after"].is_null() {
+            return Err(ApiError::invalid("after", "The restore point."));
+        }
+        let ids = body["identity_ids"].as_array();
+        if !ids.is_some_and(|a| !a.is_empty() && a.iter().all(|i| i.is_string())) {
+            return Err(ApiError::invalid(
+                "identity_ids",
+                "The restored identities.",
+            ));
+        }
+    }
     let id = crate::jobs::create(c.p.as_ref(), &kind, Some(tenant), &params).await?;
     let j = job_row(c, &id).await?;
     Ok(Reply::json(202, j))
