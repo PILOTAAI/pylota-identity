@@ -14,6 +14,7 @@ pub(crate) mod js;
 mod net;
 mod queues;
 mod r2;
+mod rest;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -99,6 +100,15 @@ impl CfPlatform {
     pub(crate) fn new(env: worker::Env, background: CfBackground) -> Result<Self, ConfigInvalid> {
         let config = config(&env)?;
         let bound = |name: &str| js::get(&env, name).is_ok_and(|v| !v.is_undefined());
+        // Config::read refuses PM_EVAL_REST without the account, the token and the index.
+        let rest = config.eval_rest.then(|| {
+            Rc::new(rest::Rest {
+                account_id: config.cf_account_id.clone().unwrap_or_default(),
+                token: config.secrets.cf_api_token.clone().unwrap_or_default(),
+                index: config.vectors_index.clone().unwrap_or_default(),
+                next_index: config.vectors_next_index.clone(),
+            })
+        });
         Ok(Self {
             db: CfD1 { env: env.clone() },
             objects: CfObjects {
@@ -114,15 +124,21 @@ impl CfPlatform {
                 binding: "BACKUP",
             }),
             queues: CfQueues { env: env.clone() },
-            ai: CfAi { env: env.clone() },
+            ai: CfAi {
+                env: env.clone(),
+                rest: rest.clone(),
+            },
             vectors: CfVectors {
                 env: env.clone(),
                 binding: "VECTORS",
+                rest: rest.clone(),
             },
-            vectors_next: bound("VECTORS_NEXT").then(|| CfVectors {
-                env: env.clone(),
-                binding: "VECTORS_NEXT",
-            }),
+            vectors_next: (bound("VECTORS_NEXT") || config.vectors_next_index.is_some() && rest.is_some())
+                .then(|| CfVectors {
+                    env: env.clone(),
+                    binding: "VECTORS_NEXT",
+                    rest: rest.clone(),
+                }),
             mail: CfMail { env: env.clone() },
             limits: CfLimits { env: env.clone() },
             dns: DohClient {

@@ -1,5 +1,5 @@
 //! Workers AI and Vectorize through `cf::externs` (S6: every call, the `gateway` option and the
-//! result shapes).
+//! result shapes), or through the REST API with `PM_EVAL_REST` ([`super::rest`]).
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -20,6 +20,7 @@ use crate::{PResult, PlatformError};
 #[derive(Clone)]
 pub struct CfAi {
     pub(crate) env: worker::Env,
+    pub(crate) rest: Option<std::rc::Rc<super::rest::Rest>>,
 }
 
 const AI: &str = "AI";
@@ -64,6 +65,11 @@ impl Ai for CfAi {
         {
             return serde_json::from_value(r?).map_err(|e| PlatformError::invalid(AI, e.to_string()));
         }
+        if let Some(rest) = &self.rest {
+            let input = serde_json::to_value(input).map_err(|e| PlatformError::invalid(AI, e.to_string()))?;
+            let out = rest.ai_run(model, &input).await?;
+            return serde_json::from_value(out).map_err(|e| PlatformError::invalid(AI, e.to_string()));
+        }
         let out = self.raw(model, input, opts).await?;
         js::to_value(AI, &out)
     }
@@ -74,6 +80,9 @@ impl Ai for CfAi {
         input: &I,
         opts: &AiOptions,
     ) -> PResult<Vec<u8>> {
+        if self.rest.is_some() {
+            return Err(PlatformError::unavailable(AI, "byte outputs are not available through PM_EVAL_REST"));
+        }
         let out = self.raw(model, input, opts).await?;
         if let Some(bytes) = out.dyn_ref::<js_sys::Uint8Array>() {
             return Ok(bytes.to_vec());
@@ -87,6 +96,10 @@ impl Ai for CfAi {
     }
 
     async fn to_markdown(&self, docs: &[MarkdownInput]) -> PResult<Vec<MarkdownOutput>> {
+        // The golden set's attachments are text, which never reach the converter.
+        if self.rest.is_some() {
+            return Err(PlatformError::unavailable(AI, "toMarkdown is not available through PM_EVAL_REST"));
+        }
         let ai = self.binding()?;
         let files = js_sys::Array::new();
         for d in docs {
@@ -118,6 +131,7 @@ impl Ai for CfAi {
 pub struct CfVectors {
     pub(crate) env: worker::Env,
     pub(crate) binding: &'static str,
+    pub(crate) rest: Option<std::rc::Rc<super::rest::Rest>>,
 }
 
 impl CfVectors {
@@ -152,6 +166,13 @@ impl VectorIndex for CfVectors {
             .await
         {
             return read_mutation(self.binding, &r?);
+        }
+        if let Some(rest) = &self.rest {
+            let lines: Vec<Value> = vectors
+                .iter()
+                .map(|v| serde_json::json!({ "id": v.id, "namespace": v.namespace, "values": v.values, "metadata": v.metadata }))
+                .collect();
+            return read_mutation(self.binding, &rest.vectorize_upsert(self.binding, &lines).await?);
         }
         let b = self.binding;
         let array = js_sys::Array::new();
@@ -192,6 +213,11 @@ impl VectorIndex for CfVectors {
         {
             return read_matches(b, &r?);
         }
+        if let Some(rest) = &self.rest {
+            let mut body = options;
+            body["vector"] = serde_json::json!(vector);
+            return read_matches(b, &rest.vectorize(b, "POST", "query", Some(&body)).await?);
+        }
         let options = js::from_json(&options).map_err(|e| js::error(b, &e))?;
         let out = wait(
             b,
@@ -221,6 +247,11 @@ impl VectorIndex for CfVectors {
         {
             return read_matches(b, &r?);
         }
+        if let Some(rest) = &self.rest {
+            let mut body = options;
+            body["vectorId"] = Value::String(id.to_owned());
+            return read_matches(b, &rest.vectorize(b, "POST", "query", Some(&body)).await?);
+        }
         let options = js::from_json(&options).map_err(|e| js::error(b, &e))?;
         let out = wait(b, self.index()?.query_by_id(id, &options)).await?;
         read_matches(b, &self.json(&out)?)
@@ -230,6 +261,12 @@ impl VectorIndex for CfVectors {
         #[cfg(feature = "itest-hooks")]
         if let Some(r) = self.fake("delete", serde_json::json!({ "ids": ids })).await {
             return read_mutation(self.binding, &r?);
+        }
+        if let Some(rest) = &self.rest {
+            let out = rest
+                .vectorize(self.binding, "POST", "delete_by_ids", Some(&super::rest::ids_body(ids)))
+                .await?;
+            return read_mutation(self.binding, &out);
         }
         let out = wait(self.binding, self.index()?.delete_by_ids(&Self::ids(ids))).await?;
         read_mutation(self.binding, &self.json(&out)?)
@@ -247,8 +284,16 @@ impl VectorIndex for CfVectors {
                 })
                 .unwrap_or_default());
         }
-        let out = wait(self.binding, self.index()?.get_by_ids(&Self::ids(ids))).await?;
-        let found = self.json(&out)?;
+        let found = match &self.rest {
+            Some(rest) => {
+                rest.vectorize(self.binding, "POST", "get_by_ids", Some(&super::rest::ids_body(ids)))
+                    .await?
+            }
+            None => {
+                let out = wait(self.binding, self.index()?.get_by_ids(&Self::ids(ids))).await?;
+                self.json(&out)?
+            }
+        };
         let list = found.as_array().ok_or_else(|| {
             PlatformError::new(
                 crate::PlatformErrorKind::Corrupt,
@@ -266,6 +311,9 @@ impl VectorIndex for CfVectors {
         #[cfg(feature = "itest-hooks")]
         if let Some(r) = self.fake("describe", serde_json::json!({})).await {
             return read_info(self.binding, &r?);
+        }
+        if let Some(rest) = &self.rest {
+            return read_info(self.binding, &rest.vectorize(self.binding, "GET", "info", None).await?);
         }
         let out = wait(self.binding, self.index()?.describe()).await?;
         read_info(self.binding, &self.json(&out)?)

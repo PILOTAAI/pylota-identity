@@ -13,6 +13,9 @@ use crate::http::{HttpClient as _, HttpRequest};
 thread_local! {
     static OFFSET: Cell<i64> = const { Cell::new(0) };
     static FAKES: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// With `PM_EVAL_REST`: the account prefix whose Workers AI and Vectorize calls go to Cloudflare
+    /// itself, not to the fake server (an evaluation inside the harness, Testing § 9.2).
+    static EVAL_PASS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// Whether the fake server holds any armed fault (from the last sync), so an unarmed run never
     /// asks it on each call.
     static ARMED: Cell<bool> = const { Cell::new(false) };
@@ -59,6 +62,13 @@ pub async fn sync(cfg: &Config) {
         return;
     };
     FAKES.with(|f| *f.borrow_mut() = Some(url.clone()));
+    EVAL_PASS.with(|p| {
+        *p.borrow_mut() = cfg
+            .cf_account_id
+            .as_ref()
+            .filter(|_| cfg.eval_rest)
+            .map(|a| format!("https://api.cloudflare.com/client/v4/accounts/{a}/"))
+    });
     let mut req = HttpRequest::get(format!("{url}/state"));
     req.timeout_ms = 2_000;
     if let Ok(r) = CfHttp.send(req).await
@@ -103,13 +113,22 @@ pub fn reroute(url: &str) -> String {
     let Some(fakes) = FAKES.with(|f| f.borrow().clone()) else {
         return url.to_owned();
     };
-    if url.starts_with(&fakes) {
+    if url.starts_with(&fakes) || eval_pass(url) {
         return url.to_owned();
     }
     match url.split_once("://") {
         Some((_, rest)) => format!("{fakes}/__http/{rest}"),
         None => url.to_owned(),
     }
+}
+
+fn eval_pass(url: &str) -> bool {
+    EVAL_PASS.with(|p| {
+        p.borrow().as_ref().is_some_and(|prefix| {
+            url.strip_prefix(prefix.as_str())
+                .is_some_and(|rest| rest.starts_with("ai/run/") || rest.starts_with("vectorize/"))
+        })
+    })
 }
 
 /// The `PlatformError` an armed fault answers with.
@@ -166,13 +185,17 @@ pub async fn mail_send(
 }
 
 /// Testing § 6.3: Workers AI and Vectorize go to the fake server, `POST {fakes}/__{service}/{op}`
-/// with a JSON body. `None` without a fake server; an answer of 429 or 5xx is an error of the binding
+/// with a JSON body. `None` without a fake server or with `PM_EVAL_REST`; an answer of 429 or 5xx is an error of the binding
 /// (the detail names the status, so a caller can tell a rate limit).
 pub async fn fake_call(
     binding: &'static str,
     path: &str,
     body: Value,
 ) -> Option<crate::PResult<Value>> {
+    // An evaluation sends them to Cloudflare through PM_EVAL_REST instead.
+    if EVAL_PASS.with(|p| p.borrow().is_some()) {
+        return None;
+    }
     let url = FAKES.with(|f| f.borrow().clone())?;
     let mut req = HttpRequest::get(format!("{url}{path}"));
     req.method = "POST";

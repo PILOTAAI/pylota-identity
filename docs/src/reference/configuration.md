@@ -110,6 +110,7 @@ Cron triggers:
 | `PM_SCANNER_URL` | unset | Optional malware scanner endpoint for inbound attachments and uploads (see [Inbound](../project/design/inbound.md#attachment-safety) and [Uploads](../project/design/uploads.md#43-classification-and-the-scanner)) |
 | `PM_SECURITY_CONTACT` | unset | Served in `/.well-known/security.txt`. When it is a `mailto:` URI and `PM_ALERT_EMAIL` is unset, alert email goes to that address |
 | `PM_EVAL_REST` | `off` | Evaluation runs only: `on` sends every Workers AI and Vectorize call through the REST API with `PM_CF_API_TOKEN`, so `wrangler dev --local` needs no remote binding ([Testing § 9.2](../project/design/testing.md#92-running)). Read only when `PM_ENV = "local"`; ignored otherwise |
+| `PM_VECTORS_INDEX`, `PM_VECTORS_NEXT_INDEX` | – | The Vectorize index names a REST call uses: `VECTORS`' index, and `VECTORS_NEXT`'s during a re-embed (a Worker cannot read a binding's index name, [Rust workspace § 7](../project/design/rust-workspace.md#7-wasm-bindgen-externs)). `PM_EVAL_REST` needs `PM_VECTORS_INDEX`, `PM_CF_ACCOUNT_ID` and `PM_CF_API_TOKEN`, and refuses to start without them |
 | `PM_LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. Content is never logged at any level |
 | `PM_DEFAULT_POLICY` | `{}` | JSON merged over the built-in tenant policy defaults |
 | `PM_CONSOLE` | `on` | `on` serves the console at `/console`; `off` removes its routes |

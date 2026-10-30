@@ -175,6 +175,10 @@ pub struct Config {
     pub frozen_since: Option<String>,
     /// Honoured only with `PM_ENV = local`.
     pub eval_rest: bool,
+    /// `PM_VECTORS_INDEX` and `PM_VECTORS_NEXT_INDEX`: the index names a Vectorize REST call needs
+    /// (a Worker cannot read a binding's index name).
+    pub vectors_index: Option<String>,
+    pub vectors_next_index: Option<String>,
     pub ses_inbound: Option<SesInbound>,
     pub ses_rule_set: String,
     pub cf_subdomain_setup: bool,
@@ -512,6 +516,18 @@ impl Config {
             .unwrap_or(7);
         let frozen = v.on_off("PM_FREEZE", false)?;
         let eval_rest = v.on_off("PM_EVAL_REST", false)? && env == DeployEnv::Local;
+        let vectors_index = v.opt("PM_VECTORS_INDEX");
+        if eval_rest {
+            for (name, set) in [
+                ("PM_CF_ACCOUNT_ID", v.opt("PM_CF_ACCOUNT_ID").is_some()),
+                ("PM_CF_API_TOKEN", v.opt("PM_CF_API_TOKEN").is_some()),
+                ("PM_VECTORS_INDEX", vectors_index.is_some()),
+            ] {
+                if !set {
+                    return Err(invalid(name, "PM_EVAL_REST needs it"));
+                }
+            }
+        }
         let cf_subdomain_setup = v.on_off("PM_CF_SUBDOMAIN_SETUP", false)?;
         let web_bot_auth = v.on_off("PM_WEB_BOT_AUTH", false)?;
         if web_bot_auth && !build.signed_requests {
@@ -725,6 +741,8 @@ impl Config {
             frozen,
             frozen_since: v.opt("PM_FREEZE_SINCE"),
             eval_rest,
+            vectors_index,
+            vectors_next_index: v.opt("PM_VECTORS_NEXT_INDEX"),
             ses_inbound,
             ses_rule_set: v.or("PM_SES_RULE_SET", "pylota-identity"),
             cf_subdomain_setup,
@@ -1085,11 +1103,22 @@ mod tests {
 
         // PM_EVAL_REST is honoured only with PM_ENV=local.
         assert!(!read(&with(&[("PM_EVAL_REST", "on")])).unwrap().eval_rest);
-        assert!(
-            read(&with(&[("PM_EVAL_REST", "on"), ("PM_ENV", "local")]))
-                .unwrap()
-                .eval_rest
-        );
+        let eval = [
+            ("PM_EVAL_REST", "on"),
+            ("PM_ENV", "local"),
+            ("PM_CF_ACCOUNT_ID", "acct"),
+            ("PM_CF_API_TOKEN", "tok"),
+            ("PM_VECTORS_INDEX", "pm-mail-chunks-eval"),
+        ];
+        let c = read(&with(&eval)).unwrap();
+        assert!(c.eval_rest);
+        assert_eq!(c.vectors_index.as_deref(), Some("pm-mail-chunks-eval"));
+        // It needs the account, the token and the index name.
+        for i in 2..eval.len() {
+            let mut less = eval.to_vec();
+            let (name, _) = less.remove(i);
+            assert_eq!(fails(&less), name);
+        }
 
         // Phone numbers need the Telnyx key and account with PM_PHONE=on.
         assert_eq!(fails(&[("PM_PHONE", "on")]), "PM_TELNYX_API_KEY");
