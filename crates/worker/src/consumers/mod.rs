@@ -15,6 +15,9 @@ use pylota_identity_platform::Platform;
 use pylota_identity_platform::queues::{Incoming, QueueName};
 use serde_json::Value;
 
+/// How long work waits while the deployment is frozen.
+pub const FROZEN_DELAY_S: u32 = 300;
+
 /// One batch of a queue (its dead-letter queue when `dead_letter`).
 pub async fn run<P: Platform>(
     p: &P,
@@ -22,6 +25,13 @@ pub async fn run<P: Platform>(
     dead_letter: bool,
     batch: Vec<Incoming<Value>>,
 ) {
+    // A restore freeze: every message comes back in 300 seconds, acked, so no retry is used up.
+    if p.config().frozen && !dead_letter {
+        for m in &batch {
+            delivery::requeue(p, queue, m, FROZEN_DELAY_S).await;
+        }
+        return;
+    }
     match (queue, dead_letter) {
         (QueueName::Inbound, false) => inbound::batch(p, batch).await,
         (QueueName::Index, false) => index::batch(p, batch).await,

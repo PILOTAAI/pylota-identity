@@ -236,6 +236,12 @@ pub enum Decision {
 
 /// The handler: `Accept`, `Reject` (a permanent `5xx`) or `TempFail`.
 pub async fn handle<P: Platform>(p: &P, msg: &EmailIn) -> EmailOutcome {
+    // A restore freeze (Observability § 9): a temporary failure before anything is read, so nothing
+    // is accepted that the restore could lose; senders retry.
+    if p.config().frozen {
+        crate::metrics::count_with(p, "inbound_received_total", None, &["tempfail_frozen"], 1);
+        return EmailOutcome::TempFail;
+    }
     match handle_email(p, msg).await {
         Ok(()) => EmailOutcome::Accept,
         Err(Decision::Reject(smtp)) => EmailOutcome::Reject {

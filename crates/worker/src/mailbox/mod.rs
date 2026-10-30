@@ -77,6 +77,12 @@ pub enum MailboxRequest {
     GetEvents {
         event_ids: Vec<String>,
     },
+    /// Point-in-time recovery of this mailbox (Restore from PITR, step 4): to `at`, or to `bookmark`;
+    /// answers the undo bookmark, and the object restarts restored from an immediate alarm.
+    Restore {
+        at: Option<i64>,
+        bookmark: Option<String>,
+    },
     /// A re-parse's inputs (J3): the raw object and the ready attachment texts.
     ReparseSource {
         message_id: String,
@@ -440,6 +446,22 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
             MailboxRequest::PendingAttachmentText { message_id } => {
                 Ok(attachments::pending(self.sql, &message_id)?)
             }
+            MailboxRequest::Restore { at, bookmark } => {
+                let undo = self
+                    .state
+                    .restore_on_next_session(at, bookmark.as_deref())
+                    .await
+                    .map_err(|e| {
+                        ApiError::new(ErrorCode::Unavailable, "Point-in-time recovery failed.")
+                            .details(serde_json::json!({ "reason": format!("{:?}", e.kind).to_lowercase() }))
+                    })?;
+                self.sql.exec(
+                    "INSERT OR REPLACE INTO meta (k, v) VALUES ('restart_pending', '1')",
+                    &[],
+                )?;
+                self.state.set_alarm(now).await?;
+                Ok(serde_json::json!({ "undo_bookmark": undo }))
+            }
             MailboxRequest::ReparseSource { message_id } => {
                 Ok(attachments::reparse_source(self.sql, &message_id)?)
             }
@@ -642,6 +664,28 @@ impl<P: Platform, S: Sql, St: ObjectState> Mailbox<'_, P, S, St> {
 
     /// Runs every due purpose, then re-arms (Design conventions § 4, rule 5).
     pub async fn alarm(&self) {
+        // After a point-in-time restore: end the session so the object starts on restored storage.
+        if self
+            .sql
+            .first::<Kv>("SELECT k, v FROM meta WHERE k = 'restart_pending'", &[])
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            let _ = self
+                .sql
+                .exec("DELETE FROM meta WHERE k = 'restart_pending'", &[]);
+            self.state.abort();
+            return;
+        }
+        // A restore freeze: the alarm comes back in 5 minutes without doing its work.
+        if self.p.config().frozen {
+            let _ = self
+                .state
+                .set_alarm(self.p.clock().now_ms() + 300_000)
+                .await;
+            return;
+        }
         if let Err(e) = self.alarm_purposes().await {
             crate::log::warn(
                 "mailbox_alarm_failed",

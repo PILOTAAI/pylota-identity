@@ -19,6 +19,11 @@ use crate::webhooks::envelope as ev;
 
 /// One `scheduled` invocation.
 pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
+    // A restore freeze: the crons only log.
+    if p.config().frozen {
+        crate::log::info("frozen", &[("detail", cron.to_owned().into())]);
+        return;
+    }
     if cron == "* * * * *" {
         mint_mailboxes(p, request_id).await;
         domains::mint_monitors(p).await;

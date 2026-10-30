@@ -245,6 +245,8 @@ impl Sql for CfSql {
 /// The alarm and `deleteAll`.
 pub struct CfStorage {
     pub(crate) storage: worker::Storage,
+    /// The raw `DurableObjectState`, for the calls `workers-rs` 0.8.7 does not wrap.
+    pub(crate) raw_state: JsValue,
 }
 
 impl ObjectState for CfStorage {
@@ -268,6 +270,38 @@ impl ObjectState for CfStorage {
             .delete_all()
             .await
             .map_err(|e| js::worker_error("storage", e))
+    }
+
+    async fn restore_on_next_session(
+        &self,
+        at_ms: Option<i64>,
+        bookmark: Option<&str>,
+    ) -> PResult<String> {
+        let storage = js::get(&self.raw_state, "storage").map_err(|e| js::error("storage", &e))?;
+        let bookmark = match (at_ms, bookmark) {
+            (_, Some(b)) => JsValue::from_str(b),
+            (Some(at), None) => {
+                let at = js_sys::Date::new(&JsValue::from_f64(at as f64));
+                js::call_async(&storage, "getBookmarkForTime", &[&at])
+                    .await
+                    .map_err(|e| js::error("storage", &e))?
+            }
+            (None, None) => {
+                return Err(crate::PlatformError::invalid(
+                    "storage",
+                    "a time or a bookmark",
+                ));
+            }
+        };
+        let undo = js::call_async(&storage, "onNextSessionRestoreBookmark", &[&bookmark])
+            .await
+            .map_err(|e| js::error("storage", &e))?;
+        undo.as_string()
+            .ok_or_else(|| crate::PlatformError::invalid("storage", "no undo bookmark"))
+    }
+
+    fn abort(&self) {
+        let _ = js::call(&self.raw_state, "abort", &[]);
     }
 }
 

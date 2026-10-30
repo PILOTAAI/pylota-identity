@@ -70,6 +70,7 @@ impl CfObjectState {
     pub fn storage(&self) -> CfStorage {
         CfStorage {
             storage: self.state.storage(),
+            raw_state: self.raw.clone().into(),
         }
     }
 

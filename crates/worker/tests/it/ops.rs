@@ -854,3 +854,79 @@ fn domain_rate_state_alerts() {
     minute();
     minute();
 }
+
+/// `it::ops::freeze_holds_everything` (Observability § 9, Restore from PITR step 2; the SES and Stripe
+/// hooks arrive with M23 and M22): with `PM_FREEZE = "on"`, `email()` answers a temporary failure
+/// before reading anything (`tempfail_frozen`); tenant keys get `503 unavailable` (`frozen`) with
+/// `Retry-After: 300` while platform keys work; a send queued by a platform key stays `queued`, its
+/// pointer re-enqueued; the crons only log; `/health` shows `frozen: true`; and
+/// `POST /v1/platform/identities/{id}/restore` answers `409 not_frozen` once unfrozen. Durable
+/// Objects keep the configuration they started with in the harness, so their alarm hold is
+/// checked natively.
+#[test]
+fn freeze_holds_everything() {
+    let _r = fakes::Reset;
+    let s = send::open_sender("frozen", "live");
+    fakes::set_config("PM_FREEZE", Some("on"));
+    fakes::set_config("PM_FREEZE_SINCE", Some("2026-10-30T10:00:00Z"));
+    assert_ne!(
+        crate::inject(
+            "a@frozen.example",
+            &s.addr,
+            &crate::mail("a@frozen.example", &s.addr, "while frozen", "x")
+        ),
+        200,
+        "a temporary failure"
+    );
+    let r = crate::get(&format!("/v1/identities/{}", s.iid), &s.key);
+    assert_eq!(r.status, 503, "{}", r.body);
+    assert_eq!(r.body["error"]["details"]["reason"], "frozen");
+    assert_eq!(r.header("retry-after"), Some("300"));
+    assert_eq!(
+        crate::get(&format!("/v1/identities/{}", s.iid), &crate::platform()).status,
+        200
+    );
+    let health = crate::call("GET", "/health", None, None, &[]);
+    assert_eq!(health.body["frozen"], true, "{}", health.body);
+    let status = crate::get("/v1/platform/status", &crate::platform()).body;
+    assert_eq!(status["frozen"], true);
+    assert_eq!(status["frozen_since"], "2026-10-30T10:00:00Z");
+
+    // A platform key's send is accepted and waits.
+    let r = send::submit(
+        &format!("/v1/identities/{}/messages", s.iid),
+        &crate::platform(),
+        &crate::slug("fz"),
+        json!({ "to": ["x@example.net"], "subject": "held", "text": "t" }),
+    );
+    assert_eq!(r.status, 202, "{}", r.body);
+    let mid = r.body["id"].as_str().unwrap().to_owned();
+    minute();
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let m = crate::get(
+        &format!("/v1/identities/{}/messages/{mid}", s.iid),
+        &crate::platform(),
+    );
+    assert_eq!(
+        m.body["status"], "queued",
+        "held, never canceled: {}",
+        m.body
+    );
+
+    // The restore endpoint: allowed only while frozen; local development has no PITR.
+    let r = crate::post(
+        &format!("/v1/platform/identities/{}/restore", s.iid),
+        &crate::platform(),
+        json!({ "bookmark": "local" }),
+    );
+    assert_ne!(r.status, 409, "{}", r.body);
+    fakes::set_config("PM_FREEZE", None);
+    fakes::set_config("PM_FREEZE_SINCE", None);
+    let r = crate::post(
+        &format!("/v1/platform/identities/{}/restore", s.iid),
+        &crate::platform(),
+        json!({ "bookmark": "local" }),
+    );
+    assert_eq!(r.status, 409, "{}", r.body);
+    assert_eq!(r.body["error"]["code"], "not_frozen");
+}

@@ -578,6 +578,17 @@ impl<P: Platform, S: Sql, St: ObjectState> Runner<'_, P, S, St> {
         let Some(c) = self.ctx()? else {
             return Ok(());
         };
+        // A restore freeze holds every job but the restore's own: `restore_reconcile` and the
+        // erasures re-applied after it (reason `reapply_after_restore:`).
+        if self.p.config().frozen
+            && c.kind != "restore_reconcile"
+            && !c.params["reason"]
+                .as_str()
+                .is_some_and(|r| r.starts_with("reapply_after_restore:"))
+        {
+            self.state.set_alarm(c.now + 300_000).await?;
+            return Ok(());
+        }
         if self.get("cancel")?.is_some() {
             return self.end(&c, "canceled", None).await;
         }

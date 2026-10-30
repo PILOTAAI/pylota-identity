@@ -240,6 +240,11 @@ fn every_served_operation() {
         seen.ok("getJob", p.get_job(&field(&job, "id")).await);
         seen.ok("getPlatformStatus", p.get_platform_status().await);
         seen.ok("listDlqItems", p.list_dlq_items(&Default::default()).await);
+        seen.any(
+            "restoreMailbox",
+            p.restore_mailbox(&s.iid, &body(json!({ "bookmark": "b" }))).await,
+            &["not_frozen"],
+        );
         seen.ok(
             "setSwitch",
             p.set_switch(&body(json!({ "name": "agent_signup", "state": "on", "reason": "sdk coverage" })), None)

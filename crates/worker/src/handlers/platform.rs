@@ -384,3 +384,85 @@ pub async fn set_switch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
     .await?;
     Ok(Reply::json(200, row))
 }
+
+/// `POST /v1/platform/identities/{identity_id}/restore` (Restore from PITR, step 4): only while the
+/// deployment is frozen (`409 not_frozen`); exactly one of `at` (within the last 30 days) and
+/// `bookmark`. The response and the audit row `mailbox.restore` carry the undo bookmark.
+pub async fn restore_mailbox<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
+    if !c.p.config().frozen {
+        return Err(ApiError::new(
+            ErrorCode::NotFrozen,
+            "A mailbox is restored only while the deployment is frozen (idvy ops freeze).",
+        ));
+    }
+    let body = c.json()?;
+    super::messages::only_fields(&body, &["at", "bookmark"])?;
+    let (at, bookmark) = match (&body["at"], &body["bookmark"]) {
+        (serde_json::Value::String(s), serde_json::Value::Null) => {
+            let t = pylota_identity_core::days::parse_rfc3339(s)
+                .ok_or_else(|| ApiError::invalid("at", "An RFC 3339 time."))?;
+            if t > c.now || c.now - t > 30 * 86_400_000 {
+                return Err(ApiError::invalid("at", "Within the last 30 days."));
+            }
+            (Some(t), None)
+        }
+        (serde_json::Value::Null, serde_json::Value::String(b)) if !b.is_empty() => {
+            (None, Some(b.clone()))
+        }
+        _ => return Err(ApiError::invalid("at", "Exactly one of at and bookmark.")),
+    };
+    let iid = c.route.param("identity_id");
+    let idn: crate::db::identities::Row =
+        c.p.db()
+            .first(crate::db::identities::get(iid))
+            .await?
+            .ok_or_else(|| ApiError::not_found(ErrorCode::IdentityNotFound))?;
+    if idn.mailbox_do_id.is_empty() {
+        return Err(ApiError::not_found(ErrorCode::IdentityNotFound));
+    }
+    let env = crate::rpc::envelope_for(
+        c.p.as_ref(),
+        Some(&idn.tenant_id),
+        Some(&idn.id),
+        &c.request_id,
+        Some(&c.key().key_id),
+        crate::mailbox::MailboxRequest::Restore {
+            at,
+            bookmark: bookmark.clone(),
+        },
+    );
+    let out = match pylota_identity_platform::ObjectClient::call::<_, serde_json::Value>(
+        c.p.objects(),
+        pylota_identity_platform::durable::DoClass::Mailbox,
+        &idn.mailbox_do_id,
+        &env,
+    )
+    .await?
+    {
+        pylota_identity_platform::durable::RpcResult::Ok(v) => v,
+        pylota_identity_platform::durable::RpcResult::Err(e) => {
+            return Err(
+                ApiError::new(ErrorCode::Unavailable, e.error.message.clone())
+                    .details(serde_json::to_value(&e.error.details).unwrap_or_default()),
+            );
+        }
+    };
+    let undo = out["undo_bookmark"].as_str().unwrap_or("").to_owned();
+    c.p.db()
+        .execute(audit::insert(
+            &c.p.ids().new_id(IdPrefix::Audit),
+            Some(&idn.tenant_id),
+            Some(&c.key().key_id),
+            "mailbox.restore",
+            "identity",
+            &idn.id,
+            &json!({ "at": at.map(rfc3339), "bookmark_used": bookmark.is_some(), "undo_bookmark": undo }),
+            &c.request_id,
+            c.now,
+        ))
+        .await?;
+    Ok(Reply::json(
+        200,
+        json!({ "identity_id": idn.id, "restored_to": at.map(rfc3339), "undo_bookmark": undo }),
+    ))
+}

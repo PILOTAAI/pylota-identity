@@ -466,7 +466,7 @@ fn j1_r2_failure() {
     assert!(rows(&idn).is_empty());
 }
 
-fn with_attachment(to: &str) -> String {
+pub fn with_attachment(to: &str) -> String {
     format!(
         "From: a@j2.example\r\nTo: {to}\r\nSubject: J2\r\nMessage-ID: <{}@it.example>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n--b\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=\"note.txt\"\r\n\r\nInvoice INV-88213\r\n--b--\r\n",
         crate::slug("j2")

@@ -260,6 +260,7 @@ async fn create_request<P: Platform>(
         "scope": plan.scope, "erasure_request_id": era,
         "identity_id": plan.identity.as_ref().map(|i| i.id.clone()),
         "target_id": plan.target_id, "counterparty_hash": plan.counterparty_hash,
+        "reason": plan.reason,
     });
     if let (Some(o), Some(e)) = (params.as_object_mut(), extra.as_object()) {
         o.extend(e.clone());

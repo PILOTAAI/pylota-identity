@@ -473,6 +473,13 @@ impl<P: Platform, S: Sql, St: ObjectState> Monitor<'_, P, S, St> {
 
     /// The alarm: a check when one is due.
     pub async fn alarm(&self) {
+        if self.p.config().frozen {
+            let _ = self
+                .state
+                .set_alarm(self.p.clock().now_ms() + 300_000)
+                .await;
+            return;
+        }
         if let Err(e) = self.alarm_inner().await {
             crate::log::warn(
                 "domain_monitor_alarm_failed",

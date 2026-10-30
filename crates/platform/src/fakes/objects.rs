@@ -133,6 +133,19 @@ impl ObjectState for FakeState {
         self.alarm.set(None);
         self.sql.drop_everything()
     }
+
+    async fn restore_on_next_session(
+        &self,
+        _at_ms: Option<i64>,
+        _bookmark: Option<&str>,
+    ) -> PResult<String> {
+        Err(crate::PlatformError::unavailable(
+            "storage",
+            "point-in-time recovery is not available here",
+        ))
+    }
+
+    fn abort(&self) {}
 }
 
 /// A WebSocket accepted by a hibernating object: what the object sent, its attachment and how it closed.

@@ -81,6 +81,22 @@ fn storable(body: &Value) -> Value {
     b
 }
 
+/// The operations that return mail content (message text, raw MIME, attachments, snippets, answers).
+const MAIL_READS: &[&str] = &[
+    "listThreads",
+    "getThread",
+    "listMessages",
+    "getMessage",
+    "getMessageRaw",
+    "getAttachment",
+    "getAttachmentText",
+    "waitForMessage",
+    "listQuarantine",
+    "searchIdentity",
+    "searchTenant",
+    "findRelatedMessages",
+];
+
 impl<P: Platform> App<P> {
     pub fn new(p: P) -> Self {
         Self { p: Rc::new(p) }
@@ -323,7 +339,8 @@ impl<P: Platform> App<P> {
                     ErrorCode::Unavailable,
                     "The deployment is frozen for a restore.",
                 )
-                .details(json!({ "reason": "frozen" })));
+                .details(json!({ "reason": "frozen" }))
+                .header("Retry-After", "300"));
             }
             if c.method != "GET"
                 && c.method != "HEAD"
@@ -343,6 +360,46 @@ impl<P: Platform> App<P> {
             _ => false,
         };
         auth::check_route(&key, spec, foreign)?;
+        // Mail reads by platform and partner keys are break-glass access (Security § 3.6): one
+        // `mail.read` row before the handler runs; a row that cannot be written refuses the read.
+        if key.level >= Level::Partner && MAIL_READS.contains(&spec.operation_id) {
+            let (target_type, target_id) = c
+                .route
+                .params
+                .iter()
+                .find(|(n, _)| n.ends_with("_id"))
+                .map_or(("route", String::new()), |(n, v)| {
+                    (n.trim_end_matches("_id"), v.clone())
+                });
+            let tenant = (target_type == "tenant").then(|| target_id.clone());
+            let detail: serde_json::Map<String, Value> = c
+                .route
+                .params
+                .iter()
+                .map(|(n, v)| (n.to_string(), Value::from(v.as_str())))
+                .collect();
+            let row = crate::db::audit::insert(
+                &pylota_identity_platform::Ids::new_id(
+                    self.p.ids(),
+                    pylota_identity_platform::ids::IdPrefix::Audit,
+                ),
+                tenant.as_deref(),
+                Some(&key.key_id),
+                "mail.read",
+                target_type,
+                &target_id,
+                &json!({ "route": spec.pattern, "operation": spec.operation_id, "params": detail }),
+                request_id,
+                c.now,
+            );
+            if self.p.db().execute(row).await.is_err() {
+                return Err(ApiError::new(
+                    ErrorCode::Unavailable,
+                    "The read could not be audited.",
+                )
+                .details(json!({ "reason": "audit_unavailable" })));
+            }
+        }
         c.key = Some(key);
 
         // The send routes keep their ledger in the mailbox (Outbound › Reservation inside the mailbox).

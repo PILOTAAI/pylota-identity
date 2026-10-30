@@ -165,6 +165,17 @@ pub trait ObjectState {
     async fn set_alarm(&self, at_ms: i64) -> PResult<()>;
     /// Deletes every row and the alarm (compatibility date ≥ 2026-02-24).
     async fn delete_all(&self) -> PResult<()>;
+    /// Point-in-time recovery of the object's SQLite storage (Observability § 9, Restore from PITR):
+    /// the bookmark for `at_ms` (`getBookmarkForTime`), or `bookmark` itself, is restored when the
+    /// object next starts (`onNextSessionRestoreBookmark`); answers the bookmark that undoes it. The
+    /// caller then ends the session ([`ObjectState::abort`]). Not available in local development.
+    async fn restore_on_next_session(
+        &self,
+        at_ms: Option<i64>,
+        bookmark: Option<&str>,
+    ) -> PResult<String>;
+    /// Ends the object's session (`ctx.abort()`), so it restarts with restored storage.
+    fn abort(&self);
 }
 
 /// `ctx.acceptWebSocket` and friends (Event feed § 7.9). Natively, `fakes::FakeHibernation` simulates

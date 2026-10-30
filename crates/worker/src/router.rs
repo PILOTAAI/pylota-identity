@@ -134,6 +134,7 @@ pub enum Handler {
     PlatformStatus,
     DlqList,
     SetSwitch,
+    RestoreMailbox,
     DlqRedrive,
 }
 
@@ -450,6 +451,17 @@ pub static ROUTES: &[RouteSpec] = &[
         I::Optional,
         PLATFORM,
         Handler::DlqRedrive,
+    ),
+    route(
+        M::Post,
+        "/v1/platform/identities/{identity_id}/restore",
+        "restoreMailbox",
+        &["platform:ops"],
+        &[],
+        Scope::PlatformOnly,
+        I::None,
+        PLATFORM,
+        Handler::RestoreMailbox,
     ),
     route(
         M::Put,

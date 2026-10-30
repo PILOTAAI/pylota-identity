@@ -129,6 +129,13 @@ const CASES: &[(&str, Case)] = &[
             Some(json!({ "name": "agent_signup", "state": "on", "reason": "x" })),
         )
     }),
+    ("restoreMailbox", |t| {
+        (
+            "POST",
+            format!("/v1/platform/identities/{}/restore", t.identity),
+            Some(json!({ "bookmark": "b" })),
+        )
+    }),
     ("listDlqItems", |t| {
         (
             "GET",
@@ -1117,4 +1124,110 @@ fn a15_system_mailbox_unreachable() {
             .values()
             .any(|v| v["metadata"]["identity_id"] == sys.as_str())
     );
+}
+
+/// `it::security::mail_reads_audited` (Security § 3.6): a platform key and a partner key reading a
+/// message, its raw MIME, an attachment, a thread and a search each write one `mail.read` audit row
+/// (the target and the route, no content) before the response; a tenant key's reads write none; with
+/// the audit insert failing, the platform key's read gets `503 unavailable` and no content.
+#[test]
+fn mail_reads_audited() {
+    let (pid, partner_key) = partner(
+        "mail reads",
+        &[
+            "tenants:manage",
+            "messages:read",
+            "search:read",
+            "attachments:read",
+        ],
+    );
+    let r = post(
+        "/v1/tenants",
+        &partner_key,
+        json!({ "slug": crate::slug("mrt"), "name": "Mail reads", "mode": "live" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    let tid = r.body["id"].as_str().unwrap().to_owned();
+    let idn = crate::identity(&platform(), &tid, &crate::slug("mr")[..8]);
+    let iid = idn["id"].as_str().unwrap().to_owned();
+    let addr = idn["primary_address"].as_str().unwrap().to_owned();
+    let tenant_key = crate::owner_key(&tid, &["messages:read", "search:read", "attachments:read"]);
+    assert_eq!(
+        crate::inject(
+            "a@j2.example",
+            &addr,
+            &crate::inbound::with_attachment(&addr)
+        ),
+        200
+    );
+    let m = crate::wait_stored(&iid, &tenant_key, "received", 1);
+    let mid = m[0]["id"].as_str().unwrap().to_owned();
+    let tid_thread = m[0]["thread_id"].as_str().unwrap().to_owned();
+    let att = m[0]["attachments"][0]["id"].as_str().unwrap().to_owned();
+    let audits = |key_id: &str| -> Vec<Value> {
+        d1(&format!(
+            "SELECT target_type, target_id, details_json FROM audit_log WHERE action = 'mail.read' AND actor_key_id = '{key_id}' ORDER BY created_at, id"
+        ))
+        .as_array()
+        .cloned()
+        .unwrap()
+    };
+    let key_id = |k: &str| get("/v1/me", k).body["key_id"].as_str().unwrap().to_owned();
+    let reads = [
+        ("GET", format!("/v1/identities/{iid}/messages/{mid}"), None),
+        (
+            "GET",
+            format!("/v1/identities/{iid}/messages/{mid}/raw"),
+            None,
+        ),
+        (
+            "GET",
+            format!("/v1/identities/{iid}/messages/{mid}/attachments/{att}"),
+            None,
+        ),
+        (
+            "GET",
+            format!("/v1/identities/{iid}/threads/{tid_thread}"),
+            None,
+        ),
+        (
+            "POST",
+            format!("/v1/identities/{iid}/search"),
+            Some(json!({ "q": "invoice", "mode": "keyword" })),
+        ),
+    ];
+    for key in [platform(), partner_key.clone()] {
+        let id = key_id(&key);
+        let before = audits(&id).len();
+        for (method, path, body) in &reads {
+            let r = call(method, path, Some(&key), body.clone(), &[]);
+            assert!(r.status < 300, "{path}: {}", r.body);
+        }
+        let rows = audits(&id);
+        assert_eq!(rows.len(), before + reads.len(), "one row per read");
+        for r in &rows[before..] {
+            assert_eq!(r["target_type"], "identity");
+            assert_eq!(r["target_id"], iid.as_str());
+            let d = r["details_json"].as_str().unwrap();
+            assert!(
+                !d.contains("INV-88213") && !d.contains("a@j2.example"),
+                "no content: {d}"
+            );
+        }
+    }
+    // A tenant key's reads write none.
+    let tk = key_id(&tenant_key);
+    for (method, path, body) in &reads {
+        call(method, path, Some(&tenant_key), body.clone(), &[]);
+    }
+    assert!(audits(&tk).is_empty());
+    // The audit insert fails: the read is refused, with no content.
+    d1(
+        "CREATE TRIGGER IF NOT EXISTS it_mail_read_fails BEFORE INSERT ON audit_log WHEN NEW.action = 'mail.read' BEGIN SELECT RAISE(ABORT, 'it'); END",
+    );
+    let r = get(&format!("/v1/identities/{iid}/messages/{mid}"), &platform());
+    d1("DROP TRIGGER it_mail_read_fails");
+    assert_eq!(r.status, 503, "{}", r.body);
+    assert!(!r.body.to_string().contains("INV-88213"));
+    let _ = pid;
 }
