@@ -73,8 +73,9 @@ pub fn scrub(field: &str, v: &str) -> String {
             w.split_once('@')
                 .is_some_and(|(l, d)| !l.is_empty() && d.contains('.'))
         });
-    // Prose (several words) is content; codes, IDs and patterns are single tokens.
-    let prose = v.split_whitespace().count() > 3;
+    // Prose (several words) is content; codes, IDs and patterns are single tokens. The platform's own
+    // error text (an SQLite message) is machine text and keeps its words.
+    let prose = field != "platform_detail" && v.split_whitespace().count() > 3;
     if looks_like_address || prose {
         return REDACTED.to_owned();
     }

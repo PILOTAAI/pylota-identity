@@ -107,7 +107,7 @@ impl From<PlatformError> for ApiError {
                 ("kind", format!("{:?}", e.kind).into()),
                 // Machine text from the platform (an SQLite message, a status); never content.
                 (
-                    "detail",
+                    "platform_detail",
                     e.detail.chars().take(200).collect::<String>().into(),
                 ),
             ],

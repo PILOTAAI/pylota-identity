@@ -880,8 +880,9 @@ pub fn handle<S: Sql>(
                 "SELECT rowid, id, direction, raw_r2_key, received_at FROM messages WHERE rowid > ?1 AND received_at >= ?2 AND received_at < ?3 ORDER BY rowid LIMIT ?4",
                 &[
                     after_rowid.into(),
-                    after.unwrap_or(i64::MIN).into(),
-                    before.unwrap_or(i64::MAX).into(),
+                    // Open bounds within ±(2^53 − 1): workerd binds numbers as doubles.
+                    after.unwrap_or(-9_007_199_254_740_991).into(),
+                    before.unwrap_or(9_007_199_254_740_991).into(),
                     i64::from(limit.clamp(1, 500)).into(),
                 ],
             )?;

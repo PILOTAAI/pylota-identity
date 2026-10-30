@@ -148,7 +148,11 @@ fn j3_reparse() {
     let job = r.body["id"].as_str().unwrap().to_owned();
     crate::eventually(60, "the reparse job to complete", || {
         let j = crate::get(&format!("/v1/platform/jobs/{job}"), &crate::platform()).body;
-        (j["status"] == "completed").then_some(j)
+        if j["status"] == "completed" {
+            return Some(j);
+        }
+        job_alarm(&job);
+        None
     });
     let row = crate::eventually(60, "the re-parsed message", || {
         let rows = crate::mailbox_query(
