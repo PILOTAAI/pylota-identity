@@ -780,6 +780,14 @@ deltas in the pull request description.
   REST path in an evaluation.
 - **Endpoints.** The REST paths follow the `cloudflare` 5.2.0 SDK bundled in the pinned Wrangler 4.139.0
   (read 2026-10-30; developers.cloudflare.com could not be reached from the build environment).
+- **The load.** Months of mail arrive in minutes, so while it delivers, the load lifts the hourly
+  limits per sender (D5) and per tenant (D13) through `PM_DEFAULT_POLICY`. Otherwise more than half the
+  set is stored `throttled`. The tenant enables the `uk_vehicle` reference pack, as a UK rental operator
+  would. The load takes about nine minutes in local workerd. The 100 generated bounce notices are not
+  stored under their `Message-ID`, so the labels leave them out, and the search runs wait out `429`s
+  with `Retry-After`.
+- **Quarantine.** The detector of Inbound › Verification codes quarantines 766 golden messages as
+  `otp_unsolicited`. This is a design-level false positive, recorded in `quality.md`.
 - **Figures.** `quality.md` holds `it.keyword_recall_at_10`, measured by `it::search::golden_keyword_recall`
   with the fake AI. The real-model baselines stay `pending` until the nightly `eval` job has run in the
   evaluation account. That job does nothing, with a warning, until the `eval` environment has
