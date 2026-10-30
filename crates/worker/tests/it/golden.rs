@@ -100,10 +100,14 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
         );
     }
 
-    // Stored: every message's `Message-ID` is `<{key}@golden.example>`.
+    // Stored: every message's `Message-ID` is `<{key}@golden.example>`. The wait ends when all are
+    // stored, or when the count has not grown for two minutes (what the pipeline does not store,
+    // such as a throttled sender's surplus, is then left out of the labels).
     let want = golden.truths().len();
     let mut ids = BTreeMap::new();
-    eventually(1_800, "the golden mailbox to be stored", || {
+    let (mut last, mut since) = (0, std::time::Instant::now());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5_400);
+    loop {
         ids.clear();
         for (idn, _) in identities.values() {
             for r in mailbox_query(idn, "SELECT id, rfc_message_id FROM messages") {
@@ -116,12 +120,33 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
                 }
             }
         }
-        if ids.len() < want {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            return None;
+        if ids.len() >= want {
+            break;
         }
-        Some(())
-    });
+        if ids.len() > last {
+            (last, since) = (ids.len(), std::time::Instant::now());
+        }
+        let stalled = since.elapsed() > std::time::Duration::from_secs(120);
+        if stalled || std::time::Instant::now() > deadline {
+            let missing: Vec<&String> = golden
+                .truths()
+                .iter()
+                .map(|t| &t.key)
+                .filter(|k| !ids.contains_key(*k))
+                .take(20)
+                .collect();
+            println!(
+                "golden: {} of {want} stored; not stored, first 20: {missing:?}",
+                ids.len()
+            );
+            assert!(
+                ids.len() * 100 >= want * 95,
+                "fewer than 95% of the golden mailbox stored"
+            );
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(15));
+    }
     let keys = ids.iter().map(|(k, v)| (v.clone(), k.clone())).collect();
     Mailbox {
         tid,
@@ -134,8 +159,13 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
 }
 
 impl Mailbox {
+    /// The truths of the stored messages.
     pub fn truths(&self) -> Vec<&Truth> {
-        self.golden.truths()
+        self.golden
+            .truths()
+            .into_iter()
+            .filter(|t| self.ids.contains_key(&t.key))
+            .collect()
     }
 
     /// One tenant-scope search: the ranked truth keys of its hits.

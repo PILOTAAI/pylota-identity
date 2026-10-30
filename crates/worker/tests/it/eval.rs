@@ -202,7 +202,12 @@ fn triage_of(m: &Mailbox, idn: &str, mid: &str) -> Value {
 #[ignore = "an evaluation: cargo xtask eval-triage"]
 fn triage() {
     let m = golden::load("golden triage", policy_on());
-    let items = m.golden.triage_items();
+    let items: Vec<_> = m
+        .golden
+        .triage_items()
+        .into_iter()
+        .filter(|(k, _)| m.ids.contains_key(k))
+        .collect();
     let identity_of: std::collections::BTreeMap<String, String> = m
         .truths()
         .iter()

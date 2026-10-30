@@ -1100,6 +1100,7 @@ fn j31_vector_capacity() {
 #[test]
 fn restore_rebuilds_ledger() {
     use pylota_identity_api_types::ids::time_of;
+    fakes::reset();
     let _r = fakes::Reset;
     let s = send::open_sender("restore ledger", "live");
     let path = format!("/v1/identities/{}/messages", s.iid);
@@ -1114,7 +1115,10 @@ fn restore_rebuilds_ledger() {
     let late = a.body["id"].as_str().unwrap().to_owned();
     send::wait_status(&s, &late, "submitted");
     let inbound = send::receive(&s, "ana@sender.example", "inbound after T");
-    assert!(time_of(&inbound).unwrap() as i64 > t);
+    assert!(
+        time_of(&inbound).unwrap() as i64 > t && time_of(&late).unwrap() as i64 > t,
+        "early {early}, T {t}, late {late}, inbound {inbound}"
+    );
 
     // The restore: every row of the three messages and their ledger entries is gone.
     let ids = format!("'{early}','{late}','{inbound}'");
