@@ -75,6 +75,7 @@
 - [AgentMail comparison and gap register](project/agentmail-gap-analysis.md)
 - [Edge-case register](project/edge-cases.md)
 - [Build plan](project/build-plan.md)
+- [Quality baselines](project/quality.md)
 - [Cloud commissioning](project/cloud-commissioning.md)
 - [Launch readiness](project/launch-readiness.md)
 - [Decision records](project/adr/index.md)

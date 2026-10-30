@@ -66,9 +66,11 @@ impl Ai for CfAi {
             return serde_json::from_value(r?).map_err(|e| PlatformError::invalid(AI, e.to_string()));
         }
         if let Some(rest) = &self.rest {
-            let input = serde_json::to_value(input).map_err(|e| PlatformError::invalid(AI, e.to_string()))?;
+            let input = serde_json::to_value(input)
+                .map_err(|e| PlatformError::invalid(AI, e.to_string()))?;
             let out = rest.ai_run(model, &input).await?;
-            return serde_json::from_value(out).map_err(|e| PlatformError::invalid(AI, e.to_string()));
+            return serde_json::from_value(out)
+                .map_err(|e| PlatformError::invalid(AI, e.to_string()));
         }
         let out = self.raw(model, input, opts).await?;
         js::to_value(AI, &out)
@@ -81,7 +83,10 @@ impl Ai for CfAi {
         opts: &AiOptions,
     ) -> PResult<Vec<u8>> {
         if self.rest.is_some() {
-            return Err(PlatformError::unavailable(AI, "byte outputs are not available through PM_EVAL_REST"));
+            return Err(PlatformError::unavailable(
+                AI,
+                "byte outputs are not available through PM_EVAL_REST",
+            ));
         }
         let out = self.raw(model, input, opts).await?;
         if let Some(bytes) = out.dyn_ref::<js_sys::Uint8Array>() {
@@ -98,7 +103,10 @@ impl Ai for CfAi {
     async fn to_markdown(&self, docs: &[MarkdownInput]) -> PResult<Vec<MarkdownOutput>> {
         // The golden set's attachments are text, which never reach the converter.
         if self.rest.is_some() {
-            return Err(PlatformError::unavailable(AI, "toMarkdown is not available through PM_EVAL_REST"));
+            return Err(PlatformError::unavailable(
+                AI,
+                "toMarkdown is not available through PM_EVAL_REST",
+            ));
         }
         let ai = self.binding()?;
         let files = js_sys::Array::new();
@@ -172,7 +180,10 @@ impl VectorIndex for CfVectors {
                 .iter()
                 .map(|v| serde_json::json!({ "id": v.id, "namespace": v.namespace, "values": v.values, "metadata": v.metadata }))
                 .collect();
-            return read_mutation(self.binding, &rest.vectorize_upsert(self.binding, &lines).await?);
+            return read_mutation(
+                self.binding,
+                &rest.vectorize_upsert(self.binding, &lines).await?,
+            );
         }
         let b = self.binding;
         let array = js_sys::Array::new();
@@ -264,7 +275,12 @@ impl VectorIndex for CfVectors {
         }
         if let Some(rest) = &self.rest {
             let out = rest
-                .vectorize(self.binding, "POST", "delete_by_ids", Some(&super::rest::ids_body(ids)))
+                .vectorize(
+                    self.binding,
+                    "POST",
+                    "delete_by_ids",
+                    Some(&super::rest::ids_body(ids)),
+                )
                 .await?;
             return read_mutation(self.binding, &out);
         }
@@ -286,8 +302,13 @@ impl VectorIndex for CfVectors {
         }
         let found = match &self.rest {
             Some(rest) => {
-                rest.vectorize(self.binding, "POST", "get_by_ids", Some(&super::rest::ids_body(ids)))
-                    .await?
+                rest.vectorize(
+                    self.binding,
+                    "POST",
+                    "get_by_ids",
+                    Some(&super::rest::ids_body(ids)),
+                )
+                .await?
             }
             None => {
                 let out = wait(self.binding, self.index()?.get_by_ids(&Self::ids(ids))).await?;
@@ -313,7 +334,10 @@ impl VectorIndex for CfVectors {
             return read_info(self.binding, &r?);
         }
         if let Some(rest) = &self.rest {
-            return read_info(self.binding, &rest.vectorize(self.binding, "GET", "info", None).await?);
+            return read_info(
+                self.binding,
+                &rest.vectorize(self.binding, "GET", "info", None).await?,
+            );
         }
         let out = wait(self.binding, self.index()?.describe()).await?;
         read_info(self.binding, &self.json(&out)?)

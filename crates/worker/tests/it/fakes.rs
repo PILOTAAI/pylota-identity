@@ -434,6 +434,17 @@ pub fn set_config(name: &str, value: Option<&str>) {
 
 /// Makes every D1 statement report `bytes` as the database's size (`meta.size_after`), or the real
 /// size again with `None`.
+/// Publishes TXT records at `name` in the fake DoH (the golden mailbox's DKIM keys and DMARC
+/// policies); they stay until the suite ends, like the corpus zones.
+pub fn publish_txt(name: &str, records: &[String]) {
+    start();
+    STATE
+        .lock()
+        .unwrap()
+        .txt
+        .insert(name.to_ascii_lowercase(), Some(records.to_vec()));
+}
+
 pub fn set_d1_size(bytes: Option<u64>) {
     start();
     STATE.lock().unwrap().d1_size = bytes;

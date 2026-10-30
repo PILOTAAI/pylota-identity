@@ -1,9 +1,10 @@
 //! `cargo xtask <command>` (Rust workspace § 9). M0 has `build-worker`, `check-layering`
 //! and `trace`; M2 adds `gen-unicode` and `fuzz`,
-//! M3 `openapi`.
+//! M3 `openapi`, M18 the evaluations (`eval-setup`, `eval-search`, `eval-agentic`, `eval-triage`).
 #![forbid(unsafe_code)]
 
 mod build_worker;
+mod eval;
 mod fuzz;
 mod gen_sdk;
 mod itest;
@@ -16,7 +17,7 @@ mod unicode;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: cargo xtask <build-worker | check-layering | trace | gen-unicode [--check] | fuzz --target <t> --time <s> | openapi>";
+const USAGE: &str = "usage: cargo xtask <build-worker | check-layering | trace | gen-unicode [--check] | fuzz --target <t> --time <s> | openapi | itest | eval-setup | eval-search | eval-agentic | eval-triage>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,6 +29,8 @@ fn main() -> ExitCode {
         Some("openapi") => openapi::run(&root),
         Some("fuzz") => fuzz::run(&root, &args[1..]),
         Some("itest") => itest::run(&root, &args[1..]),
+        Some("eval-setup") => eval::setup(&root),
+        Some(s @ ("eval-search" | "eval-agentic" | "eval-triage")) => eval::run(&root, &s[5..]),
         Some("gen-sdk") => gen_sdk::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         Some("gen-unicode") => unicode::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         _ => {

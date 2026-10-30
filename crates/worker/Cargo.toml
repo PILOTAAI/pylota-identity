@@ -36,6 +36,8 @@ rmcp = { workspace = true, default-features = false }
 pylota-identity = { path = "../sdk" }
 # it::cli: the landing page's CLI examples through idvy's library.
 pylota-identity-cli = { path = "../cli" }
+# it::golden and the evaluations: the golden mailbox and its labelled sets (build plan M18).
+pylota-identity-conformance = { path = "../conformance" }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 # The workerd suite (Testing § 6): `cargo xtask itest` runs it; `cargo test --workspace` never builds it.

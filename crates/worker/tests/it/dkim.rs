@@ -39,3 +39,29 @@ pub fn sign(raw: &str) -> String {
         .expect("signed");
     format!("{}{raw}", sig.to_header())
 }
+
+/// `raw` signed with the corpus test key as `d={domain}; s=s1`: the golden mailbox publishes that key
+/// at `s1._domainkey.{domain}` ([`public_record`]).
+pub fn sign_as(raw: &str, domain: &str) -> String {
+    let sig = DkimSigner::from_key(key())
+        .domain(domain)
+        .selector("s1")
+        .headers(["From", "To", "Subject", "Message-ID", "Date"])
+        .sign(raw.as_bytes())
+        .expect("signed");
+    format!("{}{raw}", sig.to_header())
+}
+
+/// The corpus test key's DKIM record, as `zones.toml` publishes it for `brightwell.example`.
+pub fn public_record() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../conformance/corpus/dns/zones.toml");
+    let t: toml::Table = std::fs::read_to_string(path)
+        .expect("the corpus zones")
+        .parse()
+        .expect("zones.toml parses");
+    t["txt"]["s1._domainkey.brightwell.example"][0]
+        .as_str()
+        .expect("the corpus DKIM record")
+        .to_owned()
+}

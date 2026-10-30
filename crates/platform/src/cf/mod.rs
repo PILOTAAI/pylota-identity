@@ -133,12 +133,13 @@ impl CfPlatform {
                 binding: "VECTORS",
                 rest: rest.clone(),
             },
-            vectors_next: (bound("VECTORS_NEXT") || config.vectors_next_index.is_some() && rest.is_some())
-                .then(|| CfVectors {
-                    env: env.clone(),
-                    binding: "VECTORS_NEXT",
-                    rest: rest.clone(),
-                }),
+            vectors_next: (bound("VECTORS_NEXT")
+                || config.vectors_next_index.is_some() && rest.is_some())
+            .then(|| CfVectors {
+                env: env.clone(),
+                binding: "VECTORS_NEXT",
+                rest: rest.clone(),
+            }),
             mail: CfMail { env: env.clone() },
             limits: CfLimits { env: env.clone() },
             dns: DohClient {

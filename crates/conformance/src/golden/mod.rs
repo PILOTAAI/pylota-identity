@@ -3,6 +3,7 @@
 
 pub mod generator;
 pub mod metrics;
+pub mod policy;
 pub mod sets;
 
 /// `crates/conformance/golden/`.

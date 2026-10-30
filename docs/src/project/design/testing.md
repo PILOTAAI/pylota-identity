@@ -748,6 +748,43 @@ and asserts that keyword recall@10 does not drop against the baseline: keyword s
 so this is a required pull-request check. Updating the baseline is a reviewed change with the score
 deltas in the pull request description.
 
+**As built (M18).** The golden set, the harness and the gates run as designed, with these settlements:
+
+- **Generation.** `pylota_identity_conformance::golden::generator` writes 5,000 messages, 5,003 with
+  whole threads, from `generator.toml`: a SplitMix64 seed, the category shares of
+  [Search § 13.1](search.md#131-golden-mailbox), and anchor references (`BK-2291`, `INV-48213`, …) that
+  it always writes first. Random references have one digit more, so they never collide with an anchor.
+  Each message's `Message-ID` is `<{key}@golden.example>`, which maps a stored message back to its truth.
+  Invoice attachments are `text/plain` (no PDF writer), so the converter is not exercised.
+- **Labels.** `golden/authoring/make_sets.py` writes `queries.toml` (200 queries in the eight kinds of
+  [Search § 13.2](search.md#132-labelled-queries-and-metrics)), `questions.toml` (61 questions: 10
+  unanswerable, 5 steering), `triage.toml` (every 8th generated message, 626 in all, plus 150
+  hand-written cases) and `hard_cases/` (165 messages, with their truth in `hard_cases/cases.toml`
+  rather than beside each file). Relevance and gold support are selectors over the truth (`ref`,
+  `domain`, `topic`, `category`, `lang`, ages, facts), and a question's facts can name a generated fact
+  (`{amount}`), so the labels follow the generator. `conf::golden::sets::tests::sets_are_complete`
+  checks the sizes and that every label resolves.
+- **Authentication.** Golden mail goes through `email()` in the itest harness (`it::golden`). Mail from a
+  legitimate sender is DKIM-signed with the corpus test key, and the fake DoH publishes that key and a
+  `p=none` DMARC record for its domain. Spoofed and phishing senders stay unsigned on domains without
+  records. Without this, the verifier would drop every citation of unauthenticated mail ([F17](../edge-cases.md)).
+- **Where the evaluations run.** They are the `#[ignore]`d tests `eval::search`, `eval::agentic` and
+  `eval::triage` of the `it` binary. `cargo xtask eval-<suite>` runs them in the harness with
+  `PM_EVAL_REST = "on"`, `PM_VECTORS_INDEX = "pm-mail-chunks-eval"`, the evaluation account in place of
+  the fake one, and its token in `.dev.vars` (mode `0600`, deleted after the run). Under the test
+  hooks, Workers AI and Vectorize calls for that account bypass the fake server, and every other
+  outbound request still goes to it. Each test applies the repeat policy
+  (`conformance::golden::policy`, checked by `xtask::eval_median_policy`), writes
+  `target/eval/<suite>.json`, and fails on its gate. Triage's first run is the triage done at delivery,
+  and each later run re-runs triage on the labelled messages. `toMarkdown` and byte outputs have no
+  REST path in an evaluation.
+- **Endpoints.** The REST paths follow the `cloudflare` 5.2.0 SDK bundled in the pinned Wrangler 4.139.0
+  (read 2026-10-30; developers.cloudflare.com could not be reached from the build environment).
+- **Figures.** `quality.md` holds `it.keyword_recall_at_10`, measured by `it::search::golden_keyword_recall`
+  with the fake AI. The real-model baselines stay `pending` until the nightly `eval` job has run in the
+  evaluation account. That job does nothing, with a warning, until the `eval` environment has
+  `PM_EVAL_CF_ACCOUNT_ID` and `PM_EVAL_CF_API_TOKEN`.
+
 ## 10. Live end-to-end suite (`live::`)
 
 PRD release criterion 3. `cargo xtask live` runs

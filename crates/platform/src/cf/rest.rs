@@ -78,9 +78,10 @@ impl Rest {
 
     fn index(&self, binding: &'static str) -> PResult<&str> {
         match binding {
-            "VECTORS_NEXT" => self.next_index.as_deref().ok_or_else(|| {
-                PlatformError::invalid(binding, "PM_VECTORS_NEXT_INDEX is not set")
-            }),
+            "VECTORS_NEXT" => self
+                .next_index
+                .as_deref()
+                .ok_or_else(|| PlatformError::invalid(binding, "PM_VECTORS_NEXT_INDEX is not set")),
             _ => Ok(&self.index),
         }
     }

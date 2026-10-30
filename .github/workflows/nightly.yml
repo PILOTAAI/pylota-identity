@@ -1,8 +1,13 @@
 # The nightly benchmarks (Testing § 6.9): the `#[ignore]`d `it::bench::*` tests that bulk-seed large
 # mailboxes and report their p95 figures, warning above each target. Never a pull-request check.
 #
-# The actions and tools are the ones ci.yml pins, at the same commits and versions. No job needs a
-# secret.
+# The quality evaluations (build plan M18, Testing § 9.2): the golden set against real Workers AI models
+# in the separate evaluation account, through `PM_EVAL_REST`. They need the `eval` environment's
+# secrets `PM_EVAL_CF_ACCOUNT_ID` and `PM_EVAL_CF_API_TOKEN` (Workers AI Read and Edit, Vectorize Edit,
+# on that account only); until they exist the job warns and does nothing.
+#
+# The actions and tools are the ones ci.yml pins, at the same commits and versions. Only the eval job
+# reads a secret.
 name: Nightly
 
 on:
@@ -43,3 +48,62 @@ jobs:
       - name: The Worker's log
         if: failure()
         run: tail -n 200 target/itest/worker.log
+
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    environment: eval
+    permissions:
+      contents: read
+    env:
+      PM_EVAL_CF_ACCOUNT_ID: ${{ secrets.PM_EVAL_CF_ACCOUNT_ID }}
+      PM_EVAL_CF_API_TOKEN: ${{ secrets.PM_EVAL_CF_API_TOKEN }}
+    steps:
+      - name: The evaluation account
+        id: account
+        run: |
+          if [ -z "$PM_EVAL_CF_ACCOUNT_ID" ] || [ -z "$PM_EVAL_CF_API_TOKEN" ]; then
+            echo "::warning::The eval environment has no PM_EVAL_CF_ACCOUNT_ID or PM_EVAL_CF_API_TOKEN: the evaluations did not run."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        if: steps.account.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        if: steps.account.outputs.ready == 'true'
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2, verified 2026-10-19
+        if: steps.account.outputs.ready == 'true'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0, verified 2026-10-09
+        if: steps.account.outputs.ready == 'true'
+        with:
+          node-version: "22" # wrangler 4.139.0 declares Node >= 22
+      - name: Install Wrangler from the lockfile
+        if: steps.account.outputs.ready == 'true'
+        working-directory: site
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install worker-build
+        if: steps.account.outputs.ready == 'true'
+        run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
+      - name: A fresh evaluation index
+        if: steps.account.outputs.ready == 'true'
+        run: cargo xtask eval-setup
+      - name: eval::search (NFR-QUAL-1)
+        if: steps.account.outputs.ready == 'true'
+        run: cargo xtask eval-search
+      - name: eval::agentic (NFR-QUAL-2)
+        if: always() && steps.account.outputs.ready == 'true'
+        run: cargo xtask eval-agentic
+      - name: eval::triage (NFR-QUAL-3)
+        if: always() && steps.account.outputs.ready == 'true'
+        run: cargo xtask eval-triage
+      - name: The reports
+        if: always() && steps.account.outputs.ready == 'true'
+        run: |
+          for f in target/eval/*.json; do
+            echo "### $f" >> "$GITHUB_STEP_SUMMARY"
+            jq '{suite, median, scores, spread}' "$f" >> "$GITHUB_STEP_SUMMARY"
+          done

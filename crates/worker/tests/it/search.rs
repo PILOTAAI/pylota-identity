@@ -593,3 +593,24 @@ fn agentic_counted_once() {
     );
     assert_eq!(r.code(), "tenant_not_found");
 }
+
+/// `it::search::golden_keyword_recall` (NFR-QUAL-1, Testing § 9.3): the golden mailbox, loaded with
+/// the fake AI, keeps its keyword recall@10 over the labelled queries no more than 0.01 below the
+/// baseline in `quality.md`, and keyword search finds every exact reference (zero-result rate 0).
+#[test]
+fn golden_keyword_recall() {
+    let m = crate::golden::load("golden keyword", json!({ "triage": { "enabled": false } }));
+    let r = crate::golden::search_run(&m, &m.golden.queries, "keyword");
+    println!(
+        "keyword recall@10 {:.4}, MRR {:.4}, nDCG@10 {:.4}, zero-result rate {:.4}",
+        r.recall_at_10, r.mrr, r.ndcg_at_10, r.zero_result_rate
+    );
+    assert!(r.exact_zero.is_empty(), "exact references with no hit: {:?}", r.exact_zero);
+    let baseline = crate::golden::baseline("it.keyword_recall_at_10");
+    assert!(baseline.is_some(), "quality.md has no `it.keyword_recall_at_10` row");
+    if let Err(e) =
+        pylota_identity_conformance::golden::policy::gate(r.recall_at_10, None, baseline)
+    {
+        panic!("keyword recall@10: {e}");
+    }
+}

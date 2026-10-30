@@ -157,7 +157,21 @@ const ZONE: &str = "00000000000000000000000000000001";
 /// checks it against `worker::auth`.
 const PLATFORM_PERMISSIONS: &str = r#"["tenants:manage","identities:read","identities:write","domains:read","domains:write","messages:read","messages:send","messages:write","attachments:read","search:read","search:agentic","quarantine:review","webhooks:read","webhooks:manage","events:read","keys:manage","erasure:manage","suppressions:manage","usage:read","audit:read","policy:write","accounts:request","accounts:approve","phone:read","phone:request","phone:send","phone:call","phone:approve","phone:manage","phone:compliance","vault:read","vault:write","vault:request","vault:use","vault:approve","vault:admin","drafts:read","drafts:write","drafts:approve","members:read","members:manage","partners:manage","platform:ops","metrics:read"]"#;
 
+/// What an evaluation run adds to the harness (Testing § 9.2): variables, the evaluation account in
+/// place of the fake one, its API token, and `--ignored` for the `#[ignore]`d evaluation tests.
+#[derive(Default)]
+pub struct Extra {
+    pub vars: Vec<(String, String)>,
+    pub account_id: Option<String>,
+    pub cf_api_token: Option<String>,
+    pub ignored: bool,
+}
+
 pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
+    run_with(root, args, &Extra::default())
+}
+
+pub fn run_with(root: &Path, args: &[String], extra: &Extra) -> Result<(), String> {
     let keep = args.iter().any(|a| a == "--keep");
     let dir = root.join("target/itest");
     let _ = std::fs::remove_dir_all(&dir);
@@ -173,17 +187,34 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let template = std::fs::read_to_string(root.join("deploy/wrangler.toml.tmpl"))
         .map_err(|e| e.to_string())?;
     let config = dir.join("wrangler.itest.toml");
-    std::fs::write(&config, render(&template, root, &token)).map_err(|e| e.to_string())?;
+    let mut rendered = render(&template, root, &token);
+    if let Some(account) = &extra.account_id {
+        rendered = rendered.replace("00000000000000000000000000000000", account);
+    }
+    let vars: String = extra
+        .vars
+        .iter()
+        .map(|(k, v)| format!("{k} = {v:?}\n"))
+        .collect();
+    rendered = rendered.replacen("[vars]\n", &format!("[vars]\n{vars}"), 1);
+    std::fs::write(&config, rendered).map_err(|e| e.to_string())?;
+    let dev_vars = dir.join(".dev.vars");
     std::fs::write(
-        dir.join(".dev.vars"),
+        &dev_vars,
         format!(
-            "PM_MASTER_KEY={}\nPM_KEY_PEPPER={}\nPM_HASH_KEY={}\nPM_CF_API_TOKEN=itest-cf-token\nPM_SES_ACCESS_KEY_ID=AKIAITESTITESTITEST\nPM_SES_SECRET_ACCESS_KEY=itest-ses-secret\n",
+            "PM_MASTER_KEY={}\nPM_KEY_PEPPER={}\nPM_HASH_KEY={}\nPM_CF_API_TOKEN={}\nPM_SES_ACCESS_KEY_ID=AKIAITESTITESTITEST\nPM_SES_SECRET_ACCESS_KEY=itest-ses-secret\n",
             STANDARD.encode(master),
             STANDARD.encode(pepper),
-            STANDARD.encode(random::<32>()?)
+            STANDARD.encode(random::<32>()?),
+            extra.cf_api_token.as_deref().unwrap_or("itest-cf-token"),
         ),
     )
     .map_err(|e| e.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dev_vars, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+    }
     let w = wrangler(root)?;
     let state = dir.join("state");
 
@@ -431,6 +462,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
             "--",
             "--test-threads=1",
         ])
+        .args(extra.ignored.then_some("--ignored"))
         .args(args.iter().filter(|a| *a != "--keep"))
         .current_dir(root)
         .env("PM_ITEST_URL", &base)
@@ -447,6 +479,10 @@ pub fn run(root: &Path, args: &[String]) -> Result<(), String> {
 
     // 8. Clean up.
     drop(_guard);
+    // An evaluation's token is not left on disk.
+    if extra.cf_api_token.is_some() {
+        let _ = std::fs::remove_file(&dev_vars);
+    }
     if !keep {
         let _ = std::fs::remove_dir_all(&state);
     }
