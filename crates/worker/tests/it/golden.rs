@@ -66,6 +66,13 @@ pub fn load(name: &str, policy: Value) -> Mailbox {
     let p = platform();
     let t = crate::tenant(&p, name);
     let tid = t["id"].as_str().unwrap().to_owned();
+    // A UK rental operator: plates and penalty charge notices are references (the `uk_vehicle` pack).
+    let r = patch(
+        &format!("/v1/tenants/{tid}/policy"),
+        &p,
+        json!({ "search": { "refs_packs": ["core", "uk_vehicle"] } }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
     if !policy.is_null() {
         let r = patch(&format!("/v1/tenants/{tid}/policy"), &p, policy);
         assert_eq!(r.status, 200, "{}", r.body);
