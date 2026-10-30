@@ -1100,8 +1100,9 @@ fn restore_rebuilds_ledger() {
     let path = format!("/v1/identities/{}/messages", s.iid);
     let early = send::send_ok(&s, &["early@example.net"], "before T");
     send::wait_status(&s, &early, "submitted");
-    let t = time_of(&early).unwrap() as i64;
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    // T is a whole second (the job's `after` is RFC 3339) after the early send.
+    let t = (time_of(&early).unwrap() as i64 / 1000 + 1) * 1000;
+    std::thread::sleep(std::time::Duration::from_millis(1100));
     let body = json!({ "to": ["late@example.net"], "subject": "after T", "text": "Hi" });
     let a = send::submit(&path, &s.key, "restore-late-1", body.clone());
     assert_eq!(a.status, 202, "{}", a.body);
@@ -1143,9 +1144,10 @@ fn restore_rebuilds_ledger() {
         if j["status"] == "completed" {
             return Some(j);
         }
-        crate::erasure::job_alarm(&job);
+        // The runner's own alarms drive it: a test alarm racing one would run a slice twice.
         None
     });
+    assert_eq!(j["result"]["outbound_found"], 1, "{j}");
     assert_eq!(j["result"]["reinserted"], 1, "{j}");
     assert_eq!(j["result"]["requeued"], 1, "{j}");
 
