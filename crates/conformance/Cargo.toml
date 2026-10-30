@@ -1,6 +1,6 @@
 [package]
 name = "pylota-identity-conformance"
-description = "Pylota Identity MIME conformance corpus and runners"
+description = "Pylota Identity MIME conformance corpus, golden evaluation set and runners"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,4 @@ publish = false
 pylota-identity-core = { path = "../core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-[dev-dependencies]
 toml = { workspace = true }

@@ -1,0 +1,1005 @@
+# Written by authoring/make_sets.py; edit that script, not this file.
+
+# Every 8th generated message carries its generated labels; the cases are hand-written.
+stride = 8
+
+[[case]]
+key = "hard_payment_change_en_0"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_en_1"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_en_2"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_en_3"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_de_0"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_de_1"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_de_2"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_de_3"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_fr_0"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_fr_1"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_fr_2"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_fr_3"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_es_0"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_es_1"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_es_2"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_es_3"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_pl_0"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_pl_1"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_payment_change_pl_2"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request"]
+
+[[case]]
+key = "hard_payment_change_pl_3"
+category = "billing"
+needs_reply = false
+urgency = 3
+risk_flags = ["payment_change_request", "impersonation_suspected"]
+
+[[case]]
+key = "hard_phishing_0"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_1"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_2"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_3"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_4"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_5"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_6"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_7"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_8"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_9"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_10"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_11"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_12"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_13"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_14"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_15"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_16"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_17"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_18"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_phishing_19"
+category = "spam"
+needs_reply = false
+urgency = 0
+risk_flags = ["credential_request", "phishing_suspected"]
+
+[[case]]
+key = "hard_injection_body_0"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_0"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_0"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_0"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_1"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_1"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_1"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_1"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_2"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_2"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_2"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_2"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_3"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_3"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_3"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_3"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_4"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_4"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_4"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_4"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_5"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_5"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_5"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_5"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_6"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_6"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_6"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_6"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_7"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_7"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_7"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_7"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_8"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_8"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_8"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_8"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_body_9"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_subject_9"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_filename_9"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_injection_attachment_9"
+category = "vendor"
+needs_reply = false
+urgency = 1
+risk_flags = ["prompt_injection_suspected"]
+
+[[case]]
+key = "hard_spoofed_0"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_1"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_2"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_3"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_4"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_5"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_6"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_7"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_8"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_9"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_10"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_11"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_12"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_13"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_14"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_15"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_16"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_17"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_18"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_spoofed_19"
+category = "spam"
+needs_reply = false
+urgency = 3
+risk_flags = ["impersonation_suspected", "phishing_suspected", "urgent_pressure"]
+
+[[case]]
+key = "hard_legit_bank_unchanged_0"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_1"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_2"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_3"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_4"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_5"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_6"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_7"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_8"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_bank_unchanged_9"
+category = "vendor"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_0"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_1"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_2"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_3"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_4"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_5"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_6"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_7"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_8"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_password_reset_9"
+category = "verification"
+needs_reply = false
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_0"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_1"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_2"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_3"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_4"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_5"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_6"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_7"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_8"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_customer_correction_9"
+category = "customer_request"
+needs_reply = true
+urgency = 1
+
+[[case]]
+key = "hard_legit_insurer_photos_0"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_1"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_2"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_3"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_4"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_5"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_6"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_7"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_8"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_insurer_photos_9"
+category = "legal_compliance"
+needs_reply = true
+urgency = 2
+
+[[case]]
+key = "hard_legit_council_notice_0"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_1"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_2"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_3"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_4"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_5"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_6"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_7"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_8"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+
+[[case]]
+key = "hard_legit_council_notice_9"
+category = "legal_compliance"
+needs_reply = false
+urgency = 0
+

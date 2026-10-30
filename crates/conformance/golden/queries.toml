@@ -1,0 +1,1202 @@
+# Written by authoring/make_sets.py; edit that script, not this file.
+
+[[query]]
+id = "exact_reference_01"
+kind = "exact_reference"
+q = "BK-2291"
+relevant = [{ grade = 3, ref = "BK-2291" }]
+
+[[query]]
+id = "exact_reference_02"
+kind = "exact_reference"
+q = "BK-3107"
+relevant = [{ grade = 3, ref = "BK-3107" }]
+
+[[query]]
+id = "exact_reference_03"
+kind = "exact_reference"
+q = "BK-4410"
+relevant = [{ grade = 3, ref = "BK-4410" }]
+
+[[query]]
+id = "exact_reference_04"
+kind = "exact_reference"
+q = "BK-5583"
+relevant = [{ grade = 3, ref = "BK-5583" }]
+
+[[query]]
+id = "exact_reference_05"
+kind = "exact_reference"
+q = "BK-6024"
+relevant = [{ grade = 3, ref = "BK-6024" }]
+
+[[query]]
+id = "exact_reference_06"
+kind = "exact_reference"
+q = "BK-7319"
+relevant = [{ grade = 3, ref = "BK-7319" }]
+
+[[query]]
+id = "exact_reference_07"
+kind = "exact_reference"
+q = "BK-8146"
+relevant = [{ grade = 3, ref = "BK-8146" }]
+
+[[query]]
+id = "exact_reference_08"
+kind = "exact_reference"
+q = "BK-9052"
+relevant = [{ grade = 3, ref = "BK-9052" }]
+
+[[query]]
+id = "exact_reference_09"
+kind = "exact_reference"
+q = "CLM-77810"
+relevant = [{ grade = 3, ref = "CLM-77810" }]
+
+[[query]]
+id = "exact_reference_10"
+kind = "exact_reference"
+q = "CLM-77942"
+relevant = [{ grade = 3, ref = "CLM-77942" }]
+
+[[query]]
+id = "exact_reference_11"
+kind = "exact_reference"
+q = "CLM-80315"
+relevant = [{ grade = 3, ref = "CLM-80315" }]
+
+[[query]]
+id = "exact_reference_12"
+kind = "exact_reference"
+q = "CLM-81107"
+relevant = [{ grade = 3, ref = "CLM-81107" }]
+
+[[query]]
+id = "exact_reference_13"
+kind = "exact_reference"
+q = "CLM-83390"
+relevant = [{ grade = 3, ref = "CLM-83390" }]
+
+[[query]]
+id = "exact_reference_14"
+kind = "exact_reference"
+q = "INV-48213"
+relevant = [{ grade = 3, ref = "INV-48213" }]
+
+[[query]]
+id = "exact_reference_15"
+kind = "exact_reference"
+q = "INV-48977"
+relevant = [{ grade = 3, ref = "INV-48977" }]
+
+[[query]]
+id = "exact_reference_16"
+kind = "exact_reference"
+q = "INV-50122"
+relevant = [{ grade = 3, ref = "INV-50122" }]
+
+[[query]]
+id = "exact_reference_17"
+kind = "exact_reference"
+q = "INV-51460"
+relevant = [{ grade = 3, ref = "INV-51460" }]
+
+[[query]]
+id = "exact_reference_18"
+kind = "exact_reference"
+q = "INV-52038"
+relevant = [{ grade = 3, ref = "INV-52038" }]
+
+[[query]]
+id = "exact_reference_19"
+kind = "exact_reference"
+q = "INV-53391"
+relevant = [{ grade = 3, ref = "INV-53391" }]
+
+[[query]]
+id = "exact_reference_20"
+kind = "exact_reference"
+q = "WK40221187"
+relevant = [{ grade = 3, ref = "WK40221187" }]
+
+[[query]]
+id = "exact_reference_21"
+kind = "exact_reference"
+q = "LB51190342"
+relevant = [{ grade = 3, ref = "LB51190342" }]
+
+[[query]]
+id = "exact_reference_22"
+kind = "exact_reference"
+q = "MC63300718"
+relevant = [{ grade = 3, ref = "MC63300718" }]
+
+[[query]]
+id = "exact_reference_23"
+kind = "exact_reference"
+q = "BR70014256"
+relevant = [{ grade = 3, ref = "BR70014256" }]
+
+[[query]]
+id = "exact_reference_24"
+kind = "exact_reference"
+q = "AB12 CDE"
+relevant = [{ grade = 3, ref = "AB12 CDE" }]
+
+[[query]]
+id = "exact_reference_25"
+kind = "exact_reference"
+q = "KX19 LMN"
+relevant = [{ grade = 3, ref = "KX19 LMN" }]
+
+[[query]]
+id = "exact_reference_26"
+kind = "exact_reference"
+q = "RT68 PQS"
+relevant = [{ grade = 3, ref = "RT68 PQS" }]
+
+[[query]]
+id = "exact_reference_27"
+kind = "exact_reference"
+q = "HG21 VWY"
+relevant = [{ grade = 3, ref = "HG21 VWY" }]
+
+[[query]]
+id = "exact_reference_28"
+kind = "exact_reference"
+q = "LM70 ZXA"
+relevant = [{ grade = 3, ref = "LM70 ZXA" }]
+
+[[query]]
+id = "exact_reference_29"
+kind = "exact_reference"
+q = "booking BK-2291"
+relevant = [{ grade = 3, ref = "BK-2291" }]
+
+[[query]]
+id = "exact_reference_30"
+kind = "exact_reference"
+q = "booking BK-3107"
+relevant = [{ grade = 3, ref = "BK-3107" }]
+
+[[query]]
+id = "exact_reference_31"
+kind = "exact_reference"
+q = "booking BK-4410"
+relevant = [{ grade = 3, ref = "BK-4410" }]
+
+[[query]]
+id = "exact_reference_32"
+kind = "exact_reference"
+q = "booking BK-5583"
+relevant = [{ grade = 3, ref = "BK-5583" }]
+
+[[query]]
+id = "exact_reference_33"
+kind = "exact_reference"
+q = "invoice INV-48213"
+relevant = [{ grade = 3, ref = "INV-48213" }]
+
+[[query]]
+id = "exact_reference_34"
+kind = "exact_reference"
+q = "invoice INV-48977"
+relevant = [{ grade = 3, ref = "INV-48977" }]
+
+[[query]]
+id = "exact_reference_35"
+kind = "exact_reference"
+q = "invoice INV-50122"
+relevant = [{ grade = 3, ref = "INV-50122" }]
+
+[[query]]
+id = "exact_reference_36"
+kind = "exact_reference"
+q = "invoice INV-51460"
+relevant = [{ grade = 3, ref = "INV-51460" }]
+
+[[query]]
+id = "exact_reference_37"
+kind = "exact_reference"
+q = "claim CLM-77810"
+relevant = [{ grade = 3, ref = "CLM-77810" }]
+
+[[query]]
+id = "exact_reference_38"
+kind = "exact_reference"
+q = "claim CLM-77942"
+relevant = [{ grade = 3, ref = "CLM-77942" }]
+
+[[query]]
+id = "exact_reference_39"
+kind = "exact_reference"
+q = "AB12CDE"
+relevant = [{ grade = 3, ref = "AB12 CDE" }]
+
+[[query]]
+id = "exact_reference_40"
+kind = "exact_reference"
+q = "KX19LMN"
+relevant = [{ grade = 3, ref = "KX19 LMN" }]
+
+[[query]]
+id = "sender_01"
+kind = "sender"
+q = "Hollins Garage"
+relevant = [{ grade = 3, domain = "hollins-garage.example" }]
+
+[[query]]
+id = "sender_02"
+kind = "sender"
+q = "from:hollins-garage.example"
+relevant = [{ grade = 3, domain = "hollins-garage.example" }]
+
+[[query]]
+id = "sender_03"
+kind = "sender"
+q = "Kerrigan Tyres"
+relevant = [{ grade = 3, domain = "kerrigan-tyres.example" }]
+
+[[query]]
+id = "sender_04"
+kind = "sender"
+q = "from:kerrigan-tyres.example"
+relevant = [{ grade = 3, domain = "kerrigan-tyres.example" }]
+
+[[query]]
+id = "sender_05"
+kind = "sender"
+q = "Ashford Bodyworks"
+relevant = [{ grade = 3, domain = "ashford-bodyworks.example" }]
+
+[[query]]
+id = "sender_06"
+kind = "sender"
+q = "from:ashford-bodyworks.example"
+relevant = [{ grade = 3, domain = "ashford-bodyworks.example" }]
+
+[[query]]
+id = "sender_07"
+kind = "sender"
+q = "Pennine Auto Repairs"
+relevant = [{ grade = 3, domain = "pennine-auto.example" }]
+
+[[query]]
+id = "sender_08"
+kind = "sender"
+q = "from:pennine-auto.example"
+relevant = [{ grade = 3, domain = "pennine-auto.example" }]
+
+[[query]]
+id = "sender_09"
+kind = "sender"
+q = "Cobalt Motors"
+relevant = [{ grade = 3, domain = "cobalt-motors.example" }]
+
+[[query]]
+id = "sender_10"
+kind = "sender"
+q = "from:cobalt-motors.example"
+relevant = [{ grade = 3, domain = "cobalt-motors.example" }]
+
+[[query]]
+id = "sender_11"
+kind = "sender"
+q = "Northgate Insurance"
+relevant = [{ grade = 3, domain = "northgate-insurance.example" }]
+
+[[query]]
+id = "sender_12"
+kind = "sender"
+q = "from:northgate-insurance.example"
+relevant = [{ grade = 3, domain = "northgate-insurance.example" }]
+
+[[query]]
+id = "sender_13"
+kind = "sender"
+q = "Calder Mutual"
+relevant = [{ grade = 3, domain = "calder-mutual.example" }]
+
+[[query]]
+id = "sender_14"
+kind = "sender"
+q = "from:calder-mutual.example"
+relevant = [{ grade = 3, domain = "calder-mutual.example" }]
+
+[[query]]
+id = "sender_15"
+kind = "sender"
+q = "Harrow Assurance"
+relevant = [{ grade = 3, domain = "harrow-assurance.example" }]
+
+[[query]]
+id = "sender_16"
+kind = "sender"
+q = "from:harrow-assurance.example"
+relevant = [{ grade = 3, domain = "harrow-assurance.example" }]
+
+[[query]]
+id = "sender_17"
+kind = "sender"
+q = "from:westmark.gov.example"
+relevant = [{ grade = 3, domain = "westmark.gov.example" }]
+
+[[query]]
+id = "sender_18"
+kind = "sender"
+q = "from:lowbridge.gov.example"
+relevant = [{ grade = 3, domain = "lowbridge.gov.example" }]
+
+[[query]]
+id = "sender_19"
+kind = "sender"
+q = "from:marlow.gov.example"
+relevant = [{ grade = 3, domain = "marlow.gov.example" }]
+
+[[query]]
+id = "sender_20"
+kind = "sender"
+q = "from:brackley.gov.example"
+relevant = [{ grade = 3, domain = "brackley.gov.example" }]
+
+[[query]]
+id = "operators_01"
+kind = "operators"
+q = "from:hollins-garage.example has:attachment"
+relevant = [{ grade = 3, domain = "hollins-garage.example", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "operators_02"
+kind = "operators"
+q = "from:hollins-garage.example subject:invoice"
+relevant = [{ grade = 3, domain = "hollins-garage.example", category = "invoice" }]
+
+[[query]]
+id = "operators_03"
+kind = "operators"
+q = "from:kerrigan-tyres.example has:attachment"
+relevant = [{ grade = 3, domain = "kerrigan-tyres.example", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "operators_04"
+kind = "operators"
+q = "from:kerrigan-tyres.example subject:invoice"
+relevant = [{ grade = 3, domain = "kerrigan-tyres.example", category = "invoice" }]
+
+[[query]]
+id = "operators_05"
+kind = "operators"
+q = "from:ashford-bodyworks.example has:attachment"
+relevant = [{ grade = 3, domain = "ashford-bodyworks.example", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "operators_06"
+kind = "operators"
+q = "from:ashford-bodyworks.example subject:invoice"
+relevant = [{ grade = 3, domain = "ashford-bodyworks.example", category = "invoice" }]
+
+[[query]]
+id = "operators_07"
+kind = "operators"
+q = "from:pennine-auto.example has:attachment"
+relevant = [{ grade = 3, domain = "pennine-auto.example", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "operators_08"
+kind = "operators"
+q = "from:pennine-auto.example subject:invoice"
+relevant = [{ grade = 3, domain = "pennine-auto.example", category = "invoice" }]
+
+[[query]]
+id = "operators_09"
+kind = "operators"
+q = "from:cobalt-motors.example has:attachment"
+relevant = [{ grade = 3, domain = "cobalt-motors.example", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "operators_10"
+kind = "operators"
+q = "from:cobalt-motors.example subject:invoice"
+relevant = [{ grade = 3, domain = "cobalt-motors.example", category = "invoice" }]
+
+[[query]]
+id = "operators_11"
+kind = "operators"
+q = "from:northgate-insurance.example subject:decision"
+relevant = [{ grade = 3, domain = "northgate-insurance.example", topic = "decision" }]
+
+[[query]]
+id = "operators_12"
+kind = "operators"
+q = "from:northgate-insurance.example subject:photographs"
+relevant = [{ grade = 3, domain = "northgate-insurance.example", topic = "photos_requested" }]
+
+[[query]]
+id = "operators_13"
+kind = "operators"
+q = "from:calder-mutual.example subject:decision"
+relevant = [{ grade = 3, domain = "calder-mutual.example", topic = "decision" }]
+
+[[query]]
+id = "operators_14"
+kind = "operators"
+q = "from:calder-mutual.example subject:photographs"
+relevant = [{ grade = 3, domain = "calder-mutual.example", topic = "photos_requested" }]
+
+[[query]]
+id = "operators_15"
+kind = "operators"
+q = "from:harrow-assurance.example subject:decision"
+relevant = [{ grade = 3, domain = "harrow-assurance.example", topic = "decision" }]
+
+[[query]]
+id = "operators_16"
+kind = "operators"
+q = "from:harrow-assurance.example subject:photographs"
+relevant = [{ grade = 3, domain = "harrow-assurance.example", topic = "photos_requested" }]
+
+[[query]]
+id = "operators_17"
+kind = "operators"
+q = "from:westmark.gov.example subject:penalty"
+relevant = [{ grade = 3, domain = "westmark.gov.example", category = "pcn" }]
+
+[[query]]
+id = "operators_18"
+kind = "operators"
+q = "from:lowbridge.gov.example subject:penalty"
+relevant = [{ grade = 3, domain = "lowbridge.gov.example", category = "pcn" }]
+
+[[query]]
+id = "operators_19"
+kind = "operators"
+q = "from:marlow.gov.example subject:penalty"
+relevant = [{ grade = 3, domain = "marlow.gov.example", category = "pcn" }]
+
+[[query]]
+id = "operators_20"
+kind = "operators"
+q = "from:brackley.gov.example subject:penalty"
+relevant = [{ grade = 3, domain = "brackley.gov.example", category = "pcn" }]
+
+[[query]]
+id = "operators_21"
+kind = "operators"
+q = "ref:BK-2291"
+relevant = [{ grade = 3, ref = "BK-2291" }]
+
+[[query]]
+id = "operators_22"
+kind = "operators"
+q = "ref:BK-3107"
+relevant = [{ grade = 3, ref = "BK-3107" }]
+
+[[query]]
+id = "operators_23"
+kind = "operators"
+q = "ref:BK-4410"
+relevant = [{ grade = 3, ref = "BK-4410" }]
+
+[[query]]
+id = "operators_24"
+kind = "operators"
+q = "ref:BK-5583"
+relevant = [{ grade = 3, ref = "BK-5583" }]
+
+[[query]]
+id = "operators_25"
+kind = "operators"
+q = "ref:BK-6024"
+relevant = [{ grade = 3, ref = "BK-6024" }]
+
+[[query]]
+id = "operators_26"
+kind = "operators"
+q = "ref:BK-7319"
+relevant = [{ grade = 3, ref = "BK-7319" }]
+
+[[query]]
+id = "operators_27"
+kind = "operators"
+q = "ref:BK-8146"
+relevant = [{ grade = 3, ref = "BK-8146" }]
+
+[[query]]
+id = "operators_28"
+kind = "operators"
+q = "ref:BK-9052"
+relevant = [{ grade = 3, ref = "BK-9052" }]
+
+[[query]]
+id = "operators_29"
+kind = "operators"
+q = "filename:invoice-inv48213"
+relevant = [{ grade = 3, ref = "INV-48213", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "operators_30"
+kind = "operators"
+q = "filename:invoice-inv48977"
+relevant = [{ grade = 3, ref = "INV-48977", category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "paraphrase_01"
+kind = "paraphrase"
+q = "customer wants to move the rental to a different day"
+relevant = [{ grade = 2, topic = "date_change" }]
+
+[[query]]
+id = "paraphrase_02"
+kind = "paraphrase"
+q = "change of collection date"
+relevant = [{ grade = 2, topic = "date_change" }]
+
+[[query]]
+id = "paraphrase_03"
+kind = "paraphrase"
+q = "reschedule a car hire"
+relevant = [{ grade = 2, topic = "date_change" }]
+
+[[query]]
+id = "paraphrase_04"
+kind = "paraphrase"
+q = "push the reservation back"
+relevant = [{ grade = 2, topic = "date_change" }]
+
+[[query]]
+id = "paraphrase_05"
+kind = "paraphrase"
+q = "customer no longer needs the car"
+relevant = [{ grade = 2, topic = "cancellation" }]
+
+[[query]]
+id = "paraphrase_06"
+kind = "paraphrase"
+q = "call off a rental"
+relevant = [{ grade = 2, topic = "cancellation" }]
+
+[[query]]
+id = "paraphrase_07"
+kind = "paraphrase"
+q = "withdraw a reservation"
+relevant = [{ grade = 2, topic = "cancellation" }]
+
+[[query]]
+id = "paraphrase_08"
+kind = "paraphrase"
+q = "trip not happening anymore"
+relevant = [{ grade = 2, topic = "cancellation" }]
+
+[[query]]
+id = "paraphrase_09"
+kind = "paraphrase"
+q = "car returned with damage"
+relevant = [{ grade = 2, topic = "damage" }]
+
+[[query]]
+id = "paraphrase_10"
+kind = "paraphrase"
+q = "dent or scratch on a returned vehicle"
+relevant = [{ grade = 2, topic = "damage" }]
+
+[[query]]
+id = "paraphrase_11"
+kind = "paraphrase"
+q = "windscreen broken during hire"
+relevant = [{ grade = 2, topic = "damage" }]
+
+[[query]]
+id = "paraphrase_12"
+kind = "paraphrase"
+q = "bodywork damage reported by customer"
+relevant = [{ grade = 2, topic = "damage" }]
+
+[[query]]
+id = "paraphrase_13"
+kind = "paraphrase"
+q = "vehicle will be brought back late"
+relevant = [{ grade = 2, topic = "late_return" }]
+
+[[query]]
+id = "paraphrase_14"
+kind = "paraphrase"
+q = "delayed drop-off of the hire car"
+relevant = [{ grade = 2, topic = "late_return" }]
+
+[[query]]
+id = "paraphrase_15"
+kind = "paraphrase"
+q = "customer running behind on returning the car"
+relevant = [{ grade = 2, topic = "late_return" }]
+
+[[query]]
+id = "paraphrase_16"
+kind = "paraphrase"
+q = "return postponed until tomorrow"
+relevant = [{ grade = 2, topic = "late_return" }]
+
+[[query]]
+id = "paraphrase_17"
+kind = "paraphrase"
+q = "keep the car for longer"
+relevant = [{ grade = 2, topic = "extension" }]
+
+[[query]]
+id = "paraphrase_18"
+kind = "paraphrase"
+q = "add days to a rental"
+relevant = [{ grade = 2, topic = "extension" }]
+
+[[query]]
+id = "paraphrase_19"
+kind = "paraphrase"
+q = "lengthen the hire period"
+relevant = [{ grade = 2, topic = "extension" }]
+
+[[query]]
+id = "paraphrase_20"
+kind = "paraphrase"
+q = "extra days on the booking"
+relevant = [{ grade = 2, topic = "extension" }]
+
+[[query]]
+id = "paraphrase_21"
+kind = "paraphrase"
+q = "someone wants to hire a vehicle"
+relevant = [{ grade = 2, topic = "new_booking" }]
+
+[[query]]
+id = "paraphrase_22"
+kind = "paraphrase"
+q = "new car rental enquiry"
+relevant = [{ grade = 2, topic = "new_booking" }]
+
+[[query]]
+id = "paraphrase_23"
+kind = "paraphrase"
+q = "reserve a people carrier"
+relevant = [{ grade = 2, topic = "new_booking" }]
+
+[[query]]
+id = "paraphrase_24"
+kind = "paraphrase"
+q = "request to rent an electric car"
+relevant = [{ grade = 2, topic = "new_booking" }]
+
+[[query]]
+id = "paraphrase_25"
+kind = "paraphrase"
+q = "insurer needs pictures of the damage"
+relevant = [{ grade = 2, topic = "photos_requested" }]
+
+[[query]]
+id = "paraphrase_26"
+kind = "paraphrase"
+q = "send images for the claim assessment"
+relevant = [{ grade = 2, topic = "photos_requested" }]
+
+[[query]]
+id = "paraphrase_27"
+kind = "paraphrase"
+q = "photographic evidence for an insurance claim"
+relevant = [{ grade = 2, topic = "photos_requested" }]
+
+[[query]]
+id = "paraphrase_28"
+kind = "paraphrase"
+q = "outcome of the insurance claim"
+relevant = [{ grade = 2, topic = "decision" }]
+
+[[query]]
+id = "paraphrase_29"
+kind = "paraphrase"
+q = "claim paid out or refused"
+relevant = [{ grade = 2, topic = "decision" }]
+
+[[query]]
+id = "paraphrase_30"
+kind = "paraphrase"
+q = "insurer's verdict on the incident"
+relevant = [{ grade = 2, topic = "decision" }]
+
+[[query]]
+id = "paraphrase_31"
+kind = "paraphrase"
+q = "insurance case started for an accident"
+relevant = [{ grade = 2, topic = "claim_opened" }]
+
+[[query]]
+id = "paraphrase_32"
+kind = "paraphrase"
+q = "new claim registered with the insurer"
+relevant = [{ grade = 2, topic = "claim_opened" }]
+
+[[query]]
+id = "paraphrase_33"
+kind = "paraphrase"
+q = "handler assigned to an incident"
+relevant = [{ grade = 2, topic = "claim_opened" }]
+
+[[query]]
+id = "paraphrase_34"
+kind = "paraphrase"
+q = "operator licence about to expire"
+relevant = [{ grade = 2, topic = "licence_renewal" }]
+
+[[query]]
+id = "paraphrase_35"
+kind = "paraphrase"
+q = "renew the licence before it lapses"
+relevant = [{ grade = 2, topic = "licence_renewal" }]
+
+[[query]]
+id = "paraphrase_36"
+kind = "paraphrase"
+q = "former customer wants a copy of their personal data"
+relevant = [{ grade = 2, topic = "data_request" }]
+
+[[query]]
+id = "paraphrase_37"
+kind = "paraphrase"
+q = "data protection request with a one-month deadline"
+relevant = [{ grade = 2, topic = "data_request" }]
+
+[[query]]
+id = "paraphrase_38"
+kind = "paraphrase"
+q = "proof of fleet cover"
+relevant = [{ grade = 2, topic = "insurance_certificate" }]
+
+[[query]]
+id = "paraphrase_39"
+kind = "paraphrase"
+q = "insurance document to keep at each branch"
+relevant = [{ grade = 2, topic = "insurance_certificate" }]
+
+[[query]]
+id = "paraphrase_40"
+kind = "paraphrase"
+q = "depot roadworthiness check coming up"
+relevant = [{ grade = 2, topic = "inspection" }]
+
+[[query]]
+id = "paraphrase_41"
+kind = "paraphrase"
+q = "inspectors will review maintenance records"
+relevant = [{ grade = 2, topic = "inspection" }]
+
+[[query]]
+id = "paraphrase_42"
+kind = "paraphrase"
+q = "garage chasing an unpaid bill"
+relevant = [{ grade = 2, topic = "reminder" }]
+
+[[query]]
+id = "paraphrase_43"
+kind = "paraphrase"
+q = "overdue repair invoice"
+relevant = [{ grade = 2, topic = "reminder" }]
+
+[[query]]
+id = "paraphrase_44"
+kind = "paraphrase"
+q = "parking fine for one of our cars"
+relevant = [{ grade = 2, topic = "pcn_issued" }]
+
+[[query]]
+id = "paraphrase_45"
+kind = "paraphrase"
+q = "car parked in a restricted zone"
+relevant = [{ grade = 2, topic = "pcn_issued" }]
+
+[[query]]
+id = "paraphrase_46"
+kind = "paraphrase"
+q = "trade news about rental depots"
+relevant = [{ grade = 2, topic = "industry_news" }]
+
+[[query]]
+id = "paraphrase_47"
+kind = "paraphrase"
+q = "newsletter for car hire businesses"
+relevant = [{ grade = 2, topic = "industry_news" }]
+
+[[query]]
+id = "paraphrase_48"
+kind = "paraphrase"
+q = "one-time login code"
+relevant = [{ grade = 2, topic = "code" }]
+
+[[query]]
+id = "paraphrase_49"
+kind = "paraphrase"
+q = "portal sign-in confirmation number"
+relevant = [{ grade = 2, topic = "code" }]
+
+[[query]]
+id = "paraphrase_50"
+kind = "paraphrase"
+q = "supplier says their bank account changed"
+relevant = [{ grade = 2, topic = "payment_change" }]
+
+[[query]]
+id = "multilingual_01"
+kind = "multilingual"
+q = "Buchung ändern"
+relevant = [{ grade = 2, lang = "de" }]
+
+[[query]]
+id = "multilingual_02"
+kind = "multilingual"
+q = "Abholung bestätigen"
+relevant = [{ grade = 2, lang = "de" }]
+
+[[query]]
+id = "multilingual_03"
+kind = "multilingual"
+q = "neue Abholzeit"
+relevant = [{ grade = 2, lang = "de" }]
+
+[[query]]
+id = "multilingual_04"
+kind = "multilingual"
+q = "modifier la réservation"
+relevant = [{ grade = 2, lang = "fr" }]
+
+[[query]]
+id = "multilingual_05"
+kind = "multilingual"
+q = "prise en charge"
+relevant = [{ grade = 2, lang = "fr" }]
+
+[[query]]
+id = "multilingual_06"
+kind = "multilingual"
+q = "merci de confirmer la réservation"
+relevant = [{ grade = 2, lang = "fr" }]
+
+[[query]]
+id = "multilingual_07"
+kind = "multilingual"
+q = "cambiar la reserva"
+relevant = [{ grade = 2, lang = "es" }]
+
+[[query]]
+id = "multilingual_08"
+kind = "multilingual"
+q = "recogida del coche"
+relevant = [{ grade = 2, lang = "es" }]
+
+[[query]]
+id = "multilingual_09"
+kind = "multilingual"
+q = "pueden confirmarlo"
+relevant = [{ grade = 2, lang = "es" }]
+
+[[query]]
+id = "multilingual_10"
+kind = "multilingual"
+q = "zmienić rezerwację"
+relevant = [{ grade = 2, lang = "pl" }]
+
+[[query]]
+id = "multilingual_11"
+kind = "multilingual"
+q = "odbiór samochodu"
+relevant = [{ grade = 2, lang = "pl" }]
+
+[[query]]
+id = "multilingual_12"
+kind = "multilingual"
+q = "proszę o potwierdzenie"
+relevant = [{ grade = 2, lang = "pl" }]
+
+[[query]]
+id = "multilingual_13"
+kind = "multilingual"
+q = "予約の変更"
+relevant = [{ grade = 2, lang = "ja" }]
+
+[[query]]
+id = "multilingual_14"
+kind = "multilingual"
+q = "受け取り日"
+relevant = [{ grade = 2, lang = "ja" }]
+
+[[query]]
+id = "multilingual_15"
+kind = "multilingual"
+q = "確認をお願いします"
+relevant = [{ grade = 2, lang = "ja" }]
+
+[[query]]
+id = "typos_01"
+kind = "typos"
+q = "bookng request"
+relevant = [{ grade = 2, category = "variant", topic = "typos" }]
+
+[[query]]
+id = "typos_02"
+kind = "typos"
+q = "reservaton cancelled"
+relevant = [{ grade = 2, category = "variant", topic = "typos" }]
+
+[[query]]
+id = "typos_03"
+kind = "typos"
+q = "Hollns Garage"
+relevant = [{ grade = 2, domain = "hollins-garage.example" }]
+
+[[query]]
+id = "typos_04"
+kind = "typos"
+q = "Kerigan Tyres"
+relevant = [{ grade = 2, domain = "kerrigan-tyres.example" }]
+
+[[query]]
+id = "typos_05"
+kind = "typos"
+q = "Ashferd Bodyworks"
+relevant = [{ grade = 2, domain = "ashford-bodyworks.example" }]
+
+[[query]]
+id = "typos_06"
+kind = "typos"
+q = "Penine Auto"
+relevant = [{ grade = 2, domain = "pennine-auto.example" }]
+
+[[query]]
+id = "typos_07"
+kind = "typos"
+q = "Cobolt Motors"
+relevant = [{ grade = 2, domain = "cobalt-motors.example" }]
+
+[[query]]
+id = "typos_08"
+kind = "typos"
+q = "Northgte Insurance"
+relevant = [{ grade = 2, domain = "northgate-insurance.example" }]
+
+[[query]]
+id = "typos_09"
+kind = "typos"
+q = "Caldor Mutual"
+relevant = [{ grade = 2, domain = "calder-mutual.example" }]
+
+[[query]]
+id = "typos_10"
+kind = "typos"
+q = "Harow Assurance"
+relevant = [{ grade = 2, domain = "harrow-assurance.example" }]
+
+[[query]]
+id = "typos_11"
+kind = "typos"
+q = "Westmrk Council"
+relevant = [{ grade = 2, domain = "westmark.gov.example" }]
+
+[[query]]
+id = "typos_12"
+kind = "typos"
+q = "Lowbrige parking"
+relevant = [{ grade = 2, domain = "lowbridge.gov.example" }]
+
+[[query]]
+id = "typos_13"
+kind = "typos"
+q = "windscren crack"
+relevant = [{ grade = 2, topic = "damage" }]
+
+[[query]]
+id = "typos_14"
+kind = "typos"
+q = "rear bumpr scratch"
+relevant = [{ grade = 2, topic = "damage" }]
+
+[[query]]
+id = "typos_15"
+kind = "typos"
+q = "photgraphs claim"
+relevant = [{ grade = 2, topic = "photos_requested" }]
+
+[[query]]
+id = "typos_16"
+kind = "typos"
+q = "operater licence"
+relevant = [{ grade = 2, topic = "licence_renewal" }]
+
+[[query]]
+id = "typos_17"
+kind = "typos"
+q = "subjct access request"
+relevant = [{ grade = 2, topic = "data_request" }]
+
+[[query]]
+id = "typos_18"
+kind = "typos"
+q = "verifcation code"
+relevant = [{ grade = 2, topic = "code" }]
+
+[[query]]
+id = "typos_19"
+kind = "typos"
+q = "penalty chrage notice"
+relevant = [{ grade = 2, category = "pcn" }]
+
+[[query]]
+id = "typos_20"
+kind = "typos"
+q = "inspecton depot"
+relevant = [{ grade = 2, topic = "inspection" }]
+
+[[query]]
+id = "relative_dates_01"
+kind = "relative_dates"
+q = "invoice newer_than:30d"
+relevant = [{ grade = 3, category = "invoice", max_age_days = 29 }]
+
+[[query]]
+id = "relative_dates_02"
+kind = "relative_dates"
+q = "invoice newer_than:90d"
+relevant = [{ grade = 3, category = "invoice", max_age_days = 89 }]
+
+[[query]]
+id = "relative_dates_03"
+kind = "relative_dates"
+q = "invoice older_than:180d"
+relevant = [{ grade = 3, category = "invoice", min_age_days = 181 }]
+
+[[query]]
+id = "relative_dates_04"
+kind = "relative_dates"
+q = "penalty newer_than:30d"
+relevant = [{ grade = 3, category = "pcn", max_age_days = 29 }]
+
+[[query]]
+id = "relative_dates_05"
+kind = "relative_dates"
+q = "penalty newer_than:90d"
+relevant = [{ grade = 3, category = "pcn", max_age_days = 89 }]
+
+[[query]]
+id = "relative_dates_06"
+kind = "relative_dates"
+q = "penalty older_than:180d"
+relevant = [{ grade = 3, category = "pcn", min_age_days = 181 }]
+
+[[query]]
+id = "relative_dates_07"
+kind = "relative_dates"
+q = "claim newer_than:30d"
+relevant = [{ grade = 3, category = "claim", max_age_days = 29 }]
+
+[[query]]
+id = "relative_dates_08"
+kind = "relative_dates"
+q = "claim newer_than:90d"
+relevant = [{ grade = 3, category = "claim", max_age_days = 89 }]
+
+[[query]]
+id = "relative_dates_09"
+kind = "relative_dates"
+q = "claim older_than:180d"
+relevant = [{ grade = 3, category = "claim", min_age_days = 181 }]
+
+[[query]]
+id = "relative_dates_10"
+kind = "relative_dates"
+q = "booking newer_than:30d"
+relevant = [{ grade = 3, category = "booking", max_age_days = 29 }]
+
+[[query]]
+id = "relative_dates_11"
+kind = "relative_dates"
+q = "booking newer_than:90d"
+relevant = [{ grade = 3, category = "booking", max_age_days = 89 }]
+
+[[query]]
+id = "relative_dates_12"
+kind = "relative_dates"
+q = "booking older_than:180d"
+relevant = [{ grade = 3, category = "booking", min_age_days = 181 }]
+
+[[query]]
+id = "relative_dates_13"
+kind = "relative_dates"
+q = "operator newer_than:30d"
+relevant = [{ grade = 3, category = "compliance", max_age_days = 29 }]
+
+[[query]]
+id = "relative_dates_14"
+kind = "relative_dates"
+q = "operator newer_than:90d"
+relevant = [{ grade = 3, category = "compliance", max_age_days = 89 }]
+
+[[query]]
+id = "relative_dates_15"
+kind = "relative_dates"
+q = "operator older_than:180d"
+relevant = [{ grade = 3, category = "compliance", min_age_days = 181 }]
+
+[[query]]
+id = "negation_or_01"
+kind = "negation_or"
+q = "invoice NOT reminder"
+relevant = [{ grade = 3, category = "invoice", topic = "invoice" }]
+
+[[query]]
+id = "negation_or_02"
+kind = "negation_or"
+q = "penalty NOT final"
+relevant = [{ grade = 3, category = "pcn", topic = "pcn_issued" }]
+
+[[query]]
+id = "negation_or_03"
+kind = "negation_or"
+q = "BK-2291 OR BK-3107"
+relevant = [{ grade = 3, ref = "BK-2291" }, { grade = 3, ref = "BK-3107" }]
+
+[[query]]
+id = "negation_or_04"
+kind = "negation_or"
+q = "INV-48213 OR INV-48977"
+relevant = [{ grade = 3, ref = "INV-48213" }, { grade = 3, ref = "INV-48977" }]
+
+[[query]]
+id = "negation_or_05"
+kind = "negation_or"
+q = "CLM-77810 OR CLM-80315"
+relevant = [{ grade = 3, ref = "CLM-77810" }, { grade = 3, ref = "CLM-80315" }]
+
+[[query]]
+id = "negation_or_06"
+kind = "negation_or"
+q = "claim NOT declined"
+relevant = [{ grade = 3, category = "claim", topic = "claim_opened" }, { grade = 1, category = "claim", topic = "photos_requested" }]
+
+[[query]]
+id = "negation_or_07"
+kind = "negation_or"
+q = "booking cancel OR cancellation"
+relevant = [{ grade = 3, topic = "cancellation" }]
+
+[[query]]
+id = "negation_or_08"
+kind = "negation_or"
+q = "subject:penalty OR subject:charge"
+relevant = [{ grade = 3, category = "pcn" }]
+
+[[query]]
+id = "negation_or_09"
+kind = "negation_or"
+q = "tyres OR brake"
+relevant = [{ grade = 2, category = "invoice" }]
+
+[[query]]
+id = "negation_or_10"
+kind = "negation_or"
+q = "licence OR certificate"
+relevant = [{ grade = 3, topic = "licence_renewal" }, { grade = 3, topic = "insurance_certificate" }]
+

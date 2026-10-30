@@ -1,0 +1,32 @@
+# The golden mailbox (Search § 13.1, Testing § 9.1): generated deterministically from this file at run
+# time and never committed. `cargo xtask eval-*` and `it::search::golden_keyword_recall` read it.
+
+seed = 20261030
+messages = 5000
+
+# The four identities of tenant `acme`, by username.
+identities = ["bookings", "inquiry", "compliance", "maintenance"]
+
+# Category shares (Search § 13.1), in percent.
+[shares]
+booking = 20
+claim = 10
+invoice = 12
+pcn = 6
+compliance = 6
+newsletter = 12
+automated = 8
+verification = 3
+forward = 5
+foreign = 8
+variant = 7
+injection = 3
+
+# Entities the generator always writes, in this order, before any random one; the labelled queries and
+# questions name them. Random references have one digit more, so they never collide with these.
+[anchors]
+bookings = ["BK-2291", "BK-3107", "BK-4410", "BK-5583", "BK-6024", "BK-7319", "BK-8146", "BK-9052"]
+claims = ["CLM-77810", "CLM-77942", "CLM-80315", "CLM-81107", "CLM-83390"]
+invoices = ["INV-48213", "INV-48977", "INV-50122", "INV-51460", "INV-52038", "INV-53391"]
+pcns = ["WK40221187", "LB51190342", "MC63300718", "BR70014256"]
+plates = ["AB12 CDE", "KX19 LMN", "RT68 PQS", "HG21 VWY", "LM70 ZXA"]

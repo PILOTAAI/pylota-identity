@@ -1,0 +1,10 @@
+From: Acme Operations <ops@acme-fleet.example>
+To: {to}
+Subject: Depot move on 14 November
+Date: Wed, 28 Oct 2026 09:30:00 +0000
+Message-ID: <hard_depot_move@golden.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+From 14 November the north depot moves to Unit 7, Riverside Park. Customers collecting from the north depot should go to the new address.
