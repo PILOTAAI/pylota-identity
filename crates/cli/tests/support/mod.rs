@@ -168,6 +168,9 @@ pub struct Script {
     pub deployed: Option<String>,
     pub deploys: u32,
     pub ratelimit_ids: Vec<u32>,
+    /// `PM_FREEZE = "on"` and `PM_FREEZE_SINCE` in the last deployed `[vars]`.
+    pub frozen: bool,
+    pub frozen_since: Option<String>,
 }
 
 /// Everything the fakes remember.
@@ -207,6 +210,12 @@ pub struct State {
     pub reseal_script: Vec<u64>,
     /// The key ID whose re-seal finished, and when (Unix ms).
     pub resealed: Option<(String, i64)>,
+    /// What `wrangler d1 export` writes, one per call in order (the last repeats).
+    pub d1_exports: Vec<String>,
+    /// The files `wrangler d1 execute --file` applied, with their contents.
+    pub d1_executed: Vec<String>,
+    /// The `wrangler d1 time-travel` calls.
+    pub time_travel: Vec<Vec<String>>,
 }
 
 impl State {
@@ -322,6 +331,9 @@ impl Fake {
             runner_calls: vec![],
             reseal_script: vec![],
             resealed: None,
+            d1_exports: vec![],
+            d1_executed: vec![],
+            time_travel: vec![],
         }));
         {
             let mut s = state.lock().unwrap();
@@ -876,7 +888,9 @@ fn worker(
     let name = s.scripts.keys().next().cloned().unwrap_or_default();
     let deployed = s.scripts.get(&name).and_then(|sc| sc.deployed.clone());
     if let ["health"] = seg {
+        let frozen = s.scripts.get(&name).is_some_and(|sc| sc.frozen);
         return match deployed {
+            Some(v) if frozen => api(200, json!({ "status": "ok", "version": v, "frozen": true })),
             Some(v) => api(200, json!({ "status": "ok", "version": v })),
             None => api(404, json!({ "message": "no worker" })),
         };
@@ -1177,13 +1191,49 @@ impl Runner for FakeRunner {
                             .flatten()
                             .filter_map(|r| r.get("namespace_id")?.as_str()?.parse().ok())
                             .collect();
+                        let vars = doc
+                            .get("vars")
+                            .and_then(|v| v.as_table())
+                            .cloned()
+                            .unwrap_or_default();
                         let sc = s.scripts.entry(name).or_default();
                         sc.deployed = Some(version.trim().to_owned());
                         sc.deploys += 1;
                         sc.ratelimit_ids = ids;
+                        sc.frozen = vars.get("PM_FREEZE").and_then(|v| v.as_str()) == Some("on");
+                        sc.frozen_since = vars
+                            .get("PM_FREEZE_SINCE")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned);
                         ok(
                             "Uploaded pylota-identity\nCurrent Version ID: 095f00a7-0000-0000-0000-000000000000\n",
                         )
+                    }
+                    ["d1", "export", _db, "--remote", "--output", out] => {
+                        let text = if s.d1_exports.len() > 1 {
+                            s.d1_exports.remove(0)
+                        } else {
+                            s.d1_exports.first().cloned().unwrap_or_default()
+                        };
+                        std::fs::write(out, text).map_err(|e| e.to_string())?;
+                        ok("🌀 Exported\n")
+                    }
+                    ["d1", "time-travel", "info", _db, ts, "--json"] => {
+                        s.time_travel.push(vec!["info".into(), (*ts).to_owned()]);
+                        ok(
+                            "{\n  \"bookmark\": \"00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683\",\n  \"timestamp\": \"2026-10-29T10:00:00.000Z\"\n}\n",
+                        )
+                    }
+                    ["d1", "time-travel", "restore", _db, bm, "--json"] => {
+                        s.time_travel.push(vec!["restore".into(), (*bm).to_owned()]);
+                        ok(
+                            "{\n  \"bookmark\": \"00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683\",\n  \"previous_bookmark\": \"00000099-00000aaa-0000bbbb-undo\",\n  \"message\": \"Database restored\"\n}\n",
+                        )
+                    }
+                    ["d1", "execute", _db, "--remote", "--file", file, "--yes"] => {
+                        let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
+                        s.d1_executed.push(text);
+                        ok("🚣 Executed\n")
                     }
                     ["secret", "put", name, "--name", worker] => {
                         let v = String::from_utf8_lossy(cmd.stdin.as_deref().unwrap_or_default())
@@ -1416,6 +1466,9 @@ impl Fake {
             runner_calls: vec![],
             reseal_script: vec![],
             resealed: None,
+            d1_exports: vec![],
+            d1_executed: vec![],
+            time_travel: vec![],
         }
     }
 }

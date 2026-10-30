@@ -118,6 +118,8 @@ pub enum Command {
     #[command(subcommand)]
     Dlq(DlqCmd),
     #[command(subcommand)]
+    Ops(OpsCmd),
+    #[command(subcommand)]
     Jobs(JobsCmd),
     #[command(subcommand)]
     Suppressions(SuppressionsCmd),
@@ -278,6 +280,75 @@ pub enum JobsCmd {
     },
     Get {
         job: String,
+    },
+}
+
+// ---- Operations -------------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum OpsCmd {
+    /// The freeze flag, switches, firing alerts, master key and capacity.
+    Status,
+    /// Turn a deployment-wide switch on or off.
+    Switch {
+        #[arg(value_parser = ["read_only", "free_sending", "emergency_prune", "agent_signup"])]
+        name: String,
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Freeze the deployment for a restore (PM_FREEZE = "on", then a code deploy).
+    Freeze {
+        #[command(flatten)]
+        dir: DirArg,
+    },
+    /// End a restore freeze.
+    Unfreeze {
+        #[command(flatten)]
+        dir: DirArg,
+    },
+    #[command(subcommand)]
+    Restore(RestoreCmd),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RestoreCmd {
+    /// Restore D1 to a point in time and replay what came after it.
+    D1 {
+        #[arg(long)]
+        at: Option<String>,
+        /// A table or table.column the restore is meant to undo (repeatable).
+        #[arg(long)]
+        exclude: Vec<String>,
+        /// A row the restore is meant to undo, as table:key (repeatable).
+        #[arg(long = "exclude-row")]
+        exclude_row: Vec<String>,
+        /// Recompute and apply the replay from an earlier restore's working directory.
+        #[arg(long = "replay-only")]
+        replay_only: Option<String>,
+        #[command(flatten)]
+        dir: DirArg,
+    },
+    /// Restore one identity's mailbox (only while frozen).
+    Mailbox {
+        identity: String,
+        #[arg(long)]
+        at: Option<String>,
+        #[arg(long)]
+        bookmark: Option<String>,
+    },
+    /// Re-queue and re-insert what came after the restore point, and re-apply erasures.
+    Reconcile {
+        #[arg(long = "identity-ids", value_delimiter = ',')]
+        identities: Vec<String>,
+        #[arg(long)]
+        after: String,
+    },
+    /// Delete the restore working directories (they hold every D1 row).
+    Cleanup {
+        #[command(flatten)]
+        dir: DirArg,
     },
 }
 
