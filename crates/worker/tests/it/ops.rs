@@ -1128,7 +1128,7 @@ fn restore_rebuilds_ledger() {
         json!({ "kind": "restore_reconcile", "tenant_id": s.tid, "after": "2026-01-01T00:00:00Z" }),
     ] {
         let r = crate::post("/v1/platform/jobs", &crate::platform(), bad);
-        assert_eq!(r.status, 422, "{}", r.body);
+        assert_eq!(r.status, 400, "{}", r.body);
     }
     let r = crate::post(
         "/v1/platform/jobs",
