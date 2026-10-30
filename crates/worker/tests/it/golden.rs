@@ -14,6 +14,22 @@ use serde_json::{Value, json};
 
 use crate::{dkim, eventually, fakes, mailbox_query, mint, patch, platform, post};
 
+/// `POST` that waits as `Retry-After` says on `429`: a run of hundreds of queries meets the rate
+/// limits as any client would.
+pub fn post_retry(path: &str, key: &str, body: Value) -> crate::Resp {
+    loop {
+        let r = post(path, key, body.clone());
+        if r.status != 429 {
+            return r;
+        }
+        let wait = r
+            .header("retry-after")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+        std::thread::sleep(std::time::Duration::from_secs(wait));
+    }
+}
+
 pub struct Mailbox {
     pub tid: String,
     /// A tenant key with every read and search permission.
@@ -170,7 +186,7 @@ impl Mailbox {
 
     /// One tenant-scope search: the ranked truth keys of its hits.
     pub fn search(&self, q: &str, mode: &str, limit: u32) -> (Vec<String>, Value) {
-        let r = post(
+        let r = post_retry(
             &format!("/v1/tenants/{}/search", self.tid),
             &self.key,
             json!({ "q": q, "mode": mode, "limit": limit }),

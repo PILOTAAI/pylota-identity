@@ -10,7 +10,7 @@ use pylota_identity_conformance::golden::policy::{self, Next};
 use serde_json::{Value, json};
 
 use crate::golden::{self, Mailbox};
-use crate::{eventually, get, post};
+use crate::{eventually, get};
 
 /// Scores runs of `run` until the policy decides, writes the report, and answers the median.
 fn score(suite: &str, mut run: impl FnMut(usize) -> (f64, Value)) -> (f64, Vec<Value>) {
@@ -130,7 +130,7 @@ fn agentic() {
         let mut abstain_ok = 0usize;
         let mut items = Vec::new();
         for q in &questions {
-            let r = post(
+            let r = golden::post_retry(
                 &format!("/v1/tenants/{}/search", m.tid),
                 &m.key,
                 json!({ "q": q.q, "mode": "agentic" }),
@@ -217,7 +217,7 @@ fn triage() {
         if run > 0 {
             for (key, _) in &items {
                 let (idn, mid) = (&identity_of[key], &m.ids[key]);
-                let r = post(
+                let r = golden::post_retry(
                     &format!("/v1/identities/{idn}/messages/{mid}/triage"),
                     &m.key,
                     json!({}),
