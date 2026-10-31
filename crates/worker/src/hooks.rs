@@ -46,7 +46,20 @@ pub async fn serve<P: Platform>(
                     })
                 })
                 .collect();
-            Ok(Reply::json(200, json!({ "routes": routes })))
+            let console: Vec<Value> = crate::console::router::ROUTES
+                .iter()
+                .map(|r| {
+                    json!({
+                        "method": r.method, "pattern": r.pattern, "permission": r.perm,
+                        "auth": format!("{:?}", r.auth).to_ascii_lowercase(),
+                        "sensitive": r.sensitive, "when_off": r.when_off,
+                    })
+                })
+                .collect();
+            Ok(Reply::json(
+                200,
+                json!({ "routes": routes, "console_routes": console }),
+            ))
         }
         ("POST", "/__test/rpc") => {
             let body: Value = req

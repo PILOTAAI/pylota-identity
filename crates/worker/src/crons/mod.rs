@@ -40,6 +40,8 @@ pub async fn run<P: Platform>(p: &P, cron: &str, request_id: &str) {
         let minute = (p.clock().now_ms() / 60_000) % 60;
         if minute < 15 {
             domains::cleanup_failed_adds(p).await;
+            // The hourly roll-up: pending invitations past `expires_at` expire and free their seats.
+            let _ = crate::members::invitations::expire(p, p.clock().now_ms(), request_id).await;
         }
     }
 }

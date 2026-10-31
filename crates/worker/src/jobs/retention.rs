@@ -34,6 +34,7 @@ pub const GLOBAL_STEPS: &[&str] = &[
     "dlq",
     "signing_keys",
     "identity_keys",
+    "console",
     "staging",
     "held_erasures",
     "audit",
@@ -572,6 +573,22 @@ async fn global<P: Platform, S: Sql>(
             "UPDATE identity_keys SET status = 'retired', retired_at = ?1 WHERE rowid IN (SELECT rowid FROM identity_keys WHERE status = 'retiring' AND verify_until <= ?1 LIMIT 1000)",
             vec![now.into()],
         )],
+        // Console rows (Console › Tables): sign-in tokens 24 hours after they expire; sessions and
+        // ended invitations 30 days after.
+        "console" => vec![
+            del(
+                "DELETE FROM login_tokens WHERE rowid IN (SELECT rowid FROM login_tokens WHERE expires_at < ?1 LIMIT 1000)",
+                vec![(now - DAY_MS).into()],
+            ),
+            del(
+                "DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE COALESCE(revoked_at, expires_at) < ?1 LIMIT 1000)",
+                vec![(now - 30 * DAY_MS).into()],
+            ),
+            del(
+                "DELETE FROM invitations WHERE rowid IN (SELECT rowid FROM invitations WHERE status IN ('expired','revoked') AND expires_at < ?1 LIMIT 1000)",
+                vec![(now - 30 * DAY_MS).into()],
+            ),
+        ],
         "staging" => return staging(c, cursor).await,
         "held_erasures" => return held_erasures(c).await,
         "audit" => return global_audit(c).await,

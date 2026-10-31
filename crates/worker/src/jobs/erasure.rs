@@ -1353,9 +1353,17 @@ async fn sweep_r2<P: Platform, S: Sql>(c: &Ctx<'_, P, S>) -> StepResult {
 
 // ---- Substeps later milestones complete (Build plan › M14, "Stubs completed by later milestones") -
 
-/// Console rows of the tenant (`members`, `invitations`, `sessions`): M21. Step 5 already deletes
-/// what exists by `tenant_id`; people left with no workspace are deleted by M24.
-async fn delete_console_rows<P: Platform, S: Sql>(_c: &Ctx<'_, P, S>) -> Result<(), ApiError> {
+/// Console rows of the tenant: `invitations`, `sessions` (active workspace this tenant) and `members`
+/// are deleted by the table deletes above; a session of a person whose active workspace was this one
+/// cannot act anywhere until they pick another. People left with no workspace are deleted by M24
+/// (Privacy § 6.9).
+async fn delete_console_rows<P: Platform, S: Sql>(c: &Ctx<'_, P, S>) -> Result<(), ApiError> {
+    c.p.db()
+        .execute(pylota_identity_platform::d1::Stmt::new(
+            "UPDATE sessions SET tenant_id = NULL WHERE tenant_id = ?1",
+            vec![c.tenant().into()],
+        ))
+        .await?;
     Ok(())
 }
 

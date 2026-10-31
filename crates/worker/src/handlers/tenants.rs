@@ -175,7 +175,7 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         },
     };
 
-    // Owner: validated and stored; the sign-in email comes with M21.
+    // Owner: validated and stored; after the commit the owner gets a sign-in link.
     let owner = match body.get("owner") {
         None | Some(Value::Null) => None,
         Some(o) => {
@@ -371,6 +371,16 @@ pub async fn create<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         .details(json!({ "max_tenants": max })));
     }
     send_quota_init(c, &tenant_id, &quota_do_id, &intent_id).await;
+    if let Some((e, _)) = &owner {
+        use pylota_identity_platform::Background as _;
+        let fut = crate::console::signin::owner_welcome(
+            c.p.clone(),
+            e.clone(),
+            c.request_id.clone(),
+            now,
+        );
+        c.p.background().wait_until(fut);
+    }
     let t: tdb::Row =
         c.p.db()
             .first(tdb::get(&tenant_id))
