@@ -7,6 +7,7 @@ pub mod audit;
 pub mod domains;
 pub mod idempotency;
 pub mod identities;
+pub mod identity_keys;
 pub mod intents;
 pub mod jobs;
 pub mod keys;

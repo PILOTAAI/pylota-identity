@@ -13,27 +13,32 @@ use crate::errors::ApiError;
 use crate::keyring::{self, Purpose};
 
 pub async fn rotate_signing_key<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
-    let purpose = match c.route.param("purpose") {
-        "web_bot_auth" => {
-            return Err(ApiError::new(
-                ErrorCode::WebBotAuthDisabled,
-                "Signed HTTP requests arrive with M25.",
-            )
-            .details(json!({ "purpose": "web_bot_auth" })));
-        }
-        p => Purpose::parse(p).ok_or_else(|| {
+    let name = c.route.param("purpose");
+    let purpose = match name {
+        "web_bot_auth" => None,
+        p => Some(Purpose::parse(p).ok_or_else(|| {
             ApiError::invalid(
                 "purpose",
                 "purpose is thread, link, cursor or web_bot_auth.",
             )
-        })?,
+        })?),
     };
+    if purpose.is_none() && !c.p.config().web_bot_auth {
+        return Err(ApiError::new(
+            ErrorCode::WebBotAuthDisabled,
+            "Signed HTTP requests are off (PM_WEB_BOT_AUTH).",
+        )
+        .details(json!({ "purpose": "web_bot_auth" })));
+    }
     let revoke = match c.query("revoke_previous") {
         None | Some("false") => false,
         Some("true") => true,
         Some(_) => return Err(ApiError::invalid("revoke_previous", "true or false.")),
     };
-    let r = keyring::rotate(c.p.as_ref(), purpose, revoke).await?;
+    let r = match purpose {
+        Some(purpose) => keyring::rotate(c.p.as_ref(), purpose, revoke).await?,
+        None => keyring::web_bot_auth::rotate(c.p.as_ref(), revoke).await?,
+    };
     c.p.db()
         .execute(audit::insert(
             &c.p.ids().new_id(IdPrefix::Audit),
@@ -41,7 +46,7 @@ pub async fn rotate_signing_key<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiErr
             Some(&c.key().key_id),
             "signing_key.rotate",
             "signing_key",
-            &format!("{}:{}", purpose.as_str(), r.kid),
+            &format!("{name}:{}", r.kid),
             &json!({ "revoke_previous": revoke }),
             &c.request_id,
             c.now,
@@ -50,7 +55,7 @@ pub async fn rotate_signing_key<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiErr
     Ok(Reply::json(
         200,
         json!({
-            "purpose": purpose.as_str(), "kid": r.kid, "created_at": rfc3339(r.created_at),
+            "purpose": name, "kid": r.kid, "created_at": rfc3339(r.created_at),
             "previous": { "kid": r.previous_kid, "verify_until": rfc3339(r.previous_verify_until), "revoked": r.revoked },
         }),
     ))

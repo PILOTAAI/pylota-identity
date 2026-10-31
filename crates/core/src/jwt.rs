@@ -28,6 +28,11 @@ pub fn sign(header: &str, payload: &[u8], seed: &[u8; 32]) -> String {
     format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig.to_bytes()))
 }
 
+/// A raw Ed25519 signature of `msg` (RFC 9421 signatures and the key directory use it unwrapped).
+pub fn ed25519(seed: &[u8; 32], msg: &[u8]) -> [u8; 64] {
+    SigningKey::from_bytes(seed).sign(msg).to_bytes()
+}
+
 /// The public key of a seed.
 pub fn public_key(seed: &[u8; 32]) -> [u8; 32] {
     SigningKey::from_bytes(seed).verifying_key().to_bytes()
@@ -65,7 +70,11 @@ pub fn header(token: &str) -> Result<Value, Error> {
 
 /// Verifies a compact JWS with `x` and returns `(header, payload)`. `typ` must equal `want_typ` when
 /// given.
-pub fn verify(token: &str, x: &[u8; 32], want_typ: Option<&str>) -> Result<(Value, Vec<u8>), Error> {
+pub fn verify(
+    token: &str,
+    x: &[u8; 32],
+    want_typ: Option<&str>,
+) -> Result<(Value, Vec<u8>), Error> {
     let parts: Vec<&str> = token.split('.').collect();
     let [h, p, s] = parts.as_slice() else {
         return Err(Error::Malformed);
@@ -113,7 +122,10 @@ mod tests {
             "eyJhbGciOiJFZERTQSJ9.RXhhbXBsZSBvZiBFZDI1NTE5IHNpZ25pbmc.hgyY0il_MGCjP0JzlnLWG1PPOt7-09PGcvMg3AIbQR6dWbhijcNR4ki4iylGjg5BhVsPt9g7sVvpAr_MuM0KAg"
         );
         let x = public_key(&seed());
-        assert_eq!(URL_SAFE_NO_PAD.encode(x), "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo");
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(x),
+            "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+        );
         let (h, p) = verify(&jws, &x, None).unwrap();
         assert_eq!(h["alg"], "EdDSA");
         assert_eq!(p, b"Example of Ed25519 signing");
@@ -133,6 +145,9 @@ mod tests {
         let other = public_key(&[7; 32]);
         assert_eq!(verify(&good, &other, None), Err(Error::Signature));
         assert_eq!(verify("a.b", &x, None), Err(Error::Malformed));
-        assert_eq!(published_jwk(&x)["kid"], "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k");
+        assert_eq!(
+            published_jwk(&x)["kid"],
+            "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+        );
     }
 }

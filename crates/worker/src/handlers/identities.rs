@@ -255,7 +255,7 @@ fn validate<P: Platform>(
 }
 
 /// An `emit_event` intent of an identity: its `event_id` is derived from the intent ID when it is sent.
-fn event_intent(
+pub(crate) fn event_intent(
     request_id: &str,
     row: &idb::Row,
     event_type: &str,

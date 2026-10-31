@@ -136,6 +136,14 @@ pub enum Handler {
     SetSwitch,
     RestoreMailbox,
     DlqRedrive,
+    IdentityKeyList,
+    IdentityKeyCreate,
+    IdentityKeyRotate,
+    IdentityKeyRevoke,
+    AssertionCreate,
+    HttpSignatureCreate,
+    IdentityJwks,
+    SignaturesDirectory,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -166,6 +174,7 @@ const ALL: &[Level] = &[
 const PLATFORM: &[Level] = &[Level::Platform];
 const PROVIDERS: &[Level] = &[Level::Platform, Level::Partner];
 const TENANT_UP: &[Level] = &[Level::Platform, Level::Partner, Level::Tenant];
+const SIGNERS: &[Level] = &[Level::Tenant, Level::Identity];
 
 /// Registers a route. Every argument is required: a route cannot exist without permissions and a scope
 /// rule, and only `Scope::Public`, `Scope::AnyKey` and a route with `foreign_permissions` may have an
@@ -1408,6 +1417,106 @@ pub static ROUTES: &[RouteSpec] = &[
     ),
     route(
         M::Get,
+        "/v1/identities/{identity_id}/keys",
+        "listIdentityKeys",
+        &["identities:read"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::None,
+        ALL,
+        Handler::IdentityKeyList,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/keys",
+        "createIdentityKey",
+        &["identities:write"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::Optional,
+        ALL,
+        Handler::IdentityKeyCreate,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/keys/rotate",
+        "rotateIdentityKey",
+        &["identities:write"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::Optional,
+        ALL,
+        Handler::IdentityKeyRotate,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/keys/{kid}/revoke",
+        "revokeIdentityKey",
+        &["identities:write"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::Optional,
+        ALL,
+        Handler::IdentityKeyRevoke,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/assertions",
+        "createAssertion",
+        &["identities:sign"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::None,
+        SIGNERS,
+        Handler::AssertionCreate,
+    ),
+    route(
+        M::Post,
+        "/v1/identities/{identity_id}/http-signatures",
+        "createHttpSignature",
+        &["identities:sign"],
+        &[],
+        Scope::Resource {
+            param: "identity_id",
+        },
+        I::None,
+        SIGNERS,
+        Handler::HttpSignatureCreate,
+    ),
+    route(
+        M::Get,
+        "/.well-known/jwks/{identity_id}.json",
+        "getIdentityJwks",
+        &[],
+        &[],
+        Scope::Public,
+        I::None,
+        &[],
+        Handler::IdentityJwks,
+    ),
+    route(
+        M::Get,
+        "/.well-known/http-message-signatures-directory",
+        "getHttpMessageSignaturesDirectory",
+        &[],
+        &[],
+        Scope::Public,
+        I::None,
+        &[],
+        Handler::SignaturesDirectory,
+    ),
+    route(
+        M::Get,
         "/v1/links/{token}",
         "getSignedLink",
         &[],
@@ -1522,8 +1631,9 @@ fn match_pattern(pattern: &'static str, path: &str) -> Option<Vec<(&'static str,
     }
     let mut params = Vec::new();
     for (p, x) in ps.into_iter().zip(&xs) {
-        if let Some(name) = p.strip_prefix('{').and_then(|n| n.strip_suffix('}')) {
-            let v = decode(x)?;
+        // `{name}` is a whole segment; `{name}.json` a segment with a literal suffix.
+        if let Some((name, suffix)) = p.strip_prefix('{').and_then(|n| n.split_once('}')) {
+            let v = decode(x.strip_suffix(suffix)?)?;
             if v.is_empty() {
                 return None;
             }
@@ -1633,6 +1743,20 @@ mod tests {
             find("GET", "/v1/nope").unwrap_err().code,
             ErrorCode::RouteNotFound
         );
+        // A parameter with a literal suffix in one segment.
+        let m = find(
+            "GET",
+            "/.well-known/jwks/idn_01ARYZ6S410000000000000000.json",
+        )
+        .unwrap();
+        assert_eq!(m.spec.handler, Handler::IdentityJwks);
+        assert_eq!(m.param("identity_id"), "idn_01ARYZ6S410000000000000000");
+        for miss in ["/.well-known/jwks/.json", "/.well-known/jwks/idn_x"] {
+            assert_eq!(
+                find("GET", miss).unwrap_err().code,
+                ErrorCode::RouteNotFound
+            );
+        }
         let e = find("PUT", "/v1/tenants").unwrap_err();
         assert_eq!(e.code, ErrorCode::MethodNotAllowed);
         assert_eq!(e.headers, [("allow".to_owned(), "POST, GET".to_owned())]);

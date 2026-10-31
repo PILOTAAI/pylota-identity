@@ -33,6 +33,7 @@ pub const GLOBAL_STEPS: &[&str] = &[
     "usage",
     "dlq",
     "signing_keys",
+    "identity_keys",
     "staging",
     "held_erasures",
     "audit",
@@ -563,6 +564,12 @@ async fn global<P: Platform, S: Sql>(
         )],
         "signing_keys" => vec![del(
             "DELETE FROM signing_keys WHERE rowid IN (SELECT rowid FROM signing_keys WHERE verify_until IS NOT NULL AND verify_until < ?1 LIMIT 1000)",
+            vec![now.into()],
+        )],
+        // Retiring identity keys past their overlap become `retired`; the rows stay until identity
+        // deletion so a thumbprint is never reused (Agent signing keys § 2).
+        "identity_keys" => vec![del(
+            "UPDATE identity_keys SET status = 'retired', retired_at = ?1 WHERE rowid IN (SELECT rowid FROM identity_keys WHERE status = 'retiring' AND verify_until <= ?1 LIMIT 1000)",
             vec![now.into()],
         )],
         "staging" => return staging(c, cursor).await,

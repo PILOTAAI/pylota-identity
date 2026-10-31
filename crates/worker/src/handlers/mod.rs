@@ -3,11 +3,14 @@
 //! permissions and levels.
 
 pub mod addresses;
+pub mod assertions;
 pub mod audit;
 pub mod domains;
 pub mod erasure;
 pub mod exports;
+pub mod http_signatures;
 pub mod identities;
+pub mod identity_keys;
 pub mod keys;
 pub mod links;
 pub mod lists;
@@ -25,6 +28,7 @@ pub mod threads;
 pub mod triage;
 pub mod wait;
 pub mod webhooks;
+pub mod well_known;
 
 use pylota_identity_api_types::ErrorCode;
 use pylota_identity_platform::{ControlDb as _, Platform};
@@ -141,6 +145,14 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::SearchTenant => search::tenant(c).await,
         Handler::Related => search::related(c).await,
         Handler::Contacts => search::contacts(c).await,
+        Handler::IdentityKeyList => identity_keys::list(c).await,
+        Handler::IdentityKeyCreate => identity_keys::create(c).await,
+        Handler::IdentityKeyRotate => identity_keys::rotate(c).await,
+        Handler::IdentityKeyRevoke => identity_keys::revoke(c).await,
+        Handler::AssertionCreate => assertions::create(c).await,
+        Handler::HttpSignatureCreate => http_signatures::create(c).await,
+        Handler::IdentityJwks => well_known::jwks(c).await,
+        Handler::SignaturesDirectory => well_known::directory(c).await,
     }
 }
 

@@ -22,6 +22,15 @@ pub fn when_minted(mut s: Stmt) -> Stmt {
     s
 }
 
+/// `insert` for the event of an identity key created in the same batch: written only if that insert
+/// won the race for the identity's one active key (O28), so the loser emits nothing.
+pub fn when_key(mut s: Stmt, kid: &str) -> Stmt {
+    debug_assert_eq!(s.sql, INSERT);
+    s.sql = "INSERT OR IGNORE INTO rpc_intents (id, class, object_id, tenant_id, identity_id, op, body_json, occurred_at, attempts, next_at, created_at) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?8 + 60000, ?8 WHERE EXISTS (SELECT 1 FROM identity_keys WHERE id = ?9)";
+    s.params.push(kid.into());
+    s
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn insert(
     id: &str,

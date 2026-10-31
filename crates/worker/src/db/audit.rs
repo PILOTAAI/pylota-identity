@@ -14,6 +14,14 @@ pub fn when_tenant(mut s: Stmt) -> Stmt {
     s
 }
 
+/// `insert` for an identity key created in the same batch: written only if that insert won the race
+/// for the identity's one active key (O28); the target ID is the kid.
+pub fn when_key(mut s: Stmt) -> Stmt {
+    debug_assert_eq!(s.sql, INSERT);
+    s.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM identity_keys WHERE id = ?6)";
+    s
+}
+
 /// The insert of one audit row, for a handler's D1 batch.
 #[allow(clippy::too_many_arguments)]
 pub fn insert(

@@ -1,8 +1,8 @@
 //! The deployment's thread, link and cursor keys ([Security §6.2], Rust workspace § 6.1): 32-byte HMAC
 //! keys sealed under the master key in D1 `signing_keys`, created on first use, opened with whichever
 //! master-key slot matches the envelope's kid, and cached per isolate for 5 minutes. Kids are single
-//! lower-case Crockford characters in alphabet order, wrapping after `z`. (`web_bot_auth` keys are
-//! Ed25519 seeds and arrive with signed HTTP requests, M25.)
+//! lower-case Crockford characters in alphabet order, wrapping after `z`. The `web_bot_auth` keys are
+//! Ed25519 seeds instead, kid'd by their RFC 7638 thumbprint ([`web_bot_auth`]).
 //!
 //! [Security §6.2]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/security.md
 
@@ -73,11 +73,11 @@ thread_local! {
 }
 
 fn aad(purpose: Purpose, kid: &str) -> String {
-    crypto::aad(
-        "signing_keys",
-        "ciphertext",
-        &format!("{}:{kid}", purpose.as_str()),
-    )
+    aad_text(purpose.as_str(), kid)
+}
+
+fn aad_text(purpose: &str, kid: &str) -> String {
+    crypto::aad("signing_keys", "ciphertext", &format!("{purpose}:{kid}"))
 }
 
 fn open<P: Platform>(p: &P, purpose: Purpose, row: &Row) -> Result<Key, ApiError> {
@@ -245,6 +245,166 @@ pub async fn rotate<P: Platform>(
         previous_verify_until: verify_until,
         revoked: revoke_previous,
     })
+}
+
+/// The deployment's Web Bot Auth keys ([Agent signing keys § 2], § 3.2): Ed25519 seeds in
+/// `signing_keys` with purpose `web_bot_auth`, the kid the 43-character thumbprint, the public JWK
+/// beside the sealed seed. The first key is created on first use while `PM_WEB_BOT_AUTH=on`; a rotated
+/// key stays listed for 7 days. Seeds are opened per call and not cached.
+///
+/// [Agent signing keys § 2]: https://github.com/PILOTAAI/pylota-identity/blob/main/docs/src/project/design/agent-keys.md
+pub mod web_bot_auth {
+    use pylota_identity_core::{crypto, jwk, jwt};
+    use pylota_identity_platform::d1::{SqlValue, Stmt};
+    use pylota_identity_platform::{Clock as _, ControlDb as _, Platform, Rng as _};
+    use serde::Deserialize;
+    use serde_json::Value;
+    use zeroize::Zeroizing;
+
+    use super::Rotated;
+    use crate::errors::ApiError;
+
+    const PURPOSE: &str = "web_bot_auth";
+    const OVERLAP_MS: i64 = 7 * 86_400_000;
+
+    /// One opened key.
+    pub struct Key {
+        pub kid: String,
+        pub seed: Zeroizing<[u8; 32]>,
+        pub public_jwk: Value,
+        /// `None` for the active key.
+        pub verify_until: Option<i64>,
+    }
+
+    #[derive(Deserialize)]
+    struct Row {
+        kid: String,
+        ciphertext: Vec<u8>,
+        public_jwk: Option<String>,
+        verify_until: Option<i64>,
+    }
+
+    fn open<P: Platform>(p: &P, row: &Row) -> Result<Key, ApiError> {
+        let s = p.secrets();
+        let slots: Vec<&[u8; 32]> = [s.master_key_a.as_ref(), s.master_key_b.as_ref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let envelope = std::str::from_utf8(&row.ciphertext).map_err(|_| ApiError::internal())?;
+        let seed = Zeroizing::new(
+            crypto::open(&slots, &super::aad_text(PURPOSE, &row.kid), envelope).map_err(|e| {
+                crate::log::error(
+                    "keyring_open_failed",
+                    &[
+                        ("purpose", PURPOSE.into()),
+                        ("reason", format!("{e:?}").into()),
+                    ],
+                );
+                ApiError::internal()
+            })?,
+        );
+        Ok(Key {
+            kid: row.kid.clone(),
+            seed: Zeroizing::new(
+                seed.as_slice()
+                    .try_into()
+                    .map_err(|_| ApiError::internal())?,
+            ),
+            public_jwk: row
+                .public_jwk
+                .as_deref()
+                .and_then(|j| serde_json::from_str(j).ok())
+                .ok_or_else(ApiError::internal)?,
+            verify_until: row.verify_until,
+        })
+    }
+
+    /// A new key's kid, public JWK and sealed seed.
+    fn fresh<P: Platform>(p: &P) -> (String, String, Vec<u8>) {
+        let seed = Zeroizing::new(p.rng().bytes::<32>());
+        let x = jwt::public_key(&seed);
+        let kid = jwk::thumbprint(&x);
+        let nonce: [u8; 12] = p.rng().bytes();
+        let sealed = crypto::seal(
+            p.secrets().active_master_key(),
+            nonce,
+            &super::aad_text(PURPOSE, &kid),
+            &seed[..],
+        );
+        (kid, jwt::published_jwk(&x).to_string(), sealed.into_bytes())
+    }
+
+    async fn load<P: Platform>(p: &P) -> Result<Vec<Key>, ApiError> {
+        let now = p.clock().now_ms();
+        let rows: Vec<Row> = p
+            .db()
+            .query(Stmt::new(
+                "SELECT kid, ciphertext, public_jwk, verify_until FROM signing_keys WHERE purpose = 'web_bot_auth' AND (verify_until IS NULL OR verify_until > ?1) ORDER BY verify_until IS NOT NULL, created_at DESC LIMIT 3",
+                vec![now.into()],
+            ))
+            .await?;
+        rows.iter().map(|r| open(p, r)).collect()
+    }
+
+    /// The active key first, then at most two retiring keys inside their overlap (O12). Creates the
+    /// first key on first use: of racing inserts, `signing_keys_current` keeps one.
+    pub async fn keys<P: Platform>(p: &P) -> Result<Vec<Key>, ApiError> {
+        let mut found = load(p).await?;
+        if found.first().is_none_or(|k| k.verify_until.is_some()) {
+            let (kid, public_jwk, sealed) = fresh(p);
+            p.db()
+                .execute(Stmt::new(
+                    "INSERT OR IGNORE INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at, verify_until) VALUES ('web_bot_auth', ?1, ?2, ?3, ?4, NULL)",
+                    vec![kid.into(), SqlValue::Blob(sealed), public_jwk.into(), p.clock().now_ms().into()],
+                ))
+                .await?;
+            found = load(p).await?;
+        }
+        if found.first().is_none_or(|k| k.verify_until.is_some()) {
+            return Err(ApiError::internal());
+        }
+        Ok(found)
+    }
+
+    /// `POST /v1/platform/keys/web_bot_auth/rotate`: a new active key; the previous one stays listed
+    /// for 7 days, or is deleted at once with `revoke_previous`.
+    pub async fn rotate<P: Platform>(p: &P, revoke_previous: bool) -> Result<Rotated, ApiError> {
+        let prev = keys(p).await?.swap_remove(0);
+        let now = p.clock().now_ms();
+        let verify_until = if revoke_previous {
+            now
+        } else {
+            now + OVERLAP_MS
+        };
+        let (kid, public_jwk, sealed) = fresh(p);
+        let first = if revoke_previous {
+            Stmt::new(
+                "DELETE FROM signing_keys WHERE purpose = 'web_bot_auth' AND kid = ?1",
+                vec![prev.kid.clone().into()],
+            )
+        } else {
+            Stmt::new(
+                "UPDATE signing_keys SET verify_until = ?2 WHERE purpose = 'web_bot_auth' AND kid = ?1",
+                vec![prev.kid.clone().into(), verify_until.into()],
+            )
+        };
+        p.db()
+            .batch(vec![
+                first,
+                Stmt::new(
+                    "INSERT INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at, verify_until) VALUES ('web_bot_auth', ?1, ?2, ?3, ?4, NULL)",
+                    vec![kid.clone().into(), SqlValue::Blob(sealed), public_jwk.into(), now.into()],
+                ),
+            ])
+            .await?;
+        Ok(Rotated {
+            kid,
+            created_at: now,
+            previous_kid: prev.kid.clone(),
+            previous_verify_until: verify_until,
+            revoked: revoke_previous,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -34,6 +34,64 @@ pub enum Error {
     BadParam(&'static str),
     /// The host is empty or not ASCII.
     BadHost,
+    /// Not an `https` URL, or its authority holds user information or a bad port.
+    BadUrl,
+}
+
+/// The signed parts of an `https` URL (RFC 9421 §2.2): `@authority` with an internationalised host as
+/// its A-label, `@path` (`/` when empty) and `@query` (`?` when absent). A fragment is not signed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Target {
+    pub authority: String,
+    pub path: String,
+    pub query: String,
+}
+
+pub fn https_target(url: &str) -> Result<Target, Error> {
+    let rest = url
+        .get(..8)
+        .filter(|s| s.eq_ignore_ascii_case("https://"))
+        .map(|_| &url[8..])
+        .ok_or(Error::BadUrl)?;
+    let rest = rest.split('#').next().unwrap_or("");
+    let end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (auth, tail) = rest.split_at(end);
+    if auth.contains('@') {
+        return Err(Error::BadUrl);
+    }
+    let (host, port) = if auth.starts_with('[') {
+        let close = auth.find(']').ok_or(Error::BadUrl)?;
+        (&auth[..=close], &auth[close + 1..])
+    } else {
+        match auth.rfind(':') {
+            Some(i) => (&auth[..i], &auth[i..]),
+            None => (auth, ""),
+        }
+    };
+    let port = match port.strip_prefix(':') {
+        None if port.is_empty() => None,
+        Some(p) => Some(p.parse::<u16>().map_err(|_| Error::BadUrl)?),
+        None => return Err(Error::BadUrl),
+    };
+    let host = host.trim_end_matches('.');
+    let host = if host.starts_with('[') {
+        host.to_owned()
+    } else {
+        idna::domain_to_ascii(host).map_err(|_| Error::BadHost)?
+    };
+    let (path, query) = match tail.split_once('?') {
+        Some((p, q)) => (p, format!("?{q}")),
+        None => (tail, "?".to_owned()),
+    };
+    Ok(Target {
+        authority: authority(&host, port, 443)?,
+        path: if path.is_empty() {
+            "/".into()
+        } else {
+            path.into()
+        },
+        query,
+    })
 }
 
 /// The `@authority` value (RFC 9421 §2.2.3): the host in lower case, with the port only when it is not
@@ -64,7 +122,7 @@ pub fn signature_params(components: &[&str], params: &[Param]) -> Result<String,
         if i > 0 {
             out.push(' ');
         }
-        write!(out, "\"{name}\"").expect("writing to a String");
+        out.push_str(&quoted(name));
     }
     out.push(')');
     for param in params {
@@ -92,10 +150,21 @@ pub fn signature_base(covered: &[(&str, &str)], params: &[Param]) -> Result<Stri
         if value.bytes().any(|b| !(0x20..0x7f).contains(&b)) {
             return Err(Error::NonAsciiValue((*name).to_owned()));
         }
-        writeln!(out, "\"{name}\": {value}").expect("writing to a String");
+        writeln!(out, "{}: {value}", quoted(name)).expect("writing to a String");
     }
     write!(out, "\"@signature-params\": {params_value}").expect("writing to a String");
     Ok(out)
+}
+
+/// Standard base64 with padding, as RFC 9421 nonces and structured-field byte sequences use.
+pub fn base64(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// A structured-field byte sequence (RFC 8941 §3.3.5): `:base64:`, the form of a `Signature` value.
+pub fn sf_bytes(bytes: &[u8]) -> String {
+    format!(":{}:", base64(bytes))
 }
 
 /// A structured-field string (RFC 8941 §3.3.3): printable ASCII, with `"` and `\` escaped.
@@ -115,7 +184,17 @@ pub fn sf_string(value: &str, param: &'static str) -> Result<String, Error> {
     Ok(out)
 }
 
+/// A component identifier as serialised: `"name"`, or `"name";req` for a component of the request a
+/// response signature covers (RFC 9421 §2.4).
+fn quoted(name: &str) -> String {
+    match name.strip_suffix(";req") {
+        Some(base) => format!("\"{base}\";req"),
+        None => format!("\"{name}\""),
+    }
+}
+
 fn check_name(name: &str) -> Result<(), Error> {
+    let name = name.strip_suffix(";req").unwrap_or(name);
     let body = name.strip_prefix('@').unwrap_or(name);
     let ok = !body.is_empty()
         && body
@@ -219,6 +298,44 @@ mod tests {
             authority("xn--bcher-kva.example", None, 443).unwrap(),
             "xn--bcher-kva.example"
         );
+    }
+
+    /// The directory's response signature covers the request's authority (Agent signing keys §3.2).
+    #[test]
+    fn req_flag() {
+        let base = signature_base(
+            &[("@authority;req", "api.example.com")],
+            &[Param::Tag("http-message-signatures-directory".into())],
+        )
+        .unwrap();
+        assert_eq!(
+            base,
+            "\"@authority\";req: api.example.com\n\"@signature-params\": (\"@authority\";req);tag=\"http-message-signatures-directory\""
+        );
+    }
+
+    /// O10: an internationalised host becomes its A-label; path and query as RFC 9421 §2.2.6–2.2.7.
+    #[test]
+    fn https_target_parts() {
+        let t = https_target("https://Bücher.example:443/fleet/a?from=2026-10-12#top").unwrap();
+        assert_eq!(t.authority, "xn--bcher-kva.example");
+        assert_eq!(
+            (t.path.as_str(), t.query.as_str()),
+            ("/fleet/a", "?from=2026-10-12")
+        );
+        let t = https_target("https://www.brightwell.example:8443").unwrap();
+        assert_eq!(
+            (t.authority.as_str(), t.path.as_str(), t.query.as_str()),
+            ("www.brightwell.example:8443", "/", "?")
+        );
+        for bad in [
+            "http://a.example/",
+            "https://u@a.example/",
+            "https://a.example:x/",
+            "ftp://a",
+        ] {
+            assert!(https_target(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

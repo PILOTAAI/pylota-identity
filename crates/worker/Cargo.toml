@@ -20,6 +20,7 @@ pylota-identity-platform = { path = "../platform" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
+zeroize = { workspace = true }
 
 
 [dev-dependencies]
