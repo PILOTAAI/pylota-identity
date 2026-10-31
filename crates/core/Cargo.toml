@@ -28,6 +28,8 @@ rsa = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# Agent assertions (core::jwt) and Web Bot Auth signatures; the Worker already links it through mail-auth.
+ed25519-dalek = { workspace = true }
 unicode-normalization = { workspace = true }
 web-time = { workspace = true }
 whatlang = { workspace = true }
@@ -35,4 +37,3 @@ x509-cert = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-ed25519-dalek = { workspace = true }

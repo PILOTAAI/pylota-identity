@@ -25,6 +25,7 @@ pub mod inbound;
 pub mod injection;
 pub mod jobs;
 pub mod jwk;
+pub mod jwt;
 pub mod keys;
 pub mod links;
 pub mod lists;
