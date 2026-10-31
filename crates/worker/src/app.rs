@@ -105,6 +105,7 @@ impl<P: Platform> App<P> {
     pub async fn fetch(&self, req: HttpRequestIn) -> HttpResponseOut {
         let request_id = request_id::new(self.p.as_ref());
         let (path, query) = split_url(&req.url);
+        let path_for_headers = path.clone();
         let mut authenticated = false;
         let mut rl_limit: Option<u32> = None;
         let result = self
@@ -152,7 +153,19 @@ impl<P: Platform> App<P> {
         };
         headers.push(("request-id".into(), request_id));
         headers.push(("x-content-type-options".into(), "nosniff".into()));
-        headers.push(("referrer-policy".into(), "no-referrer".into()));
+        let console = path_for_headers == "/console" || path_for_headers.starts_with("/console/");
+        if console {
+            // `same-origin`, so a form's `Origin` is not `null` (Console › CSRF).
+            headers.push(("referrer-policy".into(), "same-origin".into()));
+            if !headers.iter().any(|(n, _)| n == "content-security-policy") {
+                headers.push(("content-security-policy".into(), crate::console::CSP.into()));
+            }
+            if !headers.iter().any(|(n, _)| n == "cache-control") {
+                headers.push(("cache-control".into(), "no-store".into()));
+            }
+        } else {
+            headers.push(("referrer-policy".into(), "no-referrer".into()));
+        }
         headers.push((
             "strict-transport-security".into(),
             "max-age=31536000".into(),
@@ -189,18 +202,20 @@ impl<P: Platform> App<P> {
         rl_limit: &mut Option<u32>,
     ) -> Result<Reply, ApiError> {
         let cfg = self.p.config();
-        // Console paths answer only on the console host, and the console arrives with M21.
+        // Console paths answer only on the console host and API paths only on the API host when the
+        // two differ (Cloud sign-up § 2); no cookie is read or set on the API host.
+        let host = req.header("host").unwrap_or("");
+        let split = cfg.console_host != cfg.api_host;
         if path == "/console" || path.starts_with("/console/") {
-            return Err(ApiError::new(
-                ErrorCode::RouteNotFound,
-                "No route matches this path.",
-            ));
+            if split && !host.eq_ignore_ascii_case(&cfg.console_host) {
+                return Err(ApiError::new(
+                    ErrorCode::RouteNotFound,
+                    "No route matches this path.",
+                ));
+            }
+            return Ok(crate::console::serve(self, req, request_id, &path, query).await);
         }
-        if cfg.console_host != cfg.api_host
-            && req
-                .header("host")
-                .is_some_and(|h| h.eq_ignore_ascii_case(&cfg.console_host))
-        {
+        if split && host.eq_ignore_ascii_case(&cfg.console_host) {
             return Err(ApiError::new(
                 ErrorCode::RouteNotFound,
                 "No route matches this path.",

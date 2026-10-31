@@ -61,10 +61,12 @@ fn unknown_route_and_method() {
     let r = h.call("DELETE", "/v1/tenants", None, None, &[]);
     assert_eq!((r.status, r.code()), (405, "method_not_allowed"));
     assert_eq!(r.header("allow"), Some("POST, GET"));
+    // The console answers its own paths from M21, and its own 404 page for the rest.
     assert_eq!(
         h.call("GET", "/console/sign-in", None, None, &[]).status,
-        404
+        200
     );
+    assert_eq!(h.call("GET", "/console/nope", None, None, &[]).status, 404);
 }
 
 #[test]

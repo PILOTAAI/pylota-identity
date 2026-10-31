@@ -160,6 +160,12 @@ pub enum ReadRequest {
         attachment_id: String,
         review: bool,
     },
+    /// The inline parts of a message with a `Content-ID`, for the console's `cid:` images
+    /// (Console › Showing untrusted mail).
+    InlineParts {
+        message_id: String,
+        review: bool,
+    },
     RegisterWait {
         from_domain: String,
         ttl_ms: i64,
@@ -1074,6 +1080,24 @@ pub async fn handle<P: Platform, S: Sql>(
                 "text_r2_key": att.text_r2_key, "text_pages": att.text_pages,
                 "received_at": row.received_at,
             }))
+        }
+        ReadRequest::InlineParts { message_id, review } => {
+            let row = by_id(s, &message_id)?
+                .filter(|r| may_see(r, review))
+                .ok_or_else(not_found)?;
+            #[derive(serde::Deserialize, serde::Serialize)]
+            struct Part {
+                id: String,
+                content_id: String,
+                sniffed_type: Option<String>,
+                size: i64,
+                r2_key: String,
+            }
+            let parts: Vec<Part> = s.query(
+                "SELECT id, content_id, sniffed_type, size, r2_key FROM attachments WHERE message_rowid = ?1 AND content_id IS NOT NULL ORDER BY rowid",
+                &[row.rowid.into()],
+            )?;
+            Ok(json!({ "status": row.status, "parts": parts }))
         }
         ReadRequest::RegisterWait {
             from_domain,
