@@ -53,9 +53,70 @@ pub fn version_matches(tag: &str, version: &str) -> Result<(), String> {
     }
 }
 
+/// The Apache-2.0 date of a release: its second anniversary (29 February gives 28 February).
+pub fn apache_date(release: &str) -> Option<String> {
+    let (y, rest) = release.split_once('-')?;
+    let (m, d) = rest.split_once('-')?;
+    let (y, m, d): (u32, u32, u32) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || release.len() != 10 {
+        return None;
+    }
+    let d = if m == 2 && d == 29 { 28 } else { d };
+    Some(format!("{:04}-{m:02}-{d:02}", y + 2))
+}
+
+/// The `CHANGELOG.md` entry of `version`: its heading names the release date and the Apache-2.0 date;
+/// answers the entry's notes. A pre-release takes the notes of `## Unreleased`.
+pub fn changelog_entry(text: &str, version: &str) -> Result<String, String> {
+    let pre = version.contains('-');
+    let want = if pre {
+        "## Unreleased".to_owned()
+    } else {
+        format!("## v{version} — ")
+    };
+    let mut lines = text.lines();
+    let heading = lines
+        .by_ref()
+        .find(|l| l.starts_with(&want))
+        .ok_or_else(|| format!("CHANGELOG.md has no entry `{want}…`"))?;
+    if !pre {
+        let rest = &heading[want.len()..];
+        let (date, apache) = rest
+            .split_once(" (Apache-2.0 on ")
+            .ok_or_else(|| format!("the CHANGELOG heading {heading:?} lacks \" (Apache-2.0 on <date>)\""))?;
+        let apache = apache.trim_end_matches(')');
+        if apache_date(date.trim()).as_deref() != Some(apache) {
+            return Err(format!(
+                "CHANGELOG: v{version} released {date} becomes Apache-2.0 on {}, not {apache}",
+                apache_date(date.trim()).unwrap_or_else(|| "?".into())
+            ));
+        }
+    }
+    let notes: Vec<&str> = lines.take_while(|l| !l.starts_with("## ")).collect();
+    Ok(notes.join("\n").trim().to_owned())
+}
+
+/// The release notes of `version`: its CHANGELOG entry, with the release and Apache-2.0 dates.
+pub fn notes(root: &Path, version: &str) -> Result<String, String> {
+    let log = std::fs::read_to_string(root.join("CHANGELOG.md"))
+        .map_err(|e| format!("CHANGELOG.md: {e}"))?;
+    let body = changelog_entry(&log, version)?;
+    let dates = log
+        .lines()
+        .find(|l| l.starts_with(&format!("## v{version} — ")))
+        .map(|l| l.trim_start_matches(&format!("## v{version} — ")).to_owned());
+    Ok(match dates {
+        Some(d) => format!("Released {d}.\n\n{body}"),
+        None => format!("A release candidate: not for production.\n\n{body}"),
+    })
+}
+
 pub fn check_version(root: &Path, tag: &str) -> Result<(), String> {
     let version = crate::build_worker::workspace_version(root)?;
     version_matches(tag, &version)?;
+    let log = std::fs::read_to_string(root.join("CHANGELOG.md"))
+        .map_err(|e| format!("CHANGELOG.md: {e}"))?;
+    changelog_entry(&log, &version)?;
     println!("{tag} matches the workspace version");
     Ok(())
 }
@@ -366,9 +427,14 @@ mod tests {
             "a leading zero"
         );
         assert!(version_matches("v1.0.0-", "1.0.0-").is_err());
-        let v = crate::build_worker::workspace_version(&root()).unwrap();
-        assert!(check_version(&root(), &format!("v{v}")).is_ok());
-        assert!(check_version(&root(), "v99.0.0").is_err());
+        let tree = root().join("target/release-version-test");
+        std::fs::create_dir_all(&tree).unwrap();
+        std::fs::write(tree.join("Cargo.toml"), "[workspace.package]\nversion = \"1.0.0-rc.1\"\n").unwrap();
+        std::fs::write(tree.join("CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n- x\n").unwrap();
+        assert!(check_version(&tree, "v1.0.0-rc.1").is_ok());
+        assert!(check_version(&tree, "v99.0.0").is_err());
+        std::fs::write(tree.join("Cargo.toml"), "[workspace.package]\nversion = \"1.0.0\"\n").unwrap();
+        assert!(check_version(&tree, "v1.0.0").is_err(), "a full release needs its CHANGELOG entry");
     }
 
     /// `xtask::release_artefacts_carry_licence` (build plan M19): the Worker bundle and each CLI
@@ -458,6 +524,21 @@ mod tests {
         )));
         assert!(!sums.contains("SHA256SUMS"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The changelog names each release's date and its Apache-2.0 date, two years later.
+    #[test]
+    fn release_changelog_dates() {
+        let log = "# Changelog\n\n## Unreleased\n\n- next\n\n## v1.0.0 — 2027-01-15 (Apache-2.0 on 2029-01-15)\n\n- first\n";
+        assert_eq!(changelog_entry(log, "1.0.0").unwrap(), "- first");
+        assert_eq!(changelog_entry(log, "1.1.0-rc.1").unwrap(), "- next");
+        assert!(changelog_entry(log, "1.1.0").is_err(), "no entry");
+        let wrong = log.replace("2029-01-15", "2028-01-15");
+        assert!(changelog_entry(&wrong, "1.0.0").is_err(), "a wrong Apache date");
+        let bare = log.replace(" (Apache-2.0 on 2029-01-15)", "");
+        assert!(changelog_entry(&bare, "1.0.0").is_err(), "no Apache date");
+        assert_eq!(apache_date("2028-02-29").as_deref(), Some("2030-02-28"));
+        assert_eq!(apache_date("2027-13-01"), None);
     }
 
     #[test]

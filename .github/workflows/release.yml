@@ -1,0 +1,187 @@
+# A release, the first of its two workflows (Rust workspace § 10, the one definition of the release
+# pipeline). On a v* tag: the version rule, the full CI gate on the tagged commit and the evaluations,
+# the CLI binaries, then the unsigned files and a draft GitHub Release. The run ends there: the owner
+# signs SHA256SUMS on their own machine (`cargo xtask release sign <tag>`), which starts
+# release-publish.yml. No job holds a signing key, a crates.io token or an npm token.
+#
+# Every action is pinned to a full commit SHA (read with git ls-remote on 2026-10-31); the tools are
+# exact versions installed with --locked.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  WORKER_BUILD_VERSION: "0.8.7" # matches worker 0.8.7 (ADR 0001)
+  CARGO_CYCLONEDX_VERSION: "0.5.9" # crates.io, read 2026-10-31
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - name: The tag is v + the workspace version, with its CHANGELOG entry
+        run: cargo xtask release --check-version "$GITHUB_REF_NAME"
+
+  gate:
+    needs: version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  evals:
+    # The quality gates of build plan M18 in the evaluation account. A release candidate without the
+    # eval environment's secrets warns and passes; a full release fails.
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    environment: eval
+    permissions:
+      contents: read
+    env:
+      PM_EVAL_CF_ACCOUNT_ID: ${{ secrets.PM_EVAL_CF_ACCOUNT_ID }}
+      PM_EVAL_CF_API_TOKEN: ${{ secrets.PM_EVAL_CF_API_TOKEN }}
+    steps:
+      - name: The evaluation account
+        id: account
+        run: |
+          if [ -n "$PM_EVAL_CF_ACCOUNT_ID" ] && [ -n "$PM_EVAL_CF_API_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "::warning::No evaluation account: the evaluations of this release candidate did not run."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::A full release needs the evaluations: the eval environment has no account."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        if: steps.account.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        if: steps.account.outputs.ready == 'true'
+        run: rustup toolchain install --no-self-update
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0, verified 2026-10-09
+        if: steps.account.outputs.ready == 'true'
+        with:
+          node-version: "22"
+      - name: Install Wrangler from the lockfile
+        if: steps.account.outputs.ready == 'true'
+        working-directory: site
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install worker-build
+        if: steps.account.outputs.ready == 'true'
+        run: cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
+      - name: eval-search, eval-agentic, eval-triage
+        if: steps.account.outputs.ready == 'true'
+        run: |
+          cargo xtask eval-setup
+          cargo xtask eval-search
+          cargo xtask eval-agentic
+          cargo xtask eval-triage
+
+  build:
+    needs: version
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-14, bin: idvy }
+          - { target: x86_64-apple-darwin, os: macos-14, bin: idvy } # cross-built on arm64
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04, bin: idvy }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, bin: idvy }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025, bin: idvy.exe }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain and the target
+        shell: bash
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add "${{ matrix.target }}"
+      - name: Build idvy
+        shell: bash
+        run: cargo build --locked --release -p pylota-identity-cli --target "${{ matrix.target }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: idvy-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.bin }}
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: [gate, evals, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write # the draft release
+      id-token: write # build provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Install worker-build and cargo-cyclonedx
+        run: |
+          cargo install worker-build --version "$WORKER_BUILD_VERSION" --locked
+          cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0, verified 2026-10-09
+        with:
+          pattern: idvy-*
+          path: dist/bin-download
+      - name: The CLI binaries at dist/bin/<target>/
+        run: |
+          mkdir -p dist/bin
+          for d in dist/bin-download/idvy-*; do
+            t="${d##*/idvy-}"
+            mkdir -p "dist/bin/$t"
+            cp "$d"/* "dist/bin/$t/"
+            chmod +x "dist/bin/$t/"*
+          done
+          rm -rf dist/bin-download
+      - name: The bundle, openapi.json, the SDK contracts, the CLI archives and SHA256SUMS
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          cargo xtask release --version "${GITHUB_REF_NAME#v}"
+      - name: The SBOMs of the Worker (wasm32) and the CLI
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          cargo cyclonedx --manifest-path crates/worker/Cargo.toml --format json --target wasm32-unknown-unknown --override-filename "sbom"
+          cp crates/worker/sbom.json "dist/pylota-identity-worker-$v.cdx.json"
+          cargo cyclonedx --manifest-path crates/cli/Cargo.toml --format json --target all --override-filename "sbom"
+          cp crates/cli/sbom.json "dist/idvy-$v.cdx.json"
+          cargo xtask release --sums
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2, read 2026-10-31
+        with:
+          subject-path: "dist/*"
+      - name: The draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          cargo xtask release --notes "$v" > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Pylota Identity $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" dist/*

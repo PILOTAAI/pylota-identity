@@ -247,6 +247,43 @@ fn verify_any(data: &[u8], sig: &str, trusted: &str, keys: &[String]) -> Result<
     Err("the new signature does not verify with the release keys".into())
 }
 
+/// The verify job of `release-publish.yml`: `dir` holds a draft's files; `SHA256SUMS.sig` verifies with
+/// one of `keys` and the trusted comment `pylota-identity v{version}`, every listed file matches, and
+/// nothing unlisted is there.
+pub fn verify_dir(dir: &Path, version: &str, keys: &[String]) -> Result<(), String> {
+    let sums = std::fs::read(dir.join("SHA256SUMS")).map_err(|_| "no SHA256SUMS".to_owned())?;
+    let sig = std::fs::read_to_string(dir.join("SHA256SUMS.sig"))
+        .map_err(|_| "no SHA256SUMS.sig: the draft is not signed".to_owned())?;
+    pylota_identity_cli::bundle::verify::signature(&sums, &sig, version, keys)
+        .map_err(|e| format!("{e:?}"))?;
+    let listed = parse_sums(&String::from_utf8_lossy(&sums))?;
+    for (name, hex) in &listed {
+        let bytes = std::fs::read(dir.join(name)).map_err(|_| format!("{name} is missing"))?;
+        if sha256_hex(&bytes) != *hex {
+            return Err(format!("{name} does not match SHA256SUMS"));
+        }
+    }
+    for e in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n != "SHA256SUMS" && n != "SHA256SUMS.sig" && !listed.iter().any(|(l, _)| *l == n) {
+            return Err(format!("{n} is not in SHA256SUMS"));
+        }
+    }
+    println!("{} file(s) verified", listed.len());
+    Ok(())
+}
+
+pub fn verify_cli(args: &[String]) -> Result<(), String> {
+    let (Some(dir), Some(v)) = (args.first(), args.get(1)) else {
+        return Err("usage: cargo xtask release verify <dir> <version>".into());
+    };
+    let keys = compiled_keys();
+    if keys.is_empty() {
+        return Err("crates/cli/src/bundle/verify.rs has no release keys yet".into());
+    }
+    verify_dir(Path::new(dir), v, &keys)
+}
+
 /// `release crates`: a published, full, signed release; a clean clone of its tag at its commit and
 /// version; then `cargo publish --locked` for each crate not yet on crates.io, in order.
 pub fn crates(env: &dyn Env, work: &Path, tag: &str, keys: &[String]) -> Result<(), String> {
@@ -800,6 +837,13 @@ mod tests {
             sign(&fake, &work("repo"), TAG, "someone/else", &sk, &keys).is_err(),
             "another repository"
         );
+
+        // The verify job accepts the signed draft, and refuses it once a file changes.
+        let good = work("good");
+        verify_dir(&good, "1.0.0-rc.1", &keys).unwrap();
+        assert!(verify_dir(&good, "1.0.0-rc.2", &keys).is_err(), "another version");
+        std::fs::write(good.join("idvy-1.0.0-rc.1-x86_64-unknown-linux-gnu.tar.gz"), b"rebuilt").unwrap();
+        assert!(verify_dir(&good, "1.0.0-rc.1", &keys).is_err(), "a changed file");
     }
 
     fn signed_release(pk_sk: &(String, String)) -> BTreeMap<String, Vec<u8>> {

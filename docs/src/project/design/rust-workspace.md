@@ -1257,6 +1257,51 @@ and `PROD_CLOUDFLARE_ACCOUNT_ID` (build plan M0, human prerequisites; the token'
 the signed bundle's lockfile ([CLI and setup §5.1](cli.md#51-wrangler)). It refuses a pre-release
 version. No other workflow deploys Pylota Identity Cloud.
 
+
+**As built (M19).** The release pipeline runs as designed, with these settlements:
+
+- **Commands.** `xtask release` gains `--sums`, which rewrites `SHA256SUMS` after the SBOMs land in
+  `dist/`, `--notes <v>`, which prints the draft's notes from `CHANGELOG.md`, and `verify <dir> <v>`,
+  which is `release-publish.yml`'s check of the signature and every checksum against the keys compiled
+  into `idvy`. New xtask commands: `gen-licenses [--check]`, `docs-check` and `dco <base> <head>`.
+  `release sign` takes the secret key's path with `--key`. Minisign prompts for the password.
+- **Licences.** `THIRD_PARTY_LICENSES` lists every third-party crate of an artefact's normal-dependency
+  graph with its version, licence and source. The data comes from `cargo metadata`, the same component
+  list as the SBOM, and the Worker's graph is on `wasm32-unknown-unknown`. The files are committed:
+  `crates/worker/` for the bundle, and `crates/{cli,sdk,api-types}/` for the CLI archives and the
+  `.crate` files, so `cargo package` includes them. `LICENSE.md` is linked into each published crate.
+  CI runs `gen-licenses --check`.
+- **Archives.** Every CLI archive, Windows included, is `idvy-<v>-<target>.tar.gz`. `x86_64-apple-darwin`
+  is cross-built on the arm64 macOS runner. The SDK fixtures tarball is written only once `sdks/fixtures/`
+  exists.
+- **Changelog.** `--check-version` refuses a full release without its
+  `## v<v> — <date> (Apache-2.0 on <date + 2 years>)` heading in `CHANGELOG.md`. A 29 February release
+  becomes Apache-2.0 on 28 February. A release candidate takes the notes of `## Unreleased`.
+- **Evaluations in `release.yml`.** A release candidate whose `eval` environment has no account warns
+  and goes on, while a full release fails.
+- **Live job.** `live` fails, with a message, until build plan M20 brings the `live::` suite, so no run
+  is promoted before then.
+- **Deployment configuration.** Staging and Cloud deployments read their rendered `wrangler.toml` from
+  the environment variables `STAGING_WRANGLER_TOML` and `PROD_WRANGLER_TOML`, which hold resource IDs
+  and no secret.
+- **`docs_forbidden_claims`.** The check reads the user-facing docs and the site's pages, not
+  `docs/src/project/`, whose pages discuss these claims as non-goals and rules. It matches end-to-end
+  *encryption*, not "end-to-end" alone. "Open source" passes only after a negation, inside quotes, or
+  naming other software or a licence ("open-source projects", "an open-source licence"). The landing
+  page's FAQ now asks "Is the source available?".
+- **Link check.** `docs-check` checks every local link and fragment of the site's own pages
+  (`site/public/*.html`) against the built docs.
+- **Owner's steps.** These are not done:
+  - the release keys: `RELEASE_KEYS` is empty, so `release sign`, `release verify` and `idvy deploy`
+    refuse;
+  - immutable releases and the `release` environment's tag rule;
+  - the `eval`, `staging` and `production` environments' secrets and variables;
+  - the legal pages (Launch readiness § 4);
+  - the `1.0.0-rc.1` version bump and its tag.
+
+  The `dco` job refuses commits without a `Signed-off-by` matching their author, which this branch's
+  commits lack.
+
 ## 11. The Rust SDK (FR-SDK-1)
 
 `crates/sdk` is the published crate `pylota-identity` (lib `pylota_identity`): the Rust client the CLI is built

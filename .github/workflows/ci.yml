@@ -1,6 +1,7 @@
 # The pull-request gate (Rust workspace § 10, Testing § 12). Build plan M0 starts it with these jobs:
 # fmt, clippy, test, layering, wasm (with the NFR-SEC-2 size budget), deny, docs and trace. Later
-# milestones add browser, audit and skills; M2 adds fuzz-smoke, M3 openapi, M5 itest.
+# milestones add browser, audit and skills; M2 adds fuzz-smoke, M3 openapi, M5 itest, M19 the docs check
+# (forbidden claims and the site's links), the licence files' freshness and the DCO sign-off.
 #
 # Every action is pinned to a full commit SHA, read from the action's releases on 2026-10-19. The
 # toolchain comes from rust-toolchain.toml; the tools are exact versions installed with --locked. No
@@ -11,6 +12,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # release.yml runs this whole gate on the tagged commit (Rust workspace § 10).
+  workflow_call:
 
 permissions: {}
 
@@ -156,7 +159,7 @@ jobs:
   itest:
     # The it:: suite against the Worker in workerd (Testing § 6). Wrangler comes from site/package-lock.json.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90 # the suite with the golden mailbox (it::search::golden_keyword_recall)
     permissions:
       contents: read
     steps:
@@ -196,6 +199,8 @@ jobs:
         run: cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
       - name: Licences, advisories and sources over the workspace
         run: cargo deny --locked --workspace check licenses advisories sources
+      - name: The THIRD_PARTY_LICENSES files are current
+        run: cargo xtask gen-licenses --check
       - name: Bans over the Worker's wasm32 graph
         run: >-
           cargo deny --locked --manifest-path crates/worker/Cargo.toml
@@ -223,6 +228,28 @@ jobs:
             echo "::error::mdbook build docs printed warnings"
             exit 1
           fi
+      - name: Forbidden claims and the site's links (xtask docs-check)
+        run: cargo xtask docs-check
+
+  dco:
+    # Every commit of a pull request is signed off by its author (DCO 1.1, build plan M19).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, verified 2026-10-19
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Signed-off-by on every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: cargo xtask dco "$BASE" "$HEAD"
 
   trace:
     runs-on: ubuntu-24.04
