@@ -2139,6 +2139,7 @@ name = "pylota-identity-worker"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "ed25519-dalek",
  "mail-auth",
  "pylota-identity",
  "pylota-identity-api-types",

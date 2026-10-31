@@ -154,6 +154,13 @@ impl Verifier {
         }
     }
 
+    /// Fetches key sets with this client (a proxy, a private CA). It must not follow redirects:
+    /// build it with `redirect(reqwest::redirect::Policy::none())`.
+    pub fn with_http_client(mut self, http: reqwest::Client) -> Self {
+        self.http = http;
+        self
+    }
+
     /// Shares seen `jti` values across processes.
     pub fn with_replay_store(mut self, store: Box<dyn ReplayStore>) -> Self {
         self.replay = store;

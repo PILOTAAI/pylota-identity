@@ -162,7 +162,8 @@ fn master_key_rotation() {
         now + 600_000
     ));
     d1(&format!(
-        "INSERT INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at) VALUES ('web_bot_auth', '{wba}', {}, '{{}}', {now})",
+        // Retiring, so it never competes with a deployment key another test created.
+        "INSERT INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at, verify_until) VALUES ('web_bot_auth', '{wba}', {}, '{{}}', {now}, {})",
         sealed(
             &a,
             "signing_keys",
@@ -170,7 +171,8 @@ fn master_key_rotation() {
             &format!("web_bot_auth:{wba}"),
             &[9; 32],
             true
-        )
+        ),
+        now + 86_400_000
     ));
     d1(&format!(
         "UPDATE domains SET smtp_sealed = {}, smtp_pending_sealed = {} WHERE id = '{dom}'",
@@ -433,4 +435,38 @@ fn signing_key_rotation() {
     assert!(n <= 32, "{n} cursor keys");
     fakes::advance(61_000);
     tenants_cursor();
+}
+
+/// O8: assertions signed before and after a master-key rotation verify with the same published key;
+/// the identity's sealed seed is re-sealed under the new key.
+#[test]
+fn rotate_master_reseals_identity_keys() {
+    let _r = fakes::Reset;
+    let a = harness_key();
+    let k2 = [0x44u8; 32];
+    let s = crate::assertions::signer("rotate_master_reseals_identity_keys");
+    let before = crate::assertions::token(&s);
+    let kid = before["kid"].as_str().unwrap().to_owned();
+    fakes::set_config("PM_MASTER_KEY_B", Some(&STANDARD.encode(k2)));
+    fakes::set_config("PM_MASTER_KEY_ACTIVE", Some("b"));
+    assert_eq!(sweep(10)["remaining"], 0);
+    let env = d1(&format!(
+        "SELECT CAST(private_enc AS TEXT) AS env FROM identity_keys WHERE id = '{kid}'"
+    ))[0]["env"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(crypto::envelope_kid(&env), Some(crypto::kid(&k2).as_str()));
+    let after = crate::assertions::token(&s);
+    assert_eq!(after["kid"], kid.as_str());
+    for t in [&before, &after] {
+        crate::assertions::verified(&s.iid, t["assertion"].as_str().unwrap());
+    }
+    fakes::set_config("PM_MASTER_KEY", Some(&STANDARD.encode(a)));
+    fakes::set_config("PM_MASTER_KEY_ACTIVE", Some("a"));
+    assert_eq!(
+        sweep(10)["remaining"],
+        0,
+        "back to the harness key, which the suite uses"
+    );
 }

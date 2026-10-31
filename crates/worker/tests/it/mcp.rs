@@ -757,6 +757,7 @@ fn annotations_complete() {
         let class = match name {
             "mail_send" | "mail_reply" | "mail_forward" => (false, false, true, true),
             "mail_update_labels" => (false, true, true, false),
+            "mail_sign_assertion" | "mail_sign_http_request" => (false, false, false, false),
             _ => (true, false, true, false),
         };
         let a = &t["annotations"];
@@ -1049,4 +1050,108 @@ fn rl_api_once_per_call() {
     assert_eq!(r.body["error"]["data"]["error"]["code"], "rate_limited");
     assert!(r.header("retry-after").is_some());
     assert_eq!(get("/v1/identities", &key).status, 429);
+}
+
+/// `it::mcp::sign_tools`: the two signing tools are listed only for tenant and identity keys holding
+/// `identities:sign`; an identity key naming another identity gets `identity_not_found`; the results
+/// have the REST shapes and the token verifies against the identity's JWKS; two identical calls differ;
+/// suspension, a pause, `PM_WEB_BOT_AUTH=off` and a tenant not opted in are `isError` results.
+#[test]
+fn sign_tools() {
+    let _reset = crate::fakes::Reset;
+    let s = crate::assertions::signer("mcp sign");
+    let sign_tools = ["mail_sign_assertion", "mail_sign_http_request"];
+    let listed = names(&s.key);
+    assert!(
+        sign_tools.iter().all(|t| listed.contains(&t.to_string())),
+        "{listed:?}"
+    );
+    for k in [
+        platform(),
+        crate::partner("mcp sign", &["identities:read"]).1,
+    ] {
+        let l = names(&k);
+        assert!(
+            !sign_tools.iter().any(|t| l.contains(&t.to_string())),
+            "{l:?}"
+        );
+    }
+    let (_, ik) = mint(
+        &platform(),
+        json!({ "name": "ik", "level": "identity", "tenant_id": s.tid, "identity_id": s.iid, "permissions": ["identities:sign"] }),
+    );
+    let other = crate::identity(&platform(), &s.tid, "other");
+    let e = err(
+        &ik,
+        "mail_sign_assertion",
+        json!({ "identity": other["id"], "audience": "x" }),
+    );
+    assert_eq!(e["code"], "identity_not_found");
+
+    let a = ok(
+        &ik,
+        "mail_sign_assertion",
+        json!({ "audience": "https://portal.supplier.example" }),
+    );
+    assert!(a["kid"].is_string() && a["expires_at"].is_string() && a["jwks_uri"].is_string());
+    let c = crate::assertions::verified(&s.iid, a["assertion"].as_str().unwrap());
+    assert_eq!(c["sub"], s.iid);
+    let b = ok(
+        &ik,
+        "mail_sign_assertion",
+        json!({ "audience": "https://portal.supplier.example" }),
+    );
+    assert_ne!(a["assertion"], b["assertion"]);
+
+    crate::fakes::set_config("PM_WEB_BOT_AUTH", Some("off"));
+    let url = json!({ "url": "https://www.brightwell.example/" });
+    assert_eq!(
+        err(&ik, "mail_sign_http_request", url.clone())["code"],
+        "web_bot_auth_disabled"
+    );
+    crate::fakes::set_config("PM_WEB_BOT_AUTH", Some("on"));
+    assert_eq!(
+        err(&ik, "mail_sign_http_request", url.clone())["code"],
+        "policy_denied"
+    );
+    crate::assertions::patch_policy(&s.tid, true);
+    let h = ok(&ik, "mail_sign_http_request", url);
+    assert_eq!(h["headers"]["From"], s.address);
+
+    let r = crate::patch(
+        &format!("/v1/identities/{}", s.iid),
+        &platform(),
+        json!({ "status": "paused" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(
+        err(&ik, "mail_sign_assertion", json!({ "audience": "x" }))["code"],
+        "identity_paused"
+    );
+    let r = crate::patch(
+        &format!("/v1/identities/{}", s.iid),
+        &platform(),
+        json!({ "status": "active" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    let r = crate::patch(
+        &format!("/v1/tenants/{}", s.tid),
+        &platform(),
+        json!({ "status": "suspended" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(
+        err(
+            &s.key,
+            "mail_sign_assertion",
+            json!({ "identity": s.iid, "audience": "x" })
+        )["code"],
+        "tenant_suspended"
+    );
+    let r = crate::patch(
+        &format!("/v1/tenants/{}", s.tid),
+        &platform(),
+        json!({ "status": "active" }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
 }

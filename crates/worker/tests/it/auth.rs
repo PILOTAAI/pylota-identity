@@ -235,3 +235,42 @@ fn f2_permission() {
         }
     }
 }
+
+/// `RL_SIGN` (Agent signing keys § 6): 600 signing calls a minute per identity, assertions and HTTP
+/// signatures together and across keys; the 601st is `429` with the `sign` bucket.
+#[test]
+fn rate_limited() {
+    let s = crate::assertions::signer("rl_sign");
+    let p = platform();
+    let (_, second) = mint(
+        &p,
+        json!({ "name": "rl2", "level": "tenant", "tenant_id": s.tid, "permissions": ["identities:sign"] }),
+    );
+    let path = format!("/v1/identities/{}/assertions", s.iid);
+    crate::fresh_minute(50);
+    std::thread::scope(|sc| {
+        for k in [&s.key, &second] {
+            let path = &path;
+            sc.spawn(move || {
+                for _ in 0..300 {
+                    let r = post(path, k, json!({ "audience": "x" }));
+                    assert_eq!(r.status, 201, "{}", r.body);
+                }
+            });
+        }
+    });
+    let r = post(&path, &s.key, json!({ "audience": "x" }));
+    assert_eq!(
+        (r.status, r.code(), r.details()["bucket"].as_str()),
+        (429, "rate_limited", Some("sign")),
+        "{}",
+        r.body
+    );
+    // The same identity's HTTP signatures share the budget.
+    let h = post(
+        &format!("/v1/identities/{}/http-signatures", s.iid),
+        &second,
+        json!({ "url": "https://www.brightwell.example/" }),
+    );
+    assert_eq!(h.status, 429, "{}", h.body);
+}

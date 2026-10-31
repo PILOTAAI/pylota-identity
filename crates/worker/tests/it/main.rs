@@ -4,6 +4,7 @@
 
 mod addresses;
 mod agentic;
+mod assertions;
 mod auth;
 mod bench;
 mod cli;
@@ -17,8 +18,10 @@ mod eval;
 mod export;
 mod fakes;
 mod golden;
+mod http_signatures;
 mod idempotency;
 mod identities;
+mod identity_keys;
 mod inbound;
 mod index;
 mod intents;
@@ -48,6 +51,7 @@ mod thread;
 mod triage;
 mod wait;
 mod webhooks;
+mod well_known;
 
 use std::process::Command;
 use std::sync::OnceLock;

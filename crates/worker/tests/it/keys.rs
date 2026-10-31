@@ -95,13 +95,25 @@ fn permission_level_rules() {
         .code(),
         "invalid_request"
     );
-    // A platform key grants identities:sign without holding it.
+    // A platform key grants identities:sign without holding it, and the key signs.
     let r = post(
         "/v1/keys",
         &p,
         json!({ "name": "s", "level": "tenant", "tenant_id": tid, "permissions": ["identities:sign"] }),
     );
     assert_eq!(r.status, 201, "{}", r.body);
+    signs(&p, tid, r.body["secret"].as_str().unwrap());
+}
+
+/// A key holding `identities:sign` mints an assertion for an identity of `tid`.
+fn signs(p: &str, tid: &str, key: &str) {
+    let i = crate::identity(p, tid, &crate::slug("signer")[..8]);
+    let a = post(
+        &format!("/v1/identities/{}/assertions", i["id"].as_str().unwrap()),
+        key,
+        json!({ "audience": "x" }),
+    );
+    assert_eq!(a.status, 201, "{}", a.body);
 }
 
 /// W35, owner-only part: `tenants:erase` on a tenant key only from an owner's key.
@@ -181,6 +193,18 @@ fn j11_partner_key_limits() {
     let own = tenant(&pk, "j11_own");
     let other = tenant(&p, "j11_other");
     assert_eq!(post("/v1/keys", &pk, json!({ "name": "t", "level": "tenant", "tenant_id": own["id"], "permissions": ["identities:read"] })).status, 201);
+    // A partner key grants identities:sign to its own tenant's keys without holding it.
+    let r = post(
+        "/v1/keys",
+        &pk,
+        json!({ "name": "s", "level": "tenant", "tenant_id": own["id"], "permissions": ["identities:sign"] }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    signs(
+        &p,
+        own["id"].as_str().unwrap(),
+        r.body["secret"].as_str().unwrap(),
+    );
     assert_eq!(post("/v1/keys", &pk, json!({ "name": "t", "level": "tenant", "tenant_id": other["id"], "permissions": ["identities:read"] })).code(), "key_scope_exceeded");
     let r = post(
         "/v1/keys",

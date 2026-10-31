@@ -368,3 +368,28 @@ published again.
 | `it::http_signatures::expiry_bounds` | 29 s and 301 s refused ([O11](../edge-cases.md)) |
 | `it::well_known::directory_signed_per_key` | One signature per listed key, tag and components as §3.2, overlap keeps two keys ([O12](../edge-cases.md)) |
 | Spike S13 | crawltest.com answers `401` (well-formed, unknown key) |
+
+## 12. As built (M25)
+
+The design holds as written, with these settlements:
+
+- **Code.** The pure parts are `core::jwk`, `core::jwt` (compact JWS, `EdDSA` only, `typ` checked) and
+  `core::httpsig` (signature bases, `https_target` for `@authority`, `@path` and `@query`, and the `;req`
+  flag the directory's signature uses). The key service is `handlers::identity_keys` (`ensure_active`,
+  shared by the signing handlers); the deployment keys are `keyring::web_bot_auth`.
+- **One active key under a race.** The new key's audit row and `identity.key_*` intent are written in the
+  same D1 batch only if that key's row exists (`audit::when_key`, `intents::when_key`), so the loser of
+  the `identity_keys_one_active` race writes neither. Two concurrent rotations both answer `200` with
+  the key that won; only the winner's event is emitted.
+- **Revoking a `retired` key** answers `200` with the key unchanged and emits nothing.
+- **Order of checks for signing.** Scope (`404`), then `deleting`/`deleted` (`404`), `403
+  tenant_suspended` (the tenant's or its partner's suspension), `409 identity_paused`, then `RL_SIGN`;
+  for HTTP signatures `422 web_bot_auth_disabled` and `403 policy_denied` follow, so another tenant's
+  identity is `404` whatever the switch.
+- **Directory.** `@authority` is `PM_API_HOST`, the host the directory is served on. Seeds are opened per
+  call and not cached in the isolate.
+- **SDK and CLI.** `Verifier::with_http_client` lets a caller supply its own client (a private CA, a
+  proxy), which must not follow redirects; `idvy assertions verify` uses a replay store that records
+  nothing (step 5 of [CLI and setup §18.5](cli.md#185-identity-keys-assertions-and-http-sign)).
+- **Spike S13** passed on 2026-10-27 (`spikes/s13-web-bot-auth/RESULT.md`), so `PM_WEB_BOT_AUTH` may be
+  turned on; it stays `off` by default.

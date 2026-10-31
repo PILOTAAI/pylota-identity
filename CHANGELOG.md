@@ -11,3 +11,7 @@ version is tagged.
 ## Unreleased
 
 - The service, the CLI (`idvy`), the Rust SDK and the documentation as built through build plan M19.
+- Agent signing keys (M25): identity keys and their JWKS, agent assertions, Web Bot Auth signed HTTP
+  requests and the key directory, `pylota_identity::assertions::Verifier`, `idvy identity-keys`,
+  `idvy assertions` and `idvy http-sign`, and the MCP tools `mail_sign_assertion` and
+  `mail_sign_http_request`.

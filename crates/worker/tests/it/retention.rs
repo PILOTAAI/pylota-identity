@@ -199,6 +199,7 @@ fn global_job_steps() {
             "usage",
             "dlq",
             "signing_keys",
+            "identity_keys",
             "staging",
             "held_erasures",
             "audit"
@@ -282,4 +283,30 @@ fn backup_copy() {
     fakes::advance(91 * 86_400_000);
     run_job("retention", Some(&s.tid), json!({}));
     assert!(r2_keys(&key, false).is_empty() && r2_keys(&key, true).is_empty());
+}
+
+/// The global job's `identity_keys` step: a `retiring` key past `verify_until` becomes `retired` and
+/// keeps its row, so its thumbprint is never reused (Agent signing keys § 2).
+#[test]
+fn global_identity_keys() {
+    let _reset = crate::fakes::Reset;
+    let s = crate::assertions::signer("global_identity_keys");
+    let first = crate::assertions::token(&s)["kid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let r = crate::post(
+        &format!("/v1/identities/{}/keys/rotate", s.iid),
+        &s.key,
+        json!({}),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    crate::fakes::advance(7 * 86_400_000 + 1_000);
+    let (_, st) = run_job("retention", None, json!({ "global": true }));
+    assert_eq!(st, "completed");
+    let row = &d1(&format!(
+        "SELECT status, retired_at FROM identity_keys WHERE id = '{first}'"
+    ))[0];
+    assert_eq!(row["status"], "retired");
+    assert!(row["retired_at"].is_i64());
 }
