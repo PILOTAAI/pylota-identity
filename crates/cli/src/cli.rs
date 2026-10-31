@@ -82,6 +82,13 @@ pub enum Command {
     Addresses(AddressesCmd),
     #[command(subcommand)]
     Domains(DomainsCmd),
+    #[command(subcommand, name = "identity-keys")]
+    IdentityKeys(IdentityKeysCmd),
+    #[command(subcommand)]
+    Assertions(AssertionsCmd),
+    /// Sign an HTTP request (Web Bot Auth) as an identity.
+    #[command(name = "http-sign")]
+    HttpSign(HttpSignArgs),
     /// Send a new email.
     Send(SendArgs),
     /// Reply to the sender of a message.
@@ -584,6 +591,62 @@ pub enum IdentitiesCmd {
     Lookup {
         address: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IdentityKeysCmd {
+    List {
+        #[arg(long, value_parser = ["active", "retiring", "retired"])]
+        status: Option<String>,
+        #[command(flatten)]
+        paging: Paging,
+    },
+    Create,
+    Rotate,
+    Revoke {
+        kid: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AssertionsCmd {
+    /// Mint an agent assertion.
+    Create {
+        #[arg(long)]
+        audience: String,
+        #[arg(long = "expires-in", default_value_t = 300)]
+        expires_in: i64,
+        #[arg(long)]
+        nonce: Option<String>,
+        /// A JSON object placed under the `ext` claim.
+        #[arg(long, conflicts_with = "ext_file")]
+        ext: Option<String>,
+        #[arg(long = "ext-file")]
+        ext_file: Option<String>,
+    },
+    /// Check an assertion offline, as a verifier does (`-` reads the token from stdin).
+    Verify {
+        token: String,
+        #[arg(long)]
+        audience: String,
+        #[arg(long)]
+        issuer: Option<String>,
+        #[arg(long)]
+        now: Option<i64>,
+    },
+}
+
+#[derive(Args, Debug)]
+pub struct HttpSignArgs {
+    #[arg(long)]
+    pub url: String,
+    #[arg(long)]
+    pub method: Option<String>,
+    #[arg(long = "expires-in", default_value_t = 60)]
+    pub expires_in: i64,
+    /// Also sign `@method`, `@path` or `@query` (repeatable).
+    #[arg(long = "component")]
+    pub components: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]

@@ -16,12 +16,14 @@ use crate::auth::{KeyScope, Level};
 use crate::errors::{ApiError, envelope};
 
 /// What a tool does, from which its four annotations are computed (MCP § 4.1). Later milestones add
-/// the classes their tools need (`AdditiveDeduplicated`, `Additive`, `Credential`, `PersonNotice`).
+/// the classes their tools need (`AdditiveDeduplicated`, `Additive`, `PersonNotice`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effect {
     Read,
     ExternalSend,
     Mutating,
+    /// Each call mints a new token or signature.
+    Credential,
 }
 
 impl Effect {
@@ -31,6 +33,7 @@ impl Effect {
             Effect::Read => (true, false, true, false),
             Effect::ExternalSend => (false, false, true, true),
             Effect::Mutating => (false, true, true, false),
+            Effect::Credential => (false, false, false, false),
         }
     }
 }
@@ -54,7 +57,7 @@ pub struct Def {
 }
 
 /// Every tool, in the fixed order of MCP § 4. `mail_get_usage` arrives with M22 (its
-/// `GET /v1/usage`) and the two signing tools with M25.
+/// `GET /v1/usage`).
 pub const TOOLS: &[Def] = &[
     Def {
         name: "mail_list_identities",
@@ -370,6 +373,48 @@ pub const TOOLS: &[Def] = &[
             )
         },
     },
+    Def {
+        name: "mail_sign_assertion",
+        title: "Sign an agent assertion",
+        description: "Get a short-lived signed token (a JWT) that proves to a third-party service that you are this mailbox's agent. It names the identity's address, display name and workspace, says that it is an AI agent, and says whether an accountable human stands behind it. Use it when a service asks you to prove who you are and checks tokens against this deployment's published keys (the JWKS at jwks_uri). Set audience to the value the service expects, and pass its challenge as nonce if it gave you one. Send the token only to that service. It expires within minutes, and each call makes a new one. Anything in ext is visible to the service, so put nothing secret in it.",
+        permissions: &["identities:sign"],
+        effect: Effect::Credential,
+        output: Output::Component("AssertionResponse"),
+        input: || {
+            object(
+                json!({
+                    "identity": signer_arg(),
+                    "audience": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[\\x20-\\x7E]{1,256}$", "description": "The service's URL or the identifier it expects in aud." },
+                    "expires_in": { "type": "integer", "minimum": 60, "maximum": 600, "default": 300, "description": "Seconds until the token expires." },
+                    "nonce": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[\\x20-\\x7E]{1,128}$", "description": "The service's challenge, copied into the token." },
+                    "ext": { "type": "object", "description": "Extra claims for the service, at most 2 KB as JSON, placed under the ext claim. Registered and Pylota claim names are refused." }
+                }),
+                &["audience"],
+            )
+        },
+    },
+    Def {
+        name: "mail_sign_http_request",
+        title: "Sign an HTTP request",
+        description: "Get Web Bot Auth headers that let a website verify that your HTTP request comes from this mailbox's agent, through this deployment. Pass the exact https URL your HTTP client will request (and the method, if you add @method to components). Attach every returned header (Signature-Agent, From, Signature-Input, Signature) to that request unchanged, and send it before expires_at. This tool does not make the request: your own HTTP client does. Fails with web_bot_auth_disabled when this deployment has signed requests turned off, and with policy_denied when the workspace has not allowed them; then make the request unsigned or ask a person.",
+        permissions: &["identities:sign"],
+        effect: Effect::Credential,
+        output: Output::Component("HttpSignatureResponse"),
+        input: || {
+            object(
+                json!({
+                    "identity": signer_arg(),
+                    "url": { "type": "string", "maxLength": 2048, "pattern": "^https://", "description": "The https URL the request will go to." },
+                    "method": { "type": "string", "pattern": "^[!#$%&'*+.^_`|~0-9A-Z-]+$", "description": "The request method, an upper-case token. Signed only when components includes @method, and then required." },
+                    "expires_in": { "type": "integer", "minimum": 30, "maximum": 300, "default": 60, "description": "Seconds until the signature expires." },
+                    "components": { "type": "array", "uniqueItems": true, "maxItems": 6,
+                        "items": { "type": "string", "enum": ["@authority", "signature-agent", "from", "@method", "@path", "@query"] },
+                        "description": "Parts of the request to sign. @authority, signature-agent and from are always signed." }
+                }),
+                &["url"],
+            )
+        },
+    },
 ];
 
 const TENANT: &str = "^ten_[0-9A-HJKMNP-TV-Z]{26}$";
@@ -391,6 +436,11 @@ fn object(properties: Value, required: &[&str]) -> Value {
 
 fn identity_arg() -> Value {
     json!({ "type": "string", "maxLength": 254, "description": "Identity id (idn_…) or address. Required for tenant, partner and platform keys." })
+}
+
+/// The signing tools are listed only to tenant and identity keys.
+fn signer_arg() -> Value {
+    json!({ "type": "string", "maxLength": 254, "description": "Identity id (idn_…) or address. Required for tenant keys." })
 }
 
 fn identity_ids(description: &str) -> Value {
@@ -1121,6 +1171,19 @@ async fn request<P: Platform>(
             };
             call("PATCH", path, vec![], Some(body))
         }
+        // No Idempotency-Key: each call mints a new token or signature.
+        "mail_sign_assertion" => call(
+            "POST",
+            format!("/v1/identities/{i}/assertions"),
+            vec![],
+            Some(body_of(a, &["identity"])),
+        ),
+        "mail_sign_http_request" => call(
+            "POST",
+            format!("/v1/identities/{i}/http-signatures"),
+            vec![],
+            Some(body_of(a, &["identity"])),
+        ),
         _ => return Err(ApiError::internal()),
     })
 }

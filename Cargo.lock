@@ -1996,6 +1996,7 @@ name = "pylota-identity"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "ed25519-dalek",
  "hmac 0.13.0",
  "pylota-identity-api-types",
  "reqwest",

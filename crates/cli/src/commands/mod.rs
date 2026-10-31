@@ -14,6 +14,7 @@ pub mod profile;
 pub mod search;
 pub mod secrets;
 pub mod setup;
+pub mod signing;
 pub mod webhooks;
 
 use std::path::PathBuf;
@@ -42,6 +43,9 @@ pub async fn dispatch(ctx: &Ctx, cmd: Command) -> Result<Output, CliError> {
         Command::Jobs(c) => ops::jobs(ctx, c).await,
         Command::Audit(a) => admin::audit(ctx, a).await,
         Command::Identities(c) => identities::identities(ctx, c).await,
+        Command::IdentityKeys(c) => signing::identity_keys(ctx, c).await,
+        Command::Assertions(c) => signing::assertions(ctx, c).await,
+        Command::HttpSign(a) => signing::http_sign(ctx, a).await,
         Command::Addresses(c) => identities::addresses(ctx, c).await,
         Command::Domains(c) => domains::run(ctx, c).await,
         Command::Send(a) => mail::send(ctx, a).await,
