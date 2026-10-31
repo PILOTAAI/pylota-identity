@@ -384,14 +384,19 @@ fn sdk_verifies() {
         let v = Verifier::new(VerifierConfig::new([iss.clone()], aud)).with_http_client(local);
         let got =
             rt.block_on(v.verify_assertion_at(&format!("{}.{claims}.{}", parts[0], parts[2]), now));
-        let ok = match (&got, what) {
+        let ok = matches!(
+            (&got, what),
             (
-                Err(AssertionError::Jwks(pylota_identity::Error::Status { status: 302, .. })),
+                Err(AssertionError::Jwks(pylota_identity::Error::Status {
+                    status: 302,
+                    ..
+                })),
                 "redirect",
-            ) => true,
-            (Err(AssertionError::Jwks(pylota_identity::Error::Decode(_))), "content type") => true,
-            _ => false,
-        };
+            ) | (
+                Err(AssertionError::Jwks(pylota_identity::Error::Decode(_))),
+                "content type"
+            )
+        );
         assert!(ok, "{what}: {got:?}");
     }
     // A paused identity's key set is a 404.
