@@ -183,6 +183,48 @@ const CASES: &[(&str, Case)] = &[
     ("deleteIdentity", |t| {
         ("DELETE", format!("/v1/identities/{}", t.identity), None)
     }),
+    ("listIdentityKeys", |t| {
+        ("GET", format!("/v1/identities/{}/keys", t.identity), None)
+    }),
+    ("createIdentityKey", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/keys", t.identity),
+            Some(json!({})),
+        )
+    }),
+    ("rotateIdentityKey", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/keys/rotate", t.identity),
+            Some(json!({})),
+        )
+    }),
+    ("revokeIdentityKey", |t| {
+        (
+            "POST",
+            format!(
+                "/v1/identities/{}/keys/{}/revoke",
+                t.identity,
+                "A".repeat(43)
+            ),
+            Some(json!({})),
+        )
+    }),
+    ("createAssertion", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/assertions", t.identity),
+            Some(json!({ "audience": "https://evil.example" })),
+        )
+    }),
+    ("createHttpSignature", |t| {
+        (
+            "POST",
+            format!("/v1/identities/{}/http-signatures", t.identity),
+            Some(json!({ "url": "https://evil.example/" })),
+        )
+    }),
     ("listAddresses", |t| {
         (
             "GET",
@@ -813,7 +855,7 @@ fn cross_tenant_matrix() {
     let at = tenant(&p, "attacker");
     let (_, tenant_attacker) = mint(
         &p,
-        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "erasure:manage", "domains:read", "domains:write", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage", "messages:send", "suppressions:manage"] }),
+        json!({ "name": "a", "level": "tenant", "tenant_id": at["id"], "permissions": ["keys:manage", "policy:write", "audit:read", "identities:read", "identities:write", "identities:sign", "erasure:manage", "domains:read", "domains:write", "messages:read", "messages:write", "quarantine:review", "attachments:read", "search:read", "webhooks:manage", "messages:send", "suppressions:manage"] }),
     );
     let (_, partner_attacker) = partner("attacker", &all);
     tenant(&partner_attacker, "attacker_own");

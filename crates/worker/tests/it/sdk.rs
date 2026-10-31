@@ -303,6 +303,26 @@ fn every_served_operation() {
         crate::cloud::record(&zone, "TXT", &format!("_dmarc.{sub}"), "v=DMARC1; p=quarantine", None);
         let d2 = seen.ok("createDomain", tk.create_domain(&tid, &body(json!({ "name": sub, "method": "cloudflare_zone" })), None).await);
         seen.ok("deleteDomain", tk.delete_domain(&field(&d2, "id")).await);
+
+        // Agent signing keys (M25).
+        let sign_key = blocking(|| {
+            crate::fakes::set_config("PM_WEB_BOT_AUTH", Some("on"));
+            crate::assertions::patch_policy(&tid, true);
+            crate::mint(
+                &platform(),
+                json!({ "name": "sdk sign", "level": "tenant", "tenant_id": tid, "permissions": ["identities:read", "identities:write", "identities:sign"] }),
+            )
+            .1
+        });
+        let sk = client(&sign_key);
+        let made = seen.ok("createIdentityKey", sk.create_identity_key(&s.iid, Some(&key("idk"))).await);
+        seen.ok("listIdentityKeys", sk.list_identity_keys(&s.iid, &Default::default()).await);
+        seen.ok("createAssertion", sk.create_assertion(&s.iid, &body(json!({ "audience": "https://sdk.example" }))).await);
+        seen.ok("createHttpSignature", sk.create_http_signature(&s.iid, &body(json!({ "url": "https://www.brightwell.example/" }))).await);
+        seen.ok("getIdentityJwks", p.get_identity_jwks(&s.iid).await);
+        seen.ok("getHttpMessageSignaturesDirectory", p.get_http_message_signatures_directory().await);
+        seen.ok("rotateIdentityKey", sk.rotate_identity_key(&s.iid, Some(&key("idr"))).await);
+        seen.ok("revokeIdentityKey", sk.revoke_identity_key(&s.iid, &field(&made, "kid"), Some(&key("idv"))).await);
         let _ = t;
     });
     // Every served operation was called (or is left out of the SDK).

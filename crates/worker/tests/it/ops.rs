@@ -1328,7 +1328,7 @@ fn restore_replays_changes() {
         "INSERT INTO webhook_endpoints (id, tenant_id, url, event_types_json, secret_enc, created_at, updated_at) VALUES ('whk_rr{x}', '{ten}', 'https://hooks.example/rr', '[\"*\"]', 's', 2, 2)"
     ));
     w(&format!(
-        "INSERT INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at) VALUES ('web_bot_auth', '{kid}', X'00ff27', '{{\"kty\":\"OKP\"}}', 2)"
+        "INSERT INTO signing_keys (purpose, kid, ciphertext, public_jwk, created_at, verify_until) VALUES ('web_bot_auth', '{kid}', X'00ff27', '{{\"kty\":\"OKP\"}}', 2, 3)"
     ));
     w(&format!(
         "INSERT INTO identity_keys (id, identity_id, tenant_id, alg, public_jwk, private_enc, status, created_at) VALUES ('ik{x}', '{idn2}', '{ten}', 'EdDSA', '{{}}', X'01', 'active', 2)"
