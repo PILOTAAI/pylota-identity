@@ -1,0 +1,57 @@
+Third-party software in pylota-identity-api-types
+
+Written by `cargo xtask gen-licenses` from the Cargo dependency graph, the component list of
+the artefact's SBOM. Each crate is used under the licence named here; its licence text is in its
+source at the version named.
+
+equivalent 1.0.3
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/indexmap-rs/equivalent
+foldhash 0.2.0
+  licence: Zlib
+  source: https://github.com/orlp/foldhash
+hashbrown 0.17.1
+  licence: MIT OR Apache-2.0
+  source: https://github.com/rust-lang/hashbrown
+indexmap 2.14.2
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/indexmap-rs/indexmap
+itoa 1.0.18
+  licence: MIT OR Apache-2.0
+  source: https://github.com/dtolnay/itoa
+memchr 2.8.3
+  licence: Unlicense OR MIT
+  source: https://github.com/BurntSushi/memchr
+proc-macro2 1.0.107
+  licence: MIT OR Apache-2.0
+  source: https://github.com/dtolnay/proc-macro2
+quote 1.0.47
+  licence: MIT OR Apache-2.0
+  source: https://github.com/dtolnay/quote
+serde 1.0.229
+  licence: MIT OR Apache-2.0
+  source: https://github.com/serde-rs/serde
+serde_core 1.0.229
+  licence: MIT OR Apache-2.0
+  source: https://github.com/serde-rs/serde
+serde_derive 1.0.229
+  licence: MIT OR Apache-2.0
+  source: https://github.com/serde-rs/serde
+serde_json 1.0.151
+  licence: MIT OR Apache-2.0
+  source: https://github.com/serde-rs/json
+syn 3.0.9
+  licence: MIT OR Apache-2.0
+  source: https://github.com/dtolnay/syn
+unicode-ident 1.0.27
+  licence: (MIT OR Apache-2.0) AND Unicode-3.0
+  source: https://github.com/dtolnay/unicode-ident
+utoipa 6.0.0
+  licence: MIT OR Apache-2.0
+  source: https://github.com/juhaku/utoipa
+utoipa-gen 6.0.1
+  licence: MIT OR Apache-2.0
+  source: https://github.com/juhaku/utoipa
+zmij 1.0.23
+  licence: MIT
+  source: https://github.com/dtolnay/zmij

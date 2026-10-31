@@ -205,6 +205,8 @@ pub struct State {
     pub scripted: BTreeMap<String, Vec<(u16, Value)>>,
     pub seq: u64,
     pub runner_calls: Vec<Cmd>,
+    /// `npm ci` answers as npm does when a package's bytes differ from its `integrity` hash.
+    pub npm_integrity_fails: bool,
     /// `remaining` of `GET /v1/platform/status` while the active key's re-seal is unfinished, one
     /// per read (the last repeats; empty is 0).
     pub reseal_script: Vec<u64>,
@@ -329,6 +331,7 @@ impl Fake {
             scripted: BTreeMap::new(),
             seq: 0,
             runner_calls: vec![],
+            npm_integrity_fails: false,
             reseal_script: vec![],
             resealed: None,
             d1_exports: vec![],
@@ -1147,6 +1150,13 @@ impl Runner for FakeRunner {
         let args: Vec<&str> = cmd.args.iter().map(String::as_str).collect();
         match cmd.program.as_str() {
             "node" => ok("v22.12.0\n"),
+            "npm" if args.first() == Some(&"ci") && self.state.lock().unwrap().npm_integrity_fails => {
+                Ok(Proc {
+                    code: 1,
+                    stdout: vec![],
+                    stderr: b"npm error code EINTEGRITY\nnpm error sha512-... integrity checksum failed when using sha512\n".to_vec(),
+                })
+            }
             "npm" => ok("10.9.0\n"),
             "sh" | "cmd" => {
                 let mut child = std::process::Command::new(&cmd.program)
@@ -1464,6 +1474,7 @@ impl Fake {
             scripted: BTreeMap::new(),
             seq: 0,
             runner_calls: vec![],
+            npm_integrity_fails: false,
             reseal_script: vec![],
             resealed: None,
             d1_exports: vec![],

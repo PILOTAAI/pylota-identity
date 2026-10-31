@@ -9,7 +9,10 @@ mod fuzz;
 mod gen_sdk;
 mod itest;
 mod layering;
+mod licenses;
 mod openapi;
+mod release;
+mod release_ops;
 mod size;
 mod trace;
 mod unicode;
@@ -17,7 +20,7 @@ mod unicode;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: cargo xtask <build-worker | check-layering | trace | gen-unicode [--check] | fuzz --target <t> --time <s> | openapi | itest | eval-setup | eval-search | eval-agentic | eval-triage>";
+const USAGE: &str = "usage: cargo xtask <build-worker | check-layering | trace | gen-unicode [--check] | fuzz --target <t> --time <s> | openapi | itest | gen-licenses [--check] | release --check-version <tag> | release --version <v> | release sign <tag> --key <path> | release crates <tag> | release-gate --version <v> | eval-setup | eval-search | eval-agentic | eval-triage>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,6 +33,15 @@ fn main() -> ExitCode {
         Some("fuzz") => fuzz::run(&root, &args[1..]),
         Some("itest") => itest::run(&root, &args[1..]),
         Some("eval-setup") => eval::setup(&root),
+        Some("release-gate") => release_ops::gate_cli(&root, &args[1..]),
+        Some("gen-licenses") => licenses::run(&root, args.get(1).is_some_and(|a| a == "--check")),
+        Some("release") => match (args.get(1).map(String::as_str), args.get(2)) {
+            (Some("--check-version"), Some(tag)) => release::check_version(&root, tag),
+            (Some("--version"), Some(v)) => release::package(&root, v),
+            (Some("sign"), _) => release_ops::sign_cli(&root, &args[2..]),
+            (Some("crates"), _) => release_ops::crates_cli(&root, &args[2..]),
+            _ => Err("usage: cargo xtask release --check-version <tag> | --version <v>".into()),
+        },
         Some(s @ ("eval-search" | "eval-agentic" | "eval-triage")) => eval::run(&root, &s[5..]),
         Some("gen-sdk") => gen_sdk::run(&root, args.get(1).is_some_and(|a| a == "--check")),
         Some("gen-unicode") => unicode::run(&root, args.get(1).is_some_and(|a| a == "--check")),

@@ -15,6 +15,11 @@ miniz_oxide = { workspace = true }
 pylota-identity-api-types = { path = "../crates/api-types" }
 # The repeat policy of the evaluations (`eval_median_policy`).
 pylota-identity-conformance = { path = "../crates/conformance" }
+# `release sign` and `release crates` verify with the CLI's verifier and its compiled-in keys.
+pylota-identity-cli = { path = "../crates/cli" }
+# `release sign` (Rust workspace § 9): pure Rust, MIT; 0.10.0 is the latest (cargo search, 2026-10-31).
+minisign = "=0.10.0"
+minisign-verify = "=0.3.0"
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 toml = { workspace = true }

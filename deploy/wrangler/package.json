@@ -1,0 +1,12 @@
+{
+  "name": "pylota-identity-wrangler",
+  "private": true,
+  "description": "The Wrangler release idvy installs from the signed bundle (npm ci --ignore-scripts; CLI and setup \u00a7 5.1).",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.139.0"
+  }
+}
