@@ -100,10 +100,27 @@ mod tests {
         let ok = "Fix a thing\n\nSigned-off-by: Ana Okafor <ana@example.invalid>\n";
         assert!(unsigned(&[c("Ana Okafor", "ana@example.invalid", 1, ok)]).is_empty());
         for (case, commit) in [
-            ("none", c("Ana Okafor", "ana@example.invalid", 1, "Fix a thing\n")),
-            ("another person", c("Ben Byrne", "ben@example.invalid", 1, ok)),
-            ("another address", c("Ana Okafor", "ana@other.invalid", 1, ok)),
-            ("in the body only", c("Ana Okafor", "ana@example.invalid", 1, "See Signed-off-by: Ana Okafor <ana@example.invalid> above\n")),
+            (
+                "none",
+                c("Ana Okafor", "ana@example.invalid", 1, "Fix a thing\n"),
+            ),
+            (
+                "another person",
+                c("Ben Byrne", "ben@example.invalid", 1, ok),
+            ),
+            (
+                "another address",
+                c("Ana Okafor", "ana@other.invalid", 1, ok),
+            ),
+            (
+                "in the body only",
+                c(
+                    "Ana Okafor",
+                    "ana@example.invalid",
+                    1,
+                    "See Signed-off-by: Ana Okafor <ana@example.invalid> above\n",
+                ),
+            ),
         ] {
             assert_eq!(unsigned(&[commit]).len(), 1, "{case}");
         }

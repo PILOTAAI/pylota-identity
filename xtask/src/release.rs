@@ -81,9 +81,9 @@ pub fn changelog_entry(text: &str, version: &str) -> Result<String, String> {
         .ok_or_else(|| format!("CHANGELOG.md has no entry `{want}…`"))?;
     if !pre {
         let rest = &heading[want.len()..];
-        let (date, apache) = rest
-            .split_once(" (Apache-2.0 on ")
-            .ok_or_else(|| format!("the CHANGELOG heading {heading:?} lacks \" (Apache-2.0 on <date>)\""))?;
+        let (date, apache) = rest.split_once(" (Apache-2.0 on ").ok_or_else(|| {
+            format!("the CHANGELOG heading {heading:?} lacks \" (Apache-2.0 on <date>)\"")
+        })?;
         let apache = apache.trim_end_matches(')');
         if apache_date(date.trim()).as_deref() != Some(apache) {
             return Err(format!(
@@ -104,7 +104,10 @@ pub fn notes(root: &Path, version: &str) -> Result<String, String> {
     let dates = log
         .lines()
         .find(|l| l.starts_with(&format!("## v{version} — ")))
-        .map(|l| l.trim_start_matches(&format!("## v{version} — ")).to_owned());
+        .map(|l| {
+            l.trim_start_matches(&format!("## v{version} — "))
+                .to_owned()
+        });
     Ok(match dates {
         Some(d) => format!("Released {d}.\n\n{body}"),
         None => format!("A release candidate: not for production.\n\n{body}"),
@@ -429,12 +432,27 @@ mod tests {
         assert!(version_matches("v1.0.0-", "1.0.0-").is_err());
         let tree = root().join("target/release-version-test");
         std::fs::create_dir_all(&tree).unwrap();
-        std::fs::write(tree.join("Cargo.toml"), "[workspace.package]\nversion = \"1.0.0-rc.1\"\n").unwrap();
-        std::fs::write(tree.join("CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n- x\n").unwrap();
+        std::fs::write(
+            tree.join("Cargo.toml"),
+            "[workspace.package]\nversion = \"1.0.0-rc.1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tree.join("CHANGELOG.md"),
+            "# Changelog\n\n## Unreleased\n\n- x\n",
+        )
+        .unwrap();
         assert!(check_version(&tree, "v1.0.0-rc.1").is_ok());
         assert!(check_version(&tree, "v99.0.0").is_err());
-        std::fs::write(tree.join("Cargo.toml"), "[workspace.package]\nversion = \"1.0.0\"\n").unwrap();
-        assert!(check_version(&tree, "v1.0.0").is_err(), "a full release needs its CHANGELOG entry");
+        std::fs::write(
+            tree.join("Cargo.toml"),
+            "[workspace.package]\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        assert!(
+            check_version(&tree, "v1.0.0").is_err(),
+            "a full release needs its CHANGELOG entry"
+        );
     }
 
     /// `xtask::release_artefacts_carry_licence` (build plan M19): the Worker bundle and each CLI
@@ -534,7 +552,10 @@ mod tests {
         assert_eq!(changelog_entry(log, "1.1.0-rc.1").unwrap(), "- next");
         assert!(changelog_entry(log, "1.1.0").is_err(), "no entry");
         let wrong = log.replace("2029-01-15", "2028-01-15");
-        assert!(changelog_entry(&wrong, "1.0.0").is_err(), "a wrong Apache date");
+        assert!(
+            changelog_entry(&wrong, "1.0.0").is_err(),
+            "a wrong Apache date"
+        );
         let bare = log.replace(" (Apache-2.0 on 2029-01-15)", "");
         assert!(changelog_entry(&bare, "1.0.0").is_err(), "no Apache date");
         assert_eq!(apache_date("2028-02-29").as_deref(), Some("2030-02-28"));

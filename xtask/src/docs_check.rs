@@ -14,8 +14,20 @@ use std::path::{Path, PathBuf};
 const NEGATIONS: &[&str] = &["not", "no", "never", "must not", "nor", "isn't", "aren't"];
 /// What may follow "open source" when it describes something else.
 const OTHERS: &[&str] = &[
-    "project", "projects", "licence", "licences", "license", "licenses", "package", "packages",
-    "agent vault", "library", "libraries", "tool", "tools", "software",
+    "project",
+    "projects",
+    "licence",
+    "licences",
+    "license",
+    "licenses",
+    "package",
+    "packages",
+    "agent vault",
+    "library",
+    "libraries",
+    "tool",
+    "tools",
+    "software",
 ];
 
 /// The text of an HTML page without tags, comments, scripts and styles.
@@ -41,7 +53,9 @@ fn html_text(html: &str) -> String {
         rest = &tail[n..];
     }
     out.push_str(rest);
-    out.replace("&nbsp;", " ").replace("&amp;", "&").replace("&quot;", "\"")
+    out.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
 }
 
 /// Markdown without fenced blocks and code spans.
@@ -118,25 +132,33 @@ fn unquoted(s: &str) -> String {
 fn negated_before(lower: &str, at: usize) -> bool {
     let before = &lower[..at];
     NEGATIONS.iter().any(|n| {
-        before
-            .match_indices(n)
-            .any(|(i, _)| {
-                let b = before.as_bytes();
-                (i == 0 || !b[i - 1].is_ascii_alphanumeric())
-                    && b.get(i + n.len()).is_none_or(|c| !c.is_ascii_alphanumeric())
-            })
+        before.match_indices(n).any(|(i, _)| {
+            let b = before.as_bytes();
+            (i == 0 || !b[i - 1].is_ascii_alphanumeric())
+                && b.get(i + n.len())
+                    .is_none_or(|c| !c.is_ascii_alphanumeric())
+        })
     })
 }
 
 /// Why `sentence` is a forbidden claim, if it is one.
 pub fn claim(sentence: &str) -> Option<&'static str> {
-    if sentence.to_lowercase().contains("we cannot see your passwords")
-        && unquoted(sentence).to_lowercase().contains("we cannot see your passwords")
+    if sentence
+        .to_lowercase()
+        .contains("we cannot see your passwords")
+        && unquoted(sentence)
+            .to_lowercase()
+            .contains("we cannot see your passwords")
     {
         return Some("\"we cannot see your passwords\" outside double quotes");
     }
     let lower = unquoted(sentence).to_lowercase();
-    for term in ["zero-knowledge", "zero knowledge", "end-to-end encrypt", "end to end encrypt"] {
+    for term in [
+        "zero-knowledge",
+        "zero knowledge",
+        "end-to-end encrypt",
+        "end to end encrypt",
+    ] {
         if let Some(at) = lower.find(term)
             && !negated_before(&lower, at)
         {
@@ -147,10 +169,16 @@ pub fn claim(sentence: &str) -> Option<&'static str> {
         for (at, _) in lower.match_indices(term) {
             let after = lower[at + term.len()..].trim_start();
             let names_other = OTHERS.iter().any(|o| {
-                after.starts_with(o) && after[o.len()..].chars().next().is_none_or(|c| !c.is_alphanumeric())
+                after.starts_with(o)
+                    && after[o.len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| !c.is_alphanumeric())
             });
             if !names_other && !negated_before(&lower, at) {
-                return Some("\"open source\" as a description (it is source available, Fair Source)");
+                return Some(
+                    "\"open source\" as a description (it is source available, Fair Source)",
+                );
             }
         }
     }
@@ -158,7 +186,9 @@ pub fn claim(sentence: &str) -> Option<&'static str> {
 }
 
 fn files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -188,7 +218,12 @@ pub fn forbidden_claims(root: &Path) -> Vec<String> {
     let pages = md
         .iter()
         .map(|p| (p, md_text(&std::fs::read_to_string(p).unwrap_or_default())))
-        .chain(html.iter().map(|p| (p, html_text(&std::fs::read_to_string(p).unwrap_or_default()))));
+        .chain(html.iter().map(|p| {
+            (
+                p,
+                html_text(&std::fs::read_to_string(p).unwrap_or_default()),
+            )
+        }));
     for (path, text) in pages {
         for s in sentences(&text) {
             if let Some(why) = claim(&s) {
@@ -252,11 +287,19 @@ pub fn site_links(root: &Path) -> Vec<String> {
                     page.clone()
                 } else if let Some(abs) = path.strip_prefix('/') {
                     let t = public.join(abs);
-                    if abs.is_empty() || abs.ends_with('/') { t.join("index.html") } else { t }
+                    if abs.is_empty() || abs.ends_with('/') {
+                        t.join("index.html")
+                    } else {
+                        t
+                    }
                 } else {
                     page.parent().unwrap().join(path)
                 };
-                let target = if target.is_dir() { target.join("index.html") } else { target };
+                let target = if target.is_dir() {
+                    target.join("index.html")
+                } else {
+                    target
+                };
                 if !target.is_file() {
                     broken.push(format!("{page_name}: {link}: no such file"));
                     continue;
@@ -331,8 +374,14 @@ mod tests {
         ] {
             assert!(claim(good).is_none(), "refused: {good}");
         }
-        assert_eq!(sentences("A one. B two? C three"), ["A one.", " B two?", " C three"]);
-        assert!(!html_text("<a id=\"open-source\" href=\"#x\">Self-host</a><!-- Open source -->").contains("pen"));
+        assert_eq!(
+            sentences("A one. B two? C three"),
+            ["A one.", " B two?", " C three"]
+        );
+        assert!(
+            !html_text("<a id=\"open-source\" href=\"#x\">Self-host</a><!-- Open source -->")
+                .contains("pen")
+        );
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let found = forbidden_claims(root);
         assert!(found.is_empty(), "{found:#?}");

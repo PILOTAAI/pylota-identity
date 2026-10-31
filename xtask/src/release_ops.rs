@@ -841,9 +841,19 @@ mod tests {
         // The verify job accepts the signed draft, and refuses it once a file changes.
         let good = work("good");
         verify_dir(&good, "1.0.0-rc.1", &keys).unwrap();
-        assert!(verify_dir(&good, "1.0.0-rc.2", &keys).is_err(), "another version");
-        std::fs::write(good.join("idvy-1.0.0-rc.1-x86_64-unknown-linux-gnu.tar.gz"), b"rebuilt").unwrap();
-        assert!(verify_dir(&good, "1.0.0-rc.1", &keys).is_err(), "a changed file");
+        assert!(
+            verify_dir(&good, "1.0.0-rc.2", &keys).is_err(),
+            "another version"
+        );
+        std::fs::write(
+            good.join("idvy-1.0.0-rc.1-x86_64-unknown-linux-gnu.tar.gz"),
+            b"rebuilt",
+        )
+        .unwrap();
+        assert!(
+            verify_dir(&good, "1.0.0-rc.1", &keys).is_err(),
+            "a changed file"
+        );
     }
 
     fn signed_release(pk_sk: &(String, String)) -> BTreeMap<String, Vec<u8>> {

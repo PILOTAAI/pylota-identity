@@ -5,7 +5,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf()
     }
 
     fn workflow(name: &str) -> (String, serde_json::Value) {
@@ -19,7 +22,13 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|s| format!("{} {}", s["name"].as_str().unwrap_or(""), s["run"].as_str().unwrap_or("")))
+            .map(|s| {
+                format!(
+                    "{} {}",
+                    s["name"].as_str().unwrap_or(""),
+                    s["run"].as_str().unwrap_or("")
+                )
+            })
             .collect()
     }
 
@@ -46,11 +55,24 @@ mod tests {
             .iter()
             .map(|k| (*k).to_owned())
             .collect();
-        assert_eq!(keys, compiled, "RELEASE_KEYS must equal crates/cli/src/bundle/verify.rs");
-        assert!(env["MINISIGN_VERSION"].as_str().is_some_and(|v| !v.is_empty()));
+        assert_eq!(
+            keys, compiled,
+            "RELEASE_KEYS must equal crates/cli/src/bundle/verify.rs"
+        );
+        assert!(
+            env["MINISIGN_VERSION"]
+                .as_str()
+                .is_some_and(|v| !v.is_empty())
+        );
         let sha = env["MINISIGN_SHA256"].as_str().unwrap_or("");
-        assert!(sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()), "{sha}");
-        assert!(doc["on"].get("workflow_dispatch").is_some() && doc["on"].as_object().unwrap().len() == 1);
+        assert!(
+            sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{sha}"
+        );
+        assert!(
+            doc["on"].get("workflow_dispatch").is_some()
+                && doc["on"].as_object().unwrap().len() == 1
+        );
         assert_eq!(doc["jobs"]["deploy"]["environment"], "production");
 
         let s = steps(&doc, "deploy");
@@ -70,15 +92,25 @@ mod tests {
             "--source-ref \"refs/tags/v$VERSION\"",
             "--deny-self-hosted-runners",
         ] {
-            assert!(s[attest].contains(flag), "the attestation check lacks {flag}");
+            assert!(
+                s[attest].contains(flag),
+                "the attestation check lacks {flag}"
+            );
         }
         let run = at("./idvy deploy --version \"$VERSION\" --gradual");
         assert!(refuse < run && minisign < sig && sig < run && sums < run && attest < run);
-        assert_eq!(s.iter().filter(|x| x.contains("idvy ")).count(), 1, "idvy runs once, last");
+        assert_eq!(
+            s.iter().filter(|x| x.contains("idvy ")).count(),
+            1,
+            "idvy runs once, last"
+        );
         assert!(!text.contains("--from-source"));
 
         // Every workflow.
-        for e in std::fs::read_dir(root().join(".github/workflows")).unwrap().flatten() {
+        for e in std::fs::read_dir(root().join(".github/workflows"))
+            .unwrap()
+            .flatten()
+        {
             let name = e.file_name().to_string_lossy().into_owned();
             let text = std::fs::read_to_string(e.path()).unwrap();
             for line in text.lines() {
@@ -86,18 +118,31 @@ mod tests {
                 if let Some(u) = l.strip_prefix("uses: ") {
                     let u = u.split_whitespace().next().unwrap_or("");
                     let pinned = u.starts_with("./")
-                        || u.split_once('@').is_some_and(|(_, r)| r.len() == 40 && r.bytes().all(|b| b.is_ascii_hexdigit()));
+                        || u.split_once('@').is_some_and(|(_, r)| {
+                            r.len() == 40 && r.bytes().all(|b| b.is_ascii_hexdigit())
+                        });
                     assert!(pinned, "{name}: {u} is not pinned to a commit SHA");
                 }
             }
-            for forbidden in ["CARGO_REGISTRY_TOKEN", "cargo publish", "NPM_TOKEN", "npm publish"] {
+            for forbidden in [
+                "CARGO_REGISTRY_TOKEN",
+                "cargo publish",
+                "NPM_TOKEN",
+                "npm publish",
+            ] {
                 assert!(!text.contains(forbidden), "{name} mentions {forbidden}");
             }
-            for l in text.lines().filter(|l| l.contains("npm ") && !l.trim_start().starts_with('#')) {
+            for l in text
+                .lines()
+                .filter(|l| l.contains("npm ") && !l.trim_start().starts_with('#'))
+            {
                 if l.contains("npm ci") {
                     assert!(l.contains("--ignore-scripts"), "{name}: {l}");
                 } else {
-                    assert!(!l.contains("npm install") && !l.contains("npx "), "{name}: {l}");
+                    assert!(
+                        !l.contains("npm install") && !l.contains("npx "),
+                        "{name}: {l}"
+                    );
                 }
             }
         }
