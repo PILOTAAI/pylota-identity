@@ -16,6 +16,9 @@ aws-lc-sys 0.46.0
 base64 0.23.1
   licence: MIT OR Apache-2.0
   source: https://github.com/marshallpierce/rust-base64
+base64ct 1.8.3
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/RustCrypto/formats
 bitflags 2.13.2
   licence: MIT OR Apache-2.0
   source: https://github.com/bitflags/bitflags
@@ -61,18 +64,36 @@ crypto-common 0.2.2
 ctutils 0.4.6
   licence: Apache-2.0 OR MIT
   source: https://github.com/RustCrypto/utils
+curve25519-dalek 5.0.0
+  licence: BSD-3-Clause
+  source: https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek
+curve25519-dalek-derive 0.1.1
+  licence: MIT/Apache-2.0
+  source: https://github.com/dalek-cryptography/curve25519-dalek
+der 0.8.3
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/RustCrypto/formats
 digest 0.11.3
   licence: MIT OR Apache-2.0
   source: https://github.com/RustCrypto/traits
 displaydoc 0.2.7
   licence: MIT OR Apache-2.0
   source: https://github.com/yaahc/displaydoc
+ed25519 3.0.0
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/RustCrypto/signatures
+ed25519-dalek 3.0.0
+  licence: BSD-3-Clause
+  source: https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek
 equivalent 1.0.3
   licence: Apache-2.0 OR MIT
   source: https://github.com/indexmap-rs/equivalent
 errno 0.3.14
   licence: MIT OR Apache-2.0
   source: https://github.com/lambda-fairy/rust-errno
+fiat-crypto 0.3.0
+  licence: MIT OR Apache-2.0 OR BSD-1-Clause
+  source: https://github.com/mit-plv/fiat-crypto
 fnv 1.0.7
   licence: Apache-2.0 / MIT
   source: https://github.com/servo/rust-fnv
@@ -223,6 +244,9 @@ percent-encoding 2.3.2
 pin-project-lite 0.2.17
   licence: Apache-2.0 OR MIT
   source: https://github.com/taiki-e/pin-project-lite
+pkcs8 0.11.0
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/RustCrypto/formats
 portable-atomic 1.15.0
   licence: Apache-2.0 OR MIT
   source: https://github.com/taiki-e/portable-atomic
@@ -316,6 +340,9 @@ sha2 0.11.0
 signal-hook-registry 1.4.8
   licence: MIT OR Apache-2.0
   source: https://github.com/vorner/signal-hook
+signature 3.0.0
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/RustCrypto/traits
 simd_cesu8 1.2.0
   licence: Apache-2.0 OR MIT
   source: https://github.com/seancroach/simd_cesu8
@@ -331,6 +358,9 @@ smallvec 1.16.3
 socket2 0.6.5
   licence: MIT OR Apache-2.0
   source: https://github.com/rust-lang/socket2
+spki 0.8.1
+  licence: Apache-2.0 OR MIT
+  source: https://github.com/RustCrypto/formats
 stable_deref_trait 1.2.1
   licence: MIT OR Apache-2.0
   source: https://github.com/storyyeller/stable_deref_trait
@@ -499,7 +529,7 @@ zerofrom 0.1.8
 zerofrom-derive 0.1.8
   licence: Unicode-3.0
   source: https://github.com/unicode-org/icu4x
-zeroize 1.9.1
+zeroize 1.9.0
   licence: Apache-2.0 OR MIT
   source: https://github.com/RustCrypto/utils
 zerotrie 0.2.5
