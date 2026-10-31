@@ -368,6 +368,66 @@ pub async fn serve<P: Platform>(
                 serde_json::to_value(out).unwrap_or(Value::Null),
             ))
         }
+        ("POST", "/__test/console-session") => {
+            // `{"email", "tenant_id", "role"}`: the person (created if needed), their membership with
+            // `role`, and a fresh session in that workspace; answers the cookie value. Tests that are
+            // not about sign-in itself start here; `authenticated_ago_ms` backdates the sign-in.
+            let body: Value = req
+                .body
+                .as_ref()
+                .and_then(|b| serde_json::from_slice(&b.to_vec()).ok())
+                .ok_or_else(|| ApiError::invalid("", "JSON body expected."))?;
+            let email = body["email"].as_str().unwrap_or("").to_ascii_lowercase();
+            let tid = body["tenant_id"].as_str().map(str::to_owned);
+            let role = body["role"].as_str().unwrap_or("owner");
+            let now = pylota_identity_platform::Clock::now_ms(p.clock());
+            let uid = pylota_identity_platform::Ids::new_id(
+                p.ids(),
+                pylota_identity_platform::ids::IdPrefix::ConsoleUser,
+            );
+            p.db()
+                .execute(pylota_identity_platform::d1::Stmt::new(
+                    "INSERT INTO users (id, email, status, created_at) VALUES (?1, ?2, 'active', ?3) ON CONFLICT (email) DO NOTHING",
+                    vec![uid.into(), email.clone().into(), now.into()],
+                ))
+                .await?;
+            #[derive(serde::Deserialize)]
+            struct U {
+                id: String,
+            }
+            let u: U = p
+                .db()
+                .first(pylota_identity_platform::d1::Stmt::new(
+                    "SELECT id FROM users WHERE email = ?1",
+                    vec![email.into()],
+                ))
+                .await?
+                .ok_or_else(ApiError::internal)?;
+            if let Some(t) = &tid {
+                if role == "owner" {
+                    p.db()
+                        .execute(pylota_identity_platform::d1::Stmt::new(
+                            "DELETE FROM members WHERE tenant_id = ?1 AND role = 'owner' AND user_id <> ?2",
+                            vec![t.clone().into(), u.id.clone().into()],
+                        ))
+                        .await?;
+                }
+                p.db()
+                    .execute(pylota_identity_platform::d1::Stmt::new(
+                        "INSERT INTO members (tenant_id, user_id, role, created_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = ?3",
+                        vec![t.clone().into(), u.id.clone().into(), role.into(), now.into()],
+                    ))
+                    .await?;
+            }
+            let at = now - body["authenticated_ago_ms"].as_i64().unwrap_or(0);
+            let value =
+                crate::console::session::create(p.as_ref(), &u.id, tid.as_deref(), None, at)
+                    .await?;
+            Ok(Reply::json(
+                200,
+                json!({ "cookie": value, "user_id": u.id }),
+            ))
+        }
         ("POST", "/__test/security-contact") => {
             // `{"value": "a@b"}` overrides `PM_SECURITY_CONTACT`, `{"value": null}` unsets it,
             // `{}` restores the configured value.

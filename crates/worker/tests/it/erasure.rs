@@ -1080,3 +1080,39 @@ fn i12_provider_suppressions() {
     );
     assert_eq!(done["receipt"]["provider_suppressions_deleted"], 1);
 }
+
+/// Tenant erasure deletes the workspace's `members`, `invitations` and `sessions` (M21's console rows;
+/// M22, M24 and M26 add their assertions).
+#[test]
+fn tenant_console_rows() {
+    let _reset = crate::fakes::Reset;
+    let s = open_sender("tenant console rows", "live");
+    let owner = crate::console::email("erase owner");
+    let mut o = crate::console::as_member(&owner, &s.tid, "owner");
+    crate::console::as_member(&crate::console::email("erase viewer"), &s.tid, "viewer");
+    let r = post(
+        &format!("/v1/tenants/{}/invitations", s.tid),
+        &platform(),
+        json!({ "email": crate::console::email("erase invited"), "role": "member" }),
+    );
+    assert_eq!(r.status, 201, "{}", r.body);
+    let e = erase(
+        &eraser(&s.tid),
+        json!({ "tenant_id": s.tid, "scope": "tenant" }),
+    );
+    assert_eq!(e.status, 202, "{}", e.body);
+    let done = run(e.body["id"].as_str().unwrap());
+    assert_eq!(done["status"], "completed", "{done}");
+    for table in ["members", "invitations", "sessions"] {
+        let n = d1(&format!(
+            "SELECT COUNT(*) AS n FROM {table} WHERE tenant_id = '{}'",
+            s.tid
+        ));
+        assert_eq!(n[0]["n"], 0, "{table}");
+    }
+    assert_eq!(
+        o.get("/console").status,
+        303,
+        "the owner's session no longer reaches it"
+    );
+}

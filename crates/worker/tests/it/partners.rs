@@ -336,4 +336,37 @@ fn j18_partner_limits() {
         ));
     }
     assert_eq!(codes[10], (429, "partner_create".to_owned()), "{codes:?}");
+    // Invitations count in the same bucket as tenant creations (M21).
+    let pt = post(
+        "/v1/partners",
+        &p,
+        json!({ "name": "j18c", "max_tenants": 100 }),
+    );
+    let pid = pt.body["id"].as_str().unwrap().to_owned();
+    let (_, pk) = crate::mint(
+        &p,
+        json!({ "name": "pk", "level": "partner", "partner_id": pid, "permissions": ["tenants:manage", "members:manage"] }),
+    );
+    crate::fresh_minute(15);
+    let t = post(
+        "/v1/tenants",
+        &pk,
+        json!({ "slug": crate::slug("j18c"), "name": "x", "mode": "live" }),
+    );
+    assert_eq!(t.status, 201, "{}", t.body);
+    let tid = t.body["id"].as_str().unwrap().to_owned();
+    let mut codes = Vec::new();
+    for i in 0..10 {
+        let r = post(
+            &format!("/v1/tenants/{tid}/invitations"),
+            &pk,
+            json!({ "email": format!("j18-{i}-{}@people.example", crate::slug("j18c")), "role": "viewer" }),
+        );
+        codes.push((
+            r.status,
+            r.details()["bucket"].as_str().unwrap_or("").to_owned(),
+        ));
+    }
+    assert!(codes[..9].iter().all(|c| c.0 == 201), "{codes:?}");
+    assert_eq!(codes[9], (429, "partner_create".to_owned()), "{codes:?}");
 }

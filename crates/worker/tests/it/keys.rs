@@ -228,3 +228,92 @@ fn j11_partner_key_limits() {
         ("key_limit_reached", Some(10))
     );
 }
+
+/// W48: a key a platform or partner key minted is provider-managed: a workspace admin's session can
+/// neither rotate nor revoke it; a rotation records the rotating person, so removing them revokes it.
+#[test]
+fn w48_rotation_provenance() {
+    let _reset = crate::fakes::Reset;
+    let p = platform();
+    let t = tenant(&p, "w48");
+    let tid = t["id"].as_str().unwrap().to_owned();
+    let (provider_key, _) = mint(
+        &p,
+        json!({ "name": "provider", "level": "tenant", "tenant_id": tid, "permissions": ["identities:read"] }),
+    );
+    let admin = crate::console::email("w48 admin");
+    let mut a = crate::console::as_member(&admin, &tid, "admin");
+    let r = a.submit(
+        "/console/keys",
+        &format!("/console/keys/{provider_key}/revoke"),
+        &[],
+    );
+    assert_eq!(r.status, 403, "{}", r.body);
+    assert!(crate::console::html(&r).contains("key_scope_exceeded"));
+    // A key the owner minted in the console, rotated by the admin's own key, is traced to the admin.
+    let owner = crate::console::email("w48 owner");
+    let mut o = crate::console::as_member(&owner, &tid, "owner");
+    let r = o.submit(
+        "/console/keys",
+        "/console/keys",
+        &[
+            ("name", "w48-owner"),
+            ("identity_id", ""),
+            ("permissions", "identities:read"),
+        ],
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    let kid = crate::d1(&format!(
+        "SELECT id FROM api_keys WHERE tenant_id = '{tid}' AND name = 'w48-owner'"
+    ))[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let r = a.submit(
+        "/console/keys",
+        "/console/keys",
+        &[
+            ("name", "w48-admin"),
+            ("identity_id", ""),
+            ("permissions", "keys:manage"),
+            ("permissions", "identities:read"),
+        ],
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    let secret = crate::console::html(&r)
+        .split(r#"id="secret" readonly value=""#)
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_owned();
+    let r = post(&format!("/v1/keys/{kid}/rotate"), &secret, json!({}));
+    assert_eq!(r.status, 200, "{}", r.body);
+    let row = crate::d1(&format!(
+        "SELECT created_by_user_id, created_by_role FROM api_keys WHERE id = '{kid}'"
+    ))[0]
+        .clone();
+    let admin_id = crate::d1(&format!("SELECT id FROM users WHERE email = '{admin}'"))[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        (
+            row["created_by_user_id"].as_str(),
+            row["created_by_role"].as_str()
+        ),
+        (Some(admin_id.as_str()), Some("admin"))
+    );
+    let r = delete(&format!("/v1/tenants/{tid}/members/{admin_id}"), &p);
+    assert_eq!(r.status, 204);
+    let revoked = crate::d1(&format!(
+        "SELECT revoked_at FROM api_keys WHERE id = '{kid}'"
+    ))[0]["revoked_at"]
+        .clone();
+    assert!(
+        revoked.is_i64(),
+        "removing the rotating admin revokes the key"
+    );
+    let _ = get;
+}

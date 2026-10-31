@@ -200,6 +200,7 @@ fn global_job_steps() {
             "dlq",
             "signing_keys",
             "identity_keys",
+            "console",
             "staging",
             "held_erasures",
             "audit"
@@ -309,4 +310,46 @@ fn global_identity_keys() {
     ))[0];
     assert_eq!(row["status"], "retired");
     assert!(row["retired_at"].is_i64());
+}
+
+/// The global job's `console` step: sign-in tokens 24 hours after expiry, sessions and ended
+/// invitations 30 days after.
+#[test]
+fn global_console_rows() {
+    let _reset = crate::fakes::Reset;
+    let s = open_sender("global console", "live");
+    let x = crate::slug("gc");
+    let now = crate::fakes::worker_now();
+    let old = now - 31 * 86_400_000;
+    d1(&format!(
+        "INSERT INTO login_tokens (id, email, purpose, token_hash, code_hash, key_kid, expires_at, created_at) VALUES ('ltk_old{x}', 'a@x.example', 'sign_in', 'th_old{x}', 'c', '0', {}, {old}), ('ltk_new{x}', 'a@x.example', 'sign_in', 'th_new{x}', 'c', '0', {}, {now}); \
+         INSERT INTO users (id, email, status, created_at) VALUES ('usr_gc{x}', 'gc{x}@people.example', 'active', {old}); \
+         INSERT INTO sessions (id_hash, key_kid, user_id, tenant_id, csrf_secret, authenticated_at, last_seen_at, expires_at, revoked_at) VALUES ('sh_old{x}', '0', 'usr_gc{x}', '{t}', 's', {old}, {old}, {old}, NULL), ('sh_new{x}', '0', 'usr_gc{x}', '{t}', 's', {now}, {now}, {}, NULL); \
+         INSERT INTO invitations (id, tenant_id, email, role, token_hash, key_kid, status, expires_at, created_at) VALUES ('inv_old{x}', '{t}', 'o{x}@people.example', 'viewer', 'ih_old{x}', '0', 'expired', {old}, {old}), ('inv_new{x}', '{t}', 'n{x}@people.example', 'viewer', 'ih_new{x}', '0', 'revoked', {now}, {now})",
+        old + 600_000,
+        now + 600_000,
+        now + 7 * 86_400_000,
+        t = s.tid
+    ));
+    let (_, st) = run_job("retention", None, json!({ "global": true }));
+    assert_eq!(st, "completed");
+    let n = |sql: &str| d1(sql)[0]["n"].as_i64().unwrap();
+    assert_eq!(
+        n(&format!(
+            "SELECT COUNT(*) AS n FROM login_tokens WHERE id IN ('ltk_old{x}','ltk_new{x}')"
+        )),
+        1
+    );
+    assert_eq!(
+        n(&format!(
+            "SELECT COUNT(*) AS n FROM sessions WHERE id_hash IN ('sh_old{x}','sh_new{x}')"
+        )),
+        1
+    );
+    assert_eq!(
+        n(&format!(
+            "SELECT COUNT(*) AS n FROM invitations WHERE id IN ('inv_old{x}','inv_new{x}')"
+        )),
+        1
+    );
 }

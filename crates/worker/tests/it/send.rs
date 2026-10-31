@@ -1456,3 +1456,34 @@ fn dry_run_stores_nothing() {
     assert_eq!(d.body["recipients"][0]["status"], "queued");
     assert!(mailbox_query(&s.iid, "SELECT id FROM messages").is_empty());
 }
+
+/// The system identity is exempt from the tenant daily cap and from abuse auto-pause (M21): its sign-in
+/// and invitation mail keeps flowing while the default tenant's cap is spent.
+#[test]
+fn system_identity_exemptions() {
+    let _reset = crate::fakes::Reset;
+    let dt = crate::default_tenant();
+    let r = crate::patch(
+        &format!("/v1/tenants/{dt}/policy"),
+        &crate::platform(),
+        json!({ "tenant_daily_send_cap": 1 }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+    let (tid, _, _) = crate::console::workspace("system exemptions");
+    for i in 0..3 {
+        let who = crate::console::email(&format!("system exempt {i}"));
+        crate::console::as_member(&who, &tid, "viewer");
+        let r = crate::console::Browser::default().post("/console/sign-in", &[("email", &who)]);
+        assert_eq!(r.status, 200);
+        crate::console::code_for(&who, 0);
+    }
+    let sys = crate::system_identity();
+    let st = crate::d1(&format!("SELECT status FROM identities WHERE id = '{sys}'"));
+    assert_eq!(st[0]["status"], "active", "never auto-paused");
+    let r = crate::patch(
+        &format!("/v1/tenants/{dt}/policy"),
+        &crate::platform(),
+        json!({ "tenant_daily_send_cap": null }),
+    );
+    assert_eq!(r.status, 200, "{}", r.body);
+}
