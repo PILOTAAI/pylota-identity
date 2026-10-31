@@ -50,6 +50,9 @@ pub struct KeyScope {
     /// The partner whose tenants a tenant or identity key belongs to.
     pub tenant_partner_id: Option<String>,
     pub provisional: bool,
+    /// A console session's principal: the signed-in person's `usr_` ID (also in `key_id`). A person
+    /// takes the decisions reserved for people (Console › What the console is).
+    pub person: Option<String>,
 }
 
 impl KeyScope {
@@ -212,6 +215,7 @@ pub async fn authenticate<P: Platform>(
         created_by_level: row.created_by_level,
         tenant_partner_id: row.tenant_partner_id,
         provisional,
+        person: None,
     })
 }
 
@@ -254,6 +258,9 @@ pub fn key_may_decide<P: Platform>(
     tenant_key_release: bool,
     tenant_partner: Option<&str>,
 ) -> bool {
+    if scope.person.is_some() {
+        return true;
+    }
     let cfg = p.config();
     let global = match &cfg.console {
         None => true,

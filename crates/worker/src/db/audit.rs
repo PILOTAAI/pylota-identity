@@ -4,13 +4,13 @@ use pylota_identity_platform::d1::Stmt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-const INSERT: &str = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9)";
+const INSERT: &str = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) VALUES (?1, ?2, ?3, ?10, ?4, ?5, ?6, ?7, ?8, ?9)";
 
 /// `insert` for a row of a tenant created in the same batch: written only once the tenant row exists
 /// (`handlers::tenants::create`).
 pub fn when_tenant(mut s: Stmt) -> Stmt {
     debug_assert_eq!(s.sql, INSERT);
-    s.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?2)";
+    s.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, ?10, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?2)";
     s
 }
 
@@ -18,7 +18,7 @@ pub fn when_tenant(mut s: Stmt) -> Stmt {
 /// for the identity's one active key (O28); the target ID is the kid.
 pub fn when_key(mut s: Stmt) -> Stmt {
     debug_assert_eq!(s.sql, INSERT);
-    s.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM identity_keys WHERE id = ?6)";
+    s.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, ?10, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM identity_keys WHERE id = ?6)";
     s
 }
 
@@ -35,18 +35,31 @@ pub fn insert(
     request_id: &str,
     now: i64,
 ) -> Stmt {
+    // A console session's principal carries the person's `usr_` ID where a key ID would be: the row
+    // records the person in `actor_user_id` and `"via": "console"` (Console › Audit and events).
+    let (key, user, details) = match actor_key_id {
+        Some(a) if a.starts_with("usr_") => {
+            let mut d = details.clone();
+            if let Some(o) = d.as_object_mut() {
+                o.insert("via".into(), "console".into());
+            }
+            (None, Some(a), d)
+        }
+        _ => (actor_key_id, None, details.clone()),
+    };
     Stmt::new(
         INSERT,
         vec![
             id.into(),
             tenant_id.map(str::to_owned).into(),
-            actor_key_id.map(str::to_owned).into(),
+            key.map(str::to_owned).into(),
             action.into(),
             target_type.into(),
             target_id.into(),
             details.to_string().into(),
             request_id.into(),
             now.into(),
+            user.map(str::to_owned).into(),
         ],
     )
 }

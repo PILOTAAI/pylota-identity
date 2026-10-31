@@ -14,6 +14,7 @@ pub mod identity_keys;
 pub mod keys;
 pub mod links;
 pub mod lists;
+pub mod members;
 pub mod messages;
 pub mod meta;
 pub mod partners;
@@ -153,6 +154,10 @@ pub async fn dispatch<P: Platform>(c: &Ctx<P>) -> Result<Reply, ApiError> {
         Handler::HttpSignatureCreate => http_signatures::create(c).await,
         Handler::IdentityJwks => well_known::jwks(c).await,
         Handler::SignaturesDirectory => well_known::directory(c).await,
+        Handler::MemberList => members::list(c).await,
+        Handler::InvitationCreate => members::invite(c).await,
+        Handler::InvitationRevoke => members::revoke_invitation(c).await,
+        Handler::MemberRemove => members::remove(c).await,
     }
 }
 

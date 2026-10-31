@@ -10,6 +10,7 @@
 
 pub mod app;
 pub mod auth;
+pub mod console;
 pub mod consumers;
 pub mod crons;
 pub mod ctx;
@@ -27,6 +28,7 @@ pub mod keyring;
 pub mod log;
 pub mod mailbox;
 pub mod mcp;
+pub mod members;
 pub mod metrics;
 pub mod net;
 pub mod objects;
@@ -39,6 +41,7 @@ pub mod router;
 pub mod rpc;
 pub mod search;
 pub mod send;
+pub mod system_mail;
 pub mod transport;
 pub mod triage;
 pub mod webhooks;

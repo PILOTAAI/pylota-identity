@@ -12,6 +12,7 @@ pub mod auth;
 pub mod citations;
 pub mod classify;
 pub mod compose;
+pub mod console;
 pub mod crypto;
 pub mod cursor;
 pub mod days;

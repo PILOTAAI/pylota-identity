@@ -24,6 +24,7 @@ pub fn writer_of(key: &KeyScope, tenant: &tdb::Row) -> Writer {
         Level::Partner if tenant.partner_id.is_some() && tenant.partner_id == key.partner_id => {
             Writer::Partner
         }
+        _ if key.person.is_some() => Writer::WorkspacePerson,
         _ => Writer::WorkspaceKey,
     }
 }
@@ -179,7 +180,7 @@ pub async fn write<P: Platform>(
             &c.request_id,
             c.now,
         );
-        audit_stmt.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?2 AND policy_version = ?10)";
+        audit_stmt.sql = "INSERT INTO audit_log (id, tenant_id, actor_key_id, actor_user_id, action, target_type, target_id, details_json, request_id, created_at) SELECT ?1, ?2, ?3, ?10, ?4, ?5, ?6, ?7, ?8, ?9 WHERE EXISTS (SELECT 1 FROM tenants WHERE id = ?2 AND policy_version = ?11)";
         audit_stmt.params.push(v.into());
         let batch = vec![
             audit_stmt,

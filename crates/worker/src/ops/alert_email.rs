@@ -6,16 +6,9 @@
 //! never content or addresses. A refused send counts `alert_emails_total{result=refused}` and reports
 //! `system_mail_blocked`.
 
-use pylota_identity_core::ses::sha256_hex;
-use pylota_identity_platform::d1::Stmt;
-use pylota_identity_platform::durable::{DoClass, RpcResult};
-use pylota_identity_platform::{ControlDb as _, ObjectClient as _, Platform};
+use pylota_identity_platform::Platform;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-
-use crate::db::{identities as idb, tenants as tdb};
-use crate::mailbox::MailboxRequest;
-use crate::mailbox::submit::SubmitInput;
 
 /// Alert emails per UTC hour.
 pub const PER_HOUR: u32 = 20;
@@ -130,60 +123,5 @@ async fn submit<P: Platform>(p: &P, e: &Email, request_id: &str) -> String {
     let Some(to) = p.config().alert_email.clone() else {
         return "missing".into();
     };
-    #[derive(Deserialize)]
-    struct Sys {
-        id: String,
-    }
-    let Ok(Some(sys)) = p
-        .db()
-        .first::<Sys>(Stmt::new(
-            "SELECT id FROM identities WHERE is_system = 1 LIMIT 1",
-            vec![],
-        ))
-        .await
-    else {
-        return "no_system_identity".into();
-    };
-    let Ok(Some(idn)) = p.db().first::<idb::Row>(idb::get(&sys.id)).await else {
-        return "unavailable".into();
-    };
-    if idn.mailbox_do_id.is_empty() {
-        return "unavailable".into();
-    }
-    let Ok(Some(t)) = p.db().first::<tdb::Row>(tdb::get(&idn.tenant_id)).await else {
-        return "unavailable".into();
-    };
-    let Ok(ctx) = crate::send::context::load(p, &idn, &t).await else {
-        return "unavailable".into();
-    };
-    let body = json!({ "to": [to], "subject": e.subject, "text": e.text });
-    let inp = SubmitInput {
-        operation: "send".into(),
-        target: None,
-        key_hash: Some(sha256_hex(e.idempotency_key.as_bytes())),
-        fingerprint: sha256_hex(body.to_string().as_bytes()),
-        dry_run: false,
-        review: false,
-        body,
-        ctx,
-        request_id: request_id.to_owned(),
-        role_relay: false,
-    };
-    let env = crate::rpc::envelope_for(
-        p,
-        Some(&t.id),
-        Some(&idn.id),
-        request_id,
-        None,
-        MailboxRequest::Submit(Box::new(inp)),
-    );
-    match p
-        .objects()
-        .call::<_, Value>(DoClass::Mailbox, &idn.mailbox_do_id, &env)
-        .await
-    {
-        Ok(RpcResult::Ok(_)) => "sent".into(),
-        Ok(RpcResult::Err(e)) => e.error.code.as_str().to_owned(),
-        Err(_) => "unavailable".into(),
-    }
+    crate::system_mail::send(p, &to, &e.subject, &e.text, &e.idempotency_key, request_id).await
 }
